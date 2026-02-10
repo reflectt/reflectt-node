@@ -108,21 +108,25 @@ server.tool(
   {
     title: z.string().describe("Task title"),
     description: z.string().optional().describe("Detailed description"),
-    status: z.enum(["todo", "in-progress", "done", "blocked"]).optional().describe("Task status (default: todo)"),
-    assignedTo: z.string().optional().describe("Agent assigned to this task"),
+    status: z.enum(["todo", "doing", "blocked", "validating", "done"]).optional().describe("Task status (default: todo)"),
+    assignee: z.string().optional().describe("Agent assigned to this task"),
     createdBy: z.string().describe("Agent creating this task"),
-    priority: z.enum(["low", "medium", "high"]).optional().describe("Task priority"),
+    priority: z.enum(["P0", "P1", "P2", "P3"]).optional().describe("Task priority (P0=critical, P1=high, P2=medium, P3=low)"),
+    blocked_by: z.array(z.string()).optional().describe("Task IDs blocking this task"),
+    epic_id: z.string().optional().describe("Epic ID this task belongs to"),
     tags: z.array(z.string()).optional().describe("Tags for categorization"),
     metadata: z.record(z.unknown()).optional().describe("Optional metadata"),
   },
-  async ({ title, description, status, assignedTo, createdBy, priority, tags, metadata }) => {
-    const task = taskManager.createTask({
+  async ({ title, description, status, assignee, createdBy, priority, blocked_by, epic_id, tags, metadata }) => {
+    const task = await taskManager.createTask({
       title,
       description,
       status: status || "todo",
-      assignedTo,
+      assignee,
       createdBy,
       priority,
+      blocked_by,
+      epic_id,
       tags,
       metadata,
     })
@@ -137,15 +141,16 @@ server.tool(
 
 server.tool(
   "list_tasks",
-  "List tasks, optionally filtered by status, assignee, or tags.",
+  "List tasks, optionally filtered by status, assignee, priority, or tags.",
   {
-    status: z.enum(["todo", "in-progress", "done", "blocked"]).optional().describe("Filter by status"),
-    assignedTo: z.string().optional().describe("Filter by assignee"),
+    status: z.enum(["todo", "doing", "blocked", "validating", "done"]).optional().describe("Filter by status"),
+    assignee: z.string().optional().describe("Filter by assignee"),
     createdBy: z.string().optional().describe("Filter by creator"),
+    priority: z.enum(["P0", "P1", "P2", "P3"]).optional().describe("Filter by priority"),
     tags: z.array(z.string()).optional().describe("Filter by tags (returns tasks with any of these tags)"),
   },
-  async ({ status, assignedTo, createdBy, tags }) => {
-    const tasks = taskManager.listTasks({ status, assignedTo, createdBy, tags })
+  async ({ status, assignee, createdBy, priority, tags }) => {
+    const tasks = taskManager.listTasks({ status, assignee, createdBy, priority, tags })
     return {
       content: [{
         type: "text",
@@ -187,19 +192,23 @@ server.tool(
     id: z.string().describe("Task ID"),
     title: z.string().optional().describe("New title"),
     description: z.string().optional().describe("New description"),
-    status: z.enum(["todo", "in-progress", "done", "blocked"]).optional().describe("New status"),
-    assignedTo: z.string().optional().describe("New assignee"),
-    priority: z.enum(["low", "medium", "high"]).optional().describe("New priority"),
+    status: z.enum(["todo", "doing", "blocked", "validating", "done"]).optional().describe("New status"),
+    assignee: z.string().optional().describe("New assignee"),
+    priority: z.enum(["P0", "P1", "P2", "P3"]).optional().describe("New priority"),
+    blocked_by: z.array(z.string()).optional().describe("Task IDs blocking this task"),
+    epic_id: z.string().optional().describe("Epic ID this task belongs to"),
     tags: z.array(z.string()).optional().describe("New tags"),
     metadata: z.record(z.unknown()).optional().describe("New metadata"),
   },
-  async ({ id, title, description, status, assignedTo, priority, tags, metadata }) => {
-    const task = taskManager.updateTask(id, {
+  async ({ id, title, description, status, assignee, priority, blocked_by, epic_id, tags, metadata }) => {
+    const task = await taskManager.updateTask(id, {
       title,
       description,
       status,
-      assignedTo,
+      assignee,
       priority,
+      blocked_by,
+      epic_id,
       tags,
       metadata,
     })
@@ -227,7 +236,7 @@ server.tool(
     id: z.string().describe("Task ID"),
   },
   async ({ id }) => {
-    const deleted = taskManager.deleteTask(id)
+    const deleted = await taskManager.deleteTask(id)
     if (!deleted) {
       return {
         content: [{
@@ -240,6 +249,31 @@ server.tool(
       content: [{
         type: "text",
         text: JSON.stringify({ success: true })
+      }]
+    }
+  }
+)
+
+server.tool(
+  "get_next_task",
+  "Get the next highest-priority task to work on (pull-based assignment). Returns unassigned todo tasks, prioritized P0 > P1 > P2 > P3, oldest first.",
+  {
+    agent: z.string().optional().describe("Agent name to filter tasks for (optional)"),
+  },
+  async ({ agent }) => {
+    const task = taskManager.getNextTask(agent)
+    if (!task) {
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ task: null, message: "No available tasks" })
+        }]
+      }
+    }
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ task })
       }]
     }
   }
@@ -399,10 +433,12 @@ function initToolHandlers() {
         properties: {
           title: { type: "string", description: "Task title" },
           description: { type: "string", description: "Task description" },
-          status: { type: "string", enum: ["todo", "in-progress", "done", "blocked"] },
-          assignedTo: { type: "string", description: "Assignee" },
+          status: { type: "string", enum: ["todo", "doing", "blocked", "validating", "done"] },
+          assignee: { type: "string", description: "Assignee" },
           createdBy: { type: "string", description: "Creator" },
-          priority: { type: "string", enum: ["low", "medium", "high"] },
+          priority: { type: "string", enum: ["P0", "P1", "P2", "P3"] },
+          blocked_by: { type: "array", items: { type: "string" }, description: "Blocking task IDs" },
+          epic_id: { type: "string", description: "Epic ID" },
           tags: { type: "array", items: { type: "string" } },
           metadata: { type: "object" },
         },
@@ -410,7 +446,7 @@ function initToolHandlers() {
       },
     },
     handler: async (args) => {
-      const task = taskManager.createTask({ status: "todo", ...args })
+      const task = await taskManager.createTask({ status: "todo", ...args })
       return { content: [{ type: "text", text: JSON.stringify({ success: true, task }) }] }
     },
   })
@@ -421,9 +457,10 @@ function initToolHandlers() {
       inputSchema: {
         type: "object",
         properties: {
-          status: { type: "string", enum: ["todo", "in-progress", "done", "blocked"] },
-          assignedTo: { type: "string" },
+          status: { type: "string", enum: ["todo", "doing", "blocked", "validating", "done"] },
+          assignee: { type: "string" },
           createdBy: { type: "string" },
+          priority: { type: "string", enum: ["P0", "P1", "P2", "P3"] },
           tags: { type: "array", items: { type: "string" } },
         },
       },
@@ -463,9 +500,11 @@ function initToolHandlers() {
           id: { type: "string", description: "Task ID" },
           title: { type: "string" },
           description: { type: "string" },
-          status: { type: "string", enum: ["todo", "in-progress", "done", "blocked"] },
-          assignedTo: { type: "string" },
-          priority: { type: "string", enum: ["low", "medium", "high"] },
+          status: { type: "string", enum: ["todo", "doing", "blocked", "validating", "done"] },
+          assignee: { type: "string" },
+          priority: { type: "string", enum: ["P0", "P1", "P2", "P3"] },
+          blocked_by: { type: "array", items: { type: "string" } },
+          epic_id: { type: "string" },
           tags: { type: "array", items: { type: "string" } },
           metadata: { type: "object" },
         },
@@ -474,7 +513,7 @@ function initToolHandlers() {
     },
     handler: async (args) => {
       const { id, ...updates } = args
-      const task = taskManager.updateTask(id, updates)
+      const task = await taskManager.updateTask(id, updates)
       if (!task) {
         return { content: [{ type: "text", text: JSON.stringify({ error: "Task not found" }) }] }
       }
@@ -494,11 +533,30 @@ function initToolHandlers() {
       },
     },
     handler: async (args) => {
-      const deleted = taskManager.deleteTask(args.id)
+      const deleted = await taskManager.deleteTask(args.id)
       if (!deleted) {
         return { content: [{ type: "text", text: JSON.stringify({ error: "Task not found" }) }] }
       }
       return { content: [{ type: "text", text: JSON.stringify({ success: true }) }] }
+    },
+  })
+
+  toolHandlers.set("get_next_task", {
+    schema: {
+      description: "Get the next highest-priority task to work on (pull-based assignment)",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agent: { type: "string", description: "Agent name to filter tasks for (optional)" },
+        },
+      },
+    },
+    handler: async (args) => {
+      const task = taskManager.getNextTask(args.agent)
+      if (!task) {
+        return { content: [{ type: "text", text: JSON.stringify({ task: null, message: "No available tasks" }) }] }
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ task }) }] }
     },
   })
 

@@ -25,10 +25,12 @@ const SendMessageSchema = z.object({
 const CreateTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
-  status: z.enum(['todo', 'in-progress', 'done', 'blocked']).default('todo'),
-  assignedTo: z.string().optional(),
+  status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).default('todo'),
+  assignee: z.string().optional(),
   createdBy: z.string().min(1),
-  priority: z.enum(['low', 'medium', 'high']).optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  blocked_by: z.array(z.string()).optional(),
+  epic_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
 })
@@ -36,9 +38,11 @@ const CreateTaskSchema = z.object({
 const UpdateTaskSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
-  status: z.enum(['todo', 'in-progress', 'done', 'blocked']).optional(),
-  assignedTo: z.string().optional(),
-  priority: z.enum(['low', 'medium', 'high']).optional(),
+  status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).optional(),
+  assignee: z.string().optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  blocked_by: z.array(z.string()).optional(),
+  epic_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
 })
@@ -142,8 +146,9 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     const tasks = taskManager.listTasks({
       status: query.status as Task['status'] | undefined,
-      assignedTo: query.assignedTo,
+      assignee: query.assignee || query.assignedTo, // Support both for backward compatibility
       createdBy: query.createdBy,
+      priority: query.priority as Task['priority'] | undefined,
       tags: query.tags ? query.tags.split(',') : undefined,
     })
     return { tasks }
@@ -182,6 +187,17 @@ export async function createServer(): Promise<FastifyInstance> {
       return { error: 'Task not found' }
     }
     return { success: true }
+  })
+
+  // Get next task (pull-based assignment)
+  app.get('/tasks/next', async (request) => {
+    const query = request.query as Record<string, string>
+    const agent = query.agent
+    const task = taskManager.getNextTask(agent)
+    if (!task) {
+      return { task: null, message: 'No available tasks' }
+    }
+    return { task }
   })
 
   // ============ MEMORY ENDPOINTS ============

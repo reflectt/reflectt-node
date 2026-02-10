@@ -15,12 +15,14 @@ export interface Task {
   id: string
   title: string
   description?: string
-  status: 'todo' | 'in-progress' | 'done' | 'blocked'
-  assignedTo?: string
+  status: 'todo' | 'doing' | 'blocked' | 'validating' | 'done'
+  assignee?: string
   createdBy: string
   createdAt: number
   updatedAt: number
-  priority?: 'low' | 'medium' | 'high'
+  priority?: 'P0' | 'P1' | 'P2' | 'P3'
+  blocked_by?: string[]
+  epic_id?: string
   tags?: string[]
   metadata?: Record<string, unknown>
 }

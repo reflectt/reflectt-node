@@ -87,8 +87,10 @@ class TaskManager {
 
   listTasks(options?: {
     status?: Task['status']
-    assignedTo?: string
+    assignee?: string
+    assignedTo?: string // Backward compatibility
     createdBy?: string
+    priority?: Task['priority']
     tags?: string[]
   }): Task[] {
     let tasks = Array.from(this.tasks.values())
@@ -97,12 +99,18 @@ class TaskManager {
       tasks = tasks.filter(t => t.status === options.status)
     }
 
-    if (options?.assignedTo) {
-      tasks = tasks.filter(t => t.assignedTo === options.assignedTo)
+    // Support both assignee and assignedTo for backward compatibility
+    const assigneeFilter = options?.assignee || options?.assignedTo
+    if (assigneeFilter) {
+      tasks = tasks.filter(t => t.assignee === assigneeFilter)
     }
 
     if (options?.createdBy) {
       tasks = tasks.filter(t => t.createdBy === options.createdBy)
+    }
+
+    if (options?.priority) {
+      tasks = tasks.filter(t => t.priority === options.priority)
     }
 
     if (options?.tags && options.tags.length > 0) {
@@ -155,15 +163,56 @@ class TaskManager {
     })
   }
 
+  getNextTask(agent?: string): Task | undefined {
+    // Priority order: P0 > P1 > P2 > P3
+    const priorityOrder: Record<string, number> = {
+      'P0': 0,
+      'P1': 1,
+      'P2': 2,
+      'P3': 3,
+    }
+
+    let tasks = Array.from(this.tasks.values())
+      .filter(t => t.status === 'todo') // Only todo tasks
+      .filter(t => !t.assignee) // Unassigned only
+
+    // If agent specified, can also include tasks assigned to that agent
+    if (agent) {
+      const agentTasks = Array.from(this.tasks.values())
+        .filter(t => t.status === 'todo')
+        .filter(t => t.assignee === agent)
+      tasks = [...tasks, ...agentTasks]
+    }
+
+    if (tasks.length === 0) return undefined
+
+    // Sort by priority (P0 first), then by creation date (oldest first)
+    tasks.sort((a, b) => {
+      const aPriority = priorityOrder[a.priority || 'P3'] ?? 999
+      const bPriority = priorityOrder[b.priority || 'P3'] ?? 999
+      
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority
+      }
+      
+      return a.createdAt - b.createdAt
+    })
+
+    return tasks[0]
+  }
+
   getStats() {
     const tasks = Array.from(this.tasks.values())
     return {
       total: tasks.length,
       byStatus: {
         todo: tasks.filter(t => t.status === 'todo').length,
-        'in-progress': tasks.filter(t => t.status === 'in-progress').length,
-        done: tasks.filter(t => t.status === 'done').length,
+        doing: tasks.filter(t => t.status === 'doing').length,
         blocked: tasks.filter(t => t.status === 'blocked').length,
+        validating: tasks.filter(t => t.status === 'validating').length,
+        done: tasks.filter(t => t.status === 'done').length,
+        // Backward compatibility
+        'in-progress': tasks.filter(t => t.status === 'doing').length,
       },
     }
   }
