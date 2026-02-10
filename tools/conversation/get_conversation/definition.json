@@ -1,0 +1,27 @@
+{
+  "id": "get_conversation",
+  "name": "Get Conversation",
+  "description": "Retrieve full conversation history by ID including all messages, tool use, and costs",
+  "category": "conversation",
+  "function_name": "get_conversation",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "conversation_id": {
+        "type": "string",
+        "description": "UUID of conversation to retrieve"
+      },
+      "user_id": {
+        "type": "string",
+        "description": "User ID who owns the conversation (default: cli_user)",
+        "default": "cli_user"
+      },
+      "include_tools": {
+        "type": "boolean",
+        "description": "Include tool execution details (default: true)",
+        "default": true
+      }
+    },
+    "required": ["conversation_id"]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": "load_components",
+  "name": "Load Components",
+  "description": "Load full component schemas for specified components, making them available for rendering. Use search_components first to find relevant components. The loaded components will be injected into render_manifest tool schema.",
+  "category": "discovery",
+  "function_name": "load_components",
+  "parameters": {
+    "type": "object",
+    "required": ["component_ids"],
+    "properties": {
+      "component_ids": {
+        "type": "array",
+        "description": "Array of component IDs to load (e.g., ['data-grid', 'agent:agent-dashboard'])",
+        "items": { "type": "string" },
+        "minItems": 1,
+        "maxItems": 50
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [
+    {"component_ids": ["data-grid", "chart"]},
+    {"component_ids": ["agent:agent-dashboard", "office:calendar-view"]}
+  ],
+  "tags": ["discovery", "components", "ui", "loading"],
+  "version": "1.0.0"
+}

@@ -1,0 +1,31 @@
+{
+  "name": "get_task_prompt",
+  "description": "Get the prompt.md file for a task",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "The ID of the task"
+      },
+      "agent": {
+        "type": "string",
+        "description": "The agent ID that owns this task"
+      },
+      "category": {
+        "type": "string",
+        "description": "Optional: The category/domain if known (speeds up lookup)"
+      },
+      "scope": {
+        "type": "string",
+        "enum": ["global", "space"],
+        "description": "Whether to look in global or space agents (default: global)"
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Required when scope is 'space'"
+      }
+    },
+    "required": ["task_id", "agent"]
+  }
+}

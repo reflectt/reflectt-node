@@ -1,0 +1,53 @@
+{
+  "id": "complete_task_run",
+  "name": "Complete Task Run",
+  "description": "Mark a task run as completed successfully. Calculates duration and records result, tokens, and cost.",
+  "category": "task",
+  "function_name": "complete_task_run",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "run_path"
+    ],
+    "properties": {
+      "run_path": {
+        "type": "string",
+        "description": "Path to the task run file"
+      },
+      "result": {
+        "type": "string",
+        "description": "Optional result summary or output"
+      },
+      "tokens": {
+        "type": "number",
+        "description": "Optional total tokens used"
+      },
+      "cost": {
+        "type": "number",
+        "description": "Optional total cost in USD"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Complete a task run with metrics",
+      "parameters": {
+        "run_path": "data/spaces/education/tasks/tutor/lesson_plan/runs/2025-10-17.json",
+        "result": "Generated 5 lesson plans successfully",
+        "tokens": 12500,
+        "cost": 0.15
+      },
+      "expected_result": "Task run marked as completed with duration calculated"
+    }
+  ],
+  "tags": [
+    "task",
+    "execution",
+    "tracking",
+    "complete",
+    "success"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

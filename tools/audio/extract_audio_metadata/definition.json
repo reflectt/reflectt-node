@@ -1,0 +1,45 @@
+{
+  "id": "extract_audio_metadata",
+  "name": "Extract Audio Metadata",
+  "description": "Extract comprehensive metadata from audio files using ffprobe. Gets duration, format, codec, sample rate, bit rate, channels, and more. Fast local processing with no API costs.",
+  "category": "audio",
+  "function_name": "extract_audio_metadata",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "audio_source"
+    ],
+    "properties": {
+      "audio_source": {
+        "type": "string",
+        "description": "File path to audio file"
+      },
+      "include_streams": {
+        "type": "boolean",
+        "default": true,
+        "description": "Include detailed stream information"
+      },
+      "include_format": {
+        "type": "boolean",
+        "default": true,
+        "description": "Include detailed format information"
+      },
+      "include_chapters": {
+        "type": "boolean",
+        "default": false,
+        "description": "Include chapter information if available"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "audio",
+    "metadata",
+    "ffprobe",
+    "duration",
+    "format"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

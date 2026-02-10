@@ -1,0 +1,20 @@
+{
+  "id": "list_packages",
+  "name": "List Packages",
+  "function_name": "list_packages",
+  "description": "List available reflectt.ai packages. Shows all packages that can be installed into spaces.",
+  "category": "packages",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "filter": {
+        "type": "string",
+        "description": "Optional filter by category or keyword"
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Show packages installed in specific space"
+      }
+    }
+  }
+}

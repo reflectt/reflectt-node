@@ -1,0 +1,48 @@
+{
+  "id": "assert_component_state",
+  "name": "Assert Component State",
+  "category": "ui",
+  "description": "Assert that component state matches expectations. Unlike validate_component_render which returns results, this tool returns an error if any assertion fails, making it ideal for testing workflows. Checks existence, visibility, data presence, row counts, selections, and specific prop values.",
+  "function_name": "assert_component_state",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The ID of the component to assert (e.g., 'table-1', 'chart-results'). This is the module ID assigned when the component was rendered."
+      },
+      "assertions": {
+        "type": "object",
+        "description": "Object containing assertions to check. All provided assertions must pass for success.",
+        "properties": {
+          "exists": {
+            "type": "boolean",
+            "description": "Assert component exists in layout store. Set to true to verify component is registered, false to verify it's not."
+          },
+          "visible": {
+            "type": "boolean",
+            "description": "Assert component is visible in DOM. Set to true to verify component is displayed and not hidden by CSS."
+          },
+          "hasData": {
+            "type": "boolean",
+            "description": "Assert component has context data. Set to true to verify component's context contains data, false to verify it's empty."
+          },
+          "rowCount": {
+            "type": "number",
+            "description": "Assert exact row count for table/list components. Checks the length of the data array in component context."
+          },
+          "hasSelection": {
+            "type": "boolean",
+            "description": "Assert component has active selection. Set to true to verify component has selected items, false to verify no selection."
+          },
+          "propEquals": {
+            "type": "object",
+            "description": "Assert specific prop values. Object with key-value pairs where each key is a prop name and value is the expected prop value. Uses deep equality for comparison."
+          }
+        }
+      }
+    },
+    "required": ["componentId", "assertions"]
+  }
+}

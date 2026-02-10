@@ -1,0 +1,32 @@
+{
+  "id": "inspect_component_tree",
+  "name": "Inspect Component Tree",
+  "category": "ui",
+  "description": "Inspect the hierarchical structure of all mounted components. Use this to understand the complete component tree, layout organization, and relationships between components.\n\nYou can:\n- View the entire component tree structure\n- See which slots contain which modules\n- Understand component hierarchy and nesting\n- Analyze layout organization\n- Identify component relationships and dependencies\n\nThis is CRITICAL for understanding the overall UI architecture and making informed decisions about component placement.\n\n** EXAMPLES **\n\n1. Get full component tree:\n{\n  \"includeProps\": true,\n  \"includeRelationships\": true\n}\n\n2. Get tree for specific component:\n{\n  \"componentId\": \"table-1\",\n  \"includeProps\": false\n}\n\n3. Analyze layout structure:\n{\n  \"includeSlotInfo\": true,\n  \"includeRelationships\": true\n}",
+  "function_name": "inspect_component_tree",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "Focus on a specific component and its relationships, or omit to get full tree"
+      },
+      "includeProps": {
+        "type": "boolean",
+        "description": "Include component props in the tree",
+        "default": false
+      },
+      "includeSlotInfo": {
+        "type": "boolean",
+        "description": "Include detailed slot configuration information",
+        "default": true
+      },
+      "includeRelationships": {
+        "type": "boolean",
+        "description": "Analyze and include component relationships and dependencies",
+        "default": true
+      }
+    }
+  }
+}

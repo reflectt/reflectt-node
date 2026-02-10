@@ -1,0 +1,27 @@
+{
+  "id": "delete_workflow",
+  "name": "Delete Workflow",
+  "description": "Delete a workflow definition. Does not delete execution history.",
+  "category": "workflows",
+  "function_name": "delete_workflow",
+  "parameters": {
+    "type": "object",
+    "required": ["id"],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z0-9_-]+$",
+        "description": "Workflow ID to delete"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["workflow", "delete"],
+  "version": "1.0.0",
+  "dependencies": []
+}

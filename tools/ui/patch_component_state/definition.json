@@ -1,0 +1,120 @@
+{
+  "id": "patch_component_state",
+  "name": "Patch Component State",
+  "category": "ui",
+  "description": "Update component props without remounting (smooth, flicker-free updates). This is a streaming UI tool that dynamically patches props of already-mounted interactive components. Supports merge/replace modes for full props, incremental array operations (add/remove/update items), batch operations, and animated transitions. Use this for real-time data updates, progressive loading, status changes, and refined updates with visual feedback. Component must already be mounted via render_manifest.",
+  "function_name": "patch_component_state",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "moduleId": {
+        "type": "string",
+        "description": "ID of the interactive module to update (must match existing module ID from render_manifest)",
+        "minLength": 1
+      },
+      "propsPatch": {
+        "type": "object",
+        "description": "Partial props to merge with or replace existing props (required for merge/replace modes)",
+        "additionalProperties": true
+      },
+      "mode": {
+        "type": "string",
+        "enum": ["merge", "replace", "array_add", "array_remove", "array_update", "batch"],
+        "description": "Operation mode: 'merge' (default) merges propsPatch, 'replace' replaces all props, 'array_add' adds items to array, 'array_remove' removes items by ID, 'array_update' updates specific items, 'batch' executes multiple operations",
+        "default": "merge"
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Enable smooth animated transition for prop changes (default: true)",
+        "default": true
+      },
+      "animation": {
+        "type": "object",
+        "description": "Custom animation configuration for visual feedback",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["flash", "fade", "bounce", "slide", "highlight"],
+            "description": "Animation type to apply"
+          },
+          "duration": {
+            "type": "number",
+            "description": "Animation duration in milliseconds (max 10000)",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "color": {
+            "type": "string",
+            "description": "Color for flash/highlight animations (CSS color value)"
+          }
+        },
+        "required": ["type", "duration"]
+      },
+      "path": {
+        "type": "string",
+        "description": "Dot notation path to array property (required for array operations, e.g., 'data.rows')"
+      },
+      "items": {
+        "type": "array",
+        "description": "Items to add to array (required for array_add mode)",
+        "items": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "position": {
+        "type": "string",
+        "enum": ["start", "end"],
+        "description": "Position to add items in array (default: 'end')",
+        "default": "end"
+      },
+      "itemIds": {
+        "type": "array",
+        "description": "Array of item IDs to remove (required for array_remove mode)",
+        "items": {
+          "type": "string"
+        }
+      },
+      "idField": {
+        "type": "string",
+        "description": "Field name to use as unique identifier for array items (default: 'id')",
+        "default": "id"
+      },
+      "updates": {
+        "type": "array",
+        "description": "Array of update objects with id and changes (required for array_update mode)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "ID of item to update"
+            },
+            "changes": {
+              "type": "object",
+              "description": "Properties to update on the item",
+              "additionalProperties": true
+            }
+          },
+          "required": ["id", "changes"]
+        }
+      },
+      "operations": {
+        "type": "array",
+        "description": "Array of operations to execute in sequence (required for batch mode)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["merge", "replace", "array_add", "array_remove", "array_update"]
+            }
+          },
+          "required": ["mode"]
+        }
+      }
+    },
+    "required": ["moduleId"]
+  }
+}

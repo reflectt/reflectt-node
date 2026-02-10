@@ -1,0 +1,64 @@
+{
+  "id": "list_task_runs",
+  "name": "List Task Runs",
+  "description": "List task runs with optional filtering by status. Returns runs sorted by newest first with optional limit.",
+  "category": "task",
+  "function_name": "list_task_runs",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "agent_name",
+      "task_id"
+    ],
+    "properties": {
+      "agent_name": {
+        "type": "string",
+        "description": "Name of the agent that executes the task"
+      },
+      "task_id": {
+        "type": "string",
+        "description": "ID of the task to list runs for"
+      },
+      "status": {
+        "type": "string",
+        "enum": ["pending", "running", "completed", "failed"],
+        "description": "Optional filter by status"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Optional limit on number of runs to return"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "List last 10 completed runs",
+      "parameters": {
+        "agent_name": "tutor",
+        "task_id": "generate_lesson_plan",
+        "status": "completed",
+        "limit": 10
+      },
+      "expected_result": "Returns array of 10 most recent completed runs"
+    },
+    {
+      "scenario": "List all failed runs for debugging",
+      "parameters": {
+        "agent_name": "doc_generator",
+        "task_id": "generate_api_docs",
+        "status": "failed"
+      },
+      "expected_result": "Returns all failed runs sorted by newest first"
+    }
+  ],
+  "tags": [
+    "task",
+    "execution",
+    "tracking",
+    "list",
+    "query"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

@@ -1,0 +1,35 @@
+{
+  "id": "load_user_profile",
+  "name": "load_user_profile",
+  "description": "Load a user's profile to retrieve preferences, working style, and patterns for personalized interactions.",
+  "category": "memory",
+  "function_name": "load_user_profile",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Unique identifier for the user",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "create_if_missing": {
+        "type": "boolean",
+        "description": "Create a default profile if none exists",
+        "default": true
+      }
+    },
+    "required": [
+      "user_id"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "memory",
+    "user",
+    "profile",
+    "persistence"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

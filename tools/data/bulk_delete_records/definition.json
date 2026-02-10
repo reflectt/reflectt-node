@@ -1,0 +1,123 @@
+{
+  "id": "bulk_delete_records",
+  "name": "Bulk Delete Records",
+  "description": "Delete multiple records by IDs or conditions. Supports safety limits, confirmation requirements, soft deletes, and audit logging. Use this for efficient bulk deletion operations.",
+  "category": "data",
+  "function_name": "bulk_delete_records",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'products')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "deleteBy": {
+        "type": "string",
+        "enum": ["ids", "condition"],
+        "description": "Deletion method: 'ids' for specific record IDs, 'condition' for matching criteria"
+      },
+      "ids": {
+        "type": "array",
+        "description": "Array of record IDs to delete (used when deleteBy='ids')",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "maxItems": 10000
+      },
+      "condition": {
+        "type": "object",
+        "description": "Condition for deletion (used when deleteBy='condition')",
+        "properties": {
+          "column": {
+            "type": "string",
+            "description": "Column to filter on"
+          },
+          "operator": {
+            "type": "string",
+            "enum": ["eq", "in", "gt", "lt", "like", "neq"],
+            "description": "Comparison operator"
+          },
+          "value": {
+            "description": "Value to compare against (type depends on column)"
+          }
+        },
+        "required": ["column", "operator", "value"]
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of records to delete. Default: 10000",
+        "default": 10000,
+        "minimum": 1,
+        "maximum": 10000
+      },
+      "softDelete": {
+        "type": "boolean",
+        "description": "If true and table has deleted_at column, mark as deleted instead of removing. Default: auto-detect",
+        "default": null
+      },
+      "requireConfirmation": {
+        "type": "boolean",
+        "description": "If true, require explicit confirmation for deletes over 100 records. Default: true",
+        "default": true
+      },
+      "confirmed": {
+        "type": "boolean",
+        "description": "User confirmation for large deletions. Set to true to confirm.",
+        "default": false
+      },
+      "returnDeleted": {
+        "type": "boolean",
+        "description": "If true, return the deleted records. Default: false",
+        "default": false
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Target specific space. Defaults to current space."
+      }
+    },
+    "required": ["table", "deleteBy"]
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "description": "Delete specific records by IDs",
+      "input": {
+        "table": "temp_data",
+        "deleteBy": "ids",
+        "ids": ["rec-1", "rec-2", "rec-3"]
+      }
+    },
+    {
+      "description": "Delete records matching condition",
+      "input": {
+        "table": "logs",
+        "deleteBy": "condition",
+        "condition": {
+          "column": "created_at",
+          "operator": "lt",
+          "value": "2024-01-01"
+        },
+        "limit": 1000
+      }
+    },
+    {
+      "description": "Soft delete inactive users",
+      "input": {
+        "table": "users",
+        "deleteBy": "condition",
+        "condition": {
+          "column": "status",
+          "operator": "eq",
+          "value": "inactive"
+        },
+        "softDelete": true,
+        "limit": 500
+      }
+    }
+  ],
+  "tags": ["bulk", "batch", "delete", "remove", "cleanup"],
+  "version": "1.0.0",
+  "dependencies": []
+}

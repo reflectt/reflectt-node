@@ -1,0 +1,171 @@
+{
+  "version": "1.0.0",
+  "description": "Validation rules and configuration for tools",
+  "validation_rules": {
+    "schema_validation": {
+      "enabled": true,
+      "strict_mode": true,
+      "required_fields": [
+        "id",
+        "name",
+        "description",
+        "category",
+        "function_name",
+        "parameters",
+        "version"
+      ],
+      "optional_fields": [
+        "examples",
+        "tags",
+        "dependencies",
+        "deprecated",
+        "replacement"
+      ]
+    },
+    "naming_conventions": {
+      "id_pattern": "^[a-z0-9_-]+$",
+      "id_max_length": 50,
+      "name_max_length": 100,
+      "description_min_length": 20,
+      "description_max_length": 500
+    },
+    "parameter_validation": {
+      "check_json_schema": true,
+      "require_descriptions": true,
+      "require_types": true,
+      "allow_additional_properties": false
+    },
+    "example_validation": {
+      "require_examples": true,
+      "min_examples": 1,
+      "validate_parameters": true,
+      "require_expected_result": true
+    },
+    "version_validation": {
+      "format": "semver",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "require_changelog": false
+    },
+    "dependency_validation": {
+      "check_existence": true,
+      "check_circular": true,
+      "check_version_compatibility": true
+    },
+    "category_validation": {
+      "allowed_categories": [
+        "data",
+        "agent",
+        "web",
+        "time",
+        "system"
+      ],
+      "require_category": true
+    }
+  },
+  "validation_levels": {
+    "error": {
+      "description": "Critical issues that prevent tool from working",
+      "rules": [
+        "missing_required_field",
+        "invalid_schema",
+        "invalid_parameter_definition",
+        "circular_dependency",
+        "invalid_category"
+      ]
+    },
+    "warning": {
+      "description": "Issues that should be fixed but don't prevent usage",
+      "rules": [
+        "missing_examples",
+        "missing_tags",
+        "long_description",
+        "deprecated_without_replacement"
+      ]
+    },
+    "info": {
+      "description": "Suggestions for improvement",
+      "rules": [
+        "few_examples",
+        "missing_optional_fields",
+        "could_add_more_tags"
+      ]
+    }
+  },
+  "validation_tests": {
+    "test_schema_compliance": {
+      "description": "Verify tool follows schema.json",
+      "severity": "error",
+      "enabled": true
+    },
+    "test_parameter_types": {
+      "description": "Verify all parameters have valid types",
+      "severity": "error",
+      "enabled": true
+    },
+    "test_examples": {
+      "description": "Verify examples are valid and complete",
+      "severity": "warning",
+      "enabled": true
+    },
+    "test_dependencies": {
+      "description": "Verify all dependencies exist",
+      "severity": "error",
+      "enabled": true
+    },
+    "test_naming": {
+      "description": "Verify naming conventions",
+      "severity": "warning",
+      "enabled": true
+    },
+    "test_version": {
+      "description": "Verify version format",
+      "severity": "error",
+      "enabled": true
+    },
+    "test_registry_sync": {
+      "description": "Verify tool is in registry",
+      "severity": "error",
+      "enabled": true
+    },
+    "test_function_exists": {
+      "description": "Verify function_name exists in system",
+      "severity": "error",
+      "enabled": false
+    }
+  },
+  "auto_fix": {
+    "enabled": false,
+    "rules": {
+      "add_missing_version": {
+        "enabled": false,
+        "default_value": "1.0.0"
+      },
+      "add_empty_tags": {
+        "enabled": false,
+        "default_value": []
+      },
+      "add_empty_dependencies": {
+        "enabled": false,
+        "default_value": []
+      },
+      "format_description": {
+        "enabled": false,
+        "trim": true,
+        "capitalize": true
+      }
+    }
+  },
+  "reporting": {
+    "format": "json",
+    "include_suggestions": true,
+    "include_examples": true,
+    "group_by_severity": true,
+    "show_file_path": true
+  },
+  "continuous_validation": {
+    "enabled": false,
+    "on_file_change": true,
+    "on_registry_update": true,
+    "schedule": "0 0 * * *"
+  }
+}

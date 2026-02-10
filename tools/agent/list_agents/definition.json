@@ -1,0 +1,32 @@
+{
+  "name": "list_agents",
+  "description": "List all agents from both global and space-specific locations. Supports filtering by domain and capabilities. Returns agents with source information (global or space).",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "domain": {
+        "type": "string",
+        "description": "Optional: Filter agents by domain (e.g., 'finance', 'inventory', 'chat')"
+      },
+      "capabilities": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional: Filter agents that have ALL of these capabilities"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Target a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    }
+  },
+  "function_name": "list_agents",
+  "id": "list_agents",
+  "category": "agent",
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

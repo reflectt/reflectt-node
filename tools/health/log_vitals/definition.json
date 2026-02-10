@@ -1,0 +1,47 @@
+{
+  "function_name": "log_vitals",
+  "description": "Log vital signs like heart rate, blood pressure, body temperature, and oxygen saturation for health monitoring",
+  "category": "health",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "heart_rate": {
+        "type": "number",
+        "description": "Heart rate in beats per minute (bpm)"
+      },
+      "blood_pressure": {
+        "type": "object",
+        "properties": {
+          "systolic": { "type": "number" },
+          "diastolic": { "type": "number" }
+        },
+        "description": "Blood pressure readings (e.g., {systolic: 120, diastolic: 80})"
+      },
+      "weight_kg": {
+        "type": "number",
+        "description": "Body weight in kilograms"
+      },
+      "body_fat_percent": {
+        "type": "number",
+        "description": "Body fat percentage"
+      },
+      "temperature_c": {
+        "type": "number",
+        "description": "Body temperature in Celsius"
+      },
+      "oxygen_saturation": {
+        "type": "number",
+        "description": "Blood oxygen saturation percentage (SpO2)"
+      },
+      "notes": {
+        "type": "string",
+        "description": "Additional notes about the vitals"
+      },
+      "measured_at": {
+        "type": "string",
+        "description": "Timestamp when vitals were measured (ISO 8601 format, defaults to now)"
+      }
+    },
+    "required": []
+  }
+}

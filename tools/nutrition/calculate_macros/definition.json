@@ -1,0 +1,32 @@
+{
+  "function_name": "calculate_macros",
+  "description": "Calculate macro nutrient breakdown (protein, carbs, fat) for a day, week, or custom period with percentages and targets",
+  "category": "nutrition",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "start_date": {
+        "type": "string",
+        "description": "Start date for calculation (YYYY-MM-DD, defaults to today)"
+      },
+      "end_date": {
+        "type": "string",
+        "description": "End date for calculation (YYYY-MM-DD, defaults to today)"
+      },
+      "target_calories": {
+        "type": "number",
+        "description": "Daily calorie target for comparison (optional)"
+      },
+      "macro_targets": {
+        "type": "object",
+        "properties": {
+          "protein_percent": { "type": "number" },
+          "carbs_percent": { "type": "number" },
+          "fat_percent": { "type": "number" }
+        },
+        "description": "Target macro percentages (should sum to 100, optional)"
+      }
+    },
+    "required": []
+  }
+}

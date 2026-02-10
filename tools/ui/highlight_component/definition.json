@@ -1,0 +1,37 @@
+{
+  "id": "highlight_component",
+  "name": "Highlight Component",
+  "category": "ui",
+  "description": "Visually highlight a component with a colored border and optional label for debugging purposes. The highlight appears temporarily to help identify components in the UI. Useful for debugging component placement, visibility, and layout issues.",
+  "function_name": "highlight_component",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The ID of the component to highlight (e.g., 'table-1', 'chart-results'). This is the module ID assigned when the component was rendered."
+      },
+      "color": {
+        "type": "string",
+        "description": "Border color for the highlight. Can be a CSS color name (red, blue), hex code (#ff0000), or RGB value. Default: 'red'",
+        "default": "red"
+      },
+      "duration": {
+        "type": "number",
+        "description": "How long to show the highlight in milliseconds. Set to 0 for permanent highlight that must be manually cleared. Default: 3000 (3 seconds)",
+        "default": 3000
+      },
+      "label": {
+        "type": "string",
+        "description": "Optional text label to display with the highlight. Appears in top-left corner of component."
+      },
+      "thickness": {
+        "type": "number",
+        "description": "Border thickness in pixels. Default: 3",
+        "default": 3
+      }
+    },
+    "required": ["componentId"]
+  }
+}

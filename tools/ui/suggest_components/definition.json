@@ -1,0 +1,37 @@
+{
+  "id": "suggest_components",
+  "name": "Suggest Components",
+  "category": "ui",
+  "description": "Get suggestions for complementary components that work well with currently rendered components. Returns component IDs with props and reasoning.\n\n** WHEN TO USE **\n- After rendering a component to discover related components\n- To build complete UI workflows\n- To find components that complement existing views\n- To enhance user experience with additional functionality\n\n** RETURNS **\n- Suggested component IDs ranked by priority\n- Reasoning for each suggestion\n- Recommended layout configurations\n- Default props for suggested components\n- Usage examples for render_manifest\n\n** EXAMPLE **\n{\n  \"currentComponentId\": \"query_results_table\",\n  \"context\": {\n    \"dataType\": \"query_results\",\n    \"userIntent\": \"data_analysis\"\n  },\n  \"maxSuggestions\": 5\n}\n\nReturns complementary components like charts, filters, and export tools.",
+  "function_name": "suggest_components",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "currentComponentId": {
+        "type": "string",
+        "description": "Component ID to get suggestions for (e.g., 'query_results_table', 'portals:chart')"
+      },
+      "context": {
+        "type": "object",
+        "description": "Optional context about the use case",
+        "properties": {
+          "dataType": {
+            "type": "string",
+            "description": "Type of data being displayed (e.g., 'query_results', 'metrics', 'relationships')"
+          },
+          "userIntent": {
+            "type": "string",
+            "description": "User's intent (e.g., 'data_analysis', 'visualization', 'exploration')"
+          }
+        }
+      },
+      "maxSuggestions": {
+        "type": "number",
+        "description": "Maximum number of suggestions to return",
+        "default": 5
+      }
+    },
+    "required": ["currentComponentId"]
+  }
+}

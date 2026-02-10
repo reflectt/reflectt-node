@@ -1,0 +1,49 @@
+{
+  "id": "schedule_workflow",
+  "name": "Schedule Workflow",
+  "description": "Schedule a workflow to run on a cron schedule (daily, weekly, monthly, or custom cron expression). Creates recurring jobs in the job_executions table for autonomous business operations.",
+  "category": "workflows",
+  "function_name": "schedule_workflow",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "workflow_id": {
+        "type": "string",
+        "description": "ID of the workflow to schedule",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "schedule": {
+        "type": "string",
+        "description": "Cron expression or preset: 'daily', 'weekly', 'monthly', or cron format '0 9 * * *'"
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Optional space ID (defaults to current space)"
+      },
+      "context": {
+        "type": "object",
+        "description": "Optional context data to pass to workflow on each execution"
+      },
+      "enabled": {
+        "type": "boolean",
+        "description": "Whether the schedule is enabled (default: true)",
+        "default": true
+      }
+    },
+    "required": [
+      "workflow_id",
+      "schedule"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "autonomous",
+    "scheduling",
+    "workflows",
+    "automation",
+    "cron"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

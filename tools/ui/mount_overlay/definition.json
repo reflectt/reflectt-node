@@ -1,0 +1,52 @@
+{
+  "id": "mount_overlay",
+  "name": "Mount Overlay",
+  "category": "ui",
+  "description": "Mount a component in overlay mode (modal or fullscreen) for immersive, focused experiences. This is a streaming UI tool that displays content above all other UI elements. Use this for: image galleries with lightbox, PDF previews, error traces, focused workflows, critical alerts, or any content that demands full attention. Supports dismissable modals or locked fullscreen modes. Combine with update_theme for mood-enhanced immersive experiences.",
+  "function_name": "mount_overlay",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "Component to mount in overlay (e.g., 'vision:image-gallery', 'document:pdf-preview', 'debug:error-trace-explorer'). Must be registered component.",
+        "minLength": 1
+      },
+      "mode": {
+        "type": "string",
+        "enum": ["modal", "fullscreen"],
+        "description": "'modal' shows component in centered dialog with backdrop (dismissable by default). 'fullscreen' covers entire viewport (immersive, requires explicit close).",
+        "default": "modal"
+      },
+      "size": {
+        "type": "string",
+        "enum": ["small", "medium", "large", "xlarge", "auto"],
+        "description": "Modal size (ignored for fullscreen). 'small' (400px), 'medium' (600px), 'large' (800px), 'xlarge' (1200px), 'auto' (fits content). Default: 'medium'.",
+        "default": "medium"
+      },
+      "dismissable": {
+        "type": "boolean",
+        "description": "Allow user to close overlay by clicking backdrop or ESC key. Default: true for modal, false for fullscreen.",
+        "default": true
+      },
+      "props": {
+        "type": "object",
+        "description": "Props to pass to the component. Must match component's prop schema.",
+        "additionalProperties": true
+      },
+      "backdrop": {
+        "type": "string",
+        "enum": ["blur", "dark", "light", "transparent"],
+        "description": "Backdrop style. 'blur' (default, frosted glass), 'dark' (80% black), 'light' (80% white), 'transparent' (no backdrop).",
+        "default": "blur"
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Enable entrance/exit animations (fade + scale). Default: true.",
+        "default": true
+      }
+    },
+    "required": ["componentId"]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "function_name": "search_social_content",
+  "description": "Search social media platforms for content by keyword or hashtag",
+  "category": "social",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "platform": {
+        "type": "string",
+        "enum": ["twitter", "instagram", "facebook"],
+        "description": "Social media platform to search"
+      },
+      "query": {
+        "type": "string",
+        "description": "Search query or hashtag"
+      },
+      "limit": {
+        "type": "integer",
+        "default": 10,
+        "description": "Maximum number of results to return (1-100)"
+      }
+    },
+    "required": ["platform", "query"]
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "id": "compose_rules",
+  "name": "Compose Rules",
+  "description": "Combine multiple rules with logic operators (AND, OR, NOT, SEQUENCE). Creates a composite rule that can be saved and reused.",
+  "category": "rule",
+  "function_name": "compose_rules",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "rule_ids",
+      "logic",
+      "name"
+    ],
+    "properties": {
+      "rule_ids": {
+        "type": "array",
+        "description": "Rules to combine",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 2
+      },
+      "logic": {
+        "type": "string",
+        "enum": [
+          "AND",
+          "OR",
+          "NOT",
+          "SEQUENCE"
+        ],
+        "description": "How to combine rules (AND=all must pass, OR=any must pass, NOT=negate, SEQUENCE=run in order)"
+      },
+      "name": {
+        "type": "string",
+        "description": "Name for the composite rule"
+      },
+      "description": {
+        "type": "string",
+        "description": "Description of what the composite rule does"
+      },
+      "save_as": {
+        "type": "string",
+        "description": "Optional rule_id to save the composite rule as",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "short_circuit": {
+        "type": "boolean",
+        "description": "Stop on first failure (AND) or success (OR) (default: true)",
+        "default": true
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "rules",
+    "business-logic",
+    "compose",
+    "combine",
+    "composite"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,64 @@
+{
+  "id": "list_portals",
+  "name": "list_portals",
+  "description": "List the available portals within a space along with their primary agent assignments.",
+  "function_name": "list_portals",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "space_id": {
+        "type": "string",
+        "description": "Optional space identifier. Defaults to the caller's current space."
+      },
+      "include_stats": {
+        "type": "boolean",
+        "description": "When true, include counts for portal resources (pages, workflows, integrations). Default is false since these subdirectories are now obsolete.",
+        "default": false
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {
+        "type": "boolean"
+      },
+      "space": {
+        "type": "string"
+      },
+      "count": {
+        "type": "number"
+      },
+      "portals": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "portal_name": { "type": "string" },
+            "display_name": { "type": "string" },
+            "description": { "type": "string" },
+            "agent_slug": { "type": "string" },
+            "space_name": { "type": "string" },
+            "created_at": { "type": "string" },
+            "updated_at": { "type": "string" },
+            "metadata": { "type": "object" },
+            "stats": {
+              "type": "object",
+              "properties": {
+                "page_count": { "type": "number" },
+                "workflow_count": { "type": "number" },
+                "integration_count": { "type": "number" }
+              },
+              "required": ["page_count", "workflow_count", "integration_count"]
+            }
+          },
+          "required": ["portal_name", "display_name", "agent_slug", "space_name", "metadata"]
+        }
+      },
+      "error": {
+        "type": "string"
+      }
+    },
+    "required": ["success", "space", "count", "portals"]
+  }
+}

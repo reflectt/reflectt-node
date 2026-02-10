@@ -1,0 +1,64 @@
+{
+  "id": "save_user_profile",
+  "name": "save_user_profile",
+  "description": "Save or update a user's profile including preferences, working style, and patterns. Creates persistent memory for personalized interactions.",
+  "category": "memory",
+  "function_name": "save_user_profile",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Unique identifier for the user (e.g., 'ryan', 'user_123')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "profile": {
+        "type": "object",
+        "description": "User profile data to save",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "User's name"
+          },
+          "preferences": {
+            "type": "object",
+            "description": "User preferences (communication style, detail level, etc.)"
+          },
+          "working_style": {
+            "type": "object",
+            "description": "How user likes to work (autonomous vs collaborative, risk tolerance, etc.)"
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Domains user frequently works in"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "User's timezone"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional metadata"
+          }
+        }
+      }
+    },
+    "required": [
+      "user_id",
+      "profile"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "memory",
+    "user",
+    "profile",
+    "persistence"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

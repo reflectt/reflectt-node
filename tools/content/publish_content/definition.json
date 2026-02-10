@@ -1,0 +1,20 @@
+{
+  "function_name": "publish_content",
+  "description": "Immediately publish content to platforms",
+  "category": "content",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "content_id": {
+        "type": "string",
+        "description": "ID of the content to publish"
+      },
+      "platform": {
+        "type": "string",
+        "enum": ["twitter", "instagram", "facebook", "blog", "newsletter"],
+        "description": "Target platform"
+      }
+    },
+    "required": ["content_id", "platform"]
+  }
+}

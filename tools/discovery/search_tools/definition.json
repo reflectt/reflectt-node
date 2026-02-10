@@ -1,0 +1,44 @@
+{
+  "id": "search_tools",
+  "name": "Search Tools",
+  "description": "Search all 276 tools by natural language query using semantic search (OpenAI embeddings) with keyword fallback. Returns brief summaries of matching tools. Use load_tools to get full definitions.",
+  "category": "discovery",
+  "function_name": "search_tools",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "query"
+    ],
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Natural language search query (e.g., 'file operations', 'agent communication', 'workflow management')"
+      },
+      "category": {
+        "type": "string",
+        "description": "Optional category filter (e.g., 'agent', 'file', 'workflow', 'ui')"
+      },
+      "limit": {
+        "type": "number",
+        "default": 10,
+        "minimum": 1,
+        "maximum": 50,
+        "description": "Maximum number of results to return"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "query": "file operations",
+      "limit": 5
+    },
+    {
+      "query": "agent conversation",
+      "category": "agent"
+    }
+  ],
+  "tags": ["discovery", "search", "tools"],
+  "version": "1.0.0",
+  "dependencies": []
+}

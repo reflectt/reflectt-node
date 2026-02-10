@@ -1,0 +1,76 @@
+{
+  "id": "improve_writing",
+  "name": "Improve Writing",
+  "category": "ui",
+  "description": "Automatically improve document writing based on analysis and user preferences. Can simplify complex sentences, adjust tone, enhance vocabulary, remove passive voice, improve clarity, and more. Uses AI to rewrite problematic sections while preserving meaning.",
+  "function_name": "improve_writing",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "moduleId": {
+        "type": "string",
+        "description": "ID of the DocumentEditor component to improve (must match existing module ID from render_manifest)",
+        "minLength": 1
+      },
+      "improvements": {
+        "type": "array",
+        "description": "Types of improvements to apply. Can specify multiple.",
+        "items": {
+          "type": "string",
+          "enum": ["simplify", "formalize", "casualize", "shorten", "elaborate", "clarify", "remove_passive", "enhance_vocabulary", "fix_grammar", "improve_flow"]
+        },
+        "minItems": 1
+      },
+      "targetTone": {
+        "type": "string",
+        "enum": ["professional", "casual", "academic", "friendly", "formal", "technical", "persuasive"],
+        "description": "Desired tone for the writing"
+      },
+      "targetGradeLevel": {
+        "type": "number",
+        "description": "Target reading grade level (1-16+). Text will be adjusted to match this level.",
+        "minimum": 1,
+        "maximum": 20
+      },
+      "preserveMeaning": {
+        "type": "boolean",
+        "description": "Ensure core message isn't changed during improvements (default: true)",
+        "default": true
+      },
+      "selection": {
+        "type": "object",
+        "description": "Improve only selected text range (if omitted, improves entire document)",
+        "properties": {
+          "start": {
+            "type": "number",
+            "description": "Start position (0-indexed)",
+            "minimum": 0
+          },
+          "end": {
+            "type": "number",
+            "description": "End position (0-indexed)",
+            "minimum": 0
+          }
+        },
+        "required": ["start", "end"]
+      },
+      "maxChanges": {
+        "type": "number",
+        "description": "Maximum number of changes to make in a single operation (default: unlimited)",
+        "minimum": 1
+      },
+      "preview": {
+        "type": "boolean",
+        "description": "Return proposed changes without applying them (default: false)",
+        "default": false
+      },
+      "aggressive": {
+        "type": "boolean",
+        "description": "Apply more aggressive improvements that may significantly alter phrasing (default: false)",
+        "default": false
+      }
+    },
+    "required": ["moduleId", "improvements"]
+  }
+}

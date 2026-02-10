@@ -1,0 +1,18 @@
+{
+  "name": "get_component_diff",
+  "description": "Compare current component state with previous state to identify what changed. Useful for debugging and understanding state mutations.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The module ID of the component to diff"
+      },
+      "compareToSnapshot": {
+        "type": "string",
+        "description": "Optional: Snapshot ID to compare against (defaults to previous history entry)"
+      }
+    },
+    "required": ["componentId"]
+  }
+}

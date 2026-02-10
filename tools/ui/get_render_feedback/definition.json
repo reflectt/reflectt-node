@@ -1,0 +1,22 @@
+{
+  "id": "get_render_feedback",
+  "name": "Get Render Feedback",
+  "category": "ui",
+  "description": "Get feedback on how components rendered. Use this to validate that your UI changes worked correctly.\n\nReturns:\n- Whether components rendered successfully\n- Visual metrics (size, position, visibility)\n- Props validation results\n- Data validation summary\n- Warnings about potential issues\n\nCall this after render_manifest to verify everything worked.\n\n** EXAMPLES **\n\n1. Check last rendered component:\n{\n  \"includeMetrics\": true\n}\n\n2. Check specific component:\n{\n  \"componentId\": \"table-1\",\n  \"includeMetrics\": true\n}\n\n3. Quick validation (no metrics):\n{\n  \"componentId\": \"dashboard-1\",\n  \"includeMetrics\": false\n}",
+  "function_name": "get_render_feedback",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "Specific component to check, or omit for last rendered"
+      },
+      "includeMetrics": {
+        "type": "boolean",
+        "description": "Include visual rendering metrics",
+        "default": true
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "name": "list_tasks",
+  "description": "List all tasks from both global and space-specific locations. Can filter by agent, status, and priority. Returns tasks sorted by priority, then agent, then title.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "agent": {
+        "type": "string",
+        "description": "Optional: Filter tasks by agent ID (e.g., 'budget_tracker')",
+        "pattern": "^[a-z_]+$"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "active",
+          "draft",
+          "completed",
+          "pending"
+        ],
+        "description": "Optional: Filter tasks by status"
+      },
+      "priority": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ],
+        "description": "Optional: Filter tasks by priority"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Target a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    }
+  },
+  "function_name": "list_tasks",
+  "id": "list_tasks",
+  "category": "task",
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

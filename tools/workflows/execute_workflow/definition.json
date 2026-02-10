@@ -1,0 +1,80 @@
+{
+  "id": "execute_workflow",
+  "name": "Execute Workflow",
+  "description": "Execute a workflow, respecting dependencies and running steps in parallel where possible. Steps are executed in waves based on dependencies, with parallel execution within each wave. Supports error handling strategies (fail/continue/retry) and input variable resolution.",
+  "category": "workflows",
+  "function_name": "execute_workflow",
+  "parameters": {
+    "type": "object",
+    "required": ["workflow_id"],
+    "properties": {
+      "workflow_id": {
+        "type": "string",
+        "description": "ID of workflow to execute"
+      },
+      "context": {
+        "type": "object",
+        "description": "Context data for workflow (accessible in step inputs via {{context.field}})"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space"
+      },
+      "sync": {
+        "type": "boolean",
+        "description": "If true, wait for workflow completion and return result. If false (default), start workflow in background and return execution_id immediately."
+      }
+    }
+  },
+  "use_tool_context": true,
+  "context_requirements": ["loadAgent", "executeAgent"],
+  "examples": [
+    {
+      "description": "Execute workflow in background (async)",
+      "input": {
+        "workflow_id": "test_workflow"
+      },
+      "output": {
+        "success": true,
+        "execution_id": "uuid-1234",
+        "status": "running",
+        "path": "workflows/test_workflow/executions/uuid-1234.json"
+      }
+    },
+    {
+      "description": "Execute workflow synchronously (wait for completion)",
+      "input": {
+        "workflow_id": "test_workflow",
+        "sync": true
+      },
+      "output": {
+        "success": true,
+        "execution_id": "uuid-1234",
+        "status": "completed",
+        "path": "workflows/test_workflow/executions/uuid-1234.json",
+        "result": {
+          "status": "completed",
+          "step_executions": {}
+        }
+      }
+    },
+    {
+      "description": "Execute workflow with context",
+      "input": {
+        "workflow_id": "send_email_workflow",
+        "context": {
+          "recipient": "user@example.com",
+          "subject": "Hello World"
+        }
+      },
+      "output": {
+        "success": true,
+        "execution_id": "uuid-5678",
+        "status": "running"
+      }
+    }
+  ],
+  "tags": ["workflow", "execution", "orchestration"],
+  "version": "2.0.0",
+  "dependencies": []
+}

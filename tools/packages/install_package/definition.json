@@ -1,0 +1,45 @@
+{
+  "id": "install_package",
+  "name": "Install Package",
+  "function_name": "install_package",
+  "description": "Install a package into a space. Creates schemas, registers package in space.json, and makes agents/workflows available.",
+  "category": "packages",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "package_name": {
+        "type": "string",
+        "description": "Package name to install (e.g., '@reflectt/retail')"
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Space to install package into (defaults to current space)"
+      },
+      "auto_install_schemas": {
+        "type": "boolean",
+        "description": "Whether to automatically create schemas/tables from package",
+        "default": true
+      },
+      "enabled_agents": {
+        "type": "array",
+        "description": "Specific agents to enable (defaults to all)",
+        "items": {
+          "type": "string"
+        }
+      },
+      "enabled_workflows": {
+        "type": "array",
+        "description": "Specific workflows to enable (defaults to all)",
+        "items": {
+          "type": "string"
+        }
+      },
+      "config": {
+        "type": "object",
+        "description": "Package-specific configuration",
+        "default": {}
+      }
+    },
+    "required": ["package_name"]
+  }
+}

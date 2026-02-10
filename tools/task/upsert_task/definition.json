@@ -1,0 +1,91 @@
+{
+  "id": "upsert_task",
+  "name": "Upsert Task",
+  "description": "Create or update a task with validated schema. Ensures consistent task structure. Use this to define what an agent can do.",
+  "category": "task",
+  "function_name": "upsert_task",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "id",
+      "agent",
+      "title",
+      "description"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z0-9_-]+$",
+        "description": "Task ID (lowercase, numbers, underscores, hyphens)"
+      },
+      "agent": {
+        "type": "string",
+        "description": "Agent ID this task belongs to (e.g., \"finance_tracker\")"
+      },
+      "title": {
+        "type": "string",
+        "description": "Human-readable task title"
+      },
+      "description": {
+        "type": "string",
+        "description": "What this task does"
+      },
+      "prompt_file": {
+        "type": "string",
+        "description": "Path to prompt file for this task (optional)"
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "active",
+          "draft",
+          "completed",
+          "pending"
+        ],
+        "default": "active",
+        "description": "Task status"
+      },
+      "priority": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ],
+        "default": "medium",
+        "description": "Task priority"
+      },
+      "context": {
+        "type": "object",
+        "description": "Additional context data for the task"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Write to a specific named space (e.g., 'creative', 'education'). Overrides current space."
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Create a budget analysis task",
+      "parameters": {
+        "id": "analyze-budget",
+        "agent": "finance_tracker",
+        "title": "Analyze Budget",
+        "description": "Analyze monthly budget and provide insights"
+      },
+      "expected_result": "Task is created or updated with validated configuration"
+    }
+  ],
+  "tags": [
+    "task",
+    "create",
+    "update",
+    "configuration",
+    "schema"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

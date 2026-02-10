@@ -1,0 +1,65 @@
+{
+  "id": "suggest_task_assignment",
+  "name": "Suggest Task Assignment",
+  "category": "ui",
+  "description": "Get AI-powered task assignment suggestions based on team member skills, capacity, performance, and task requirements. Uses intelligent routing engine to recommend optimal assignees.\n\n** WHEN TO USE **\n- When a new task needs to be assigned\n- To find the best team member for a specific task\n- To understand why a particular assignment is recommended\n- To compare multiple assignment options\n\n** HOW IT WORKS **\n- Analyzes task complexity, required skills, and urgency\n- Evaluates team member skills, current workload, and performance history\n- Calculates match scores based on multiple factors (skills 30%, capacity 25%, performance 20%, context 15%, collaboration 10%)\n- Returns top suggestions with detailed reasoning and estimated completion times\n\n** RETURNS **\n- Top 3 assignment suggestions with confidence scores\n- Detailed reasoning for each suggestion\n- Estimated completion times\n- Potential risks and benefits\n- Alternative options\n\n** EXAMPLE **\n{\n  \"taskDetails\": {\n    \"title\": \"Implement React authentication flow\",\n    \"description\": \"Build secure login/logout with JWT tokens\",\n    \"tags\": [\"react\", \"auth\", \"security\"],\n    \"priority\": \"high\",\n    \"estimatedHours\": 16\n  },\n  \"maxSuggestions\": 3,\n  \"includeReasoning\": true\n}\n\nReturns suggestions like: Sarah (92% match, React expert, available now) vs Mike (78% match, security background, 65% loaded)",
+  "function_name": "suggest_task_assignment",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "taskId": {
+        "type": "string",
+        "description": "Optional task ID if analyzing an existing task"
+      },
+      "taskDetails": {
+        "type": "object",
+        "description": "Task information for analysis",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Task title"
+          },
+          "description": {
+            "type": "string",
+            "description": "Task description"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Task tags/categories"
+          },
+          "priority": {
+            "type": "string",
+            "description": "Task priority (low, medium, high, critical)"
+          },
+          "estimatedHours": {
+            "type": "number",
+            "description": "Estimated hours to complete"
+          }
+        },
+        "required": ["title"]
+      },
+      "teamMembers": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional: Only consider these specific team member IDs"
+      },
+      "maxSuggestions": {
+        "type": "number",
+        "description": "Maximum number of suggestions to return",
+        "default": 3
+      },
+      "includeReasoning": {
+        "type": "boolean",
+        "description": "Include detailed reasoning for suggestions",
+        "default": true
+      }
+    },
+    "required": []
+  }
+}

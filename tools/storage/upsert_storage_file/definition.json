@@ -1,0 +1,65 @@
+{
+  "id": "upsert_storage_file",
+  "name": "Save to Storage",
+  "description": "Save a file to the storage/ directory in a space. Enforces clean structure with storage/[category]/[filename]. Mimics S3-style object storage for unstructured content like documents, images, audio, etc.",
+  "category": "storage",
+  "function_name": "upsert_storage_file",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "category",
+      "filename",
+      "content"
+    ],
+    "properties": {
+      "category": {
+        "type": "string",
+        "description": "Storage category/bucket (e.g., 'stories', 'characters', 'worlds', 'images', 'audio')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "filename": {
+        "type": "string",
+        "description": "Filename with extension (e.g., 'my-story.md', 'hero.json', 'map.png')"
+      },
+      "content": {
+        "type": "string",
+        "description": "File content to save"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Save to a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Save a story to storage",
+      "parameters": {
+        "category": "stories",
+        "filename": "time-traveler.md",
+        "content": "# The Time Traveler\n\nOnce upon a time...",
+        "target_space": "creative"
+      },
+      "expected_result": "File saved to storage/stories/time-traveler.md in the creative space"
+    },
+    {
+      "scenario": "Save a character profile",
+      "parameters": {
+        "category": "characters",
+        "filename": "hero-001.json",
+        "content": "{\"name\": \"John\", \"age\": 30}"
+      },
+      "expected_result": "File saved to storage/characters/hero-001.json in current space"
+    }
+  ],
+  "tags": [
+    "storage",
+    "file",
+    "save",
+    "organize",
+    "bucket"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

@@ -1,0 +1,77 @@
+{
+  "id": "search_tools",
+  "name": "Search Tools",
+  "description": "Search for available tools by capability, keywords, or category. Uses fuzzy search across tool names, descriptions, parameters, and examples. Returns ranked results with relevance scores.",
+  "category": "tools",
+  "function_name": "search_tools",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Natural language or keyword search query (e.g., 'bulk delete records', 'email', 'chart visualization')",
+        "minLength": 1
+      },
+      "category": {
+        "type": "string",
+        "description": "Optional: Filter by category (e.g., 'data', 'ui', 'agent', 'audio', 'document')"
+      },
+      "capabilities": {
+        "type": "array",
+        "description": "Optional: Filter by capability tags (e.g., ['bulk', 'async', 'ai'])",
+        "items": {
+          "type": "string"
+        }
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of results to return. Default: 10",
+        "default": 10,
+        "minimum": 1,
+        "maximum": 50
+      },
+      "includeExamples": {
+        "type": "boolean",
+        "description": "If true, include usage examples in results. Default: true",
+        "default": true
+      },
+      "minScore": {
+        "type": "number",
+        "description": "Minimum relevance score (0-100) to include. Default: 20",
+        "default": 20,
+        "minimum": 0,
+        "maximum": 100
+      }
+    },
+    "required": ["query"]
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "description": "Search for bulk data operations",
+      "input": {
+        "query": "bulk insert multiple records",
+        "category": "data",
+        "limit": 5
+      }
+    },
+    {
+      "description": "Find AI-related tools",
+      "input": {
+        "query": "artificial intelligence",
+        "capabilities": ["ai"],
+        "includeExamples": true
+      }
+    },
+    {
+      "description": "Search for email tools",
+      "input": {
+        "query": "email compose send",
+        "limit": 3
+      }
+    }
+  ],
+  "tags": ["search", "discovery", "find", "query", "lookup"],
+  "version": "1.0.0",
+  "dependencies": []
+}

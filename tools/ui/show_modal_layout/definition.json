@@ -1,0 +1,166 @@
+{
+  "name": "show_modal_layout",
+  "description": "Show a modal/overlay containing a full layout (tabs, split, dashboard, accordion, etc.) with multiple components arranged in slots. This allows complex modal experiences like multi-step wizards, comparison views, or dashboard overlays.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "layoutMode": {
+        "type": "string",
+        "enum": [
+          "standard",
+          "split",
+          "tabs",
+          "accordion",
+          "dashboard",
+          "master-detail",
+          "three-column",
+          "feed"
+        ],
+        "description": "The layout mode to use inside the modal. Each mode arranges slots differently."
+      },
+      "title": {
+        "type": "string",
+        "description": "Title to display in the modal header"
+      },
+      "size": {
+        "type": "string",
+        "enum": ["sm", "md", "lg", "xl", "full"],
+        "default": "lg",
+        "description": "Modal size: sm (512px), md (768px), lg (1024px), xl (1280px), full (maximized)"
+      },
+      "components": {
+        "type": "array",
+        "description": "Array of components to mount in the layout slots",
+        "items": {
+          "type": "object",
+          "properties": {
+            "componentId": {
+              "type": "string",
+              "description": "Component ID from the registry"
+            },
+            "slot": {
+              "type": "string",
+              "enum": ["hero", "main", "detail", "context", "navigation", "status", "actions", "overlay", "background"],
+              "description": "Which slot to mount this component in (v2.0.0 semantic slots)"
+            },
+            "props": {
+              "type": "object",
+              "description": "Props to pass to the component"
+            },
+            "label": {
+              "type": "string",
+              "description": "Optional label for tabs/accordion"
+            },
+            "icon": {
+              "type": "string",
+              "description": "Optional icon emoji for tabs/accordion"
+            }
+          },
+          "required": ["componentId", "slot"]
+        }
+      },
+      "layoutConfig": {
+        "type": "object",
+        "description": "Additional configuration for specific layout modes",
+        "properties": {
+          "splitRatio": {
+            "type": "number",
+            "description": "For split mode: ratio between left and right panes (0.0-1.0, default 0.5)"
+          },
+          "tabsConfig": {
+            "type": "object",
+            "description": "For tabs mode: tab configuration",
+            "properties": {
+              "position": {
+                "type": "string",
+                "enum": ["top", "left", "bottom"],
+                "default": "top",
+                "description": "Position of the tab bar"
+              },
+              "initialTab": {
+                "type": "number",
+                "default": 0,
+                "description": "Index of initially active tab"
+              }
+            }
+          },
+          "accordionConfig": {
+            "type": "object",
+            "description": "For accordion mode: accordion configuration",
+            "properties": {
+              "allowMultiple": {
+                "type": "boolean",
+                "default": true,
+                "description": "Allow multiple sections to be open at once"
+              },
+              "sections": {
+                "type": "array",
+                "description": "Section definitions",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "Unique section ID"
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "Section title"
+                    },
+                    "icon": {
+                      "type": "string",
+                      "description": "Optional icon emoji"
+                    },
+                    "slot": {
+                      "type": "string",
+                      "enum": ["hero", "main", "detail", "context", "navigation", "status", "actions", "overlay", "background"],
+                      "description": "Which slot this section renders (v2.0.0 semantic slots)"
+                    },
+                    "expanded": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "Whether section is initially expanded"
+                    },
+                    "collapsible": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "Whether section can be collapsed"
+                    }
+                  },
+                  "required": ["id", "title", "slot"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "dismissable": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether the modal can be dismissed by clicking outside or pressing ESC"
+      },
+      "backdrop": {
+        "type": "string",
+        "enum": ["blur", "dark", "light", "none"],
+        "default": "blur",
+        "description": "Backdrop style"
+      },
+      "template": {
+        "type": "string",
+        "enum": [
+          "wizard",
+          "comparison",
+          "dashboard",
+          "masterDetail",
+          "formWithSidebar",
+          "accordion",
+          "threeColumn",
+          "feed",
+          "quickAction"
+        ],
+        "description": "Use a pre-configured template instead of manually specifying layout"
+      }
+    },
+    "required": ["layoutMode", "components"]
+  }
+}

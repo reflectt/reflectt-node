@@ -1,0 +1,95 @@
+{
+  "id": "set_responsive_slots",
+  "name": "Set Responsive Slots",
+  "category": "ui",
+  "description": "Configure how slots behave at different screen sizes (mobile, tablet, desktop) for responsive layouts. Slots can be visible, hidden, or converted to drawers based on viewport width. This enables mobile-first design patterns and progressive enhancement strategies.",
+  "function_name": "set_responsive_slots",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mobile": {
+        "type": "object",
+        "description": "Slot behavior on mobile devices (<768px). Keys: 'primary', 'secondary', 'sidebar', 'top'. Values: 'visible', 'hidden', 'drawer'.",
+        "additionalProperties": false,
+        "properties": {
+          "primary": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Primary slot behavior on mobile"
+          },
+          "secondary": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Secondary slot behavior on mobile"
+          },
+          "sidebar": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Sidebar slot behavior on mobile"
+          },
+          "top": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Top slot behavior on mobile"
+          }
+        }
+      },
+      "tablet": {
+        "type": "object",
+        "description": "Slot behavior on tablet devices (768-1023px). Keys: 'primary', 'secondary', 'sidebar', 'top'. Values: 'visible', 'hidden', 'drawer'.",
+        "additionalProperties": false,
+        "properties": {
+          "primary": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Primary slot behavior on tablet"
+          },
+          "secondary": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Secondary slot behavior on tablet"
+          },
+          "sidebar": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Sidebar slot behavior on tablet"
+          },
+          "top": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Top slot behavior on tablet"
+          }
+        }
+      },
+      "desktop": {
+        "type": "object",
+        "description": "Slot behavior on desktop devices (1024px+). Keys: 'primary', 'secondary', 'sidebar', 'top'. Values: 'visible', 'hidden', 'drawer'.",
+        "additionalProperties": false,
+        "properties": {
+          "primary": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Primary slot behavior on desktop"
+          },
+          "secondary": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Secondary slot behavior on desktop"
+          },
+          "sidebar": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Sidebar slot behavior on desktop"
+          },
+          "top": {
+            "type": "string",
+            "enum": ["visible", "hidden", "drawer"],
+            "description": "Top slot behavior on desktop"
+          }
+        }
+      }
+    },
+    "required": ["mobile", "tablet", "desktop"]
+  }
+}

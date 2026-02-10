@@ -1,0 +1,15 @@
+{
+  "function_name": "detect_language",
+  "description": "Detect the language of a given text. Returns the detected language code with confidence score. Supports 100+ languages. Useful before translation to determine source language.",
+  "category": "translation",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The text to detect the language for. Should be at least a few words for accurate detection."
+      }
+    },
+    "required": ["text"]
+  }
+}

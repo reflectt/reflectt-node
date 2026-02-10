@@ -1,0 +1,34 @@
+{
+  "id": "upsert_tool_implementation",
+  "name": "Upsert Tool Implementation",
+  "description": "Create or update a tool's TypeScript implementation in implementations/[category]/[name].ts",
+  "category": "tools",
+  "function_name": "upsert_tool_implementation",
+  "parameters": {
+    "type": "object",
+    "required": ["tool_name", "category", "implementation"],
+    "properties": {
+      "tool_name": {
+        "type": "string",
+        "description": "The function_name for this tool (must match definition)"
+      },
+      "category": {
+        "type": "string",
+        "description": "Tool category (must match definition)"
+      },
+      "implementation": {
+        "type": "string",
+        "description": "TypeScript source code for the tool implementation"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space for space-specific tool"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["tools", "meta", "create", "update", "implementation"],
+  "version": "1.0.0",
+  "dependencies": []
+}

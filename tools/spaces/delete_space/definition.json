@@ -1,0 +1,36 @@
+{
+  "id": "delete_space",
+  "name": "Delete Space",
+  "description": "Delete a space and all its data permanently. This removes all agents, tasks, tables, storage files, and metadata associated with the space. Use with caution - this operation cannot be undone.",
+  "category": "spaces",
+  "function_name": "delete_space",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "space_name": {
+        "type": "string",
+        "description": "Name of the space to delete",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "confirm": {
+        "type": "boolean",
+        "description": "Must be set to true to confirm deletion",
+        "default": false
+      }
+    },
+    "required": [
+      "space_name",
+      "confirm"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "space",
+    "management",
+    "delete",
+    "cleanup"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

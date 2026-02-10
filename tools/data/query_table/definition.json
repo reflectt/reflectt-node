@@ -1,0 +1,97 @@
+{
+  "id": "query_table",
+  "name": "Query Table",
+  "description": "Advanced querying with filters, sorting, and pagination. Supports nested field access (e.g., 'user.name') and multiple filter operators.",
+  "category": "data",
+  "function_name": "query_table",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'worlds', 'users')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "where": {
+        "type": "array",
+        "description": "Optional: Array of filter conditions (all must match)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "field": {
+              "type": "string",
+              "description": "Field name (supports nested fields like 'user.name')"
+            },
+            "operator": {
+              "type": "string",
+              "enum": [
+                "eq",
+                "ne",
+                "gt",
+                "gte",
+                "lt",
+                "lte",
+                "contains",
+                "startsWith",
+                "endsWith",
+                "in"
+              ],
+              "description": "Comparison operator"
+            },
+            "value": {
+              "description": "Value to compare against"
+            }
+          },
+          "required": [
+            "field",
+            "operator",
+            "value"
+          ]
+        }
+      },
+      "orderBy": {
+        "type": "object",
+        "description": "Optional: Sort order",
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "Field to sort by"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "description": "Sort direction"
+          }
+        },
+        "required": [
+          "field",
+          "direction"
+        ]
+      },
+      "limit": {
+        "type": "number",
+        "description": "Optional: Maximum number of records to return"
+      },
+      "offset": {
+        "type": "number",
+        "description": "Optional: Number of records to skip (for pagination)",
+        "default": 0
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Query from a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    },
+    "required": [
+      "table"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,167 @@
+{
+  "id": "create_data_binding",
+  "name": "Create Data Binding",
+  "category": "ui",
+  "description": "Create automatic data binding between components so changes in one automatically update the other. This enables reactive UIs where selections, filters, and data flow seamlessly between related components without manual synchronization. Supports common patterns like table-to-chart, filter-to-multiple, master-detail, and search-to-highlight. Can use pre-built templates or create custom bindings with transformations.",
+  "function_name": "create_data_binding",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "template": {
+        "type": "string",
+        "enum": [
+          "table-to-chart",
+          "filter-to-multiple",
+          "master-detail",
+          "search-to-highlight",
+          "aggregation-to-summary",
+          "selection-sync",
+          "cascade-filter",
+          "transform-pipeline",
+          "custom"
+        ],
+        "description": "Pre-built binding template to use, or 'custom' for manual configuration"
+      },
+      "sourceComponentId": {
+        "type": "string",
+        "description": "Source component ID to watch for changes (required for custom bindings)",
+        "minLength": 1
+      },
+      "targetComponentId": {
+        "type": "string",
+        "description": "Target component ID to update (required)",
+        "minLength": 1
+      },
+      "targetComponentIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Multiple target component IDs (for filter-to-multiple template only)"
+      },
+      "sourceDataPath": {
+        "type": "string",
+        "description": "Path to data in source component (e.g., 'selection.selectedRows', 'filters.search'). Required for custom bindings",
+        "examples": [
+          "selection.selectedRows",
+          "selection.selectedRow",
+          "filters",
+          "filters.search",
+          "data.rows",
+          "data"
+        ]
+      },
+      "targetPropPath": {
+        "type": "string",
+        "description": "Path to prop in target component (e.g., 'data', 'filters', 'highlightIds'). Required for custom bindings",
+        "examples": [
+          "data",
+          "filters",
+          "highlightIds",
+          "selection",
+          "record",
+          "recordId"
+        ]
+      },
+      "options": {
+        "type": "object",
+        "description": "Template-specific options",
+        "properties": {
+          "xField": {
+            "type": "string",
+            "description": "Field to use for x-axis (table-to-chart)"
+          },
+          "yField": {
+            "type": "string",
+            "description": "Field to use for y-axis (table-to-chart)"
+          },
+          "seriesField": {
+            "type": "string",
+            "description": "Field to use for series grouping (table-to-chart)"
+          },
+          "idField": {
+            "type": "string",
+            "description": "Field to use as unique identifier (master-detail, selection-sync)",
+            "default": "id"
+          },
+          "loadFullRecord": {
+            "type": "boolean",
+            "description": "Whether to load full record or just ID (master-detail)",
+            "default": false
+          },
+          "searchField": {
+            "type": "string",
+            "description": "Search field to watch (search-to-highlight)",
+            "default": "query"
+          },
+          "matchFields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Fields to match against in target (search-to-highlight)",
+            "default": ["name", "label", "id"]
+          },
+          "aggregationType": {
+            "type": "string",
+            "enum": ["sum", "avg", "count", "min", "max"],
+            "description": "Aggregation type (aggregation-to-summary)"
+          },
+          "aggregationField": {
+            "type": "string",
+            "description": "Field to aggregate (aggregation-to-summary)"
+          },
+          "bidirectional": {
+            "type": "boolean",
+            "description": "Enable bidirectional binding (selection-sync)",
+            "default": false
+          },
+          "filterKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Specific filter keys to sync (filter-to-multiple)"
+          },
+          "debounce": {
+            "type": "number",
+            "description": "Debounce delay in milliseconds",
+            "minimum": 0,
+            "maximum": 5000,
+            "default": 0
+          }
+        }
+      },
+      "transformation": {
+        "type": "string",
+        "description": "JavaScript function to transform source value before applying to target (custom bindings only). Function signature: (sourceValue, sourceContext) => transformedValue",
+        "examples": [
+          "(rows) => rows.map(r => ({ x: r.date, y: r.value }))",
+          "(value) => value.toUpperCase()",
+          "(filters) => ({ ...filters, page: 1 })"
+        ]
+      },
+      "enabled": {
+        "type": "boolean",
+        "description": "Whether binding should be enabled immediately",
+        "default": true
+      },
+      "bidirectional": {
+        "type": "boolean",
+        "description": "Enable bidirectional binding (custom bindings only)",
+        "default": false
+      },
+      "triggerEvents": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["data_update", "selection_change", "filter_change", "action_triggered", "custom"]
+        },
+        "description": "Event types that trigger this binding (custom bindings only)",
+        "default": ["data_update", "selection_change", "filter_change"]
+      }
+    },
+    "required": ["template", "targetComponentId"]
+  }
+}

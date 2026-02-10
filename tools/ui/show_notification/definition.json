@@ -1,0 +1,70 @@
+{
+  "id": "show_notification",
+  "name": "Show Notification",
+  "category": "ui",
+  "description": "Trigger toast/alert notifications in the UI. This is a streaming UI tool - notifications appear in real-time as the tool call streams through. Use this to communicate important updates, confirmations, errors, or actionable alerts to the user. Supports 4 severity levels (info/success/warning/error), customizable duration, action buttons, and positioning. Notifications can be persistent (duration: 0) or auto-dismiss. Action buttons can trigger prompts or dismiss. Use the 'title' for emphasis and 'message' for details.",
+  "function_name": "show_notification",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "message": {
+        "type": "string",
+        "description": "Notification message text (supports markdown)",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "severity": {
+        "type": "string",
+        "enum": ["info", "success", "warning", "error"],
+        "description": "Notification severity: 'info' (informational), 'success' (positive outcome), 'warning' (caution), 'error' (problem/failure)"
+      },
+      "title": {
+        "type": "string",
+        "description": "Optional notification title/heading",
+        "maxLength": 100
+      },
+      "duration": {
+        "type": "number",
+        "description": "Auto-dismiss duration in milliseconds. Use 0 for persistent notifications that require manual dismiss. Default: 5000ms (5 seconds)",
+        "minimum": 0,
+        "maximum": 30000,
+        "default": 5000
+      },
+      "actions": {
+        "type": "array",
+        "description": "Optional action buttons shown in notification",
+        "items": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string",
+              "description": "Button label text",
+              "minLength": 1,
+              "maxLength": 50
+            },
+            "action": {
+              "type": "string",
+              "enum": ["dismiss", "prompt"],
+              "description": "'dismiss' closes notification, 'prompt' sends a prompt to chat"
+            },
+            "prompt": {
+              "type": "string",
+              "description": "Prompt text to send when action='prompt'",
+              "maxLength": 200
+            }
+          },
+          "required": ["label", "action"]
+        },
+        "maxItems": 3
+      },
+      "position": {
+        "type": "string",
+        "enum": ["top-right", "top-center", "bottom-right"],
+        "description": "Notification position on screen. Default: 'top-right'",
+        "default": "top-right"
+      }
+    },
+    "required": ["message", "severity"]
+  }
+}

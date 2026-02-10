@@ -1,0 +1,39 @@
+{
+  "id": "get_relevant_context",
+  "name": "get_relevant_context",
+  "description": "Search conversation history and synthesize relevant context for current query. This helps agents understand what the user has done recently and what's relevant to their current request.",
+  "category": "memory",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to get context for"
+      },
+      "query": {
+        "type": "string",
+        "description": "Current query or topic to find relevant context for"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of conversations to analyze (default: 10)",
+        "default": 10
+      },
+      "recency_weight": {
+        "type": "number",
+        "description": "How much to favor recent vs relevant (0-1, default: 0.7). Higher values favor recency.",
+        "default": 0.7
+      },
+      "include_cache": {
+        "type": "boolean",
+        "description": "Use cached summary if available (default: true)",
+        "default": true
+      }
+    },
+    "required": [
+      "user_id",
+      "query"
+    ]
+  },
+  "function_name": "get_relevant_context"
+}

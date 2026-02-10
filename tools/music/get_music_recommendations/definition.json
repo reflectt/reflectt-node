@@ -1,0 +1,64 @@
+{
+  "id": "get_music_recommendations",
+  "name": "Get Music Recommendations",
+  "category": "music",
+  "description": "Get personalized music recommendations based on your favorite tracks, artists, and genres. Discover new music tailored to your taste.\n\nYou can:\n- Get recommendations based on seed tracks, artists, or genres\n- Customize recommendation parameters (tempo, energy, acousticness, etc.)\n- Get up to 100 recommendations\n- Receive audio feature analysis for each track\n\nRequires Spotify API credentials via OAuth.\n\n** WHEN TO USE **\n- User asks for \"music recommendations\"\n- User wants to discover songs similar to their favorites\n- User wants new music suggestions\n- User wants to explore by genre or artist\n\n** WHEN NOT TO USE **\n- User wants to search for specific music (use search_music)\n- User wants their listening history (use track_listening_history)\n- User wants to play a specific song (use play_track)\n\n** EXAMPLES **\n\n1. Recommendations based on favorite artists:\n{\n  \"seed_artists\": [\"1 The Weeknd\", \"5K1ykvn66NonMVlW5B46mK\"],\n  \"limit\": 20\n}\n\n2. Recommendations based on genres:\n{\n  \"seed_genres\": [\"pop\", \"indie\", \"electronic\"],\n  \"limit\": 15\n}\n\n3. Recommendations with audio features:\n{\n  \"seed_tracks\": [\"3n3Ppam7vgaVa1iaRUc9Lp\"],\n  \"target_energy\": 0.8,\n  \"target_danceability\": 0.7,\n  \"limit\": 25\n}",
+  "function_name": "get_music_recommendations",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "seed_tracks": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of Spotify track IDs (up to 5)"
+      },
+      "seed_artists": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of Spotify artist IDs (up to 5)"
+      },
+      "seed_genres": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of genre names (up to 5)"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Number of recommendations to return (1-100, default: 20)",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 20
+      },
+      "target_energy": {
+        "type": "number",
+        "description": "Target energy level (0.0-1.0)",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "target_danceability": {
+        "type": "number",
+        "description": "Target danceability (0.0-1.0)",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "target_tempo": {
+        "type": "number",
+        "description": "Target tempo in BPM (0-300)"
+      },
+      "target_popularity": {
+        "type": "number",
+        "description": "Target popularity (0-100)",
+        "minimum": 0,
+        "maximum": 100
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "validate_tool",
+  "name": "Validate Tool",
+  "description": "Validate that tool definition matches implementation by checking parameter names, types, and context_requirements",
+  "category": "tools",
+  "function_name": "validate_tool",
+  "parameters": {
+    "type": "object",
+    "required": ["tool_name"],
+    "properties": {
+      "tool_name": {
+        "type": "string",
+        "description": "The function_name of the tool to validate"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space for space-specific tools"
+      },
+      "strict": {
+        "type": "boolean",
+        "description": "Enable strict validation (check for all best practices)"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["tools", "meta", "validation", "quality"],
+  "version": "1.0.0",
+  "dependencies": []
+}

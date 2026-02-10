@@ -1,0 +1,69 @@
+{
+  "id": "generate_image",
+  "name": "Generate Image",
+  "description": "Generate images from text prompts using AI image generation (DALL-E 3). Creates high-quality images and saves them to storage. Returns storage path for inline rendering.",
+  "category": "vision",
+  "function_name": "generate_image",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Detailed text description of the image to generate. Be specific about style, composition, colors, mood, etc."
+      },
+      "size": {
+        "type": "string",
+        "enum": ["1024x1024", "1792x1024", "1024x1792"],
+        "description": "Image size/aspect ratio. Square (1024x1024), landscape (1792x1024), or portrait (1024x1792). Default: 1024x1024",
+        "default": "1024x1024"
+      },
+      "quality": {
+        "type": "string",
+        "enum": ["standard", "hd"],
+        "description": "Image quality. 'standard' is faster and cheaper, 'hd' has finer details. Default: standard",
+        "default": "standard"
+      },
+      "style": {
+        "type": "string",
+        "enum": ["vivid", "natural"],
+        "description": "Visual style. 'vivid' for hyper-real and dramatic, 'natural' for more realistic. Default: vivid",
+        "default": "vivid"
+      },
+      "filename": {
+        "type": "string",
+        "description": "Optional: Custom filename (without extension). Auto-generated if not provided.",
+        "pattern": "^[a-zA-Z0-9_-]+$"
+      }
+    },
+    "required": ["prompt"]
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "input": {
+        "prompt": "A serene mountain landscape at sunset with purple and orange skies, photorealistic",
+        "size": "1792x1024",
+        "quality": "hd"
+      },
+      "output": {
+        "success": true,
+        "image": {
+          "storage_path": "storage/images/generated/mountain_sunset_1234567890.png",
+          "url": "https://...openai.com/...",
+          "prompt": "A serene mountain landscape...",
+          "size": "1792x1024",
+          "revised_prompt": "..."
+        }
+      }
+    }
+  ],
+  "tags": ["image", "generation", "ai", "dall-e", "create"],
+  "version": "1.0.0",
+  "dependencies": ["openai"],
+  "cost": {
+    "standard_1024": 0.04,
+    "hd_1024": 0.08,
+    "standard_1792": 0.08,
+    "hd_1792": 0.12
+  }
+}

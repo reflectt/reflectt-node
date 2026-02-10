@@ -1,0 +1,28 @@
+{
+  "id": "get_ui_insights",
+  "name": "Get UI Insights",
+  "category": "ui",
+  "description": "Analyze UI interaction patterns to understand component usage, identify problems, and get optimization recommendations.\n\n** WHEN TO USE **\n- To understand which components are most frequently used\n- To identify components with errors or performance issues\n- To optimize the UI based on actual usage patterns\n- To get data-driven recommendations for improving user experience\n- When debugging recurring component issues\n\n** RETURNS **\n- Most frequently used components (top 10)\n- Components with errors or issues\n- Success rate across all interactions\n- Recent activity patterns (last hour, day, week)\n- User satisfaction scores (if available)\n- Top actions performed\n- Actionable recommendations for improvements\n\n** INSIGHTS PROVIDED **\n1. Usage Patterns: Which components users interact with most\n2. Error Detection: Components that fail or cause errors\n3. Performance Metrics: Success rates and interaction volumes\n4. User Satisfaction: Feedback scores when available\n5. Optimization Opportunities: Data-driven suggestions\n\n** EXAMPLE **\n{\n  \"includeRecommendations\": true,\n  \"timeWindow\": \"last_day\"\n}\n\nReturns comprehensive analysis of UI interactions with actionable insights.",
+  "function_name": "get_ui_insights",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "includeRecommendations": {
+        "type": "boolean",
+        "description": "Include actionable recommendations based on insights",
+        "default": true
+      },
+      "timeWindow": {
+        "type": "string",
+        "enum": ["last_hour", "last_day", "last_week", "all"],
+        "description": "Time window for analysis",
+        "default": "all"
+      },
+      "componentType": {
+        "type": "string",
+        "description": "Filter insights to a specific component type (optional)"
+      }
+    }
+  }
+}

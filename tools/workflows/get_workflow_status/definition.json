@@ -1,0 +1,30 @@
+{
+  "id": "get_workflow_status",
+  "name": "Get Workflow Status",
+  "description": "Get current status of a running workflow execution",
+  "category": "workflows",
+  "function_name": "get_workflow_status",
+  "parameters": {
+    "type": "object",
+    "required": ["execution_id"],
+    "properties": {
+      "execution_id": {
+        "type": "string",
+        "description": "Workflow execution ID"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space"
+      },
+      "include_step_details": {
+        "type": "boolean",
+        "description": "Include detailed step information"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["workflow", "status"],
+  "version": "1.0.0",
+  "dependencies": []
+}

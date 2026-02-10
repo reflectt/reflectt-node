@@ -1,0 +1,102 @@
+{
+  "type": "ui_tool",
+  "name": "recommend_chart_type",
+  "description": "Analyze data and recommend optimal chart types with confidence scores, reasoning, and enhancements. Uses advanced data analysis including distribution, correlations, trends, and user learning to suggest the best visualizations.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "chartComponentId": {
+        "type": "string",
+        "description": "The ID of the chart component to provide recommendations for"
+      },
+      "data": {
+        "type": "array",
+        "description": "The data to analyze for chart recommendations (array of objects)",
+        "items": {
+          "type": "object"
+        }
+      },
+      "columns": {
+        "type": "array",
+        "description": "Optional column definitions for better analysis",
+        "items": {
+          "type": "string"
+        }
+      },
+      "currentChartType": {
+        "type": "string",
+        "description": "Current chart type (for enhancement suggestions)",
+        "enum": ["line", "bar", "area", "pie", "scatter", "radar", "heatmap", "treemap", "sunburst", "boxplot", "histogram"]
+      },
+      "includeEnhancements": {
+        "type": "boolean",
+        "description": "Include enhancement suggestions for current/recommended charts (default: true)",
+        "default": true
+      },
+      "includeInteractions": {
+        "type": "boolean",
+        "description": "Include interactivity suggestions (default: true)",
+        "default": true
+      },
+      "includeAnomalies": {
+        "type": "boolean",
+        "description": "Detect and report data anomalies (default: false)",
+        "default": false
+      },
+      "autoApply": {
+        "type": "boolean",
+        "description": "Auto-apply recommendation if confidence > 90% (default: false)",
+        "default": false
+      },
+      "maxRecommendations": {
+        "type": "number",
+        "description": "Maximum number of chart type recommendations (default: 3)",
+        "default": 3
+      }
+    }
+  },
+  "examples": [
+    {
+      "description": "Get chart recommendations for time series data",
+      "input": {
+        "chartComponentId": "sales-chart",
+        "data": [
+          { "date": "2024-01", "revenue": 45000 },
+          { "date": "2024-02", "revenue": 52000 },
+          { "date": "2024-03", "revenue": 48000 }
+        ],
+        "includeEnhancements": true,
+        "maxRecommendations": 5
+      }
+    },
+    {
+      "description": "Get enhancements for current chart",
+      "input": {
+        "chartComponentId": "sales-chart",
+        "currentChartType": "bar",
+        "includeEnhancements": true,
+        "includeInteractions": true
+      }
+    },
+    {
+      "description": "Analyze data with anomaly detection",
+      "input": {
+        "data": [
+          { "month": "Jan", "sales": 100 },
+          { "month": "Feb", "sales": 105 },
+          { "month": "Mar", "sales": 500 }
+        ],
+        "includeAnomalies": true,
+        "includeEnhancements": true
+      }
+    },
+    {
+      "description": "Auto-apply best chart if highly confident",
+      "input": {
+        "chartComponentId": "metrics-chart",
+        "autoApply": true,
+        "includeEnhancements": true
+      }
+    }
+  ]
+}

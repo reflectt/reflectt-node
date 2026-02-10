@@ -1,0 +1,35 @@
+{
+  "id": "get_weather_map",
+  "name": "Get Weather Map",
+  "category": "weather",
+  "description": "Get weather map tile data for displaying interactive weather overlays. Returns tile URLs for temperature, precipitation, clouds, pressure, wind, rain, and snow layers.\n\nYou can:\n- Get tile URLs for different weather layers\n- Display temperature maps\n- Show precipitation overlays\n- Visualize wind patterns\n- Show cloud coverage\n- Display pressure systems\n- View rain and snow accumulation\n\nUse these tiles with mapping libraries like Leaflet or MapboxGL.\n\n** EXAMPLES **\n\n1. Get temperature map tile:\n{\n  \"layer\": \"temp_new\",\n  \"zoom\": 5,\n  \"x\": 5,\n  \"y\": 12\n}\n\n2. Get precipitation map tile:\n{\n  \"layer\": \"precipitation_new\",\n  \"zoom\": 8,\n  \"x\": 128,\n  \"y\": 95\n}\n\n3. Get wind speed map:\n{\n  \"layer\": \"wind_new\",\n  \"zoom\": 3,\n  \"x\": 2,\n  \"y\": 3\n}",
+  "function_name": "get_weather_map",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["layer", "zoom", "x", "y"],
+    "properties": {
+      "layer": {
+        "type": "string",
+        "enum": ["temp_new", "precipitation_new", "clouds_new", "pressure_new", "wind_new", "rain_new", "snow_new"],
+        "description": "Weather map layer type"
+      },
+      "zoom": {
+        "type": "number",
+        "description": "Map zoom level (0-20)",
+        "minimum": 0,
+        "maximum": 20
+      },
+      "x": {
+        "type": "number",
+        "description": "Tile X coordinate",
+        "minimum": 0
+      },
+      "y": {
+        "type": "number",
+        "description": "Tile Y coordinate",
+        "minimum": 0
+      }
+    }
+  }
+}

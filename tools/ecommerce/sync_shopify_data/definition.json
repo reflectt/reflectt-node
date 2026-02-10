@@ -1,0 +1,24 @@
+{
+  "function_name": "sync_shopify_data",
+  "description": "Comprehensive Shopify data synchronization. Syncs products, orders, and/or inventory levels from Shopify to database. Returns sync statistics with counts of created, updated, and deleted items",
+  "category": "ecommerce",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "data_type": {
+        "type": "string",
+        "enum": ["products", "orders", "inventory", "all"],
+        "description": "Type of data to sync: 'products', 'orders', 'inventory', or 'all'. Defaults to 'all'"
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of items to sync per type. Defaults to 100"
+      },
+      "force_refresh": {
+        "type": "boolean",
+        "description": "If true, bypass cache and force refresh from Shopify"
+      }
+    },
+    "required": []
+  }
+}

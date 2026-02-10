@@ -1,0 +1,24 @@
+{
+  "id": "get_forecast",
+  "name": "Get Forecast",
+  "category": "weather",
+  "description": "Get 5-day weather forecast with 3-hour intervals for a location. Returns temperature, precipitation probability, wind conditions, and weather conditions for each forecast period.\n\nYou can:\n- Get 5-day forecast by city name\n- Get forecast by coordinates\n- Choose temperature units (metric, imperial, kelvin)\n- See probability of precipitation for each period\n- Get detailed conditions every 3 hours (40 data points)\n- Plan activities based on future weather\n\nThis tool caches results for 10 minutes to reduce API calls.\n\n** EXAMPLES **\n\n1. Get 5-day forecast:\n{\n  \"location\": \"London\"\n}\n\n2. Get forecast with imperial units:\n{\n  \"location\": \"Miami, US\",\n  \"units\": \"imperial\"\n}\n\n3. Get forecast by coordinates:\n{\n  \"location\": \"51.5074,-0.1278\",\n  \"units\": \"metric\"\n}",
+  "function_name": "get_forecast",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["location"],
+    "properties": {
+      "location": {
+        "type": "string",
+        "description": "Location name (e.g., 'London, UK') or coordinates (e.g., '51.5074,-0.1278')"
+      },
+      "units": {
+        "type": "string",
+        "enum": ["metric", "imperial", "kelvin"],
+        "description": "Temperature units: metric (°C), imperial (°F), kelvin (K)",
+        "default": "metric"
+      }
+    }
+  }
+}

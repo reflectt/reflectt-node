@@ -1,0 +1,27 @@
+{
+  "id": "trace_conversation",
+  "name": "Trace Conversation",
+  "description": "Trace full execution path from root conversation through all child conversations. Visualizes agent-to-agent delegation chains and tool execution flow.",
+  "category": "debug",
+  "function_name": "trace_conversation",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "conversation_id": {
+        "type": "string",
+        "description": "Conversation ID (can be any conversation in the tree - will find root automatically)"
+      },
+      "user_id": {
+        "type": "string",
+        "description": "User ID who owns the conversation"
+      },
+      "include_visualization": {
+        "type": "boolean",
+        "description": "Include ASCII tree visualization (default: true)",
+        "default": true
+      }
+    },
+    "required": ["conversation_id", "user_id"]
+  },
+  "version": "1.0.0"
+}

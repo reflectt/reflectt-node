@@ -1,0 +1,29 @@
+{
+  "id": "get_current_time",
+  "name": "Get Current Time",
+  "description": "Get the current date and time. Use this to know what \"now\" is for time-sensitive operations, scheduling, or logging.",
+  "category": "time",
+  "function_name": "get_current_time",
+  "parameters": {
+    "type": "object",
+    "required": [],
+    "properties": {}
+  },
+  "examples": [
+    {
+      "scenario": "Get current timestamp for logging",
+      "parameters": {},
+      "expected_result": "Returns current date and time in ISO format"
+    }
+  ],
+  "tags": [
+    "time",
+    "date",
+    "timestamp",
+    "now",
+    "current"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "context_requirements": []
+}

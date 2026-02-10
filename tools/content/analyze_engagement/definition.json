@@ -1,0 +1,28 @@
+{
+  "function_name": "analyze_engagement",
+  "description": "Analyze content performance and engagement metrics",
+  "category": "content",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "content_id": {
+        "type": "string",
+        "description": "ID of specific content to analyze (optional if date_range provided)"
+      },
+      "date_range": {
+        "type": "object",
+        "description": "Analyze all content within date range",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "description": "ISO 8601 start date"
+          },
+          "end_date": {
+            "type": "string",
+            "description": "ISO 8601 end date"
+          }
+        }
+      }
+    }
+  }
+}

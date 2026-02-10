@@ -1,0 +1,34 @@
+{
+  "id": "create_playlist",
+  "name": "Create Playlist",
+  "category": "music",
+  "description": "Create a new Spotify playlist and add tracks to it. Perfect for organizing your favorite songs or sharing curated collections.\n\nYou can:\n- Create a new playlist with a name and description\n- Set playlist visibility (public or private)\n- Add tracks by their IDs\n- Get playlist details and links\n\nRequires Spotify API credentials via OAuth.\n\n** WHEN TO USE **\n- User asks to \"create a playlist\"\n- User wants to save songs to a new collection\n- User wants to create a curated playlist\n- User wants to share a collection with others\n\n** WHEN NOT TO USE **\n- User wants to search for existing playlists (use search_music)\n- User wants recommendations (use get_music_recommendations)\n- User wants to modify an existing playlist\n\n** EXAMPLES **\n\n1. Create a public playlist:\n{\n  \"name\": \"My Workout Mix\",\n  \"description\": \"High energy songs for the gym\",\n  \"is_public\": true\n}\n\n2. Create a private playlist with tracks:\n{\n  \"name\": \"Chill Vibes\",\n  \"description\": \"Relaxing evening music\",\n  \"is_public\": false,\n  \"track_ids\": [\"3n3Ppam7vgaVa1iaRUc9Lp\", \"4cOdK2wGLETKBW3PvgPWqLv\"]\n}",
+  "function_name": "create_playlist",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["name"],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Playlist name (required)"
+      },
+      "description": {
+        "type": "string",
+        "description": "Playlist description (optional)"
+      },
+      "is_public": {
+        "type": "boolean",
+        "description": "Whether the playlist is public (default: false)",
+        "default": false
+      },
+      "track_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of Spotify track IDs to add to the playlist (optional, max 100)"
+      }
+    }
+  }
+}

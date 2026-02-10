@@ -1,0 +1,43 @@
+{
+  "function_name": "get_health_metrics",
+  "description": "Retrieve health metrics like heart rate, blood pressure, weight, BMI, body fat percentage for analysis and tracking",
+  "category": "health",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "metric_types": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "heart_rate",
+            "blood_pressure",
+            "weight",
+            "bmi",
+            "body_fat",
+            "vo2_max",
+            "resting_hr",
+            "steps",
+            "distance",
+            "calories",
+            "active_minutes"
+          ]
+        },
+        "description": "Types of metrics to retrieve (defaults to all)"
+      },
+      "start_date": {
+        "type": "string",
+        "description": "Start date for metrics (YYYY-MM-DD, defaults to 30 days ago)"
+      },
+      "end_date": {
+        "type": "string",
+        "description": "End date for metrics (YYYY-MM-DD, defaults to today)"
+      },
+      "include_trend": {
+        "type": "boolean",
+        "description": "If true, include trend analysis (increasing, decreasing, stable)"
+      }
+    },
+    "required": []
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "id": "create_rule",
+  "name": "Create Rule",
+  "description": "Create a new business rule with definition and prompt. Rules are reusable, composable logic units that can be referenced by agents, tasks, and workflows for validation, automation, transformation, or conditional logic.",
+  "category": "rule",
+  "function_name": "create_rule",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "rule_id",
+      "name",
+      "description",
+      "type",
+      "input_schema",
+      "output_schema"
+    ],
+    "properties": {
+      "rule_id": {
+        "type": "string",
+        "description": "Unique identifier for the rule (lowercase, hyphens)",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "name": {
+        "type": "string",
+        "description": "Human-readable rule name"
+      },
+      "description": {
+        "type": "string",
+        "description": "What this rule does and when to use it"
+      },
+      "type": {
+        "type": "string",
+        "enum": [
+          "validation",
+          "automation",
+          "transformation",
+          "conditional",
+          "composite"
+        ],
+        "description": "Type of rule"
+      },
+      "input_schema": {
+        "type": "object",
+        "description": "JSON Schema for rule input"
+      },
+      "output_schema": {
+        "type": "object",
+        "description": "JSON Schema for rule output"
+      },
+      "conditions": {
+        "type": "array",
+        "description": "Optional conditions that must be met",
+        "items": {
+          "type": "object"
+        }
+      },
+      "actions": {
+        "type": "array",
+        "description": "Actions to perform when conditions are met",
+        "items": {
+          "type": "object"
+        }
+      },
+      "prompt_content": {
+        "type": "string",
+        "description": "Markdown documentation for the rule"
+      },
+      "tags": {
+        "type": "array",
+        "description": "Tags for categorization",
+        "items": {
+          "type": "string"
+        }
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Additional metadata (domain, complexity, etc.)"
+      },
+      "dependencies": {
+        "type": "array",
+        "description": "Other rule IDs this rule depends on",
+        "items": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "rules",
+    "business-logic",
+    "create",
+    "validation",
+    "automation"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

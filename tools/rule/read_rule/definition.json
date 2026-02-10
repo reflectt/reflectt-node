@@ -1,0 +1,35 @@
+{
+  "id": "read_rule",
+  "name": "Read Rule",
+  "description": "Load a rule definition and prompt. Returns the complete rule specification including definition, documentation, and metadata.",
+  "category": "rule",
+  "function_name": "read_rule",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "rule_id"
+    ],
+    "properties": {
+      "rule_id": {
+        "type": "string",
+        "description": "Rule identifier to load",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "include_metadata": {
+        "type": "boolean",
+        "description": "Include usage statistics and version history (default: true)",
+        "default": true
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "rules",
+    "business-logic",
+    "read",
+    "load"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

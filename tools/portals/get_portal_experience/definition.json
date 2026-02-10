@@ -1,0 +1,27 @@
+{
+  "id": "get_portal_experience",
+  "name": "Get Portal Experience",
+  "category": "portals",
+  "description": "Load the editable experience manifest for a portal, merging current-space overrides with global defaults.",
+  "function_name": "get_portal_experience",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "portal_id": {
+        "type": "string",
+        "description": "Portal identifier (e.g. concierge, customer). Defaults to concierge.",
+        "default": "concierge"
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Space slug to load the portal from. Defaults to the caller's current space."
+      },
+      "include_metadata": {
+        "type": "boolean",
+        "description": "When true, include the full merged portal record in the response.",
+        "default": false
+      }
+    },
+    "required": []
+  }
+}

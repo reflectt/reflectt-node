@@ -1,0 +1,35 @@
+{
+  "id": "get_space_info",
+  "name": "Get Space Info",
+  "description": "Get detailed information about a specific space including metadata, creation date, statistics (agent count, task count, table count, storage usage), and directory structure.",
+  "category": "spaces",
+  "function_name": "get_space_info",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "space_name": {
+        "type": "string",
+        "description": "Name of the space to get info about",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "include_contents": {
+        "type": "boolean",
+        "description": "Include lists of agents, tasks, and tables in the space",
+        "default": false
+      }
+    },
+    "required": [
+      "space_name"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "space",
+    "management",
+    "info",
+    "details"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

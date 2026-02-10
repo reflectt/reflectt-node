@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tool Definition Schema",
+  "description": "Schema for defining reusable tools that agents can use",
+  "type": "object",
+  "required": ["id", "name", "description", "category", "function_name", "parameters"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "Unique tool identifier (lowercase, numbers, underscores, hyphens)"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable tool name"
+    },
+    "description": {
+      "type": "string",
+      "description": "What this tool does and when to use it"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["data", "agent", "web", "time", "system", "vision"],
+      "description": "Tool category for organization"
+    },
+    "function_name": {
+      "type": "string",
+      "description": "The actual function name to invoke"
+    },
+    "parameters": {
+      "type": "object",
+      "description": "JSONSchema definition of tool parameters"
+    },
+    "examples": {
+      "type": "array",
+      "description": "Example usage scenarios",
+      "items": {
+        "type": "object",
+        "properties": {
+          "scenario": {
+            "type": "string"
+          },
+          "parameters": {
+            "type": "object"
+          },
+          "expected_result": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tags for searchability"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semantic version"
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Other tools this tool depends on"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "get_component_interactions",
+  "name": "Get Component Interactions",
+  "category": "ui",
+  "description": "Get interaction history and activity metrics for a specific component. Use this to understand how users are interacting with components and track component usage patterns.\n\nYou can:\n- See click counts and interaction patterns\n- Track data update frequency\n- Monitor selection changes\n- View filter application history\n- Get recent event timeline\n- Analyze component engagement\n\nThis is CRITICAL for understanding user behavior, debugging interaction issues, and making data-driven UI decisions.\n\n** EXAMPLES **\n\n1. Get all interactions for a component:\n{\n  \"componentId\": \"table-1\"\n}\n\n2. Get recent interactions (last 5 minutes):\n{\n  \"componentId\": \"chart-1\",\n  \"since\": 1699900000000\n}\n\n3. Get interaction summary with event timeline:\n{\n  \"componentId\": \"dashboard-1\",\n  \"includeEventTimeline\": true,\n  \"eventLimit\": 20\n}",
+  "function_name": "get_component_interactions",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["componentId"],
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The component ID to analyze interactions for"
+      },
+      "since": {
+        "type": "number",
+        "description": "Timestamp (ms since epoch) to filter interactions from. Omit to get all interactions."
+      },
+      "includeEventTimeline": {
+        "type": "boolean",
+        "description": "Include detailed event timeline",
+        "default": true
+      },
+      "eventLimit": {
+        "type": "number",
+        "description": "Maximum number of recent events to return",
+        "default": 10
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "function_name": "monitor_mentions",
+  "description": "Monitor brand mentions across social media platforms in real-time",
+  "category": "social",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "keyword": {
+        "type": "string",
+        "description": "Brand name or keyword to monitor"
+      },
+      "platforms": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["twitter", "instagram", "facebook"]
+        },
+        "description": "Platforms to monitor"
+      },
+      "since_date": {
+        "type": "string",
+        "description": "ISO 8601 timestamp to fetch mentions since (default: last 24 hours)"
+      }
+    },
+    "required": ["keyword", "platforms"]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "id": "get_task_run_stats",
+  "name": "Get Task Run Stats",
+  "description": "Calculate aggregate statistics for all runs of a task. Returns total runs, success rate, average duration, and total cost.",
+  "category": "task",
+  "function_name": "get_task_run_stats",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "agent_name",
+      "task_id"
+    ],
+    "properties": {
+      "agent_name": {
+        "type": "string",
+        "description": "Name of the agent that executes the task"
+      },
+      "task_id": {
+        "type": "string",
+        "description": "ID of the task to get statistics for"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Get statistics for lesson plan generation task",
+      "parameters": {
+        "agent_name": "tutor",
+        "task_id": "generate_lesson_plan"
+      },
+      "expected_result": "Returns stats: { total_runs: 50, successful_runs: 48, failed_runs: 2, success_rate: 96, avg_duration_ms: 15000, total_cost: 2.50 }"
+    }
+  ],
+  "tags": [
+    "task",
+    "execution",
+    "tracking",
+    "analytics",
+    "stats"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

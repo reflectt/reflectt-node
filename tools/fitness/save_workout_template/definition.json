@@ -1,0 +1,28 @@
+{
+  "function_name": "save_workout_template",
+  "description": "Save a completed workout as a reusable template for future workouts",
+  "category": "fitness",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "workout_id": {
+        "type": "string",
+        "description": "ID of the completed workout to save as template"
+      },
+      "template_name": {
+        "type": "string",
+        "description": "Name for the template (optional, uses workout name if not provided)"
+      },
+      "mark_as_favorite": {
+        "type": "boolean",
+        "description": "If true, mark this template as a favorite"
+      },
+      "tags": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Additional tags for the template"
+      }
+    },
+    "required": ["workout_id"]
+  }
+}

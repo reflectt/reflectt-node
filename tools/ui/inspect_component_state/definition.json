@@ -1,0 +1,41 @@
+{
+  "id": "inspect_component_state",
+  "name": "Inspect Component State",
+  "category": "ui",
+  "description": "Inspect the current state of rendered components. Use this to understand what the user is seeing and make context-aware decisions.\n\nYou can:\n- Get state of a specific component by ID\n- Query all components of a certain type\n- Check component props, selections, filters, and data\n- See which components are currently rendered\n\nThis is CRITICAL for making intelligent decisions based on current UI state.\n\n** EXAMPLES **\n\n1. Get all components:\n{\n  \"includeProps\": true,\n  \"includeSelection\": true\n}\n\n2. Get specific component:\n{\n  \"componentId\": \"table-1\",\n  \"includeProps\": true,\n  \"includeData\": false\n}\n\n3. Get all tables:\n{\n  \"componentType\": \"query_results_table\",\n  \"includeSelection\": true,\n  \"includeFilters\": true\n}",
+  "function_name": "inspect_component_state",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "Specific component ID to inspect, or omit to get all components"
+      },
+      "componentType": {
+        "type": "string",
+        "description": "Filter by component type (e.g., 'query_results_table', 'cost-dashboard')"
+      },
+      "includeProps": {
+        "type": "boolean",
+        "description": "Include current component props",
+        "default": true
+      },
+      "includeSelection": {
+        "type": "boolean",
+        "description": "Include selection state (selected rows, cells, etc.)",
+        "default": true
+      },
+      "includeFilters": {
+        "type": "boolean",
+        "description": "Include active filters",
+        "default": true
+      },
+      "includeData": {
+        "type": "boolean",
+        "description": "Include component data (can be large)",
+        "default": false
+      }
+    }
+  }
+}

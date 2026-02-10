@@ -1,0 +1,37 @@
+{
+  "id": "search_music",
+  "name": "Search Music",
+  "category": "music",
+  "description": "Search Spotify for tracks, albums, artists, and playlists. Use this to discover music, find specific songs, or explore artists.\n\nYou can:\n- Search for specific tracks, albums, or artists\n- Filter results by type (track, album, artist, playlist)\n- Get detailed information including preview URLs and Spotify links\n- Set result limits (up to 50 results)\n\nRequires Spotify API credentials via OAuth.\n\n** WHEN TO USE **\n- User asks to \"search for [song/artist/album]\"\n- User wants to find music by a specific artist\n- User wants to explore albums or playlists\n- User wants to discover songs\n\n** WHEN NOT TO USE **\n- User wants playback control (use play_track)\n- User wants recommendations (use get_music_recommendations)\n- User wants their listening history (use track_listening_history)\n\n** EXAMPLES **\n\n1. Search for a track:\n{\n  \"query\": \"Blinding Lights\",\n  \"type\": \"track\",\n  \"limit\": 10\n}\n\n2. Search for an artist:\n{\n  \"query\": \"The Weeknd\",\n  \"type\": \"artist\",\n  \"limit\": 5\n}\n\n3. Search for an album:\n{\n  \"query\": \"After Hours\",\n  \"type\": \"album\",\n  \"limit\": 10\n}",
+  "function_name": "search_music",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query (song name, artist name, album title, etc.)"
+      },
+      "type": {
+        "type": "string",
+        "enum": ["track", "album", "artist", "playlist"],
+        "description": "Type of content to search for (default: track)",
+        "default": "track"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of results to return (1-50, default: 20)",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 20
+      },
+      "offset": {
+        "type": "number",
+        "description": "Index offset for pagination (default: 0)",
+        "minimum": 0,
+        "default": 0
+      }
+    }
+  }
+}

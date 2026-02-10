@@ -1,0 +1,80 @@
+{
+  "id": "extract_document_tables",
+  "name": "Extract Document Tables",
+  "description": "Extract structured table data from PDFs, Word, and Excel documents. Auto-detects tables, identifies headers, and outputs in JSON, CSV, or Markdown format. Perfect for invoice processing and data extraction.",
+  "category": "document",
+  "function_name": "extract_document_tables",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "document_source"
+    ],
+    "properties": {
+      "document_source": {
+        "type": "string",
+        "description": "File path to document"
+      },
+      "document_type": {
+        "type": "string",
+        "enum": [
+          "pdf",
+          "word",
+          "excel"
+        ],
+        "description": "Optional: Document type (auto-detected if not provided)"
+      },
+      "table_options": {
+        "type": "object",
+        "description": "Table extraction options",
+        "properties": {
+          "page_range": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "Extract tables from specific pages [start, end]"
+          },
+          "detect_headers": {
+            "type": "boolean",
+            "default": true,
+            "description": "Attempt to identify table headers"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "csv",
+              "markdown"
+            ],
+            "default": "json",
+            "description": "Format for table data"
+          },
+          "min_rows": {
+            "type": "number",
+            "default": 2,
+            "description": "Minimum rows to consider as table"
+          },
+          "min_cols": {
+            "type": "number",
+            "default": 2,
+            "description": "Minimum columns to consider as table"
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "document",
+    "table",
+    "extract",
+    "data",
+    "parse",
+    "structured"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

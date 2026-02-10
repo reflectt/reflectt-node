@@ -1,0 +1,86 @@
+{
+  "function_name": "create_order",
+  "description": "Create a new order in the system. Accepts line items (product_id and quantity), customer information, and shipping address. Auto-generates order number and updates inventory. Returns order ID and order number",
+  "category": "ecommerce",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "description": "Array of line items to include in the order",
+        "items": {
+          "type": "object",
+          "properties": {
+            "product_id": {
+              "type": "string",
+              "description": "UUID of the product to order"
+            },
+            "quantity": {
+              "type": "integer",
+              "description": "Quantity to order",
+              "minimum": 1
+            }
+          },
+          "required": ["product_id", "quantity"]
+        }
+      },
+      "customer_name": {
+        "type": "string",
+        "description": "Full name of customer"
+      },
+      "customer_email": {
+        "type": "string",
+        "description": "Email address of customer"
+      },
+      "shipping_address": {
+        "type": "object",
+        "description": "Shipping address details",
+        "properties": {
+          "street": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "postal_code": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string"
+          }
+        }
+      },
+      "billing_address": {
+        "type": "object",
+        "description": "Billing address details (optional, defaults to shipping address)"
+      },
+      "tax_amount": {
+        "type": "number",
+        "description": "Tax amount (defaults to 0)"
+      },
+      "shipping_amount": {
+        "type": "number",
+        "description": "Shipping cost (defaults to 0)"
+      },
+      "discount_amount": {
+        "type": "number",
+        "description": "Discount amount (defaults to 0)"
+      },
+      "notes": {
+        "type": "string",
+        "description": "Internal notes for the order"
+      },
+      "sync_to_shopify": {
+        "type": "boolean",
+        "description": "If true, attempt to sync this order to Shopify"
+      }
+    },
+    "required": ["items", "customer_name", "customer_email", "shipping_address"]
+  }
+}

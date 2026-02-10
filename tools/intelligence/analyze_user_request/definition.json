@@ -1,0 +1,65 @@
+{
+  "id": "analyze_user_request",
+  "name": "Analyze User Request",
+  "description": "Comprehensive user request analysis middleware. Analyzes intent, loads user context, matches patterns, and provides routing recommendations. Returns a unified context package for intelligent request handling.",
+  "category": "intelligence",
+  "function_name": "analyze_user_request",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "user_id",
+      "message"
+    ],
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Unique identifier for the user",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "message": {
+        "type": "string",
+        "description": "The user's message/request to analyze"
+      },
+      "conversation_context": {
+        "type": "array",
+        "description": "Optional: Recent conversation history for context",
+        "items": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "use_cache": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to use cached analysis for identical messages (default: true)"
+      },
+      "include_recommendations": {
+        "type": "boolean",
+        "default": true,
+        "description": "Include agent routing recommendations (default: true)"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "intelligence",
+    "intent",
+    "routing",
+    "middleware",
+    "analysis"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,138 @@
+{
+  "name": "render_3d_scene",
+  "description": "Render an interactive 3D scene with Three.js. Perfect for data visualization, spatial planning, product demos, and immersive experiences. Objects can be animated (rotate, bounce, pulse, orbit) and users can interact with them by clicking and orbiting the camera.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Title or description of the 3D scene"
+      },
+      "objects": {
+        "type": "array",
+        "description": "Array of 3D objects to render in the scene",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique identifier for this object"
+            },
+            "type": {
+              "type": "string",
+              "enum": ["box", "sphere", "cylinder", "cone", "torus", "text"],
+              "description": "Type of 3D geometry to render"
+            },
+            "position": {
+              "type": "array",
+              "description": "3D position as [x, y, z] coordinates",
+              "items": { "type": "number" },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "rotation": {
+              "type": "array",
+              "description": "Optional rotation in radians as [x, y, z]",
+              "items": { "type": "number" },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "scale": {
+              "oneOf": [
+                { "type": "number" },
+                {
+                  "type": "array",
+                  "items": { "type": "number" },
+                  "minItems": 3,
+                  "maxItems": 3
+                }
+              ],
+              "description": "Scale factor (uniform number or [x,y,z] array)"
+            },
+            "color": {
+              "type": "string",
+              "description": "Color in hex format (e.g., '#3b82f6')"
+            },
+            "wireframe": {
+              "type": "boolean",
+              "description": "Render as wireframe instead of solid"
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Transparency level (0=invisible, 1=opaque)"
+            },
+            "text": {
+              "type": "string",
+              "description": "Text to display (only for type='text')"
+            },
+            "animate": {
+              "type": "object",
+              "description": "Animation configuration",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["rotate", "bounce", "pulse", "orbit"],
+                  "description": "Type of animation"
+                },
+                "speed": {
+                  "type": "number",
+                  "description": "Animation speed multiplier (default: 1)"
+                },
+                "axis": {
+                  "type": "string",
+                  "enum": ["x", "y", "z"],
+                  "description": "Axis for rotation animation"
+                }
+              },
+              "required": ["type"]
+            },
+            "metadata": {
+              "type": "object",
+              "description": "Custom metadata attached to this object",
+              "additionalProperties": true
+            }
+          },
+          "required": ["id", "type", "position"]
+        }
+      },
+      "camera": {
+        "type": "object",
+        "description": "Camera configuration",
+        "properties": {
+          "position": {
+            "type": "array",
+            "description": "Camera position as [x, y, z]",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "fov": {
+            "type": "number",
+            "description": "Field of view in degrees (default: 50)"
+          }
+        }
+      },
+      "environment": {
+        "type": "string",
+        "enum": ["sunset", "dawn", "night", "warehouse", "forest", "studio"],
+        "description": "Environment lighting preset (default: 'studio')"
+      },
+      "grid": {
+        "type": "boolean",
+        "description": "Show floor grid (default: true)"
+      },
+      "backgroundColor": {
+        "type": "string",
+        "description": "Background color in hex format (default: '#0a0a0a')"
+      },
+      "slot": {
+        "type": "string",
+        "enum": ["primary", "secondary", "sidebar", "overlay", "inline"],
+        "description": "UI slot to render the scene in (default: 'primary')"
+      }
+    },
+    "required": ["objects"]
+  }
+}

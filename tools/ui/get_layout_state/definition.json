@@ -1,0 +1,13 @@
+{
+  "id": "get_layout_state",
+  "name": "Get Layout State",
+  "category": "ui",
+  "description": "Get current layout state (intent, slots, components). Use this before making layout changes to understand current state.",
+  "function_name": "get_layout_state",
+  "version": "1.0.0",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  }
+}

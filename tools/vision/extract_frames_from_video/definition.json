@@ -1,0 +1,109 @@
+{
+  "id": "extract_frames_from_video",
+  "name": "Extract Frames from Video",
+  "description": "Extract individual frames from a video file at specified intervals or timestamps. Saves frames as image files that can be analyzed separately. Useful for creating thumbnails, analyzing specific moments, or preparing frames for further image analysis.",
+  "category": "vision",
+  "function_name": "extract_frames_from_video",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "video_source"
+    ],
+    "properties": {
+      "video_source": {
+        "type": "string",
+        "description": "Path to the video file"
+      },
+      "extraction_method": {
+        "type": "string",
+        "enum": ["interval", "count", "timestamps"],
+        "default": "count",
+        "description": "Method for extracting frames: 'interval' (every N seconds), 'count' (total number of frames), or 'timestamps' (specific times)"
+      },
+      "interval_seconds": {
+        "type": "number",
+        "description": "Extract one frame every N seconds (used with extraction_method='interval')"
+      },
+      "frame_count": {
+        "type": "number",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 100,
+        "description": "Total number of frames to extract, evenly distributed (used with extraction_method='count')"
+      },
+      "timestamps": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Specific timestamps in seconds to extract frames from (used with extraction_method='timestamps')"
+      },
+      "output_directory": {
+        "type": "string",
+        "description": "Directory to save extracted frames. Defaults to 'extracted_frames' in data directory."
+      },
+      "output_format": {
+        "type": "string",
+        "enum": ["jpg", "png"],
+        "default": "jpg",
+        "description": "Image format for extracted frames"
+      },
+      "quality": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 90,
+        "description": "Quality of extracted frames (1-100, higher is better)"
+      },
+      "include_base64": {
+        "type": "boolean",
+        "default": false,
+        "description": "Whether to include base64-encoded image data in the response (for immediate analysis)"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Extract 10 evenly distributed frames",
+      "parameters": {
+        "video_source": "/path/to/video.mp4",
+        "extraction_method": "count",
+        "frame_count": 10,
+        "output_format": "jpg"
+      },
+      "expected_result": "Extracts 10 frames evenly distributed throughout the video"
+    },
+    {
+      "scenario": "Extract one frame every 5 seconds",
+      "parameters": {
+        "video_source": "/path/to/video.mp4",
+        "extraction_method": "interval",
+        "interval_seconds": 5,
+        "output_format": "png"
+      },
+      "expected_result": "Extracts frames at 5-second intervals"
+    },
+    {
+      "scenario": "Extract frames at specific timestamps",
+      "parameters": {
+        "video_source": "/path/to/video.mp4",
+        "extraction_method": "timestamps",
+        "timestamps": [10, 30, 60, 120],
+        "output_directory": "/custom/output",
+        "include_base64": true
+      },
+      "expected_result": "Extracts frames at 10s, 30s, 60s, and 120s with base64 data"
+    }
+  ],
+  "tags": [
+    "vision",
+    "video",
+    "frames",
+    "extraction",
+    "thumbnail",
+    "ffmpeg"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "context_requirements": []
+}

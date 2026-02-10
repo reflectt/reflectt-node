@@ -1,0 +1,83 @@
+{
+  "id": "create_task_run",
+  "name": "Create Task Run",
+  "description": "Create a new task run instance for tracking task execution. Returns run ID and path for subsequent operations.",
+  "category": "task",
+  "function_name": "create_task_run",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "agent_name",
+      "task_id",
+      "task_title"
+    ],
+    "properties": {
+      "agent_name": {
+        "type": "string",
+        "description": "Name of the agent executing the task"
+      },
+      "task_id": {
+        "type": "string",
+        "description": "ID of the task being executed"
+      },
+      "task_title": {
+        "type": "string",
+        "description": "Title of the task"
+      },
+      "description": {
+        "type": "string",
+        "description": "Optional description of what this task run will do"
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Optional inline prompt for the task"
+      },
+      "prompt_file": {
+        "type": "string",
+        "description": "Optional path to prompt file"
+      },
+      "context": {
+        "type": "object",
+        "description": "Optional context data for the task execution"
+      },
+      "steps": {
+        "type": "array",
+        "description": "Optional array of steps to track",
+        "items": {
+          "type": "object",
+          "properties": {
+            "step_number": {
+              "type": "number"
+            },
+            "description": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Create a new task run for documentation generation",
+      "parameters": {
+        "agent_name": "doc_generator",
+        "task_id": "generate_api_docs",
+        "task_title": "Generate API Documentation",
+        "description": "Generate comprehensive API documentation from code"
+      },
+      "expected_result": "Returns run_id and run_path for tracking execution"
+    }
+  ],
+  "tags": [
+    "task",
+    "execution",
+    "tracking",
+    "create"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "context_requirements": [
+    "dataDir"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "function_name": "get_order_details",
+  "description": "Retrieve complete order details including items, customer information, and payment status. Accepts order_id or order_number to look up order",
+  "category": "ecommerce",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "order_id": {
+        "type": "string",
+        "description": "UUID of the order to retrieve (required if order_number not provided)"
+      },
+      "order_number": {
+        "type": "string",
+        "description": "Order number to retrieve (required if order_id not provided)"
+      },
+      "include_product_details": {
+        "type": "boolean",
+        "description": "If true, include full product details for each line item"
+      }
+    },
+    "required": []
+  }
+}

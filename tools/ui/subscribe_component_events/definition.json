@@ -1,0 +1,41 @@
+{
+  "id": "subscribe_component_events",
+  "name": "Subscribe Component Events",
+  "category": "ui",
+  "description": "Subscribe to real-time component events. This enables reactive AI that responds to user interactions automatically.\n\nYou can subscribe to:\n- selection_change: When user selects rows, cells, items\n- filter_change: When user applies filters\n- data_update: When component data changes\n- action_triggered: When user clicks actions\n- suggest_component: When components suggest related components\n- custom: Custom events from components\n\nUse this to build reactive experiences that feel magical to users.\n\nIMPORTANT: Subscriptions persist across messages. Use sparingly for critical events only.\n\n** EXAMPLES **\n\n1. Subscribe to table selection changes:\n{\n  \"events\": [\"selection_change\"],\n  \"componentId\": \"table-1\"\n}\n\n2. Subscribe to all filter changes:\n{\n  \"events\": [\"filter_change\", \"data_update\"]\n}\n\n3. Auto-respond to selection changes:\n{\n  \"events\": [\"selection_change\"],\n  \"componentId\": \"table-1\",\n  \"autoRespond\": {\n    \"selection_change\": {\n      \"action\": \"Show details of selected rows in sidebar\"\n    }\n  }\n}",
+  "function_name": "subscribe_component_events",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "events": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": ["selection_change", "filter_change", "data_update", "action_triggered", "suggest_component", "custom"]
+        },
+        "description": "Event types to subscribe to",
+        "minItems": 1
+      },
+      "componentId": {
+        "type": "string",
+        "description": "Subscribe to events from specific component, or omit for all components"
+      },
+      "autoRespond": {
+        "type": "object",
+        "description": "Optional automatic responses to events",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "description": "What to do when this event occurs"
+            }
+          },
+          "required": ["action"]
+        }
+      }
+    },
+    "required": ["events"]
+  }
+}

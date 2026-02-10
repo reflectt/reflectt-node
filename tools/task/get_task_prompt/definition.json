@@ -1,0 +1,67 @@
+{
+  "id": "get_task_prompt",
+  "name": "Get Task Prompt",
+  "description": "Get the prompt.md file for a task from global or space agents",
+  "category": "task",
+  "function_name": "get_task_prompt",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "task_id",
+      "agent"
+    ],
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "The ID of the task"
+      },
+      "agent": {
+        "type": "string",
+        "description": "The agent ID that owns this task"
+      },
+      "category": {
+        "type": "string",
+        "description": "Optional: The category/domain if known (speeds up lookup)"
+      },
+      "scope": {
+        "type": "string",
+        "enum": ["global", "space"],
+        "description": "Whether to look in global or space agents (default: global)"
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Required when scope is 'space'"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Get prompt from global agent",
+      "parameters": {
+        "task_id": "lesson_plan",
+        "agent": "tutor"
+      },
+      "expected_result": "Returns the prompt.md content from global/agents/education/tutor/tasks/lesson_plan/"
+    },
+    {
+      "scenario": "Get prompt from space agent with category hint",
+      "parameters": {
+        "task_id": "generate_report",
+        "agent": "analyst",
+        "category": "finance",
+        "scope": "space",
+        "space_id": "default"
+      },
+      "expected_result": "Returns the prompt.md content from spaces/default/agents/finance/analyst/tasks/generate_report/"
+    }
+  ],
+  "tags": [
+    "task",
+    "prompt",
+    "read",
+    "agent"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

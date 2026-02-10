@@ -1,0 +1,71 @@
+{
+  "id": "optimize_team_assignments",
+  "name": "Optimize Team Assignments",
+  "category": "ui",
+  "description": "Globally optimize task assignments across an entire team or project board. Uses intelligent algorithms to balance workload, minimize completion time, or maximize quality based on chosen strategy.\n\n** WHEN TO USE **\n- When planning sprint assignments for multiple tasks\n- To rebalance team workload\n- To optimize for fastest delivery or highest quality\n- When onboarding new tasks to a board\n\n** OPTIMIZATION STRATEGIES **\n- load_balance: Distribute work evenly across team (default)\n- minimize_time: Assign to fastest performers to complete ASAP\n- maximize_quality: Assign to best-matched experts for highest quality\n\n** HOW IT WORKS **\n- Analyzes all tasks in the queue\n- Considers current team capacity and assignments\n- Applies global optimization (not greedy per-task)\n- Respects capacity limits and dependencies\n- Returns optimal assignment plan\n\n** RETURNS **\n- Optimized assignment map (task -> assignee)\n- Load distribution after optimization\n- Estimated total completion time\n- Quality predictions\n- Recommendations for improvements\n\n** EXAMPLE **\n{\n  \"boardId\": \"sprint-23\",\n  \"strategy\": \"load_balance\",\n  \"constraints\": {\n    \"respectCurrentAssignments\": true,\n    \"maxReassignments\": 5\n  }\n}\n\nReturns: Balanced assignments with Sarah: 3 tasks (45%), Mike: 2 tasks (60%), Emma: 3 tasks (40%)",
+  "function_name": "optimize_team_assignments",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "boardId": {
+        "type": "string",
+        "description": "Optional board ID to optimize"
+      },
+      "tasks": {
+        "type": "array",
+        "description": "Array of tasks to assign",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "priority": {
+              "type": "string"
+            },
+            "estimatedHours": {
+              "type": "number"
+            }
+          },
+          "required": ["id", "title"]
+        }
+      },
+      "strategy": {
+        "type": "string",
+        "enum": ["load_balance", "minimize_time", "maximize_quality"],
+        "description": "Optimization strategy",
+        "default": "load_balance"
+      },
+      "constraints": {
+        "type": "object",
+        "description": "Optimization constraints",
+        "properties": {
+          "respectCurrentAssignments": {
+            "type": "boolean",
+            "description": "Keep existing assignments when possible",
+            "default": false
+          },
+          "maxReassignments": {
+            "type": "number",
+            "description": "Maximum number of tasks to reassign",
+            "default": -1
+          }
+        }
+      }
+    },
+    "required": []
+  }
+}

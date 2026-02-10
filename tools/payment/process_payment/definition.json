@@ -1,0 +1,52 @@
+{
+  "function_name": "process_payment",
+  "description": "Process a payment using Stripe and store transaction details. Creates a payment intent, confirms payment, and records the transaction.",
+  "category": "payment",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "amount": {
+        "type": "number",
+        "description": "Payment amount in the smallest currency unit (cents for USD). Example: 2999 for $29.99"
+      },
+      "currency": {
+        "type": "string",
+        "description": "ISO 4217 currency code (e.g., 'usd', 'eur', 'gbp'). Defaults to 'usd'",
+        "default": "usd"
+      },
+      "payment_method_id": {
+        "type": "string",
+        "description": "Stripe payment method ID (e.g., 'pm_1234567890')"
+      },
+      "customer_id": {
+        "type": "string",
+        "description": "Optional Stripe customer ID. If not provided, will be created from customer details"
+      },
+      "customer_email": {
+        "type": "string",
+        "description": "Customer email address"
+      },
+      "customer_name": {
+        "type": "string",
+        "description": "Customer full name"
+      },
+      "description": {
+        "type": "string",
+        "description": "Description of the payment (e.g., 'Monthly subscription', 'Product purchase')"
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Additional metadata to store with the transaction (e.g., {order_id: '123', subscription_id: 'sub_456'})"
+      },
+      "idempotency_key": {
+        "type": "string",
+        "description": "Unique key to ensure idempotency and prevent duplicate charges"
+      },
+      "return_url": {
+        "type": "string",
+        "description": "Optional return URL for 3D Secure and other payment confirmations"
+      }
+    },
+    "required": ["amount", "currency", "payment_method_id", "customer_email"]
+  }
+}

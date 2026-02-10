@@ -1,0 +1,31 @@
+{
+  "function_name": "track_water",
+  "description": "Track daily water intake and compare to hydration goals, helping maintain proper hydration levels",
+  "category": "wellness",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "amount_ml": {
+        "type": "number",
+        "description": "Amount of water consumed in milliliters"
+      },
+      "date": {
+        "type": "string",
+        "description": "Date of water intake (YYYY-MM-DD, defaults to today)"
+      },
+      "daily_goal_ml": {
+        "type": "number",
+        "description": "Daily water intake goal in ml (default: 2000ml)"
+      },
+      "reset_daily_total": {
+        "type": "boolean",
+        "description": "If true, reset and start new daily total"
+      },
+      "get_summary": {
+        "type": "boolean",
+        "description": "If true, return daily summary instead of logging"
+      }
+    },
+    "required": []
+  }
+}

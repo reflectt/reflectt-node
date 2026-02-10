@@ -1,0 +1,50 @@
+{
+  "id": "list_notifications",
+  "name": "List Notifications",
+  "description": "Retrieve notifications for a user from global and/or space-scoped stores, optionally filtering by status.",
+  "category": "notifications",
+  "function_name": "list_notifications",
+  "parameters": {
+    "type": "object",
+    "required": ["user_id"],
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Target user identifier whose notifications should be listed."
+      },
+      "scope": {
+        "type": "string",
+        "description": "Which stores to include (global, space, or all). Defaults to all.",
+        "enum": ["global", "space", "all"],
+        "default": "all"
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Optional space identifier when listing space-specific notifications outside the current space."
+      },
+      "status": {
+        "type": "string",
+        "description": "Filter by notification status (unread, read, or all). Defaults to unread only when specified.",
+        "enum": ["unread", "read", "all"],
+        "default": "all"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of notifications to return (most recent first).",
+        "minimum": 1,
+        "maximum": 200,
+        "default": 50
+      },
+      "include_meta": {
+        "type": "boolean",
+        "description": "When true, returns additional summary metadata (unread counts, scopes).",
+        "default": true
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["notifications", "ui", "alerts"],
+  "version": "1.0.0",
+  "dependencies": []
+}

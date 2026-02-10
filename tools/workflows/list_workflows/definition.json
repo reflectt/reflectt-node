@@ -1,0 +1,29 @@
+{
+  "id": "list_workflows",
+  "name": "List Workflows",
+  "description": "List all available workflows with optional filters",
+  "category": "workflows",
+  "use_tool_context": true,
+  "function_name": "list_workflows",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space"
+      },
+      "filter_tags": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Filter by tags"
+      },
+      "include_steps": {
+        "type": "boolean",
+        "description": "Include step details"
+      }
+    }
+  },
+  "tags": ["workflow", "list"],
+  "version": "1.0.0",
+  "dependencies": []
+}

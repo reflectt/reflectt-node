@@ -1,0 +1,29 @@
+{
+  "id": "get_table_schema",
+  "name": "Get Table Schema",
+  "description": "Get the schema.json for a table. Returns the auto-generated or manually defined schema that describes the table structure and field types.",
+  "category": "data",
+  "function_name": "get_table_schema",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'worlds', 'users')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Get schema from a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    },
+    "required": [
+      "table"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,123 @@
+{
+  "id": "upsert_agent",
+  "name": "Upsert Agent",
+  "description": "Create or update an agent with validated schema. All required fields enforced. Use this to define new agents or modify existing ones.",
+  "category": "agent",
+  "function_name": "upsert_agent",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "id",
+      "slug",
+      "name",
+      "domain",
+      "provider",
+      "model",
+      "prompt_file"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z_]+$",
+        "description": "Agent ID (lowercase, underscores only)"
+      },
+      "slug": {
+        "type": "string",
+        "pattern": "^[a-z]+:[a-z_]+$",
+        "description": "Agent slug in format domain:agent_name (e.g., \"finance:finance_tracker\")"
+      },
+      "name": {
+        "type": "string",
+        "description": "Human-readable agent name"
+      },
+      "domain": {
+        "type": "string",
+        "description": "Domain this agent belongs to (e.g., \"finance\", \"inventory\")"
+      },
+      "provider": {
+        "type": "string",
+        "enum": [
+          "claude_agents"
+        ],
+        "description": "AI provider (always \"claude_agents\")"
+      },
+      "model": {
+        "type": "string",
+        "enum": [
+          "claude-haiku-4-5",
+          "claude-haiku-4-5",
+          "claude-opus-4-20250514"
+        ],
+        "description": "AI model to use"
+      },
+      "prompt_file": {
+        "type": "string",
+        "description": "Path to prompt markdown file"
+      },
+      "role": {
+        "type": "string",
+        "description": "Agent role/purpose"
+      },
+      "description": {
+        "type": "string",
+        "description": "Detailed description of what the agent does"
+      },
+      "capabilities": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of capabilities this agent has"
+      },
+      "temperature": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.3,
+        "description": "Temperature for AI responses"
+      },
+      "maxOutputTokens": {
+        "type": "number",
+        "minimum": 1024,
+        "maximum": 8192,
+        "default": 4096,
+        "description": "Maximum output tokens"
+      },
+      "scope": {
+        "type": "string",
+        "enum": ["space", "global"],
+        "default": "space",
+        "description": "Where to create the agent: 'space' (current space) or 'global' (shared across all spaces)"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Write to a specific named space (e.g., 'creative', 'education'). Overrides scope parameter."
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Create a new finance tracking agent",
+      "parameters": {
+        "id": "finance_tracker",
+        "slug": "finance:finance_tracker",
+        "name": "Finance Tracker",
+        "domain": "finance",
+        "provider": "claude_agents",
+        "model": "claude-haiku-4-5",
+        "prompt_file": "data/prompts/finance/tracker.md"
+      },
+      "expected_result": "Agent is created or updated with validated configuration"
+    }
+  ],
+  "tags": [
+    "agent",
+    "create",
+    "update",
+    "configuration",
+    "schema"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

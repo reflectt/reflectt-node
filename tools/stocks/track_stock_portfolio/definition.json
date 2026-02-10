@@ -1,0 +1,18 @@
+{
+  "id": "track_stock_portfolio",
+  "name": "Track Stock Portfolio",
+  "category": "stocks",
+  "description": "Track and update a stock portfolio with current prices and performance metrics.\n\nReturns:\n- Updated holdings with current prices\n- Gain/loss for each holding\n- Total portfolio value\n- Overall portfolio performance (gain/loss percentage)\n- Weighted allocation by symbol\n\nAutomatically fetches latest prices for all holdings and calculates metrics.\n\n** EXAMPLES **\n\n1. Track stock portfolio:\n{\n  \"portfolio_id\": \"my-portfolio-1\"\n}\n\n2. Track another user's portfolio:\n{\n  \"portfolio_id\": \"user-portfolio-2\"\n}",
+  "function_name": "track_stock_portfolio",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["portfolio_id"],
+    "properties": {
+      "portfolio_id": {
+        "type": "string",
+        "description": "Portfolio identifier"
+      }
+    }
+  }
+}

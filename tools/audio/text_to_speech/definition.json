@@ -1,0 +1,120 @@
+{
+  "id": "text_to_speech",
+  "name": "Text To Speech",
+  "description": "Generate natural-sounding speech from text using ElevenLabs API. Supports multiple voices including singing voice, voice settings, and high-quality audio output. Perfect for creating podcasts, audiobooks, voiceovers, songs, and audio content. For singing: set ELEVENLABS_SINGING_VOICE_ID env var to a voice ID that can sing, or it will use a default expressive voice with high style settings.",
+  "category": "audio",
+  "function_name": "text_to_speech",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Text to convert to speech or lyrics to sing (max 5000 characters per request)"
+      },
+      "voice_preset": {
+        "type": "string",
+        "enum": [
+          "default",
+          "singing",
+          "narrative",
+          "conversational",
+          "dramatic",
+          "calm",
+          "energetic"
+        ],
+        "default": "default",
+        "description": "Voice preset optimized for different use cases. 'singing' uses a voice and settings optimized for musical performance. 'narrative' for audiobooks. 'conversational' for natural dialogue. 'dramatic' for storytelling. 'calm' for meditation/relaxation. 'energetic' for announcements/ads."
+      },
+      "voice_id": {
+        "type": "string",
+        "description": "Voice ID to use (optional, overrides voice_preset selection). Use list_voices to see available voices."
+      },
+      "voice_settings": {
+        "type": "object",
+        "description": "Voice customization settings (optional, overrides preset defaults)",
+        "properties": {
+          "stability": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Voice stability (0-1). Higher = more consistent, lower = more expressive. Singing uses lower stability."
+          },
+          "similarity_boost": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Similarity to original voice (0-1)"
+          },
+          "style": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Style exaggeration (0-1). Higher values add more character."
+          },
+          "use_speaker_boost": {
+            "type": "boolean",
+            "description": "Boost speaker clarity"
+          }
+        }
+      },
+      "model_id": {
+        "type": "string",
+        "enum": [
+          "eleven_monolingual_v1",
+          "eleven_multilingual_v2",
+          "eleven_turbo_v2",
+          "eleven_turbo_v2_5"
+        ],
+        "default": "eleven_multilingual_v2",
+        "description": "Model to use for generation. Turbo models are faster but may have less quality."
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "mp3_44100_128",
+          "mp3_44100_192",
+          "pcm_16000",
+          "pcm_22050",
+          "pcm_24000"
+        ],
+        "default": "mp3_44100_128",
+        "description": "Audio output format"
+      },
+      "output_path": {
+        "type": "string",
+        "description": "Custom output path. If not specified, saves to storage/audio/generated/"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "description": "Generate a song with singing voice",
+      "input": {
+        "text": "Oh the sun shines bright, on this beautiful day, I'm feeling alive in every way",
+        "voice_preset": "singing"
+      }
+    },
+    {
+      "description": "Create a calm narration",
+      "input": {
+        "text": "Welcome to this peaceful meditation session. Take a deep breath and relax.",
+        "voice_preset": "calm"
+      }
+    }
+  ],
+  "tags": [
+    "audio",
+    "text-to-speech",
+    "tts",
+    "voice",
+    "elevenlabs",
+    "singing",
+    "music"
+  ],
+  "version": "2.0.0",
+  "dependencies": []
+}

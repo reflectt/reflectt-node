@@ -1,0 +1,30 @@
+{
+  "function_name": "sync_products",
+  "description": "Synchronize products from Shopify to database. Fetches products from Shopify API, stores them in the products table, and returns count of synced products with status summary",
+  "category": "ecommerce",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "category": {
+        "type": "string",
+        "description": "Filter products by category (optional). If provided, only syncs products matching this category"
+      },
+      "status": {
+        "type": "string",
+        "enum": ["active", "archived", "draft"],
+        "description": "Filter products by status (optional). Default is 'active'"
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of products to sync. Defaults to 50, max 250",
+        "minimum": 1,
+        "maximum": 250
+      },
+      "force_refresh": {
+        "type": "boolean",
+        "description": "If true, bypass cache and force refresh from Shopify"
+      }
+    },
+    "required": []
+  }
+}

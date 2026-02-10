@@ -1,0 +1,80 @@
+{
+  "name": "bulk_patch_components",
+  "description": "Update multiple components at once with different prop changes. Dramatically reduces tool calls needed for complex operations. Each patch can use different modes (merge, replace, array operations).",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "patches": {
+        "type": "array",
+        "description": "Array of patch operations to apply",
+        "items": {
+          "type": "object",
+          "properties": {
+            "componentId": {
+              "type": "string",
+              "description": "Module ID of component to patch"
+            },
+            "propsPatch": {
+              "type": "object",
+              "description": "Props to patch on this component"
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["merge", "replace", "array_add", "array_remove", "array_update"],
+              "description": "Patch mode (default: merge)"
+            },
+            "path": {
+              "type": "string",
+              "description": "For array operations: dot notation path to array"
+            },
+            "items": {
+              "type": "array",
+              "description": "For array_add: items to add"
+            },
+            "position": {
+              "type": "string",
+              "enum": ["start", "end"],
+              "description": "For array_add: where to insert items"
+            },
+            "itemIds": {
+              "type": "array",
+              "description": "For array_remove: IDs of items to remove",
+              "items": {
+                "type": "string"
+              }
+            },
+            "updates": {
+              "type": "array",
+              "description": "For array_update: items to update",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "changes": {
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            "idField": {
+              "type": "string",
+              "description": "For array operations: field to use as ID (default: 'id')"
+            }
+          },
+          "required": ["componentId"]
+        }
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Animate all patches (default: false for better performance)"
+      },
+      "stopOnError": {
+        "type": "boolean",
+        "description": "Stop processing if any patch fails (default: false - continues on errors)"
+      }
+    },
+    "required": ["patches"]
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "id": "learn_pattern",
+  "name": "learn_pattern",
+  "description": "Extract and save a learned pattern about user behavior. Enables 'When user says X, do Y' intelligence.",
+  "category": "memory",
+  "function_name": "learn_pattern",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Unique identifier for the user",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "pattern": {
+        "type": "object",
+        "description": "Pattern to learn",
+        "properties": {
+          "trigger": {
+            "type": "string",
+            "description": "What triggers this pattern (user phrase, context, etc.)"
+          },
+          "action": {
+            "type": "string",
+            "description": "What to do when triggered"
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Confidence level (0-1)",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "context": {
+            "type": "object",
+            "description": "Additional context for when pattern applies"
+          },
+          "examples": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Example interactions that led to this pattern"
+          }
+        },
+        "required": [
+          "trigger",
+          "action",
+          "confidence"
+        ]
+      }
+    },
+    "required": [
+      "user_id",
+      "pattern"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "memory",
+    "learning",
+    "patterns",
+    "intelligence"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,43 @@
+{
+  "id": "process_job_queue",
+  "name": "Process Job Queue",
+  "description": "Process pending jobs from job_executions table. Finds all jobs with status='pending', executes them (workflows, tasks, etc.), and updates their status. This is the worker that makes autonomous loops actually run by processing scheduled jobs and event-triggered workflows.",
+  "category": "workflows",
+  "function_name": "process_job_queue",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "space_id": {
+        "type": "string",
+        "description": "Optional space ID to process jobs from (defaults to current space)"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Optional limit on number of jobs to process in this run (default: 10)",
+        "default": 10,
+        "minimum": 1,
+        "maximum": 100
+      },
+      "job_type": {
+        "type": "string",
+        "description": "Optional filter to only process specific job types (e.g., 'workflow', 'task')",
+        "enum": [
+          "workflow",
+          "task"
+        ]
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "workflows",
+    "jobs",
+    "queue",
+    "autonomous",
+    "scheduler",
+    "worker"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

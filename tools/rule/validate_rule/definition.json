@@ -1,0 +1,40 @@
+{
+  "id": "validate_rule",
+  "name": "Validate Rule",
+  "description": "Check if a rule definition is valid. Validates schema, conditions, actions, dependencies, and overall structure. Returns detailed errors and warnings.",
+  "category": "rule",
+  "function_name": "validate_rule",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "rule_id"
+    ],
+    "properties": {
+      "rule_id": {
+        "type": "string",
+        "description": "Rule to validate",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "strict": {
+        "type": "boolean",
+        "description": "Enable strict validation (checks best practices)",
+        "default": false
+      },
+      "check_dependencies": {
+        "type": "boolean",
+        "description": "Validate that all dependencies exist",
+        "default": true
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "rules",
+    "business-logic",
+    "validate",
+    "check"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

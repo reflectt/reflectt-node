@@ -1,0 +1,34 @@
+{
+  "id": "test_tool",
+  "name": "Test Tool",
+  "description": "Run tests for a tool by executing it with sample inputs and verifying outputs",
+  "category": "tools",
+  "function_name": "test_tool",
+  "parameters": {
+    "type": "object",
+    "required": ["tool_name", "test_inputs"],
+    "properties": {
+      "tool_name": {
+        "type": "string",
+        "description": "The function_name of the tool to test"
+      },
+      "test_inputs": {
+        "type": "object",
+        "description": "Sample inputs to pass to the tool"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space for space-specific tools"
+      },
+      "expected_output": {
+        "type": "object",
+        "description": "Optional expected output to validate against"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["tools", "meta", "test", "validation"],
+  "version": "1.0.0",
+  "dependencies": []
+}

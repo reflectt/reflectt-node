@@ -1,0 +1,39 @@
+{
+  "id": "compare_screenshots",
+  "name": "Compare Screenshots",
+  "category": "ui",
+  "description": "Compare two screenshots to detect visual differences (useful for regression testing). Uses pixel-by-pixel comparison to generate a diff image highlighting changes. Returns percentage of pixels that differ and a visual diff.",
+  "function_name": "compare_screenshots",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "screenshot1Id": {
+        "type": "string",
+        "description": "ID of the first screenshot (baseline). Get this from the screenshot_component tool output."
+      },
+      "screenshot2Id": {
+        "type": "string",
+        "description": "ID of the second screenshot (comparison). Get this from the screenshot_component tool output."
+      },
+      "threshold": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Difference threshold (0-1). Lower values are more strict (detect tiny changes). 0.1 is recommended for most cases.",
+        "default": 0.1
+      },
+      "ignoreAntialiasing": {
+        "type": "boolean",
+        "description": "Ignore antialiasing differences (recommended for cross-browser testing).",
+        "default": true
+      },
+      "highlightColor": {
+        "type": "string",
+        "description": "Color for highlighting differences in diff image (CSS color format).",
+        "default": "#ff00ff"
+      }
+    },
+    "required": ["screenshot1Id", "screenshot2Id"]
+  }
+}

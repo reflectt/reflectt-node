@@ -1,0 +1,44 @@
+{
+  "id": "start_task_run",
+  "name": "Start Task Run",
+  "description": "Mark a task run as started and record the agent model being used. Updates status from 'pending' to 'running'.",
+  "category": "task",
+  "function_name": "start_task_run",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "run_path"
+    ],
+    "properties": {
+      "run_path": {
+        "type": "string",
+        "description": "Path to the task run file (returned from create_task_run)"
+      },
+      "agent_model": {
+        "type": "string",
+        "description": "Optional model identifier (e.g., 'claude-haiku-4-5-20251001')"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Start a task run with Claude Sonnet",
+      "parameters": {
+        "run_path": "data/spaces/education/tasks/tutor/lesson_plan/runs/2025-10-17.json",
+        "agent_model": "claude-haiku-4-5"
+      },
+      "expected_result": "Task run marked as running with model recorded"
+    }
+  ],
+  "tags": [
+    "task",
+    "execution",
+    "tracking",
+    "start"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "context_requirements": [
+    "dataDir"
+  ]
+}

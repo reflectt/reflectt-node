@@ -1,0 +1,46 @@
+{
+  "id": "install_packages",
+  "name": "Install Packages",
+  "description": "Install npm packages using npm install. Supports both production and dev dependencies. Automatically updates package.json and verifies installation success.",
+  "category": "tools",
+  "function_name": "install_packages",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "packages": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of package names to install (e.g., ['express', 'lodash', '@types/node'])"
+      },
+      "dev": {
+        "type": "boolean",
+        "default": false,
+        "description": "Install as dev dependencies (--save-dev)"
+      },
+      "exact": {
+        "type": "boolean",
+        "default": false,
+        "description": "Install exact versions (--save-exact)"
+      },
+      "global": {
+        "type": "boolean",
+        "default": false,
+        "description": "Install globally (-g)"
+      }
+    },
+    "required": [
+      "packages"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "npm",
+    "package-management",
+    "installation"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

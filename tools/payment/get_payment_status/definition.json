@@ -1,0 +1,26 @@
+{
+  "function_name": "get_payment_status",
+  "description": "Get the current status of a payment. Queries database first, then Stripe API for latest status.",
+  "category": "payment",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "payment_id": {
+        "type": "string",
+        "description": "Stripe charge ID or payment intent ID"
+      },
+      "transaction_id": {
+        "type": "string",
+        "description": "Internal transaction ID from database (used if payment_id not provided)"
+      },
+      "include_refunds": {
+        "type": "boolean",
+        "description": "Include refund details. Default: true"
+      },
+      "include_charges": {
+        "type": "boolean",
+        "description": "Include charge details. Default: true"
+      }
+    }
+  }
+}

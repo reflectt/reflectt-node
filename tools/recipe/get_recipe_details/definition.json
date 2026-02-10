@@ -1,0 +1,23 @@
+{
+  "function_name": "get_recipe_details",
+  "description": "Get complete recipe details including ingredients, instructions, nutrition information, and cooking tips",
+  "category": "recipe",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "recipe_id": {
+        "type": "string",
+        "description": "Recipe ID (Spoonacular ID or internal ID)"
+      },
+      "include_nutrition": {
+        "type": "boolean",
+        "description": "If true, include detailed nutrition information (default: true)"
+      },
+      "include_similar": {
+        "type": "boolean",
+        "description": "If true, include similar recipe recommendations"
+      }
+    },
+    "required": ["recipe_id"]
+  }
+}

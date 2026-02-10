@@ -1,0 +1,49 @@
+{
+  "id": "update_rule",
+  "name": "Update Rule",
+  "description": "Modify an existing rule. Creates a new version and preserves history. Supports semantic versioning (major.minor.patch).",
+  "category": "rule",
+  "function_name": "update_rule",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "rule_id",
+      "updates"
+    ],
+    "properties": {
+      "rule_id": {
+        "type": "string",
+        "description": "Rule to update",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "updates": {
+        "type": "object",
+        "description": "Fields to update (partial update supported)"
+      },
+      "version_bump": {
+        "type": "string",
+        "enum": [
+          "major",
+          "minor",
+          "patch"
+        ],
+        "description": "Type of version bump (default: patch)",
+        "default": "patch"
+      },
+      "change_notes": {
+        "type": "string",
+        "description": "Description of changes made"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "rules",
+    "business-logic",
+    "update",
+    "version"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

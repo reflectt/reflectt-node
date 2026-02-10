@@ -1,0 +1,40 @@
+{
+  "function_name": "track_activity",
+  "description": "Track physical activity like steps, distance, calories burned, and active minutes from fitness trackers or manual entry",
+  "category": "health",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "date": {
+        "type": "string",
+        "description": "Date to track activity for (YYYY-MM-DD format, defaults to today)"
+      },
+      "source": {
+        "type": "string",
+        "enum": ["manual", "fitbit", "apple_health", "google_fit"],
+        "description": "Source of the activity data (defaults to 'manual')"
+      },
+      "steps": {
+        "type": "number",
+        "description": "Number of steps taken"
+      },
+      "distance_km": {
+        "type": "number",
+        "description": "Distance traveled in kilometers"
+      },
+      "calories": {
+        "type": "number",
+        "description": "Calories burned"
+      },
+      "active_minutes": {
+        "type": "number",
+        "description": "Minutes of active movement"
+      },
+      "sync_from_fitbit": {
+        "type": "boolean",
+        "description": "If true, sync activity data from Fitbit instead of manual entry"
+      }
+    },
+    "required": []
+  }
+}

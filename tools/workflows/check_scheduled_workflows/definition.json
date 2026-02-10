@@ -1,0 +1,105 @@
+{
+  "id": "check_scheduled_workflows",
+  "name": "Check Scheduled Workflows",
+  "description": "Scan scheduled_jobs for due workflows, enqueue pending executions, and optionally auto-process the workflow queue. Keeps recurring schedules alive by dispatching jobs when their next_run is reached.",
+  "category": "workflows",
+  "function_name": "check_scheduled_workflows",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "space_id": {
+        "type": "string",
+        "description": "Optional space ID to scope the scheduler scan (defaults to current space)"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of schedules to dispatch in this run (default: 25)",
+        "default": 25,
+        "minimum": 1,
+        "maximum": 100
+      },
+      "now": {
+        "type": "string",
+        "description": "Optional ISO timestamp to use as the current time for deterministic testing"
+      },
+      "auto_process": {
+        "type": "boolean",
+        "description": "When true, immediately runs process_job_queue after dispatching jobs",
+        "default": false
+      },
+      "notification": {
+        "type": "object",
+        "description": "Optional notification payload to emit whenever a schedule dispatches a job.",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "Target user who should receive the notification (defaults to web_user when omitted)."
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["global", "space"],
+            "description": "Notification scope (defaults to space when a space_id is present)."
+          },
+          "space_id": {
+            "type": "string",
+            "description": "Space to associate with the notification when scope=space."
+          },
+          "title": {
+            "type": "string",
+            "description": "Override title for the notification."
+          },
+          "message": {
+            "type": "string",
+            "description": "Override message body for the notification. Defaults to a generated summary."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["info", "success", "warning", "error"],
+            "description": "Visual severity indicator (defaults to info)."
+          },
+          "category": {
+            "type": "string",
+            "description": "Logical category label (defaults to scheduler)."
+          },
+          "source": {
+            "type": "string",
+            "description": "String describing which agent/component emitted the notification."
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": { "type": "string" },
+                "action": { "type": "string" },
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "required": ["label", "action"]
+            },
+            "description": "Optional action buttons rendered alongside the notification."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Custom metadata to merge into the generated notification payload.",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "workflows",
+    "scheduler",
+    "jobs",
+    "automation"
+  ],
+  "version": "1.0.0",
+  "dependencies": [
+    "process_job_queue"
+  ]
+}

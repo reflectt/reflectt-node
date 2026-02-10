@@ -1,0 +1,37 @@
+{
+  "function_name": "update_inventory",
+  "description": "Update product inventory levels. Accepts product_id or SKU, quantity adjustment, and operation type (set/add/subtract). Returns updated stock level and low stock alerts if applicable",
+  "category": "ecommerce",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "product_id": {
+        "type": "string",
+        "description": "UUID of the product to update (required if sku not provided)"
+      },
+      "sku": {
+        "type": "string",
+        "description": "SKU of the product to update (required if product_id not provided)"
+      },
+      "quantity": {
+        "type": "integer",
+        "description": "Quantity to adjust or set",
+        "minimum": 0
+      },
+      "operation": {
+        "type": "string",
+        "enum": ["set", "add", "subtract"],
+        "description": "Operation type: 'set' to set exact quantity, 'add' to increase, 'subtract' to decrease (default: 'set')"
+      },
+      "low_stock_threshold": {
+        "type": "integer",
+        "description": "Optional: Update the low stock threshold for this product"
+      },
+      "sync_to_shopify": {
+        "type": "boolean",
+        "description": "If true, attempt to sync inventory update to Shopify"
+      }
+    },
+    "required": ["quantity", "operation"]
+  }
+}

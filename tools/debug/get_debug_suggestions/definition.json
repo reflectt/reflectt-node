@@ -1,0 +1,29 @@
+{
+  "id": "get_debug_suggestions",
+  "name": "Get Debug Suggestions",
+  "description": "Get smart debugging suggestions based on recent conversation history. Analyzes errors, performance, and cost patterns to provide actionable recommendations.",
+  "category": "debug",
+  "function_name": "get_debug_suggestions",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to analyze"
+      },
+      "days": {
+        "type": "number",
+        "description": "Number of days to analyze (default: 7)",
+        "default": 7
+      },
+      "focus": {
+        "type": "string",
+        "enum": ["errors", "performance", "cost", "all"],
+        "description": "What to focus on (default: all)",
+        "default": "all"
+      }
+    },
+    "required": ["user_id"]
+  },
+  "version": "1.0.0"
+}

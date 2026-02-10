@@ -1,0 +1,67 @@
+{
+  "id": "http_fetch",
+  "name": "http Fetch",
+  "description": "Use fetch() tool to retrieve content from a specified URL using HTTP GET or POST methods.",
+  "category": "web",
+  "function_name": "http_fetch",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "url"
+    ],
+    "properties": {
+      "url": {
+        "type": "string",
+        "format": "uri",
+        "description": "The URL to fetch"
+      },
+      "method": {
+        "type": "string",
+        "enum": ["GET", "POST"],
+        "default": "GET",
+        "description": "The HTTP method to use for the request"
+      },
+      "headers": {
+        "type": "object",
+        "additionalProperties": {"type": "string"},
+        "description": "Optional HTTP headers to include in the request"
+      },
+      "body": {
+        "type": "string",
+        "description": "Optional body content for POST requests"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Fetch content from a documentation page",
+      "parameters": {
+        "url": "https://example.com/docs/api-reference",
+        "method": "GET"
+      },
+      "expected_result": "Returns the text content of the page"
+    },
+    {
+      "scenario": "Submit data to a form endpoint",
+      "parameters": {
+        "url": "https://example.com/api/submit",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": "{\"name\":\"John Doe\",\"email\":\"john.doe@example.com\"}"
+      },
+      "expected_result": "Returns a success message"
+    }
+  ],
+  "tags": [
+    "web",
+    "fetch",
+    "scrape",
+    "content",
+    "url"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "context_requirements": []
+}

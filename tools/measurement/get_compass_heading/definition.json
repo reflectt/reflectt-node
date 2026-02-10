@@ -1,0 +1,18 @@
+{
+  "id": "get_compass_heading",
+  "name": "Get Compass Heading",
+  "category": "measurement",
+  "description": "Get device compass heading using browser Device Orientation API. Returns heading in degrees (0-360) and cardinal direction (N, NE, E, SE, S, SW, W, NW, etc.).\n\nRequirements:\n- Browser must support DeviceOrientationEvent API\n- User may need to grant permission for device sensors\n- Device must have magnetometer/compass sensor\n- HTTPS required (security constraint)\n\nReturns:\n- Heading in degrees (0 = North, 90 = East, 180 = South, 270 = West)\n- Cardinal direction (16-point compass: N, NNE, NE, ENE, E, ESE, SE, SSE, S, SSW, SW, WSW, W, WNW, NW, NNW)\n- Accuracy estimate in degrees\n- Timestamp\n\nNote: This is a client-side operation and requires browser environment. Not available in server-side execution.\n\n** EXAMPLES **\n\n1. Get current heading:\n{}\n\n2. Get heading with timeout:\n{\n  \"timeout\": 3000\n}",
+  "function_name": "get_compass_heading",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "timeout": {
+        "type": "number",
+        "description": "Timeout in milliseconds (default: 5000)",
+        "default": 5000
+      }
+    }
+  }
+}

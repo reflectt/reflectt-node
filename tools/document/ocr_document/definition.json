@@ -1,0 +1,80 @@
+{
+  "id": "ocr_document",
+  "name": "Ocr Document",
+  "description": "Perform OCR on scanned documents and images using Tesseract.js. Supports 100+ languages, confidence scoring, and searchable PDF output. Perfect for digitizing paper documents.",
+  "category": "document",
+  "function_name": "ocr_document",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "document_source",
+      "source_type"
+    ],
+    "properties": {
+      "document_source": {
+        "type": "string",
+        "description": "File path to PDF or image"
+      },
+      "source_type": {
+        "type": "string",
+        "enum": [
+          "pdf",
+          "image"
+        ],
+        "description": "Type of source document"
+      },
+      "ocr_options": {
+        "type": "object",
+        "description": "OCR options",
+        "properties": {
+          "language": {
+            "type": "string",
+            "default": "eng",
+            "description": "ISO 639-2 language code (e.g., 'eng', 'spa', 'fra')"
+          },
+          "page_range": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "Page range for PDFs [start, end]"
+          },
+          "output_format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "pdf",
+              "hocr"
+            ],
+            "default": "text",
+            "description": "Output format (text, searchable PDF, or hOCR)"
+          },
+          "deskew": {
+            "type": "boolean",
+            "default": true,
+            "description": "Auto-rotate skewed images"
+          },
+          "enhance": {
+            "type": "boolean",
+            "default": true,
+            "description": "Pre-process image for better OCR"
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "document",
+    "ocr",
+    "scan",
+    "text-recognition",
+    "tesseract",
+    "digitize"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

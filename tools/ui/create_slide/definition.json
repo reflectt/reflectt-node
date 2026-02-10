@@ -1,0 +1,109 @@
+{
+  "id": "create_slide",
+  "name": "Create Slide",
+  "category": "ui",
+  "description": "Create, update, delete, or reorder slides in the SlideDeck component. Allows AI to build presentations programmatically with full control over slide layouts, content, transitions, and ordering. Component must already be mounted.",
+  "function_name": "create_slide",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "moduleId": {
+        "type": "string",
+        "description": "ID of the SlideDeck component to control (must match existing module ID from render_manifest)",
+        "minLength": 1
+      },
+      "operation": {
+        "type": "string",
+        "enum": ["create", "update", "delete", "reorder", "duplicate"],
+        "description": "Slide operation: 'create' adds new slide, 'update' modifies existing, 'delete' removes, 'reorder' changes position, 'duplicate' copies slide",
+        "default": "create"
+      },
+      "slideIndex": {
+        "type": "number",
+        "description": "Index of slide to update/delete/insert at (0-based). For create, inserts after this index",
+        "minimum": 0
+      },
+      "slide": {
+        "type": "object",
+        "description": "Slide data for create/update operations",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Slide title"
+          },
+          "layout": {
+            "type": "string",
+            "enum": ["title", "content", "two-column", "image-text", "blank"],
+            "description": "Slide layout template",
+            "default": "content"
+          },
+          "content": {
+            "type": "object",
+            "description": "Slide content based on layout",
+            "properties": {
+              "text": {
+                "type": "string",
+                "description": "Main text content"
+              },
+              "image": {
+                "type": "string",
+                "description": "Image URL",
+                "format": "uri"
+              },
+              "bullets": {
+                "type": "array",
+                "description": "Bullet point items",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "notes": {
+                "type": "string",
+                "description": "Speaker notes"
+              },
+              "subtitle": {
+                "type": "string",
+                "description": "Subtitle text (for title layout)"
+              }
+            }
+          },
+          "background": {
+            "type": "object",
+            "description": "Slide background styling",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["color", "gradient", "image"],
+                "default": "color"
+              },
+              "value": {
+                "type": "string",
+                "description": "Color hex, gradient CSS, or image URL"
+              }
+            }
+          },
+          "transition": {
+            "type": "string",
+            "enum": ["none", "fade", "slide", "zoom", "flip", "cube"],
+            "description": "Slide transition animation",
+            "default": "fade"
+          },
+          "speakerNotes": {
+            "type": "string",
+            "description": "Speaker notes for this slide"
+          }
+        }
+      },
+      "newOrder": {
+        "type": "array",
+        "description": "New slide order for reorder operation (array of slide indices)",
+        "items": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "required": ["moduleId", "operation"]
+  }
+}

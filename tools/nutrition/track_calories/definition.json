@@ -1,0 +1,24 @@
+{
+  "function_name": "track_calories",
+  "description": "Track daily calorie intake and compare to calorie goals, showing progress and remaining calories for the day",
+  "category": "nutrition",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "date": {
+        "type": "string",
+        "description": "Date to track calories for (YYYY-MM-DD, defaults to today)"
+      },
+      "calorie_goal": {
+        "type": "number",
+        "description": "Daily calorie goal (optional, will calculate if not provided)"
+      },
+      "goal_type": {
+        "type": "string",
+        "enum": ["weight_loss", "maintenance", "muscle_gain"],
+        "description": "Type of goal for automatic calorie calculation (optional)"
+      }
+    },
+    "required": []
+  }
+}

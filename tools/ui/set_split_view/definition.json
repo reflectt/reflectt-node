@@ -1,0 +1,84 @@
+{
+  "id": "set_split_view",
+  "name": "Set Split View",
+  "category": "ui",
+  "description": "Configure a split-screen view with synchronized or independent panes for side-by-side comparisons, before/after analysis, or multi-context exploration. This is a streaming UI tool that displays two components simultaneously with adjustable ratio and optional linked scrolling. Use this for: comparing agent outputs, before/after code, dual dashboards, multi-model responses, or any scenario requiring parallel views. More focused than set_ui_layout's generic split mode.",
+  "function_name": "set_split_view",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "leftPane": {
+        "type": "object",
+        "description": "Left pane configuration",
+        "additionalProperties": false,
+        "properties": {
+          "componentId": {
+            "type": "string",
+            "description": "Component to mount in left pane (e.g., 'agent:agent-registry', 'cost:cost-dashboard')",
+            "minLength": 1
+          },
+          "props": {
+            "type": "object",
+            "description": "Props to pass to left component",
+            "additionalProperties": true
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional title for left pane header (1-50 characters)",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        },
+        "required": ["componentId"]
+      },
+      "rightPane": {
+        "type": "object",
+        "description": "Right pane configuration",
+        "additionalProperties": false,
+        "properties": {
+          "componentId": {
+            "type": "string",
+            "description": "Component to mount in right pane",
+            "minLength": 1
+          },
+          "props": {
+            "type": "object",
+            "description": "Props to pass to right component",
+            "additionalProperties": true
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional title for right pane header (1-50 characters)",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        },
+        "required": ["componentId"]
+      },
+      "ratio": {
+        "type": "number",
+        "description": "Width ratio of left pane (0.1-0.9). Default 0.5 (equal split). Example: 0.6 = 60% left, 40% right.",
+        "minimum": 0.1,
+        "maximum": 0.9,
+        "default": 0.5
+      },
+      "linkScroll": {
+        "type": "boolean",
+        "description": "Synchronize scroll position between panes (for comparing similar content). Default: false.",
+        "default": false
+      },
+      "dividerLocked": {
+        "type": "boolean",
+        "description": "Prevent user from dragging divider to adjust ratio. Default: false (user can resize).",
+        "default": false
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Enable smooth animated transition for split view setup. Default: true.",
+        "default": true
+      }
+    },
+    "required": ["leftPane", "rightPane"]
+  }
+}

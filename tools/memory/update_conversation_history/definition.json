@@ -1,0 +1,80 @@
+{
+  "id": "update_conversation_history",
+  "name": "update_conversation_history",
+  "description": "Add a new entry to the user's conversation history. Maintains context across sessions for intelligent follow-ups.",
+  "category": "memory",
+  "function_name": "update_conversation_history",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Unique identifier for the user",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "entry": {
+        "type": "object",
+        "description": "Conversation entry to add",
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "description": "ISO timestamp of the interaction"
+          },
+          "user_message": {
+            "type": "string",
+            "description": "What the user said"
+          },
+          "intent": {
+            "type": "string",
+            "description": "Recognized intent"
+          },
+          "actions_taken": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Actions performed"
+          },
+          "agents_used": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Specialist agents delegated to"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "Result of the interaction"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional context"
+          }
+        },
+        "required": [
+          "user_message",
+          "intent"
+        ]
+      },
+      "max_history": {
+        "type": "number",
+        "description": "Maximum number of history entries to keep (default: 100)",
+        "default": 100
+      }
+    },
+    "required": [
+      "user_id",
+      "entry"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "memory",
+    "conversation",
+    "history",
+    "context"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

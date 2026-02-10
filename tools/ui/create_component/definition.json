@@ -1,0 +1,63 @@
+{
+  "name": "create_component",
+  "description": "Create a new component instance and mount it to a specified slot. Alternative to render_manifest for adding single components. Automatically validates props and manages component lifecycle.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "Component type to create (e.g., 'query_results_table', 'portals:chart', 'portals:kanban-board')"
+      },
+      "slot": {
+        "type": "string",
+        "enum": ["primary", "secondary", "sidebar", "top"],
+        "description": "Which slot to mount the component in"
+      },
+      "props": {
+        "type": "object",
+        "description": "Component props - will be validated against component schema"
+      },
+      "position": {
+        "type": "string",
+        "enum": ["start", "end", "before", "after"],
+        "description": "Where to insert in slot module list (default: 'end')"
+      },
+      "beforeModuleId": {
+        "type": "string",
+        "description": "If position is 'before' or 'after', which module to reference"
+      },
+      "validate": {
+        "type": "boolean",
+        "description": "Validate props before creating (default: true)"
+      },
+      "effects": {
+        "type": "array",
+        "description": "Visual effects to apply to the component",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "intensity": {
+              "type": "number"
+            },
+            "color": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "effectPreset": {
+        "type": "string",
+        "enum": ["subtle", "cyberpunk", "aurora", "mystical", "energetic", "calm", "celebration", "focus"],
+        "description": "Preset visual effect style"
+      },
+      "label": {
+        "type": "string",
+        "description": "Optional label for the component instance"
+      }
+    },
+    "required": ["componentId", "slot", "props"]
+  }
+}

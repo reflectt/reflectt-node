@@ -1,0 +1,136 @@
+{
+  "id": "batch_update_records",
+  "name": "Batch Update Records",
+  "description": "Update multiple records with the same or different values. Supports uniform updates (same change to many records) and individual updates (different changes per record). Efficient SQL UPDATE operations with concurrency handling.",
+  "category": "data",
+  "function_name": "batch_update_records",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'products')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "updateType": {
+        "type": "string",
+        "enum": ["uniform", "individual"],
+        "description": "'uniform' applies same updates to multiple records. 'individual' applies different updates per record."
+      },
+      "uniformUpdate": {
+        "type": "object",
+        "description": "Configuration for uniform updates (used when updateType='uniform')",
+        "properties": {
+          "updates": {
+            "type": "object",
+            "description": "Fields and values to update (e.g., {status: 'active', priority: 'high'})",
+            "additionalProperties": true
+          },
+          "where": {
+            "type": "object",
+            "description": "Filter condition",
+            "properties": {
+              "column": {
+                "type": "string",
+                "description": "Column to filter on"
+              },
+              "operator": {
+                "type": "string",
+                "enum": ["eq", "in", "gt", "lt", "like", "neq"],
+                "description": "Comparison operator"
+              },
+              "value": {
+                "description": "Value to compare against"
+              }
+            },
+            "required": ["column", "operator", "value"]
+          }
+        },
+        "required": ["updates", "where"]
+      },
+      "individualUpdates": {
+        "type": "array",
+        "description": "Array of individual record updates (used when updateType='individual')",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Record ID to update"
+            },
+            "updates": {
+              "type": "object",
+              "description": "Fields and values to update for this record",
+              "additionalProperties": true
+            }
+          },
+          "required": ["id", "updates"]
+        },
+        "minItems": 1,
+        "maxItems": 1000
+      },
+      "returning": {
+        "type": "array",
+        "description": "Columns to return in updated records (e.g., ['id', 'name', 'updated_at']). Empty array returns nothing.",
+        "items": {
+          "type": "string"
+        }
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of records to update (for uniform updates). Default: 10000",
+        "default": 10000,
+        "minimum": 1,
+        "maximum": 10000
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Target specific space. Defaults to current space."
+      }
+    },
+    "required": ["table", "updateType"]
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "description": "Uniform update: Set all pending orders to processing",
+      "input": {
+        "table": "orders",
+        "updateType": "uniform",
+        "uniformUpdate": {
+          "updates": {
+            "status": "processing",
+            "processed_at": "2024-11-03T12:00:00Z"
+          },
+          "where": {
+            "column": "status",
+            "operator": "eq",
+            "value": "pending"
+          }
+        },
+        "returning": ["id", "status", "updated_at"]
+      }
+    },
+    {
+      "description": "Individual updates: Update specific products with different prices",
+      "input": {
+        "table": "products",
+        "updateType": "individual",
+        "individualUpdates": [
+          {
+            "id": "prod-1",
+            "updates": { "price": 19.99, "discount": 0.1 }
+          },
+          {
+            "id": "prod-2",
+            "updates": { "price": 29.99, "discount": 0.15 }
+          }
+        ],
+        "returning": ["id", "name", "price"]
+      }
+    }
+  ],
+  "tags": ["bulk", "batch", "update", "modify", "edit"],
+  "version": "1.0.0",
+  "dependencies": []
+}

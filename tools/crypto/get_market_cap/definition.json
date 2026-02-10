@@ -1,0 +1,21 @@
+{
+  "id": "get_market_cap",
+  "name": "Get Market Cap",
+  "category": "crypto",
+  "description": "Get top cryptocurrencies ranked by market capitalization.\n\nReturns top N cryptocurrencies with:\n- Rank\n- Name and symbol\n- Market cap\n- Current price\n- 24h volume\n- Price change (24h)\n- Circulating supply\n\nUseful for:\n- Finding market leaders\n- Analyzing crypto market trends\n- Comparing top coins\n\nData is cached for 1 hour.\n\n** EXAMPLES **\n\n1. Get top 10 cryptocurrencies:\n{\n  \"limit\": \"10\"\n}\n\n2. Get top 25 cryptocurrencies:\n{\n  \"limit\": \"25\"\n}\n\n3. Get top 50 cryptocurrencies:\n{\n  \"limit\": \"50\"\n}",
+  "function_name": "get_market_cap",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "type": "string",
+        "description": "Number of top coins to return. Default: 10, Max: 250"
+      },
+      "currency": {
+        "type": "string",
+        "description": "Currency for prices and market cap. Default: 'usd'"
+      }
+    }
+  }
+}

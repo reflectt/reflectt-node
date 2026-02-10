@@ -1,0 +1,43 @@
+{
+  "name": "delete_task",
+  "description": "Delete a task from the file system. Can search across all agents or target a specific agent. Supports both space-specific and global scopes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "Task ID (e.g., 'create-budget', 'track-expense')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "agent": {
+        "type": "string",
+        "description": "Optional: Agent ID to narrow the search (e.g., 'budget_tracker'). If not provided, will search all agents.",
+        "pattern": "^[a-z_]+$"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Target a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "space",
+          "global"
+        ],
+        "description": "Where to delete the task from: 'space' (default) or 'global'",
+        "default": "space"
+      }
+    },
+    "required": [
+      "task_id"
+    ]
+  },
+  "function_name": "delete_task",
+  "id": "delete_task",
+  "category": "task",
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

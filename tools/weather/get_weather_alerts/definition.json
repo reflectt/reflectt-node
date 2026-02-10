@@ -1,0 +1,26 @@
+{
+  "id": "get_weather_alerts",
+  "name": "Get Weather Alerts",
+  "category": "weather",
+  "description": "Get severe weather warnings and alerts for a specific location. Returns government-issued weather alerts including hurricanes, tornadoes, floods, heat waves, winter storms, and other severe weather events.\n\nYou can:\n- Get active weather alerts for coordinates\n- See alert severity and event type\n- Get detailed alert descriptions\n- See start and end times for alerts\n- Get official alert sources\n- Stay informed about dangerous weather\n\nAlerts are provided by national weather agencies and are cached for 10 minutes.\n\n** EXAMPLES **\n\n1. Get alerts for coordinates:\n{\n  \"lat\": 37.7749,\n  \"lon\": -122.4194\n}\n\n2. Get alerts for different location:\n{\n  \"lat\": 25.7617,\n  \"lon\": -80.1918\n}",
+  "function_name": "get_weather_alerts",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["lat", "lon"],
+    "properties": {
+      "lat": {
+        "type": "number",
+        "description": "Latitude of the location",
+        "minimum": -90,
+        "maximum": 90
+      },
+      "lon": {
+        "type": "number",
+        "description": "Longitude of the location",
+        "minimum": -180,
+        "maximum": 180
+      }
+    }
+  }
+}

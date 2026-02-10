@@ -1,0 +1,40 @@
+{
+  "id": "screenshot_component",
+  "name": "Screenshot Component",
+  "category": "ui",
+  "description": "Capture a screenshot of a component or entire layout for visual testing and debugging. Returns a data URL that can be saved to history for comparison. Useful for visual regression testing and documenting UI state.",
+  "function_name": "screenshot_component",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The ID of the component to screenshot (e.g., 'form-1', 'table-results'). If omitted, captures the entire layout container."
+      },
+      "format": {
+        "type": "string",
+        "enum": ["png", "jpeg", "webp"],
+        "description": "Image format for the screenshot. PNG provides lossless quality, JPEG is smaller, WebP offers best compression.",
+        "default": "png"
+      },
+      "quality": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Image quality for lossy formats (0.0 to 1.0). Higher values mean better quality but larger file size.",
+        "default": 0.92
+      },
+      "fullPage": {
+        "type": "boolean",
+        "description": "Capture the entire scrollable area instead of just the visible viewport. Useful for long components.",
+        "default": false
+      },
+      "saveToHistory": {
+        "type": "boolean",
+        "description": "Save screenshot to history for later comparison (keeps last 20). Set to false for one-off captures.",
+        "default": true
+      }
+    }
+  }
+}

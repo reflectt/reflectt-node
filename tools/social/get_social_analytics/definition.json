@@ -1,0 +1,20 @@
+{
+  "function_name": "get_social_analytics",
+  "description": "Get engagement metrics and analytics for social media posts",
+  "category": "social",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "post_id": {
+        "type": "string",
+        "description": "Internal post ID or platform-specific post ID"
+      },
+      "platform": {
+        "type": "string",
+        "enum": ["twitter", "instagram", "facebook"],
+        "description": "Social media platform"
+      }
+    },
+    "required": ["post_id", "platform"]
+  }
+}

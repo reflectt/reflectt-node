@@ -1,0 +1,108 @@
+{
+  "id": "set_ui_layout",
+  "name": "Set UI Layout",
+  "category": "ui",
+  "description": "Control the overall UI layout and slot configuration. Supports 10 layout modes including original modes (standard, split, sidebar-focus, fullscreen) and industry-standard foolproof layouts (dashboard, master-detail, app-shell, three-column, board, feed). Use this to orchestrate the spatial arrangement of content - layout changes happen smoothly in real-time. Choose semantic layout names that match your use case for bulletproof UIs.",
+  "function_name": "set_ui_layout",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": [
+          "standard", 
+          "split", 
+          "sidebar-focus", 
+          "fullscreen",
+          "dashboard",
+          "master-detail",
+          "app-shell",
+          "three-column",
+          "board",
+          "feed"
+        ],
+        "description": "Original modes: 'standard' (chat + sidebar), 'split' (chat + panes), 'sidebar-focus' (sidebar emphasized), 'fullscreen' (content only). Industry-standard: 'dashboard' (responsive widget grid), 'master-detail' (list + detail 1/3-2/3), 'app-shell' (header/nav/content), 'three-column' (IDE-style nav|content|inspector), 'board' (Kanban columns), 'feed' (centered timeline max-width 768px)."
+      },
+      "splitRatio": {
+        "type": "number",
+        "description": "For 'split' mode: ratio of left pane width to total width (0.0-1.0). Default 0.66 (2/3 left, 1/3 right). Example: 0.5 = equal split, 0.7 = larger left pane.",
+        "minimum": 0.1,
+        "maximum": 0.9,
+        "default": 0.66
+      },
+      "slots": {
+        "type": "object",
+        "description": "Configure which slots are visible and their behavior. Keys: 'sidebar', 'top', 'primary', 'secondary'. Values: objects with 'visible' (boolean) and optional 'collapsed' (boolean for sidebar).",
+        "additionalProperties": false,
+        "properties": {
+          "sidebar": {
+            "type": "object",
+            "properties": {
+              "visible": { "type": "boolean", "description": "Show/hide sidebar" },
+              "collapsed": { "type": "boolean", "description": "Start sidebar in collapsed state (icon only)" }
+            }
+          },
+          "top": {
+            "type": "object",
+            "properties": {
+              "visible": { "type": "boolean", "description": "Show/hide top banner" }
+            }
+          },
+          "primary": {
+            "type": "object",
+            "properties": {
+              "visible": { "type": "boolean", "description": "Show/hide primary pane (left in split mode)" }
+            }
+          },
+          "secondary": {
+            "type": "object",
+            "properties": {
+              "visible": { "type": "boolean", "description": "Show/hide secondary pane (right in split mode)" }
+            }
+          }
+        }
+      },
+      "topBanner": {
+        "type": "object",
+        "description": "Configure the top banner content (only if slots.top.visible = true)",
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Banner text (1-200 characters)",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["info", "success", "warning", "error"],
+            "description": "'info' (blue), 'success' (green), 'warning' (amber), 'error' (red)",
+            "default": "info"
+          },
+          "dismissable": {
+            "type": "boolean",
+            "description": "Allow user to close banner (default: true)",
+            "default": true
+          },
+          "action": {
+            "type": "object",
+            "description": "Optional action button in banner",
+            "properties": {
+              "label": { "type": "string", "description": "Button text" },
+              "prompt": { "type": "string", "description": "Prompt to send to chat when clicked" }
+            },
+            "required": ["label", "prompt"]
+          }
+        },
+        "required": ["message"]
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Enable smooth animated transitions for layout changes (default: true)",
+        "default": true
+      }
+    },
+    "required": ["mode"]
+  }
+}

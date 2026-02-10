@@ -1,0 +1,41 @@
+{
+  "id": "get_learned_patterns",
+  "name": "get_learned_patterns",
+  "description": "Retrieve learned patterns about user behavior to inform intelligent routing and actions.",
+  "category": "memory",
+  "function_name": "get_learned_patterns",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Unique identifier for the user",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "trigger_match": {
+        "type": "string",
+        "description": "Optional: Find patterns matching this trigger text"
+      },
+      "min_confidence": {
+        "type": "number",
+        "description": "Minimum confidence level to return (default: 0.5)",
+        "default": 0.5,
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "required": [
+      "user_id"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "memory",
+    "learning",
+    "patterns",
+    "intelligence"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

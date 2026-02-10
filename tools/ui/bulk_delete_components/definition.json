@@ -1,0 +1,29 @@
+{
+  "name": "bulk_delete_components",
+  "description": "Delete multiple components at once. Useful for clearing slots, removing related components, or cleanup operations. Each component is removed from its slot and optionally cleaned up from context bus.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "componentIds": {
+        "type": "array",
+        "description": "Array of module IDs to delete",
+        "items": {
+          "type": "string"
+        }
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Play exit animations (default: false for better performance)"
+      },
+      "cleanupContext": {
+        "type": "boolean",
+        "description": "Cleanup components from context bus (default: true)"
+      },
+      "stopOnError": {
+        "type": "boolean",
+        "description": "Stop deleting if any deletion fails (default: false - continues on errors)"
+      }
+    },
+    "required": ["componentIds"]
+  }
+}

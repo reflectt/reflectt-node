@@ -1,0 +1,87 @@
+{
+  "type": "ui_tool",
+  "name": "suggest_form_values",
+  "description": "Intelligently suggest form field values based on learning patterns, form context, and field relationships. Uses context-aware inference, validation, and historical patterns to provide smart auto-fill suggestions.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "formComponentId": {
+        "type": "string",
+        "description": "The ID of the form component to provide suggestions for"
+      },
+      "fieldId": {
+        "type": "string",
+        "description": "Specific field ID to get suggestions for. If not provided, suggests for all fields."
+      },
+      "formContext": {
+        "type": "object",
+        "description": "Context about the form for intelligent suggestions",
+        "properties": {
+          "formTitle": {
+            "type": "string",
+            "description": "Title or name of the form"
+          },
+          "formUrl": {
+            "type": "string",
+            "description": "URL of the form (for matching with similar forms)"
+          },
+          "formType": {
+            "type": "string",
+            "enum": ["personal", "business", "shipping", "billing", "unknown"],
+            "description": "Type of form to tailor suggestions"
+          },
+          "otherFields": {
+            "type": "object",
+            "description": "Current values of other fields for inference (e.g., {\"country\": \"USA\", \"state\": \"CA\"})"
+          }
+        }
+      },
+      "includeReasoning": {
+        "type": "boolean",
+        "description": "Include reasoning for each suggestion (default: true)",
+        "default": true
+      },
+      "includeAlternatives": {
+        "type": "boolean",
+        "description": "Include alternative suggestions beyond primary (default: false)",
+        "default": false
+      }
+    }
+  },
+  "examples": [
+    {
+      "description": "Get suggestions for a specific field",
+      "input": {
+        "formComponentId": "checkout-form",
+        "fieldId": "email",
+        "includeReasoning": true
+      }
+    },
+    {
+      "description": "Get context-aware suggestions for a shipping form",
+      "input": {
+        "formComponentId": "shipping-form",
+        "formContext": {
+          "formType": "shipping",
+          "otherFields": {
+            "country": "United States",
+            "state": "CA"
+          }
+        },
+        "includeAlternatives": true
+      }
+    },
+    {
+      "description": "Get suggestions with inference from other fields",
+      "input": {
+        "fieldId": "zip",
+        "formContext": {
+          "otherFields": {
+            "state": "California",
+            "city": "San Francisco"
+          }
+        }
+      }
+    }
+  ]
+}

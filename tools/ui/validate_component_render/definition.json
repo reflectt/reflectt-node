@@ -1,0 +1,31 @@
+{
+  "id": "validate_component_render",
+  "name": "Validate Component Render",
+  "category": "ui",
+  "description": "Validate that a component rendered successfully with correct props and data. Checks if component is mounted, visible, has expected props, and contains expected data. Returns detailed validation results with specific errors for failed checks.",
+  "function_name": "validate_component_render",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The ID of the component to validate (e.g., 'table-1', 'chart-results'). This is the module ID assigned when the component was rendered."
+      },
+      "expectedProps": {
+        "type": "object",
+        "description": "Optional object of props the component should have. Each key-value pair will be compared with actual component props using deep equality. Example: { \"title\": \"Sales Data\", \"showFilters\": true }"
+      },
+      "expectedData": {
+        "type": "object",
+        "description": "Optional object of data the component should contain. Each key-value pair will be compared with actual component context data using deep equality. Example: { \"rowCount\": 10, \"status\": \"loaded\" }"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Maximum time to wait for component to mount in milliseconds. Default: 5000 (5 seconds)",
+        "default": 5000
+      }
+    },
+    "required": ["componentId"]
+  }
+}

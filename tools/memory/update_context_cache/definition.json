@@ -1,0 +1,29 @@
+{
+  "id": "update_context_cache",
+  "name": "update_context_cache",
+  "description": "Generate or update cached context summary for fast retrieval. This creates a summary of recent user activity that can be quickly accessed.",
+  "category": "memory",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to update cache for"
+      },
+      "force_refresh": {
+        "type": "boolean",
+        "description": "Force refresh even if cache is valid (default: false)",
+        "default": false
+      },
+      "cache_duration_hours": {
+        "type": "number",
+        "description": "Cache duration in hours (default: 24)",
+        "default": 24
+      }
+    },
+    "required": [
+      "user_id"
+    ]
+  },
+  "function_name": "update_context_cache"
+}

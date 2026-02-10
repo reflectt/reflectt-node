@@ -1,0 +1,46 @@
+{
+  "id": "web_search",
+  "name": "Web Search",
+  "description": "Search the web for information on a topic. Returns search results with titles, URLs, and snippets. Use this to find current information or research topics.",
+  "category": "web",
+  "function_name": "web_search",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "query"
+    ],
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "The search query"
+      },
+      "num_results": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "default": 5,
+        "description": "Number of results to return (1-10)"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Research best practices for budget tracking",
+      "parameters": {
+        "query": "personal budget tracking best practices",
+        "num_results": 5
+      },
+      "expected_result": "Returns 5 search results with titles, URLs, and snippets"
+    }
+  ],
+  "tags": [
+    "web",
+    "search",
+    "research",
+    "internet",
+    "information"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "context_requirements": []
+}

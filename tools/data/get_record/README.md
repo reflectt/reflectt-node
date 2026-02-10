@@ -1,0 +1,58 @@
+# Get Record
+
+## Description
+
+Get a single record by ID from tables/[table]/rows/[id].json. Retrieves structured data from PostgreSQL-style table storage.
+
+## Purpose and Use Cases
+
+- **Primary use**: Get a single record by ID from tables/[table]/rows/[id].json. Retrieves structured data from PostgreSQL-style table storage.
+- **Integration**: Works with data category tools
+- **Requirements**: Needs dataDir, globalDir
+
+## Input Parameters
+
+### Required Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `table` | string | Table name (e.g., 'stories', 'characters', 'worlds', 'users') |
+| `id` | string | Record ID to retrieve |
+
+
+### Optional Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `target_space` | string | - | Optional: Get from a specific named space (e.g., 'creative', 'education'). Defaults to current space. |
+
+
+## Output Format
+
+See implementation for specific output type.
+
+## Example Usage
+
+```typescript
+import getRecord from './implementation'
+
+const result = await getRecord(
+  {
+    // Add parameters here
+  },
+  dataDir,
+  globalDir
+)
+
+console.log(result)
+```
+
+
+
+## Error Handling
+
+The function returns structured error responses when issues occur.
+
+## Related Tools
+
+- See other data category tools

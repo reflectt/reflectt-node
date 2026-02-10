@@ -1,0 +1,28 @@
+{
+  "id": "get_crypto_price",
+  "name": "Get Crypto Price",
+  "category": "crypto",
+  "description": "Get current cryptocurrency prices in multiple currencies.\n\nReturns:\n- Current price\n- Market cap\n- 24h volume\n- Price change (24h)\n- Market cap rank\n\nSupports 10,000+ cryptocurrencies. Data is cached for 1 minute.\n\n** EXAMPLES **\n\n1. Get Bitcoin price in USD:\n{\n  \"coin_ids\": [\"bitcoin\"],\n  \"currencies\": [\"usd\"]\n}\n\n2. Get multiple crypto prices in different currencies:\n{\n  \"coin_ids\": [\"bitcoin\", \"ethereum\"],\n  \"currencies\": [\"usd\", \"eur\"]\n}\n\n3. Get Ethereum price in multiple currencies:\n{\n  \"coin_ids\": [\"ethereum\"],\n  \"currencies\": [\"usd\", \"gbp\", \"jpy\"]\n}",
+  "function_name": "get_crypto_price",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["coin_ids"],
+    "properties": {
+      "coin_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of coin IDs (e.g., ['bitcoin', 'ethereum'])"
+      },
+      "currencies": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of currencies (e.g., ['usd', 'eur']). Default: ['usd']"
+      }
+    }
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "id": "parse_office_document",
+  "name": "Parse Office Document",
+  "description": "Parse Word, Excel, and PowerPoint documents to extract text, data, and structure. Supports .docx, .xlsx, .pptx formats with formatting preservation and sheet/slide extraction.",
+  "category": "document",
+  "function_name": "parse_office_document",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "document_source",
+      "document_type"
+    ],
+    "properties": {
+      "document_source": {
+        "type": "string",
+        "description": "File path to Office document"
+      },
+      "document_type": {
+        "type": "string",
+        "enum": [
+          "word",
+          "excel",
+          "powerpoint"
+        ],
+        "description": "Type of Office document"
+      },
+      "extract_options": {
+        "type": "object",
+        "description": "Extraction options",
+        "properties": {
+          "preserve_formatting": {
+            "type": "boolean",
+            "default": false,
+            "description": "Keep HTML formatting (Word only)"
+          },
+          "sheet_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Specific sheets to extract (Excel only)"
+          },
+          "include_formulas": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include cell formulas (Excel only)"
+          },
+          "extract_images": {
+            "type": "boolean",
+            "default": false,
+            "description": "Extract embedded images"
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "document",
+    "office",
+    "word",
+    "excel",
+    "powerpoint",
+    "parse",
+    "extract"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

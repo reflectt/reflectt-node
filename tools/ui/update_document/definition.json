@@ -1,0 +1,68 @@
+{
+  "id": "update_document",
+  "name": "Update Document",
+  "category": "ui",
+  "description": "Modify document content in the DocumentEditor component. Allows AI to programmatically insert, replace, append, or prepend content in rich text documents. Supports HTML and Markdown formats with optional formatting preservation. Component must already be mounted.",
+  "function_name": "update_document",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "moduleId": {
+        "type": "string",
+        "description": "ID of the DocumentEditor component to control (must match existing module ID from render_manifest)",
+        "minLength": 1
+      },
+      "operation": {
+        "type": "string",
+        "enum": ["replace", "insert", "append", "prepend", "clear"],
+        "description": "Content operation type: 'replace' replaces all content, 'insert' at position, 'append' to end, 'prepend' to beginning, 'clear' removes all content",
+        "default": "append"
+      },
+      "content": {
+        "type": "string",
+        "description": "Content to insert (HTML or Markdown format)",
+        "minLength": 0
+      },
+      "format": {
+        "type": "string",
+        "enum": ["html", "markdown", "text"],
+        "description": "Content format: 'html' for rich HTML, 'markdown' for Markdown, 'text' for plain text",
+        "default": "text"
+      },
+      "position": {
+        "type": "number",
+        "description": "Character position for 'insert' operation (0-indexed)",
+        "minimum": 0
+      },
+      "applyFormatting": {
+        "type": "boolean",
+        "description": "Apply rich text formatting from content (default: true)",
+        "default": true
+      },
+      "selection": {
+        "type": "object",
+        "description": "Text selection range to replace (alternative to position)",
+        "properties": {
+          "start": {
+            "type": "number",
+            "description": "Start position (0-indexed)",
+            "minimum": 0
+          },
+          "end": {
+            "type": "number",
+            "description": "End position (0-indexed)",
+            "minimum": 0
+          }
+        },
+        "required": ["start", "end"]
+      },
+      "autoSave": {
+        "type": "boolean",
+        "description": "Automatically save after update (default: true)",
+        "default": true
+      }
+    },
+    "required": ["moduleId", "operation"]
+  }
+}

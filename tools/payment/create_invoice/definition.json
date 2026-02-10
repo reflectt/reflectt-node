@@ -1,0 +1,65 @@
+{
+  "function_name": "create_invoice",
+  "description": "Create and finalize a Stripe invoice for a customer. Supports line items with amounts and quantities.",
+  "category": "payment",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "customer_id": {
+        "type": "string",
+        "description": "Stripe customer ID"
+      },
+      "customer_email": {
+        "type": "string",
+        "description": "Customer email address (if customer_id not provided, this is required)"
+      },
+      "customer_name": {
+        "type": "string",
+        "description": "Customer name (optional, used if creating new customer)"
+      },
+      "items": {
+        "type": "array",
+        "description": "Array of invoice line items",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Item name or description"
+            },
+            "amount": {
+              "type": "number",
+              "description": "Item amount in smallest currency unit (cents for USD)"
+            },
+            "quantity": {
+              "type": "number",
+              "description": "Item quantity. Default: 1"
+            },
+            "currency": {
+              "type": "string",
+              "description": "Currency code (usd, eur, etc). Default: usd"
+            }
+          },
+          "required": ["name", "amount"]
+        }
+      },
+      "due_date": {
+        "type": "string",
+        "description": "Invoice due date in ISO format (YYYY-MM-DD). If not provided, defaults to 30 days from now"
+      },
+      "description": {
+        "type": "string",
+        "description": "Invoice description or memo"
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Additional metadata to store with the invoice (e.g., {order_id: '123', project_id: 'proj_456'})"
+      },
+      "auto_advance": {
+        "type": "boolean",
+        "description": "Whether to automatically finalize the invoice. Default: true"
+      }
+    },
+    "required": ["items"]
+  }
+}

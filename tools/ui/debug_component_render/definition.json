@@ -1,0 +1,38 @@
+{
+  "id": "debug_component_render",
+  "name": "Debug Component Render",
+  "category": "ui",
+  "description": "Debug rendering and runtime state of a specific component. Use this to diagnose issues with component visibility, mounting, performance, and errors.\n\nYou can:\n- Check if component is mounted in DOM\n- Verify component visibility\n- Get component dimensions and position\n- Access component props and context\n- View error logs for the component\n- Track render count and performance\n- Diagnose rendering issues\n\nThis is CRITICAL for debugging component issues, performance problems, and understanding why components may not be appearing or behaving correctly.\n\n** EXAMPLES **\n\n1. Debug component rendering:\n{\n  \"componentId\": \"table-1\"\n}\n\n2. Debug with detailed DOM info:\n{\n  \"componentId\": \"chart-1\",\n  \"includeDOM\": true,\n  \"includePerformance\": true\n}\n\n3. Debug with full context and error logs:\n{\n  \"componentId\": \"dashboard-1\",\n  \"includeContext\": true,\n  \"includeErrors\": true,\n  \"includeDOM\": true\n}",
+  "function_name": "debug_component_render",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["componentId"],
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The component ID to debug"
+      },
+      "includeDOM": {
+        "type": "boolean",
+        "description": "Include DOM element information (mounted, visible, dimensions)",
+        "default": true
+      },
+      "includeContext": {
+        "type": "boolean",
+        "description": "Include component context from context bus",
+        "default": true
+      },
+      "includeErrors": {
+        "type": "boolean",
+        "description": "Include error logs for this component",
+        "default": true
+      },
+      "includePerformance": {
+        "type": "boolean",
+        "description": "Include performance metrics (render count, timing)",
+        "default": true
+      }
+    }
+  }
+}

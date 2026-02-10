@@ -1,0 +1,79 @@
+{
+  "id": "upsert_package",
+  "name": "Create or Update Package",
+  "function_name": "upsert_package",
+  "description": "Create or update a Reflectt package. Creates complete package structure with agents, workflows, schemas, and rules. Use this to build reusable domain packages.",
+  "category": "packages",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "package_name": {
+        "type": "string",
+        "description": "Package name in format @reflectt/domain (e.g., '@reflectt/retail', '@reflectt/finance')"
+      },
+      "description": {
+        "type": "string",
+        "description": "Clear description of what this package provides"
+      },
+      "category": {
+        "type": "string",
+        "description": "Package category",
+        "enum": ["retail", "finance", "legal", "healthcare", "education", "manufacturing", "hospitality", "real-estate", "professional-services", "other"]
+      },
+      "dependencies": {
+        "type": "array",
+        "description": "Array of package names this package depends on (no versioning)",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      },
+      "agents": {
+        "type": "array",
+        "description": "Array of agent definitions to include in package",
+        "items": {
+          "type": "object"
+        },
+        "default": []
+      },
+      "workflows": {
+        "type": "array",
+        "description": "Array of workflow definitions to include in package",
+        "items": {
+          "type": "object"
+        },
+        "default": []
+      },
+      "schemas": {
+        "type": "array",
+        "description": "Array of data schema definitions (tables)",
+        "items": {
+          "type": "object"
+        },
+        "default": []
+      },
+      "rules": {
+        "type": "array",
+        "description": "Array of business rule definitions",
+        "items": {
+          "type": "object"
+        },
+        "default": []
+      },
+      "industries": {
+        "type": "array",
+        "description": "Industries this package applies to",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Additional package metadata",
+        "default": {}
+      }
+    },
+    "required": ["package_name", "description"]
+  }
+}

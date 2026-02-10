@@ -1,0 +1,33 @@
+{
+  "id": "track_watch_list",
+  "name": "Track Watch List",
+  "category": "entertainment",
+  "description": "Manage your personal watch list for movies and TV shows. Add, remove, and view movies you want to watch.\n\nYou can:\n- Add movies to your watch list\n- Remove movies from your watch list\n- View your complete watch list\n- Check watch list status for movies\n- Organize and manage entertainment queue\n\nStores watch list in the database.\n\n** WHEN TO USE **\n- User asks to \"add to watch list\" or \"add to favorites\"\n- User wants to see their watch list\n- User wants to manage saved movies\n- User wants to remove from watch list\n\n** WHEN NOT TO USE **\n- User wants to search for movies (use search_movies)\n- User wants movie details (use get_movie_details)\n- User wants recommendations (use get_entertainment_recommendations)\n\n** EXAMPLES **\n\n1. Add movie to watch list:\n{\n  \"action\": \"add\",\n  \"content_id\": \"278\",\n  \"content_type\": \"movie\",\n  \"title\": \"The Shawshank Redemption\"\n}\n\n2. View watch list:\n{\n  \"action\": \"list\"\n}\n\n3. Remove from watch list:\n{\n  \"action\": \"remove\",\n  \"content_id\": \"278\",\n  \"content_type\": \"movie\"\n}",
+  "function_name": "track_watch_list",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["action"],
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["add", "remove", "list", "check"],
+        "description": "Action to perform on watch list"
+      },
+      "content_id": {
+        "type": "string",
+        "description": "Movie or show ID (required for add, remove, check actions)"
+      },
+      "content_type": {
+        "type": "string",
+        "enum": ["movie", "tv"],
+        "description": "Type of content (movie or tv show)",
+        "default": "movie"
+      },
+      "title": {
+        "type": "string",
+        "description": "Title of the movie/show (for reference)"
+      }
+    }
+  }
+}

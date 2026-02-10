@@ -1,0 +1,31 @@
+{
+  "id": "list_spaces",
+  "name": "List Spaces",
+  "description": "List all available spaces in the system. Returns space names, descriptions, creation dates, and metadata. Useful for discovering what spaces exist and their purposes.",
+  "category": "spaces",
+  "function_name": "list_spaces",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "include_stats": {
+        "type": "boolean",
+        "description": "Include statistics about each space (agent count, task count, table count, storage size)",
+        "default": false
+      },
+      "filter_tag": {
+        "type": "string",
+        "description": "Optional: Filter spaces by a metadata tag"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "space",
+    "management",
+    "list",
+    "discovery"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

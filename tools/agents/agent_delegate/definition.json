@@ -1,0 +1,48 @@
+{
+  "name": "agent_delegate",
+  "description": "Delegate a task to another specialized agent. Use this when you need expertise from a different domain (e.g., Sales Agent needs Data Agent to run queries, or Workflow Agent needs Design Agent to generate images). This enables multi-agent collaboration where each agent brings specialized capabilities.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "target_agent": {
+        "type": "string",
+        "enum": ["sales", "data", "design", "workflow", "document", "analytics", "marketing", "finance", "concierge"],
+        "description": "The agent to delegate to. Choose based on capabilities: 'sales' for revenue/customer analysis, 'data' for database queries/analytics, 'design' for images/UI, 'workflow' for task/process management, 'document' for text editing, 'analytics' for metrics/KPIs, 'marketing' for campaigns, 'finance' for budgets, 'concierge' for general coordination."
+      },
+      "task": {
+        "type": "string",
+        "description": "Clear description of the task to delegate. Be specific about what you need the other agent to do. Example: 'Query the sales database for Q4 revenue breakdown by product category and return the top 5 products'"
+      },
+      "context": {
+        "type": "object",
+        "description": "Additional context the target agent needs. Include relevant data from your current task, user intent, component details, etc.",
+        "properties": {
+          "original_user_intent": {
+            "type": "string",
+            "description": "The original user's intent that started this workflow"
+          },
+          "component_id": {
+            "type": "string",
+            "description": "The component that initiated the workflow"
+          },
+          "data": {
+            "type": "object",
+            "description": "Any relevant data the target agent needs"
+          }
+        }
+      },
+      "mode": {
+        "type": "string",
+        "enum": ["single", "sequential", "parallel"],
+        "description": "Execution mode: 'single' for one agent (default), 'sequential' for multiple agents in order, 'parallel' for simultaneous execution",
+        "default": "single"
+      },
+      "wait_for_result": {
+        "type": "boolean",
+        "description": "Whether to wait for the delegated agent's result before continuing. Set to true if you need their output to complete your task.",
+        "default": true
+      }
+    },
+    "required": ["target_agent", "task"]
+  }
+}

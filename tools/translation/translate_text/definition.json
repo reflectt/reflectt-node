@@ -1,0 +1,32 @@
+{
+  "function_name": "translate_text",
+  "description": "Translate text from one language to another. Supports 100+ languages with automatic language detection. Translations are cached for 7 days to improve performance. Supports HTML and Markdown format preservation.",
+  "category": "translation",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "The text to translate. Can be plain text, HTML, or Markdown."
+      },
+      "target_lang": {
+        "type": "string",
+        "description": "Target language code (ISO 639-1). Examples: 'en' (English), 'es' (Spanish), 'fr' (French), 'de' (German), 'ja' (Japanese), 'zh' (Chinese), 'ar' (Arabic), etc. See full list at https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes"
+      },
+      "source_lang": {
+        "type": "string",
+        "description": "Source language code (ISO 639-1). If not provided, language will be auto-detected. Use 'auto' for automatic detection."
+      },
+      "format": {
+        "type": "string",
+        "enum": ["text", "html", "markdown"],
+        "description": "Format of the text. 'text' for plain text, 'html' for HTML content, 'markdown' for Markdown content. Default: 'text'"
+      },
+      "preserve_formatting": {
+        "type": "boolean",
+        "description": "Whether to preserve formatting (line breaks, whitespace, etc.). Default: true"
+      }
+    },
+    "required": ["text", "target_lang"]
+  }
+}

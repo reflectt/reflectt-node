@@ -1,0 +1,86 @@
+{
+  "id": "extract_text_from_image",
+  "name": "Extract Text from Image (OCR)",
+  "description": "Extract all visible text from an image using Claude's vision capabilities. Perfect for reading documents, signs, labels, screenshots, or any image containing text.",
+  "category": "vision",
+  "function_name": "extract_text_from_image",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "image_source"
+    ],
+    "properties": {
+      "image_source": {
+        "type": "string",
+        "description": "Image source - can be a URL, base64 encoded image data, or file path"
+      },
+      "image_type": {
+        "type": "string",
+        "enum": ["url", "base64", "file_path"],
+        "default": "url",
+        "description": "Type of image source provided"
+      },
+      "media_type": {
+        "type": "string",
+        "enum": ["image/jpeg", "image/png", "image/gif", "image/webp"],
+        "default": "image/jpeg",
+        "description": "MIME type of the image"
+      },
+      "preserve_formatting": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to preserve the original text layout and formatting"
+      },
+      "language_hint": {
+        "type": "string",
+        "description": "Optional language hint to improve accuracy (e.g., 'English', 'Spanish', 'Chinese')"
+      },
+      "max_tokens": {
+        "type": "number",
+        "default": 2048,
+        "description": "Maximum tokens for the response"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Extract text from a scanned document",
+      "parameters": {
+        "image_source": "https://example.com/document.jpg",
+        "image_type": "url",
+        "preserve_formatting": true
+      },
+      "expected_result": "Returns all text from the document with preserved formatting"
+    },
+    {
+      "scenario": "Read text from a screenshot",
+      "parameters": {
+        "image_source": "/path/to/screenshot.png",
+        "image_type": "file_path",
+        "media_type": "image/png",
+        "preserve_formatting": false
+      },
+      "expected_result": "Returns plain text extracted from screenshot"
+    },
+    {
+      "scenario": "Extract text from multilingual sign",
+      "parameters": {
+        "image_source": "https://example.com/sign.jpg",
+        "image_type": "url",
+        "language_hint": "Spanish and English"
+      },
+      "expected_result": "Returns text in multiple languages"
+    }
+  ],
+  "tags": [
+    "vision",
+    "ocr",
+    "text-extraction",
+    "image",
+    "document",
+    "ai",
+    "claude"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

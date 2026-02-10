@@ -1,0 +1,76 @@
+{
+  "id": "parse_pdf",
+  "name": "Parse Pdf",
+  "description": "Extract text, tables, metadata, and structure from PDF files. Supports page-range extraction, table detection, and image extraction. Perfect for processing invoices, contracts, reports, and any PDF document.",
+  "category": "document",
+  "function_name": "parse_pdf",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "pdf_source"
+    ],
+    "properties": {
+      "pdf_source": {
+        "type": "string",
+        "description": "File path or URL to PDF file"
+      },
+      "source_type": {
+        "type": "string",
+        "enum": [
+          "file_path",
+          "url"
+        ],
+        "default": "file_path",
+        "description": "Type of PDF source provided"
+      },
+      "extract_options": {
+        "type": "object",
+        "description": "Options for what to extract from the PDF",
+        "properties": {
+          "text": {
+            "type": "boolean",
+            "default": true,
+            "description": "Extract text content"
+          },
+          "tables": {
+            "type": "boolean",
+            "default": false,
+            "description": "Extract tables (experimental)"
+          },
+          "metadata": {
+            "type": "boolean",
+            "default": true,
+            "description": "Extract document metadata"
+          },
+          "images": {
+            "type": "boolean",
+            "default": false,
+            "description": "Extract embedded images"
+          },
+          "page_range": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "Extract specific page range [start, end] (1-indexed)"
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "document",
+    "pdf",
+    "parse",
+    "extract",
+    "text",
+    "metadata",
+    "tables"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

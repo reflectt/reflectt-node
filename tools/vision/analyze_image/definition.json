@@ -1,0 +1,82 @@
+{
+  "id": "analyze_image",
+  "name": "Analyze Image",
+  "description": "Analyze an image using Claude's vision capabilities. Provides detailed descriptions, identifies objects, text, people, scenes, and can answer specific questions about the image content.",
+  "category": "vision",
+  "function_name": "analyze_image",
+  "use_tool_context": true,
+  "parameters": {
+    "type": "object",
+    "required": [
+      "image_source"
+    ],
+    "properties": {
+      "image_source": {
+        "type": "string",
+        "description": "Image source - can be a URL, base64 encoded image data, or file path"
+      },
+      "image_type": {
+        "type": "string",
+        "enum": ["url", "base64", "file_path"],
+        "default": "url",
+        "description": "Type of image source provided"
+      },
+      "media_type": {
+        "type": "string",
+        "enum": ["image/jpeg", "image/png", "image/gif", "image/webp"],
+        "default": "image/jpeg",
+        "description": "MIME type of the image"
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Optional specific question or instruction about what to analyze in the image. If not provided, returns a general description.",
+        "default": "Describe this image in detail, including all visible objects, text, people, and the overall scene."
+      },
+      "max_tokens": {
+        "type": "number",
+        "default": 1024,
+        "description": "Maximum tokens for the response"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Analyze a product image",
+      "parameters": {
+        "image_source": "https://example.com/product.jpg",
+        "image_type": "url",
+        "prompt": "Describe this product, including its features, condition, and any visible text or labels."
+      },
+      "expected_result": "Returns detailed analysis of the product image"
+    },
+    {
+      "scenario": "Identify objects in a scene",
+      "parameters": {
+        "image_source": "https://example.com/room.jpg",
+        "image_type": "url",
+        "prompt": "List all objects visible in this room."
+      },
+      "expected_result": "Returns a list of all identified objects"
+    },
+    {
+      "scenario": "Analyze uploaded image from file",
+      "parameters": {
+        "image_source": "/path/to/image.png",
+        "image_type": "file_path",
+        "media_type": "image/png"
+      },
+      "expected_result": "Returns general description of the image content"
+    }
+  ],
+  "tags": [
+    "vision",
+    "image",
+    "analyze",
+    "ai",
+    "claude",
+    "description",
+    "object-detection"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,64 @@
+{
+  "id": "search_conversations",
+  "name": "Search Conversations",
+  "description": "Search conversations by criteria (date range, participants, type, cost, etc.)",
+  "category": "conversation",
+  "function_name": "search_conversations",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Filter by user ID (optional - defaults to current user)"
+      },
+      "conversation_type": {
+        "type": "string",
+        "enum": ["user_chat", "agent_to_agent", "task_execution", "workflow_execution"],
+        "description": "Filter by conversation type"
+      },
+      "agent_slug": {
+        "type": "string",
+        "description": "Filter by primary agent (who we're talking TO)"
+      },
+      "calling_agent_slug": {
+        "type": "string",
+        "description": "Filter by calling agent (who initiated the conversation, for agent_to_agent conversations)"
+      },
+      "task_id": {
+        "type": "string",
+        "description": "Filter by task ID"
+      },
+      "date_from": {
+        "type": "string",
+        "description": "ISO date - conversations after this date"
+      },
+      "date_to": {
+        "type": "string",
+        "description": "ISO date - conversations before this date"
+      },
+      "min_cost": {
+        "type": "number",
+        "description": "Minimum cost in USD"
+      },
+      "max_cost": {
+        "type": "number",
+        "description": "Maximum cost in USD"
+      },
+      "status": {
+        "type": "string",
+        "enum": ["active", "completed", "failed", "cancelled"],
+        "description": "Filter by status"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum results to return (default: 20)",
+        "default": 20
+      },
+      "offset": {
+        "type": "number",
+        "description": "Pagination offset",
+        "default": 0
+      }
+    }
+  }
+}

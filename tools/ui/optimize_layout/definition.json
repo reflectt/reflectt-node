@@ -1,0 +1,20 @@
+{
+  "name": "optimize_layout",
+  "description": "Analyze current UI layout and suggest optimizations for better UX, performance, and mobile compatibility.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "focus": {
+        "type": "string",
+        "enum": ["mobile", "desktop", "performance", "accessibility", "general"],
+        "default": "general",
+        "description": "Focus area for optimization analysis"
+      },
+      "applyRecommendations": {
+        "type": "boolean",
+        "default": false,
+        "description": "If true, automatically apply safe recommendations"
+      }
+    }
+  }
+}

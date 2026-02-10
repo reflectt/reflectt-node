@@ -1,0 +1,32 @@
+{
+  "function_name": "refund_payment",
+  "description": "Refund a Stripe payment (full or partial). Creates a refund transaction and updates the original transaction status.",
+  "category": "payment",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "payment_id": {
+        "type": "string",
+        "description": "Stripe charge ID or payment intent ID to refund"
+      },
+      "transaction_id": {
+        "type": "string",
+        "description": "Internal transaction ID from database (used to look up the payment if payment_id not provided)"
+      },
+      "amount": {
+        "type": "number",
+        "description": "Refund amount in smallest currency unit (cents for USD). If not provided, refunds the full amount."
+      },
+      "reason": {
+        "type": "string",
+        "description": "Refund reason: 'duplicate', 'fraudulent', 'requested_by_customer', or 'other'. Default: 'requested_by_customer'",
+        "enum": ["duplicate", "fraudulent", "requested_by_customer", "other"]
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Additional metadata to store with the refund (e.g., {reason_details: 'Customer changed mind'})"
+      }
+    },
+    "required": ["reason"]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "function_name": "get_exercise_info",
+  "description": "Get detailed information about an exercise including proper form, target muscles, equipment needed, and demonstration",
+  "category": "fitness",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Exercise name or search query"
+      },
+      "body_part": {
+        "type": "string",
+        "description": "Filter by body part"
+      },
+      "equipment": {
+        "type": "string",
+        "description": "Filter by equipment type"
+      },
+      "target_muscle": {
+        "type": "string",
+        "description": "Filter by target muscle"
+      }
+    },
+    "required": ["query"]
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "id": "extract_document_metadata",
+  "name": "Extract Document Metadata",
+  "description": "Extract comprehensive metadata from PDF, Word, Excel, and PowerPoint documents. Returns title, author, dates, page count, file info, and custom properties. Fast and lightweight.",
+  "category": "document",
+  "function_name": "extract_document_metadata",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "document_source"
+    ],
+    "properties": {
+      "document_source": {
+        "type": "string",
+        "description": "File path to document"
+      },
+      "document_type": {
+        "type": "string",
+        "enum": [
+          "pdf",
+          "word",
+          "excel",
+          "powerpoint"
+        ],
+        "description": "Optional: Document type (auto-detected from extension if not provided)"
+      },
+      "extract_options": {
+        "type": "object",
+        "description": "Options for metadata extraction",
+        "properties": {
+          "include_statistics": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include word count, page count, etc."
+          },
+          "include_properties": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include custom document properties"
+          },
+          "include_security": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include encryption and permissions info"
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "document",
+    "metadata",
+    "extract",
+    "info",
+    "properties"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

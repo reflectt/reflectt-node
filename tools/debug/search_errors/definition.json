@@ -1,0 +1,35 @@
+{
+  "id": "search_errors",
+  "name": "Search Errors",
+  "description": "Search for errors by criteria and detect recurring patterns. Helps identify systemic issues and common failure modes.",
+  "category": "debug",
+  "function_name": "search_errors",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to search errors for"
+      },
+      "date_from": {
+        "type": "string",
+        "description": "Start date (ISO format) - optional"
+      },
+      "date_to": {
+        "type": "string",
+        "description": "End date (ISO format) - optional"
+      },
+      "agent_slug": {
+        "type": "string",
+        "description": "Filter by specific agent - optional"
+      },
+      "min_occurrences": {
+        "type": "number",
+        "description": "Minimum pattern occurrences to report (default: 2)",
+        "default": 2
+      }
+    },
+    "required": ["user_id"]
+  },
+  "version": "1.0.0"
+}

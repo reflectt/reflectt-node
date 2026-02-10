@@ -1,0 +1,55 @@
+{
+  "id": "set_layout_by_intent",
+  "name": "Set Layout By Intent",
+  "category": "ui",
+  "description": "Set layout based on user intent instead of explicit mode. The system intelligently chooses the optimal layout based on what you're trying to accomplish (analyze, compare, explore, focus, present, edit, monitor, collaborate). Provide high-level intent and optional context, and the system will select and apply the best layout mode automatically with reasoning.",
+  "function_name": "set_layout_by_intent",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "intent": {
+        "type": "string",
+        "enum": [
+          "analyze",
+          "compare",
+          "explore",
+          "focus",
+          "present",
+          "edit",
+          "monitor",
+          "collaborate"
+        ],
+        "description": "User intent: 'analyze' (deep dive into data), 'compare' (side-by-side comparison), 'explore' (browse and discover), 'focus' (concentrate on single item), 'present' (show to others), 'edit' (modify content), 'monitor' (watch live updates), 'collaborate' (work with others)."
+      },
+      "context": {
+        "type": "object",
+        "description": "Optional context to help refine layout selection",
+        "additionalProperties": false,
+        "properties": {
+          "dataVolume": {
+            "type": "string",
+            "enum": ["small", "medium", "large"],
+            "description": "Amount of data being displayed: 'small' (few items), 'medium' (moderate dataset), 'large' (extensive data)"
+          },
+          "timeConstraint": {
+            "type": "string",
+            "enum": ["quick", "detailed"],
+            "description": "Time available: 'quick' (fast overview), 'detailed' (deep analysis)"
+          },
+          "userRole": {
+            "type": "string",
+            "enum": ["viewer", "editor", "admin"],
+            "description": "User's role: 'viewer' (read-only), 'editor' (can modify), 'admin' (full access)"
+          }
+        }
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Enable smooth animated transitions for layout changes (default: true)",
+        "default": true
+      }
+    },
+    "required": ["intent"]
+  }
+}

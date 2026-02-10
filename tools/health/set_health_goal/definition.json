@@ -1,0 +1,40 @@
+{
+  "function_name": "set_health_goal",
+  "description": "Set health and fitness goals like target weight, daily steps, exercise minutes, or calorie intake",
+  "category": "health",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "goal_type": {
+        "type": "string",
+        "enum": [
+          "weight",
+          "steps",
+          "active_minutes",
+          "calories_burned",
+          "exercise_days",
+          "heart_rate",
+          "body_fat"
+        ],
+        "description": "Type of health goal to set"
+      },
+      "target_value": {
+        "type": "number",
+        "description": "Target value for the goal"
+      },
+      "current_value": {
+        "type": "number",
+        "description": "Current value (optional, will be fetched from latest metrics if not provided)"
+      },
+      "deadline": {
+        "type": "string",
+        "description": "Deadline to achieve the goal (YYYY-MM-DD format, optional)"
+      },
+      "notes": {
+        "type": "string",
+        "description": "Additional notes or motivation for the goal"
+      }
+    },
+    "required": ["goal_type", "target_value"]
+  }
+}

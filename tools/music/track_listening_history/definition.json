@@ -1,0 +1,29 @@
+{
+  "id": "track_listening_history",
+  "name": "Track Listening History",
+  "category": "music",
+  "description": "Get your recently played tracks and listening history from Spotify. See what you've been listening to and when.\n\nYou can:\n- View recently played tracks\n- Filter by date range\n- See play timestamps\n- Get track and artist information\n- Track listening patterns\n\nRequires Spotify API credentials via OAuth.\n\n** WHEN TO USE **\n- User asks for \"recently played\" or \"listening history\"\n- User wants to see what they played\n- User wants to recall a song they heard recently\n- User wants to analyze their listening habits\n\n** WHEN NOT TO USE **\n- User wants to search for music (use search_music)\n- User wants recommendations (use get_music_recommendations)\n- User wants to play a track (use play_track)\n\n** EXAMPLES **\n\n1. Get last 20 played tracks:\n{\n  \"limit\": 20\n}\n\n2. Get recently played with timestamp filtering:\n{\n  \"limit\": 50,\n  \"after_timestamp\": 1699000000000\n}",
+  "function_name": "track_listening_history",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "limit": {
+        "type": "number",
+        "description": "Number of recently played tracks to return (1-50, default: 20)",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 20
+      },
+      "after_timestamp": {
+        "type": "number",
+        "description": "Unix timestamp in milliseconds - only get tracks played after this time"
+      },
+      "before_timestamp": {
+        "type": "number",
+        "description": "Unix timestamp in milliseconds - only get tracks played before this time"
+      }
+    }
+  }
+}

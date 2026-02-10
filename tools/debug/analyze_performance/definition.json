@@ -1,0 +1,22 @@
+{
+  "id": "analyze_performance",
+  "name": "Analyze Performance",
+  "description": "Profile conversation performance and identify bottlenecks. Analyzes tool execution times, token efficiency, and provides optimization recommendations.",
+  "category": "debug",
+  "function_name": "analyze_performance",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "conversation_id": {
+        "type": "string",
+        "description": "Conversation ID to analyze"
+      },
+      "user_id": {
+        "type": "string",
+        "description": "User ID who owns the conversation"
+      }
+    },
+    "required": ["conversation_id", "user_id"]
+  },
+  "version": "1.0.0"
+}

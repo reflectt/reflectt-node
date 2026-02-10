@@ -1,0 +1,43 @@
+{
+  "function_name": "log_exercise",
+  "description": "Log a completed exercise with sets, reps, weight, and performance notes",
+  "category": "fitness",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "exercise_name": {
+        "type": "string",
+        "description": "Name of the exercise"
+      },
+      "exercise_id": {
+        "type": "string",
+        "description": "ExerciseDB ID (optional, will search by name if not provided)"
+      },
+      "sets": {
+        "type": "number",
+        "description": "Number of sets completed"
+      },
+      "reps": {
+        "type": "number",
+        "description": "Repetitions per set"
+      },
+      "weight_kg": {
+        "type": "number",
+        "description": "Weight used in kilograms"
+      },
+      "duration_seconds": {
+        "type": "number",
+        "description": "Duration of the exercise (for timed exercises)"
+      },
+      "notes": {
+        "type": "string",
+        "description": "Performance notes or feedback"
+      },
+      "workout_id": {
+        "type": "string",
+        "description": "ID of the workout this exercise belongs to (optional)"
+      }
+    },
+    "required": ["exercise_name"]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "function_name": "create_content",
+  "description": "Create new content for social media and publishing platforms",
+  "category": "content",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "description": "Content title or headline"
+      },
+      "body": {
+        "type": "string",
+        "description": "Main content body/text"
+      },
+      "media_urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "URLs of media assets (images, videos)"
+      },
+      "tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Tags/hashtags for the content"
+      },
+      "platform": {
+        "type": "string",
+        "enum": ["twitter", "instagram", "facebook", "blog", "newsletter"],
+        "description": "Target platform for content"
+      }
+    },
+    "required": ["title", "body", "platform"]
+  }
+}

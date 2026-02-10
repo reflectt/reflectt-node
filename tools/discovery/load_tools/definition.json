@@ -1,0 +1,36 @@
+{
+  "id": "load_tools",
+  "name": "Load Tools",
+  "description": "Load full tool definitions for specified tools, making them available in the current conversation. Use search_tools first to find relevant tools. The loaded tools will be injected into the system and available for immediate use.",
+  "category": "discovery",
+  "function_name": "load_tools",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "tool_names"
+    ],
+    "properties": {
+      "tool_names": {
+        "type": "array",
+        "description": "Array of tool names to load (e.g., ['read_file', 'write_file', 'execute_task'])",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 1,
+        "maxItems": 50
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "tool_names": ["read_file", "write_file"]
+    },
+    {
+      "tool_names": ["chat_with_agent", "execute_task", "create_workflow"]
+    }
+  ],
+  "tags": ["discovery", "tools", "loading"],
+  "version": "1.0.0",
+  "dependencies": []
+}

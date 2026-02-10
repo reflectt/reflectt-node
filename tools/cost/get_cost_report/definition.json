@@ -1,0 +1,45 @@
+{
+  "id": "get_cost_report",
+  "name": "get_cost_report",
+  "description": "Generate a detailed cost report for a specified time period. Shows total spending, breakdown by agent and conversation type, top expenses, and cost trends. Perfect for understanding where AI costs are going.",
+  "category": "cost",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to generate report for (optional - defaults to current user)"
+      },
+      "date_from": {
+        "type": "string",
+        "description": "Start date in YYYY-MM-DD format (default: 30 days ago)"
+      },
+      "date_to": {
+        "type": "string",
+        "description": "End date in YYYY-MM-DD format (default: today)"
+      },
+      "group_by": {
+        "type": "string",
+        "enum": [
+          "day",
+          "week",
+          "agent",
+          "type"
+        ],
+        "description": "How to group the cost data (optional)"
+      },
+      "include_breakdown": {
+        "type": "boolean",
+        "description": "Include detailed breakdown by agent and type (default: true)",
+        "default": true
+      },
+      "include_trends": {
+        "type": "boolean",
+        "description": "Include trend analysis vs previous period (default: true)",
+        "default": true
+      }
+    },
+    "required": []
+  },
+  "function_name": "get_cost_report"
+}

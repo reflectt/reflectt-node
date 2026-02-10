@@ -1,0 +1,44 @@
+{
+  "id": "get_entertainment_recommendations",
+  "name": "Get Entertainment Recommendations",
+  "category": "entertainment",
+  "description": "Get personalized entertainment recommendations for movies and TV shows. Discover content based on your favorites or preferred genres.\n\nYou can:\n- Get recommendations based on a specific movie/show\n- Get recommendations by genre\n- Discover similar content\n- Filter by ratings and popularity\n- Get multiple recommendations\n\nUses TMDB recommendation engine.\n\n** WHEN TO USE **\n- User asks for \"recommendations\"\n- User wants movies \"similar to\" something\n- User wants to discover new content by genre\n- User wants personalized suggestions\n\n** WHEN NOT TO USE **\n- User wants to search for specific content (use search_movies)\n- User wants detailed info (use get_movie_details)\n- User wants trending content (use get_trending)\n\n** EXAMPLES **\n\n1. Get recommendations based on a movie:\n{\n  \"based_on_content_id\": \"278\",\n  \"content_type\": \"movie\",\n  \"limit\": 20\n}\n\n2. Get recommendations by genres:\n{\n  \"genres\": [\"action\", \"thriller\"],\n  \"limit\": 15\n}\n\n3. Get similar shows:\n{\n  \"based_on_content_id\": \"1399\",\n  \"content_type\": \"tv\",\n  \"limit\": 10\n}",
+  "function_name": "get_entertainment_recommendations",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "based_on_content_id": {
+        "type": "string",
+        "description": "TMDB ID of movie/show to get recommendations for"
+      },
+      "content_type": {
+        "type": "string",
+        "enum": ["movie", "tv"],
+        "description": "Type of content (movie or tv show)",
+        "default": "movie"
+      },
+      "genres": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of genre names to filter by (e.g., ['action', 'thriller'])"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Number of recommendations to return (1-20, default: 10)",
+        "minimum": 1,
+        "maximum": 20,
+        "default": 10
+      },
+      "min_rating": {
+        "type": "number",
+        "description": "Minimum vote average (0-10)",
+        "minimum": 0,
+        "maximum": 10
+      }
+    }
+  }
+}

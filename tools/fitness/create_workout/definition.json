@@ -1,0 +1,63 @@
+{
+  "function_name": "create_workout",
+  "description": "Create a new workout plan or template with exercises, sets, reps, and rest periods",
+  "category": "fitness",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Name of the workout (e.g., 'Push Day', 'Full Body')"
+      },
+      "workout_type": {
+        "type": "string",
+        "enum": ["template", "completed"],
+        "description": "Whether this is a template or a completed workout"
+      },
+      "exercises": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "exercise_id": { "type": "string" },
+            "name": { "type": "string" },
+            "sets": { "type": "number" },
+            "reps": { "type": "number" },
+            "weight_kg": { "type": "number" },
+            "duration_seconds": { "type": "number" },
+            "rest_seconds": { "type": "number" }
+          }
+        },
+        "description": "List of exercises in the workout"
+      },
+      "description": {
+        "type": "string",
+        "description": "Description of the workout"
+      },
+      "tags": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Tags to categorize the workout (e.g., 'strength', 'cardio', 'beginner')"
+      },
+      "auto_generate": {
+        "type": "boolean",
+        "description": "If true, auto-generate workout from preferences"
+      },
+      "body_parts": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Body parts to target (for auto-generation)"
+      },
+      "duration_minutes": {
+        "type": "number",
+        "description": "Target workout duration (for auto-generation)"
+      },
+      "equipment": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Available equipment (for auto-generation)"
+      }
+    },
+    "required": ["name"]
+  }
+}

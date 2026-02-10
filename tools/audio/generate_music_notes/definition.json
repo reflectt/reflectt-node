@@ -1,0 +1,117 @@
+{
+  "id": "generate_music_notes",
+  "name": "Generate Music Notes",
+  "description": "Generate musical instrument sounds with specified notes, chords, and rhythm. Creates audio files of instruments playing note sequences. Perfect for creating background music, melodies, chord progressions, and instrumental backing tracks.",
+  "category": "audio",
+  "function_name": "generate_music_notes",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "instrument": {
+        "type": "string",
+        "enum": [
+          "piano",
+          "guitar",
+          "bass",
+          "drums",
+          "synth",
+          "strings",
+          "brass",
+          "woodwind"
+        ],
+        "description": "Instrument type to generate sounds for"
+      },
+      "notes": {
+        "type": "array",
+        "description": "Array of notes to play. Each note can be a string like 'C4', 'D#5', 'F3' (note + octave) or a chord like ['C4', 'E4', 'G4']",
+        "items": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-G](#|b)?[0-8]$",
+              "description": "Single note with octave (e.g., 'C4', 'F#5', 'Bb3')"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-G](#|b)?[0-8]$"
+              },
+              "description": "Chord as array of notes"
+            }
+          ]
+        }
+      },
+      "durations": {
+        "type": "array",
+        "description": "Duration of each note in beats (e.g., [1, 0.5, 0.5, 2]). If omitted, all notes are 1 beat. Array length must match notes array.",
+        "items": {
+          "type": "number",
+          "minimum": 0.125,
+          "maximum": 8
+        }
+      },
+      "tempo": {
+        "type": "number",
+        "description": "Tempo in BPM (beats per minute). Default: 120",
+        "minimum": 40,
+        "maximum": 240,
+        "default": 120
+      },
+      "volume": {
+        "type": "number",
+        "description": "Volume level (0.0 to 1.0). Default: 0.8",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.8
+      },
+      "repeat": {
+        "type": "number",
+        "description": "Number of times to repeat the sequence. Default: 1",
+        "minimum": 1,
+        "maximum": 16,
+        "default": 1
+      },
+      "output_filename": {
+        "type": "string",
+        "description": "Custom filename (without extension). Auto-generated if not provided.",
+        "pattern": "^[a-zA-Z0-9_-]+$"
+      }
+    },
+    "required": ["instrument", "notes"]
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "description": "Generate a simple C major chord progression",
+      "input": {
+        "instrument": "piano",
+        "notes": [["C4", "E4", "G4"], ["F4", "A4", "C5"], ["G4", "B4", "D5"], ["C4", "E4", "G4"]],
+        "durations": [2, 2, 2, 4],
+        "tempo": 100
+      }
+    },
+    {
+      "description": "Generate a bass line",
+      "input": {
+        "instrument": "bass",
+        "notes": ["C2", "C2", "G2", "G2", "A2", "A2", "F2", "F2"],
+        "durations": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5],
+        "tempo": 120,
+        "repeat": 4
+      }
+    },
+    {
+      "description": "Generate a drum beat",
+      "input": {
+        "instrument": "drums",
+        "notes": ["C2", "D2", "C2", "D2"],
+        "durations": [0.5, 0.5, 0.5, 0.5],
+        "tempo": 140,
+        "repeat": 8
+      }
+    }
+  ],
+  "tags": ["audio", "music", "generation", "instrument", "notes", "composition"],
+  "version": "1.0.0"
+}

@@ -1,0 +1,61 @@
+{
+  "id": "search_news",
+  "name": "Search News Articles",
+  "category": "news",
+  "description": "Search news articles using NewsAPI. Use this to find articles by keyword, date range, source, or domain.\n\nYou can:\n- Search articles by keyword or phrase\n- Filter by date range (from/to)\n- Filter by news sources or domains\n- Sort by relevancy, popularity, or date\n- Search in specific language\n\nUses NewsAPI.org (100 requests/day limit on free tier).\nCache: Articles are cached for 24 hours to conserve API quota.\n\n** WHEN TO USE **\n- User wants to search for specific topic or keyword\n- User wants news from specific date range\n- User wants news from specific sources/domains\n- User needs historical news articles\n\n** WHEN NOT TO USE **\n- User wants latest/breaking news (use get_headlines)\n- User wants unlimited RSS feeds (use get_rss_feed)\n- User just wants general headlines (use get_headlines)\n\n** EXAMPLES **\n\n1. Search for topic:\n{\n  \"q\": \"climate change\",\n  \"sortBy\": \"relevancy\",\n  \"pageSize\": 20\n}\n\n2. Search with date range:\n{\n  \"q\": \"cryptocurrency\",\n  \"from\": \"2025-01-01\",\n  \"to\": \"2025-01-31\",\n  \"sortBy\": \"publishedAt\"\n}\n\n3. Search specific domains:\n{\n  \"q\": \"artificial intelligence\",\n  \"domains\": \"techcrunch.com,wired.com\",\n  \"sortBy\": \"popularity\"\n}",
+  "function_name": "search_news",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["q"],
+    "properties": {
+      "q": {
+        "type": "string",
+        "description": "Search query (keywords or phrases to search for)"
+      },
+      "from": {
+        "type": "string",
+        "description": "Start date (YYYY-MM-DD format, e.g., '2025-01-01')"
+      },
+      "to": {
+        "type": "string",
+        "description": "End date (YYYY-MM-DD format, e.g., '2025-01-31')"
+      },
+      "language": {
+        "type": "string",
+        "description": "Language code (e.g., 'en', 'es', 'fr')"
+      },
+      "sortBy": {
+        "type": "string",
+        "enum": ["relevancy", "popularity", "publishedAt"],
+        "description": "Sort order (default: publishedAt)",
+        "default": "publishedAt"
+      },
+      "pageSize": {
+        "type": "number",
+        "description": "Number of results to return (1-100, default: 20)",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 20
+      },
+      "page": {
+        "type": "number",
+        "description": "Page number for pagination (default: 1)",
+        "minimum": 1,
+        "default": 1
+      },
+      "sources": {
+        "type": "string",
+        "description": "Comma-separated list of news source IDs (e.g., 'techcrunch,wired')"
+      },
+      "domains": {
+        "type": "string",
+        "description": "Comma-separated list of domains (e.g., 'bbc.co.uk,techcrunch.com')"
+      },
+      "excludeDomains": {
+        "type": "string",
+        "description": "Comma-separated list of domains to exclude"
+      }
+    }
+  }
+}

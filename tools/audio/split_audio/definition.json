@@ -1,0 +1,92 @@
+{
+  "id": "split_audio",
+  "name": "Split Audio",
+  "description": "Split audio files by silence, duration, or specific timestamps using ffmpeg. Perfect for breaking up long recordings, extracting segments, or creating clips. Fast local processing with no API costs.",
+  "category": "audio",
+  "function_name": "split_audio",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "audio_source",
+      "split_method"
+    ],
+    "properties": {
+      "audio_source": {
+        "type": "string",
+        "description": "File path to audio file"
+      },
+      "split_method": {
+        "type": "string",
+        "enum": [
+          "silence",
+          "duration",
+          "timestamps"
+        ],
+        "description": "Method to use for splitting"
+      },
+      "silence_threshold": {
+        "type": "number",
+        "default": -40,
+        "description": "Silence threshold in dB (for silence method)"
+      },
+      "silence_duration": {
+        "type": "number",
+        "default": 1,
+        "description": "Minimum silence duration in seconds (for silence method)"
+      },
+      "segment_duration": {
+        "type": "number",
+        "description": "Duration per segment in seconds (for duration method)"
+      },
+      "timestamps": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "start": {
+              "type": "number",
+              "description": "Start time in seconds"
+            },
+            "end": {
+              "type": "number",
+              "description": "End time in seconds"
+            },
+            "name": {
+              "type": "string",
+              "description": "Optional segment name"
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ]
+        },
+        "description": "Specific timestamps to split at (for timestamps method)"
+      },
+      "output_directory": {
+        "type": "string",
+        "description": "Directory to save segments. Defaults to storage/audio/segments/"
+      },
+      "output_format": {
+        "type": "string",
+        "description": "Output format (default: same as input)"
+      },
+      "preserve_quality": {
+        "type": "boolean",
+        "default": true,
+        "description": "Use lossless encoding to preserve quality"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "audio",
+    "split",
+    "segment",
+    "ffmpeg",
+    "editing"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

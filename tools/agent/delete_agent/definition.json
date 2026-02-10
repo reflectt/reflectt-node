@@ -1,0 +1,45 @@
+{
+  "name": "delete_agent",
+  "description": "Delete an agent from the file system. Can optionally delete all associated tasks. Supports both space-specific and global scopes.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "agent_id": {
+        "type": "string",
+        "description": "Agent ID (e.g., 'budget_tracker'). Will search all domains if slug not provided.",
+        "pattern": "^[a-z_]+$"
+      },
+      "slug": {
+        "type": "string",
+        "description": "Agent slug in format domain:agent_id (e.g., 'finance:budget_tracker'). Takes precedence over agent_id.",
+        "pattern": "^[a-z]+:[a-z_]+$"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Target a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "space",
+          "global"
+        ],
+        "description": "Where to delete the agent from: 'space' (default) or 'global'",
+        "default": "space"
+      },
+      "delete_tasks": {
+        "type": "boolean",
+        "description": "Whether to also delete all tasks associated with this agent (default: false)",
+        "default": false
+      }
+    }
+  },
+  "function_name": "delete_agent",
+  "id": "delete_agent",
+  "category": "agent",
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,29 @@
+{
+  "function_name": "track_progress",
+  "description": "Track fitness progress over time for specific exercises, showing strength gains and performance improvements",
+  "category": "fitness",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "exercise_name": {
+        "type": "string",
+        "description": "Name of the exercise to track (optional, tracks all if not provided)"
+      },
+      "metric": {
+        "type": "string",
+        "enum": ["weight", "reps", "volume", "frequency", "duration"],
+        "description": "Metric to track (defaults to 'weight')"
+      },
+      "period": {
+        "type": "string",
+        "enum": ["week", "month", "3months", "year", "all"],
+        "description": "Time period to analyze (defaults to '3months')"
+      },
+      "include_chart_data": {
+        "type": "boolean",
+        "description": "If true, include data formatted for charting"
+      }
+    },
+    "required": []
+  }
+}

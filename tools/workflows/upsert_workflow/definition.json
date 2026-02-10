@@ -1,0 +1,56 @@
+{
+  "id": "upsert_workflow",
+  "name": "Create Workflow",
+  "description": "Create a workflow definition with steps in dependency tree format",
+  "category": "workflows",
+  "function_name": "upsert_workflow",
+  "parameters": {
+    "type": "object",
+    "required": ["id", "name", "description", "steps"],
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^[a-z0-9_-]+$",
+        "description": "Unique workflow identifier"
+      },
+      "name": {
+        "type": "string",
+        "description": "Human-readable workflow name"
+      },
+      "description": {
+        "type": "string",
+        "description": "What this workflow does"
+      },
+      "steps": {
+        "type": "array",
+        "description": "Array of workflow steps",
+        "items": {
+          "type": "object",
+          "required": ["id", "agent", "task", "depends_on", "inputs", "error_handling"],
+          "properties": {
+            "id": {"type": "string"},
+            "agent": {"type": "string"},
+            "task": {"type": "string"},
+            "depends_on": {"type": "array", "items": {"type": "string"}},
+            "inputs": {"type": "object"},
+            "error_handling": {"type": "string", "enum": ["fail", "continue", "retry"]},
+            "max_retries": {"type": "number"}
+          }
+        }
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space"
+      },
+      "tags": {
+        "type": "array",
+        "items": {"type": "string"}
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["workflow", "orchestration"],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,18 @@
+{
+  "id": "get_visual_hierarchy",
+  "name": "Get Visual Hierarchy",
+  "category": "ui",
+  "description": "Get visual hierarchy of all components showing what's in which slot, z-index stacking, visibility status, dimensions, and overlapping detection. Useful for debugging layout issues, understanding component placement, and identifying rendering problems.",
+  "function_name": "get_visual_hierarchy",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "includeHidden": {
+        "type": "boolean",
+        "description": "Include hidden slots and components in the hierarchy. Default: false (only show visible slots)",
+        "default": false
+      }
+    }
+  }
+}

@@ -1,0 +1,174 @@
+{
+  "name": "create_nested_layout",
+  "description": "Create a layout within another layout (nested/composite layouts). Enables complex multi-level UI structures like tabs inside dashboard cells, split views with tabs, accordions with splits, etc. Use this when you need to combine multiple layout patterns.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "parentSlot": {
+        "type": "string",
+        "enum": ["primary", "secondary", "sidebar"],
+        "description": "The parent slot to mount the nested layout in"
+      },
+      "nestedMode": {
+        "type": "string",
+        "enum": [
+          "tabs",
+          "accordion",
+          "split",
+          "dashboard",
+          "master-detail",
+          "board",
+          "feed",
+          "three-column",
+          "app-shell",
+          "standard"
+        ],
+        "description": "The layout mode for the nested layout"
+      },
+      "label": {
+        "type": "string",
+        "description": "Optional label for the nested layout container"
+      },
+      "configuration": {
+        "type": "object",
+        "description": "Configuration for the nested layout",
+        "properties": {
+          "tabsConfig": {
+            "type": "object",
+            "description": "Configuration for tabs mode",
+            "properties": {
+              "tabs": {
+                "type": "array",
+                "description": "Tab definitions",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "description": "Tab label"
+                    },
+                    "icon": {
+                      "type": "string",
+                      "description": "Optional emoji or icon"
+                    },
+                    "slot": {
+                      "type": "string",
+                      "enum": ["primary", "secondary", "sidebar"],
+                      "description": "Which slot to render in this tab"
+                    }
+                  },
+                  "required": ["label", "slot"]
+                }
+              },
+              "position": {
+                "type": "string",
+                "enum": ["top", "left", "bottom"],
+                "description": "Tab bar position",
+                "default": "top"
+              }
+            },
+            "required": ["tabs"]
+          },
+          "accordionConfig": {
+            "type": "object",
+            "description": "Configuration for accordion mode",
+            "properties": {
+              "sections": {
+                "type": "array",
+                "description": "Accordion section definitions",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string",
+                      "description": "Section title"
+                    },
+                    "icon": {
+                      "type": "string",
+                      "description": "Optional emoji or icon"
+                    },
+                    "slot": {
+                      "type": "string",
+                      "enum": ["primary", "secondary", "sidebar"],
+                      "description": "Which slot to render in this section"
+                    },
+                    "expanded": {
+                      "type": "boolean",
+                      "description": "Whether section is initially expanded",
+                      "default": false
+                    }
+                  },
+                  "required": ["title", "slot"]
+                }
+              },
+              "allowMultiple": {
+                "type": "boolean",
+                "description": "Allow multiple sections to be open simultaneously",
+                "default": false
+              }
+            },
+            "required": ["sections"]
+          },
+          "splitRatio": {
+            "type": "number",
+            "description": "Split ratio for split mode (0.0 to 1.0)",
+            "minimum": 0.1,
+            "maximum": 0.9,
+            "default": 0.5
+          }
+        }
+      },
+      "template": {
+        "type": "string",
+        "enum": [
+          "tabbedDashboard",
+          "splitWithTabs",
+          "accordionWithSplits",
+          "dashboardInTab",
+          "masterDetailWithTabs"
+        ],
+        "description": "Pre-configured nested layout template (alternative to manual configuration)"
+      },
+      "templateConfig": {
+        "type": "object",
+        "description": "Configuration for the selected template",
+        "properties": {
+          "tabLabels": {
+            "type": "array",
+            "description": "Tab labels for tabbed templates",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sectionTitles": {
+            "type": "array",
+            "description": "Section titles for accordion templates",
+            "items": {
+              "type": "string"
+            }
+          },
+          "leftLabel": {
+            "type": "string",
+            "description": "Label for left pane in split templates"
+          },
+          "rightTabLabels": {
+            "type": "array",
+            "description": "Tab labels for right pane in split templates",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "required": ["parentSlot"],
+    "oneOf": [
+      {
+        "required": ["nestedMode", "configuration"]
+      },
+      {
+        "required": ["template"]
+      }
+    ]
+  }
+}

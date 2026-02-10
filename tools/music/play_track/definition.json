@@ -1,0 +1,27 @@
+{
+  "id": "play_track",
+  "name": "Play Track",
+  "category": "music",
+  "description": "Play a track on your active Spotify device. Control playback and get now-playing information.\n\nYou can:\n- Play a specific track by URI or ID\n- Get current playback state\n- See what's currently playing\n- Control device playback\n\nRequires Spotify Premium and an active device.\nRequires Spotify API credentials via OAuth.\n\n** WHEN TO USE **\n- User asks to \"play [song name]\"\n- User wants to start playback\n- User wants to know what's currently playing\n- User wants playback control\n\n** WHEN NOT TO USE **\n- User wants to search for music (use search_music)\n- User wants recommendations (use get_music_recommendations)\n- User wants to create a playlist (use create_playlist)\n\n** EXAMPLES **\n\n1. Play a specific track:\n{\n  \"track_id\": \"3n3Ppam7vgaVa1iaRUc9Lp\"\n}\n\n2. Play and get now playing info:\n{\n  \"track_id\": \"3n3Ppam7vgaVa1iaRUc9Lp\",\n  \"include_now_playing\": true\n}",
+  "function_name": "play_track",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["track_id"],
+    "properties": {
+      "track_id": {
+        "type": "string",
+        "description": "Spotify track ID or URI (e.g., '3n3Ppam7vgaVa1iaRUc9Lp' or 'spotify:track:3n3Ppam7vgaVa1iaRUc9Lp')"
+      },
+      "device_id": {
+        "type": "string",
+        "description": "Target device ID. If not specified, plays on currently active device"
+      },
+      "include_now_playing": {
+        "type": "boolean",
+        "description": "Include now playing information in response (default: true)",
+        "default": true
+      }
+    }
+  }
+}

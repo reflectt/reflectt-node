@@ -1,0 +1,69 @@
+{
+  "id": "upsert_record",
+  "name": "Save Record",
+  "description": "Save a structured record to a table in a space. Enforces database-like structure with tables/[table-name]/schema.json and tables/[table-name]/rows/[row-id].json. Auto-generates schema on first record. Mimics PostgreSQL table structure for structured data.",
+  "category": "data",
+  "function_name": "upsert_record",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "table",
+      "record"
+    ],
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'worlds', 'users')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "record": {
+        "type": "object",
+        "description": "Record data as JSON object. Will auto-add 'id', 'created_at', 'updated_at' if missing."
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Save to a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Save a story record with metadata",
+      "parameters": {
+        "table": "stories",
+        "record": {
+          "title": "The Time Traveler",
+          "author": "AI Writer",
+          "genre": "sci-fi",
+          "word_count": 1500,
+          "storage_path": "storage/stories/time-traveler.md"
+        },
+        "target_space": "creative"
+      },
+      "expected_result": "Record saved to tables/stories/rows/[uuid].json with auto-generated ID and timestamps. Schema created if first record."
+    },
+    {
+      "scenario": "Save a character record",
+      "parameters": {
+        "table": "characters",
+        "record": {
+          "name": "Sarah Chen",
+          "age": 35,
+          "occupation": "Physicist",
+          "traits": ["intelligent", "curious", "cautious"]
+        }
+      },
+      "expected_result": "Record saved to tables/characters/rows/[uuid].json in current space"
+    }
+  ],
+  "tags": [
+    "database",
+    "record",
+    "table",
+    "save",
+    "structured-data"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

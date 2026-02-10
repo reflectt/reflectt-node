@@ -1,0 +1,38 @@
+{
+  "id": "get_tool_implementation",
+  "name": "Get Tool Implementation",
+  "description": "Get a tool's TypeScript implementation file content. Returns the source code, file path, and metadata for a tool's implementation.",
+  "category": "tools",
+  "function_name": "get_tool_implementation",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tool_name": {
+        "type": "string",
+        "description": "The function_name of the tool to get implementation for"
+      },
+      "category": {
+        "type": "string",
+        "description": "Tool category (data, agent, task, time, web, tools, workflows, storage, etc.)"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space for space-specific tools"
+      }
+    },
+    "required": [
+      "tool_name",
+      "category"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "tools",
+    "read",
+    "implementation",
+    "source-code"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

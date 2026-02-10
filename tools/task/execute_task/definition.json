@@ -1,0 +1,98 @@
+{
+  "id": "execute_task",
+  "name": "Execute Task",
+  "description": "Execute a task for an agent. The task must exist in data/agents/<agent-name>/tasks/<task-name>/. This allows agents to coordinate and break down complex work. Phase 2: Now routes through chat_with_agent for clean dependency chain.",
+  "category": "task",
+  "function_name": "execute_task",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "agent_name",
+      "task_name"
+    ],
+    "properties": {
+      "agent_name": {
+        "type": "string",
+        "description": "Name of the agent to execute the task (e.g., \"general\", \"sales_agent\", \"developer\")"
+      },
+      "task_name": {
+        "type": "string",
+        "description": "Name of the task file without .json (e.g., \"create-capability\")"
+      },
+      "input": {
+        "type": "object",
+        "description": "Optional input data for the task (task-specific parameters, data to process, etc.)"
+      },
+      "context": {
+        "type": "object",
+        "description": "Optional context from workflow or caller (workflow variables, user preferences, session data, etc.)"
+      },
+      "conversation_history": {
+        "type": "array",
+        "description": "Optional array of previous messages for multi-turn task execution",
+        "items": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "role",
+            "content"
+          ]
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Delegate data analysis to specialized agent",
+      "parameters": {
+        "agent_name": "data_analyst",
+        "task_name": "analyze-sales-trends"
+      },
+      "expected_result": "Task is executed by the data_analyst agent and results are returned"
+    },
+    {
+      "scenario": "Execute task with workflow context",
+      "parameters": {
+        "agent_name": "finance_tracker",
+        "task_name": "analyze-expenses",
+        "input": {
+          "month": "2025-10"
+        },
+        "context": {
+          "user_id": "123",
+          "budget_limit": 5000
+        }
+      },
+      "expected_result": "Task receives workflow variables via context and uses them during execution"
+    }
+  ],
+  "tags": [
+    "agent",
+    "task",
+    "delegate",
+    "coordination",
+    "workflow"
+  ],
+  "version": "2.0.0",
+  "dependencies": [
+    "chat_with_agent",
+    "create_task_run",
+    "start_task_run",
+    "complete_task_run",
+    "fail_task_run",
+    "record_tool_use",
+    "get_task_run_stats"
+  ],
+  "use_tool_context": true
+}

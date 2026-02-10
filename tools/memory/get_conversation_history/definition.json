@@ -1,0 +1,43 @@
+{
+  "id": "get_conversation_history",
+  "name": "get_conversation_history",
+  "description": "Retrieve a user's conversation history to understand context and patterns across sessions.",
+  "category": "memory",
+  "function_name": "get_conversation_history",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Unique identifier for the user",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of recent entries to retrieve (default: 20)",
+        "default": 20
+      },
+      "filter_intent": {
+        "type": "string",
+        "description": "Optional: Filter by specific intent"
+      },
+      "filter_agent": {
+        "type": "string",
+        "description": "Optional: Filter by agent used"
+      }
+    },
+    "required": [
+      "user_id"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "memory",
+    "conversation",
+    "history",
+    "context"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

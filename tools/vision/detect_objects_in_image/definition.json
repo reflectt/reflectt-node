@@ -1,0 +1,96 @@
+{
+  "id": "detect_objects_in_image",
+  "name": "Detect Objects in Image",
+  "description": "Detect and identify objects, people, animals, and items in an image. Returns a structured list of detected objects with descriptions and locations when possible.",
+  "category": "vision",
+  "function_name": "detect_objects_in_image",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "image_source"
+    ],
+    "properties": {
+      "image_source": {
+        "type": "string",
+        "description": "Image source - can be a URL, base64 encoded image data, or file path"
+      },
+      "image_type": {
+        "type": "string",
+        "enum": ["url", "base64", "file_path"],
+        "default": "url",
+        "description": "Type of image source provided"
+      },
+      "media_type": {
+        "type": "string",
+        "enum": ["image/jpeg", "image/png", "image/gif", "image/webp"],
+        "default": "image/jpeg",
+        "description": "MIME type of the image"
+      },
+      "object_types": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional: Specific types of objects to detect (e.g., ['people', 'vehicles', 'animals']). If not provided, detects all objects."
+      },
+      "include_locations": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to include relative locations/positions of detected objects"
+      },
+      "min_confidence": {
+        "type": "string",
+        "enum": ["low", "medium", "high"],
+        "default": "medium",
+        "description": "Minimum confidence level for object detection"
+      },
+      "max_tokens": {
+        "type": "number",
+        "default": 1024,
+        "description": "Maximum tokens for the response"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Detect all objects in a room",
+      "parameters": {
+        "image_source": "https://example.com/room.jpg",
+        "image_type": "url",
+        "include_locations": true
+      },
+      "expected_result": "Returns list of detected objects with their locations"
+    },
+    {
+      "scenario": "Count people in an image",
+      "parameters": {
+        "image_source": "https://example.com/crowd.jpg",
+        "image_type": "url",
+        "object_types": ["people", "person"]
+      },
+      "expected_result": "Returns list of detected people"
+    },
+    {
+      "scenario": "Detect vehicles in parking lot",
+      "parameters": {
+        "image_source": "/path/to/parking.png",
+        "image_type": "file_path",
+        "media_type": "image/png",
+        "object_types": ["car", "truck", "vehicle"],
+        "min_confidence": "high"
+      },
+      "expected_result": "Returns high-confidence vehicle detections"
+    }
+  ],
+  "tags": [
+    "vision",
+    "object-detection",
+    "image",
+    "ai",
+    "claude",
+    "recognition",
+    "identification"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

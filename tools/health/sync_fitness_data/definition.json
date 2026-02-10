@@ -1,0 +1,40 @@
+{
+  "function_name": "sync_fitness_data",
+  "description": "Synchronize fitness and health data from connected devices like Fitbit, Apple Health, or Google Fit",
+  "category": "health",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "source": {
+        "type": "string",
+        "enum": ["fitbit", "apple_health", "google_fit"],
+        "description": "Fitness data source to sync from"
+      },
+      "data_types": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "activity",
+            "heart_rate",
+            "sleep",
+            "weight",
+            "body_fat",
+            "nutrition",
+            "all"
+          ]
+        },
+        "description": "Types of data to sync (defaults to 'all')"
+      },
+      "date": {
+        "type": "string",
+        "description": "Date to sync data for (YYYY-MM-DD, defaults to today)"
+      },
+      "full_sync": {
+        "type": "boolean",
+        "description": "If true, sync all historical data (may take longer)"
+      }
+    },
+    "required": ["source"]
+  }
+}

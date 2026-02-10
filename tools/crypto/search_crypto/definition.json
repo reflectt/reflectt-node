@@ -1,0 +1,18 @@
+{
+  "id": "search_crypto",
+  "name": "Search Crypto",
+  "category": "crypto",
+  "description": "Search for cryptocurrencies by name or symbol.\n\nReturns list of matching cryptocurrencies with IDs, names, symbols, and market cap ranks.\n\nUseful for:\n- Finding cryptocurrency IDs from names\n- Discovering new cryptocurrencies\n- Researching market sectors\n\nData is cached for 24 hours.\n\n** EXAMPLES **\n\n1. Search for Bitcoin:\n{\n  \"query\": \"Bitcoin\"\n}\n\n2. Search for Ethereum:\n{\n  \"query\": \"Ethereum\"\n}\n\n3. Search for altcoins by symbol:\n{\n  \"query\": \"DOGE\"\n}",
+  "function_name": "search_crypto",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Cryptocurrency name, symbol, or keyword"
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "fill_form",
+  "name": "Fill Form",
+  "category": "ui",
+  "description": "Fill out form fields in a form-builder or other form component. Provide field name-value mappings and optionally submit the form. Supports text inputs, textareas, select dropdowns, checkboxes, and radio buttons.",
+  "function_name": "fill_form",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The ID of the form component (e.g., 'contact-form', 'user-settings'). This is the module ID assigned when the component was rendered."
+      },
+      "fields": {
+        "type": "object",
+        "description": "Field name to value mapping. Keys are field names (or data-field attributes), values are the data to fill. Example: { \"email\": \"user@example.com\", \"age\": \"25\", \"subscribe\": true }",
+        "additionalProperties": true
+      },
+      "submit": {
+        "type": "boolean",
+        "description": "Whether to submit the form after filling fields (default: false). If true, looks for submit button or triggers form submission.",
+        "default": false
+      }
+    },
+    "required": ["componentId", "fields"]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "function_name": "archive_content",
+  "description": "Archive old or inactive content for storage",
+  "category": "content",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "content_ids": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of content IDs to archive"
+      },
+      "date_range": {
+        "type": "object",
+        "description": "Archive all content within date range",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "description": "ISO 8601 start date"
+          },
+          "end_date": {
+            "type": "string",
+            "description": "ISO 8601 end date"
+          }
+        }
+      }
+    }
+  }
+}

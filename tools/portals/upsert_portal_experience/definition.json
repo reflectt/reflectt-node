@@ -1,0 +1,100 @@
+{
+  "id": "upsert_portal_experience",
+  "name": "Upsert Portal Experience",
+  "category": "portals",
+  "description": "Create or update the experience manifest for a portal, merging space overrides with global defaults.",
+  "function_name": "upsert_portal_experience",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "portal_id": {
+        "type": "string",
+        "description": "Portal identifier to update (defaults to concierge)."
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Space slug where the portal lives (defaults to caller's current space)."
+      },
+      "experience": {
+        "type": "object",
+        "description": "Experience manifest payload to persist under metadata.experience. Should contain an 'interactiveModules' array with component definitions that match the render_manifest format. Each module must have: id, componentId, slot, optional capability, props, label, description, size, actions, and meta.",
+        "properties": {
+          "interactiveModules": {
+            "type": "array",
+            "description": "Array of interactive component modules (max 10). Each module represents a UI component to render.",
+            "maxItems": 10,
+            "items": {
+              "type": "object",
+              "required": ["id", "componentId", "slot"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Unique identifier for this module instance"
+                },
+                "componentId": {
+                  "type": "string",
+                  "description": "Component type from registry (e.g., 'hero', 'stat-grid', 'activity-feed')"
+                },
+                "slot": {
+                  "type": "string",
+                  "enum": ["inline", "primary", "secondary", "sidebar", "overlay", "top"],
+                  "description": "Where to render this component"
+                },
+                "capability": {
+                  "type": "string",
+                  "description": "Optional capability requirement (e.g., 'module:schedule_overview')"
+                },
+                "props": {
+                  "type": "object",
+                  "description": "Component props with actual data"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Optional display label"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Optional description"
+                },
+                "size": {
+                  "type": "string",
+                  "enum": ["sm", "md", "lg"],
+                  "description": "Optional size hint"
+                },
+                "actions": {
+                  "type": "array",
+                  "description": "Optional action buttons"
+                },
+                "meta": {
+                  "type": "object",
+                  "description": "Optional metadata"
+                }
+              }
+            }
+          },
+          "capabilities": {
+            "type": "array",
+            "description": "Optional array of enabled capabilities",
+            "items": { "type": "string" }
+          },
+          "meta": {
+            "type": "object",
+            "description": "Optional metadata about the experience"
+          }
+        },
+        "required": ["interactiveModules"]
+      },
+      "merge": {
+        "type": "boolean",
+        "description": "When true, shallow-merge the new manifest with any existing experience instead of replacing it entirely.",
+        "default": false
+      },
+      "ensure_directories": {
+        "type": "boolean",
+        "description": "Ensure the portal directory structure exists (pages/workflows/integrations). Default is false since portal data is now consolidated in portal.json.",
+        "default": false
+      }
+    },
+    "required": ["experience"]
+  }
+}

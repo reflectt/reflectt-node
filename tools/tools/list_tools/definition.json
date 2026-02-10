@@ -1,0 +1,29 @@
+{
+  "id": "list_tools",
+  "name": "List Tools",
+  "description": "List all available tools with optional filter by category",
+  "category": "tools",
+  "function_name": "list_tools",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "category": {
+        "type": "string",
+        "description": "Optional category filter (data, agent, task, time, web, tools, workflows, storage, creative_utils)"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space to list space-specific tools"
+      },
+      "include_implementations": {
+        "type": "boolean",
+        "description": "Include implementation file paths"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["tools", "meta", "list"],
+  "version": "1.0.0",
+  "dependencies": []
+}

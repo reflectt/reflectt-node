@@ -1,0 +1,34 @@
+{
+  "id": "get_storage_file",
+  "name": "Get From Storage",
+  "description": "Get a file from storage/[category]/[filename]. Retrieves unstructured content like documents, images, audio, etc. from S3-style object storage.",
+  "category": "storage",
+  "function_name": "get_storage_file",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "category": {
+        "type": "string",
+        "description": "Storage category/bucket (e.g., 'stories', 'characters', 'images', 'audio')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "filename": {
+        "type": "string",
+        "description": "Filename with extension (e.g., 'my-story.md', 'hero.json', 'map.png')"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Get from a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    },
+    "required": [
+      "category",
+      "filename"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

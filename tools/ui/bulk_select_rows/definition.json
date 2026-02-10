@@ -1,0 +1,43 @@
+{
+  "name": "bulk_select_rows",
+  "description": "Select rows in multiple table components at once. Useful for syncing selections across tables, selecting related data, or multi-table operations. Each selection can be configured independently.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "selections": {
+        "type": "array",
+        "description": "Array of selection operations to apply",
+        "items": {
+          "type": "object",
+          "properties": {
+            "componentId": {
+              "type": "string",
+              "description": "Module ID of the table component"
+            },
+            "rowIds": {
+              "type": "array",
+              "description": "Array of row IDs to select",
+              "items": {
+                "type": "string"
+              }
+            },
+            "selectAll": {
+              "type": "boolean",
+              "description": "Select all rows in this table"
+            },
+            "clearExisting": {
+              "type": "boolean",
+              "description": "Clear existing selections before applying (default: true)"
+            }
+          },
+          "required": ["componentId"]
+        }
+      },
+      "stopOnError": {
+        "type": "boolean",
+        "description": "Stop processing if any selection fails (default: false - continues on errors)"
+      }
+    },
+    "required": ["selections"]
+  }
+}

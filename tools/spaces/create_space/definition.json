@@ -1,0 +1,38 @@
+{
+  "id": "create_space",
+  "name": "Create Space",
+  "description": "Create a new space with a given name. Spaces are isolated environments for organizing data, agents, tasks, and storage. Creates the directory structure: data/spaces/[space_name]/ with subdirectories for agents, tasks, tables, and storage.",
+  "category": "spaces",
+  "function_name": "create_space",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "space_name": {
+        "type": "string",
+        "description": "Name of the space to create (lowercase, alphanumeric, underscores, hyphens)",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "description": {
+        "type": "string",
+        "description": "Optional description of what this space is for"
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Optional metadata to store with the space (tags, owner, purpose, etc.)"
+      }
+    },
+    "required": [
+      "space_name"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "space",
+    "management",
+    "create",
+    "organization"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

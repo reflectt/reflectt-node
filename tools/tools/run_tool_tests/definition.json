@@ -1,0 +1,43 @@
+{
+  "id": "run_tool_tests",
+  "name": "Run Tool Tests",
+  "description": "Run Jest tests for a specific tool by executing its .test.ts file. Returns test results including pass/fail status, coverage information, and detailed test output.",
+  "category": "tools",
+  "function_name": "run_tool_tests",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tool_name": {
+        "type": "string",
+        "description": "The function_name of the tool to test"
+      },
+      "category": {
+        "type": "string",
+        "description": "Tool category (data, agent, task, time, web, tools, workflows, storage, etc.)"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space for space-specific tool tests"
+      },
+      "verbose": {
+        "type": "boolean",
+        "description": "Include verbose test output (default: false)"
+      }
+    },
+    "required": [
+      "tool_name",
+      "category"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "tools",
+    "testing",
+    "jest",
+    "execution",
+    "validation"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

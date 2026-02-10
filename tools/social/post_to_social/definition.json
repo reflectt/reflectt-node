@@ -1,0 +1,31 @@
+{
+  "function_name": "post_to_social",
+  "description": "Post content to social media platforms (Twitter, Instagram, Facebook)",
+  "category": "social",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "platform": {
+        "type": "string",
+        "enum": ["twitter", "instagram", "facebook"],
+        "description": "Social media platform to post to"
+      },
+      "text": {
+        "type": "string",
+        "description": "Post content/caption (max 280 chars for Twitter, 2200 for Instagram/Facebook)"
+      },
+      "media_urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of media URLs (images/videos) to include in post"
+      },
+      "schedule_for": {
+        "type": "string",
+        "description": "ISO 8601 timestamp to schedule post for later (optional, defaults to immediate)"
+      }
+    },
+    "required": ["platform", "text"]
+  }
+}

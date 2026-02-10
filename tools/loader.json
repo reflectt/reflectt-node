@@ -1,0 +1,67 @@
+{
+  "version": "1.0.0",
+  "description": "Tool loader configuration for dynamic tool loading",
+  "loader_config": {
+    "auto_load": true,
+    "cache_enabled": true,
+    "validation_enabled": true,
+    "default_tool_set": "basic_data"
+  },
+  "loading_strategies": {
+    "eager": {
+      "description": "Load all tools at startup",
+      "use_case": "Small number of tools, fast startup needed"
+    },
+    "lazy": {
+      "description": "Load tools on first use",
+      "use_case": "Large number of tools, memory optimization"
+    },
+    "on_demand": {
+      "description": "Load tools only when explicitly requested",
+      "use_case": "Dynamic tool requirements"
+    }
+  },
+  "resolution_order": [
+    "explicit_tools",
+    "tool_set",
+    "tool_categories",
+    "default_tool_set"
+  ],
+  "validation_rules": {
+    "check_schema": true,
+    "check_dependencies": true,
+    "check_version_compatibility": true,
+    "fail_on_missing_dependency": false
+  },
+  "caching": {
+    "enabled": true,
+    "ttl_seconds": 3600,
+    "max_cache_size_mb": 50
+  },
+  "examples": {
+    "load_by_id": {
+      "method": "loadTool",
+      "params": {
+        "tool_id": "read_data_file"
+      }
+    },
+    "load_by_category": {
+      "method": "loadToolsByCategory",
+      "params": {
+        "category": "data"
+      }
+    },
+    "load_by_set": {
+      "method": "loadToolSet",
+      "params": {
+        "set_name": "agent_builder"
+      }
+    },
+    "load_by_tags": {
+      "method": "loadToolsByTags",
+      "params": {
+        "tags": ["search", "web"]
+      }
+    }
+  }
+}

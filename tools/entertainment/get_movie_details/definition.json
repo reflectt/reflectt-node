@@ -1,0 +1,38 @@
+{
+  "id": "get_movie_details",
+  "name": "Get Movie Details",
+  "category": "entertainment",
+  "description": "Get detailed information about a specific movie from TMDB. Access comprehensive data including cast, crew, runtime, budget, revenue, genres, and trailers.\n\nYou can:\n- Get complete movie information\n- View cast and crew details\n- See runtime, budget, and box office revenue\n- Watch trailers and clips\n- Read reviews and ratings\n- Get genre and production info\n\nRequires TMDB API key.\n\n** WHEN TO USE **\n- User asks for details about a specific movie\n- User wants to know cast, runtime, budget\n- User wants to watch trailers\n- User wants comprehensive movie information\n\n** WHEN NOT TO USE **\n- User wants to search for movies (use search_movies)\n- User wants trending movies (use get_trending)\n- User wants watch list management (use track_watch_list)\n\n** EXAMPLES **\n\n1. Get movie details by TMDB ID:\n{\n  \"movie_id\": 278\n}\n\n2. Get full details with cast:\n{\n  \"movie_id\": 550,\n  \"include_cast\": true,\n  \"include_crew\": true\n}",
+  "function_name": "get_movie_details",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["movie_id"],
+    "properties": {
+      "movie_id": {
+        "type": "number",
+        "description": "TMDB movie ID"
+      },
+      "include_cast": {
+        "type": "boolean",
+        "description": "Include cast information (default: true)",
+        "default": true
+      },
+      "include_crew": {
+        "type": "boolean",
+        "description": "Include crew information (default: true)",
+        "default": true
+      },
+      "include_videos": {
+        "type": "boolean",
+        "description": "Include trailers and clips (default: true)",
+        "default": true
+      },
+      "include_reviews": {
+        "type": "boolean",
+        "description": "Include reviews (default: false)",
+        "default": false
+      }
+    }
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "type": "ui_tool",
+  "name": "suggest_email_recipients",
+  "description": "Intelligently suggest email recipients based on context, patterns, and user behavior. Provides smart recipient suggestions with reasoning, considering thread participants, time patterns, subject analysis, and relationship mapping.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "emailComponentId": {
+        "type": "string",
+        "description": "The ID of the email component to provide suggestions for. If not provided, returns general suggestions."
+      },
+      "query": {
+        "type": "string",
+        "description": "Partial recipient query (email or name) to filter suggestions"
+      },
+      "context": {
+        "type": "object",
+        "description": "Context information for intelligent suggestions",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "description": "Email subject line for subject-based suggestions"
+          },
+          "threadParticipants": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Email addresses of people already in the thread"
+          },
+          "timeOfDay": {
+            "type": "number",
+            "description": "Hour of day (0-23) for time-based pattern matching"
+          },
+          "dayOfWeek": {
+            "type": "number",
+            "description": "Day of week (0-6, Sunday=0) for day-based pattern matching"
+          },
+          "primaryRecipient": {
+            "type": "string",
+            "description": "Primary TO recipient to suggest CC recipients based on relationships"
+          },
+          "emailBody": {
+            "type": "string",
+            "description": "Email body text for content-based analysis"
+          }
+        }
+      },
+      "maxSuggestions": {
+        "type": "number",
+        "description": "Maximum number of suggestions to return (default: 5)",
+        "default": 5
+      },
+      "includeGroups": {
+        "type": "boolean",
+        "description": "Include auto-detected recipient groups in suggestions (default: true)",
+        "default": true
+      },
+      "suggestCC": {
+        "type": "boolean",
+        "description": "Suggest CC recipients based on TO recipients (default: false)",
+        "default": false
+      }
+    }
+  },
+  "examples": [
+    {
+      "description": "Get recipient suggestions based on partial query",
+      "input": {
+        "query": "john",
+        "maxSuggestions": 5
+      }
+    },
+    {
+      "description": "Get context-aware suggestions for a specific email with subject",
+      "input": {
+        "emailComponentId": "compose-email-1",
+        "context": {
+          "subject": "Q4 Planning Meeting",
+          "timeOfDay": 14,
+          "dayOfWeek": 2
+        },
+        "maxSuggestions": 10
+      }
+    },
+    {
+      "description": "Suggest CC recipients based on primary recipient",
+      "input": {
+        "context": {
+          "primaryRecipient": "manager@company.com"
+        },
+        "suggestCC": true,
+        "maxSuggestions": 3
+      }
+    },
+    {
+      "description": "Get suggestions for people in a thread with subject analysis",
+      "input": {
+        "query": "sa",
+        "context": {
+          "threadParticipants": ["alice@company.com", "bob@company.com"],
+          "subject": "Sales Dashboard Review"
+        },
+        "includeGroups": true
+      }
+    }
+  ]
+}

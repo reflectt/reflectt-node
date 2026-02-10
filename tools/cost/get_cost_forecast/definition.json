@@ -1,0 +1,27 @@
+{
+  "id": "get_cost_forecast",
+  "name": "get_cost_forecast",
+  "description": "Project future spending based on historical usage patterns. Provides conservative, likely, and pessimistic scenarios with confidence levels and actionable recommendations.",
+  "category": "cost",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to forecast for (optional - defaults to current user)"
+      },
+      "forecast_days": {
+        "type": "number",
+        "description": "Number of days to forecast (default: 30)",
+        "default": 30
+      },
+      "include_recommendations": {
+        "type": "boolean",
+        "description": "Include actionable cost-saving recommendations (default: true)",
+        "default": true
+      }
+    },
+    "required": []
+  },
+  "function_name": "get_cost_forecast"
+}

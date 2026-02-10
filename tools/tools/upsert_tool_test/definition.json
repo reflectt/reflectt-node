@@ -1,0 +1,44 @@
+{
+  "id": "upsert_tool_test",
+  "name": "Upsert Tool Test",
+  "description": "Create or update a tool's Jest test file. Writes test code to tests/[category]/[name].test.ts for automated testing of tool functionality.",
+  "category": "tools",
+  "function_name": "upsert_tool_test",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tool_name": {
+        "type": "string",
+        "description": "The function_name of the tool to create tests for"
+      },
+      "category": {
+        "type": "string",
+        "description": "Tool category (must match the tool's category)"
+      },
+      "test_code": {
+        "type": "string",
+        "description": "TypeScript Jest test code for the tool"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space for space-specific tool tests"
+      }
+    },
+    "required": [
+      "tool_name",
+      "category",
+      "test_code"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "tools",
+    "testing",
+    "jest",
+    "create",
+    "update"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

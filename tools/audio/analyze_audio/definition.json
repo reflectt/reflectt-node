@@ -1,0 +1,84 @@
+{
+  "id": "analyze_audio",
+  "name": "Analyze Audio",
+  "description": "Advanced audio analysis using AssemblyAI. Detects speakers, analyzes sentiment, identifies topics, detects entities, generates chapters, and performs content moderation. Perfect for meeting analysis, podcast processing, and content understanding.",
+  "category": "audio",
+  "function_name": "analyze_audio",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "audio_source"
+    ],
+    "properties": {
+      "audio_source": {
+        "type": "string",
+        "description": "File path or URL to audio file"
+      },
+      "audio_type": {
+        "type": "string",
+        "enum": [
+          "file_path",
+          "url"
+        ],
+        "default": "file_path",
+        "description": "Type of audio source provided"
+      },
+      "features": {
+        "type": "object",
+        "description": "Analysis features to enable",
+        "properties": {
+          "speaker_labels": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable speaker diarization (who spoke when)"
+          },
+          "sentiment_analysis": {
+            "type": "boolean",
+            "default": false,
+            "description": "Analyze sentiment of each sentence"
+          },
+          "auto_chapters": {
+            "type": "boolean",
+            "default": false,
+            "description": "Auto-generate chapter summaries"
+          },
+          "entity_detection": {
+            "type": "boolean",
+            "default": false,
+            "description": "Detect names, organizations, locations"
+          },
+          "content_safety": {
+            "type": "boolean",
+            "default": false,
+            "description": "Content moderation and safety labels"
+          },
+          "iab_categories": {
+            "type": "boolean",
+            "default": false,
+            "description": "Topic classification using IAB taxonomy"
+          }
+        }
+      },
+      "speaker_count": {
+        "type": "number",
+        "description": "Expected number of speakers (helps improve diarization accuracy)"
+      },
+      "language_code": {
+        "type": "string",
+        "default": "en",
+        "description": "Language code (e.g., 'en', 'es', 'fr')"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "audio",
+    "analysis",
+    "speaker-detection",
+    "sentiment",
+    "assemblyai"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

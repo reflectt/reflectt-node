@@ -1,0 +1,44 @@
+{
+  "id": "get_rss_feed",
+  "name": "Get RSS Feed",
+  "category": "news",
+  "description": "Parse RSS/Atom feeds from any source. Use this for unlimited news aggregation without API limits.\n\nYou can:\n- Parse any public RSS/Atom feed\n- Get articles from multiple feeds at once\n- Access unlimited news sources (no API quota)\n- Parse custom/niche news sources\n- Aggregate content from blogs, podcasts, etc.\n\nNo API key required - works with any public RSS feed.\nCache: Not cached (RSS is already fast and unlimited).\n\nPopular RSS feeds:\n- TechCrunch: https://techcrunch.com/feed/\n- Hacker News: https://news.ycombinator.com/rss\n- NYT: https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml\n- BBC: https://feeds.bbci.co.uk/news/rss.xml\n- Reddit: https://www.reddit.com/r/{subreddit}/.rss\n\n** WHEN TO USE **\n- User wants unlimited news aggregation\n- User wants news from specific RSS feeds\n- User wants to avoid API quota limits\n- User wants niche/custom news sources\n- User wants blog/podcast content\n\n** WHEN NOT TO USE **\n- User wants curated top headlines (use get_headlines)\n- User wants to search news (use search_news)\n- User doesn't have specific RSS feed URL\n\n** EXAMPLES **\n\n1. Parse single RSS feed:\n{\n  \"url\": \"https://techcrunch.com/feed/\",\n  \"maxItems\": 20\n}\n\n2. Parse multiple feeds:\n{\n  \"urls\": [\n    \"https://techcrunch.com/feed/\",\n    \"https://www.theverge.com/rss/index.xml\",\n    \"https://news.ycombinator.com/rss\"\n  ],\n  \"maxItemsPerFeed\": 10\n}\n\n3. Parse news category feeds:\n{\n  \"category\": \"technology\"\n}",
+  "function_name": "get_rss_feed",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "RSS feed URL to parse (single feed)"
+      },
+      "urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of RSS feed URLs to parse (multiple feeds)"
+      },
+      "category": {
+        "type": "string",
+        "enum": ["technology", "business", "science", "general", "entertainment"],
+        "description": "Use popular RSS feeds from this category"
+      },
+      "maxItems": {
+        "type": "number",
+        "description": "Max items to return from single feed (default: 20)",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 20
+      },
+      "maxItemsPerFeed": {
+        "type": "number",
+        "description": "Max items per feed when parsing multiple feeds (default: 10)",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 10
+      }
+    }
+  }
+}

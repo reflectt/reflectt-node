@@ -1,0 +1,25 @@
+{
+  "id": "list_tool_categories",
+  "name": "List Tool Categories",
+  "description": "List all tool categories (data, agent, task, time, web, tools, workflows, storage, creative_utils, etc.)",
+  "category": "tools",
+  "function_name": "list_tool_categories",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space to include space-specific categories"
+      },
+      "include_counts": {
+        "type": "boolean",
+        "description": "Include count of tools in each category"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["tools", "meta", "categories"],
+  "version": "1.0.0",
+  "dependencies": []
+}

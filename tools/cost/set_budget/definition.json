@@ -1,0 +1,42 @@
+{
+  "id": "set_budget",
+  "name": "set_budget",
+  "description": "Set monthly spending budget with configurable alert thresholds. Get notified when you hit 50%, 75%, or 90% of your budget. Can also set daily limits and automatic actions.",
+  "category": "cost",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to set budget for (optional - defaults to current user)"
+      },
+      "monthly_limit_usd": {
+        "type": "number",
+        "description": "Monthly spending limit in USD"
+      },
+      "daily_limit_usd": {
+        "type": "number",
+        "description": "Optional daily spending limit in USD"
+      },
+      "alert_at_percentage": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Alert thresholds as percentages (e.g., [50, 75, 90]). Default: [75, 90]",
+        "default": [
+          75,
+          90
+        ]
+      },
+      "auto_downgrade_at": {
+        "type": "number",
+        "description": "Percentage threshold to auto-downgrade to cheaper models (optional)"
+      }
+    },
+    "required": [
+      "monthly_limit_usd"
+    ]
+  },
+  "function_name": "set_budget"
+}

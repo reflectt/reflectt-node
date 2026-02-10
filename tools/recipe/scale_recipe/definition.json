@@ -1,0 +1,23 @@
+{
+  "function_name": "scale_recipe",
+  "description": "Scale a recipe to a different number of servings, automatically adjusting all ingredient quantities",
+  "category": "recipe",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "recipe_id": {
+        "type": "string",
+        "description": "Recipe ID to scale"
+      },
+      "target_servings": {
+        "type": "number",
+        "description": "Desired number of servings"
+      },
+      "save_as_new": {
+        "type": "boolean",
+        "description": "If true, save the scaled recipe as a new recipe"
+      }
+    },
+    "required": ["recipe_id", "target_servings"]
+  }
+}

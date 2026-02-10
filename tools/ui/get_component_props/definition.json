@@ -1,0 +1,23 @@
+{
+  "id": "get_component_props",
+  "name": "Get Component Props",
+  "category": "ui",
+  "description": "Get detailed prop information for a component including types, defaults, descriptions, and examples. Use this BEFORE render_manifest to validate props and understand component requirements.\n\n** WHEN TO USE **\n- Before using render_manifest to learn what props are available\n- To understand required vs. optional props\n- To see example values for complex props\n- To discover component capabilities and features\n\n** RETURNS **\n- Prop names, types, and whether they're required\n- Default values and descriptions\n- Example prop configurations\n- Component metadata (category, tags, capabilities)\n\n** EXAMPLE **\n{\n  \"componentId\": \"query_results_table\",\n  \"includeExamples\": true\n}\n\nReturns all props for the table component with example configurations.",
+  "function_name": "get_component_props",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "Component ID (e.g., 'query_results_table', 'portals:chart')"
+      },
+      "includeExamples": {
+        "type": "boolean",
+        "description": "Include example prop values",
+        "default": true
+      }
+    },
+    "required": ["componentId"]
+  }
+}

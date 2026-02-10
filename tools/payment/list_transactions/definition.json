@@ -1,0 +1,48 @@
+{
+  "function_name": "list_transactions",
+  "description": "List transactions with filtering and pagination. Returns summary statistics including totals and counts.",
+  "category": "payment",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "start_date": {
+        "type": "string",
+        "description": "Filter transactions from this date (ISO format: YYYY-MM-DD)"
+      },
+      "end_date": {
+        "type": "string",
+        "description": "Filter transactions until this date (ISO format: YYYY-MM-DD)"
+      },
+      "status": {
+        "type": "string",
+        "description": "Filter by transaction status (succeeded, pending, failed, refunded, partially_refunded)"
+      },
+      "transaction_type": {
+        "type": "string",
+        "description": "Filter by transaction type (payment, invoice, refund)"
+      },
+      "customer_id": {
+        "type": "string",
+        "description": "Filter by Stripe customer ID"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Number of transactions to return. Default: 50, Max: 1000"
+      },
+      "offset": {
+        "type": "number",
+        "description": "Number of transactions to skip for pagination. Default: 0"
+      },
+      "sort_by": {
+        "type": "string",
+        "description": "Sort field: 'created_at', 'amount'. Default: 'created_at'",
+        "enum": ["created_at", "amount"]
+      },
+      "sort_order": {
+        "type": "string",
+        "description": "Sort order: 'asc' or 'desc'. Default: 'desc'",
+        "enum": ["asc", "desc"]
+      }
+    }
+  }
+}

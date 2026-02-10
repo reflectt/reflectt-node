@@ -1,0 +1,37 @@
+{
+  "id": "set_layout_intent",
+  "name": "Set Layout Intent",
+  "category": "ui",
+  "description": "Set the UI layout intent to organize components semantically. **CRITICAL: Call this FIRST before render_manifest to establish the layout pattern.**\n\n**When to use each intent:**\n- User wants overview/dashboard → 'dashboard'\n- User wants to focus/write/read → 'focus'\n- User wants to compare things → 'compare'\n- User wants to browse/explore → 'hero-detail'\n- User asks \"what happened\" → 'timeline'\n- User needs step-by-step guide → 'wizard'\n- User wants to switch between items → 'tabs'\n- User wants creative/design work → 'canvas'",
+  "function_name": "set_layout_intent",
+  "version": "2.0.0",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "intent": {
+        "type": "string",
+        "enum": [
+          "focus",
+          "dashboard",
+          "compare",
+          "hero-detail",
+          "timeline",
+          "spatial",
+          "wizard",
+          "canvas",
+          "split",
+          "tabs",
+          "modal-over",
+          "grid-explore"
+        ],
+        "description": "Layout intent:\n- focus: Single document/artifact (reading, editing)\n- dashboard: Multi-metric overview (analytics, monitoring)\n- compare: Side-by-side comparison (diff, A/B test)\n- hero-detail: Master-detail pattern (list+preview, file browser)\n- timeline: Chronological feed (activity log, chat history)\n- spatial: Maps/canvas/geographic data\n- wizard: Multi-step workflow (onboarding, checkout)\n- canvas: Creative workspace (design tool, whiteboard)\n- split: Multi-document parallel work\n- tabs: Categorical organization (settings, profiles)\n- modal-over: Interrupt workflow (confirmations, forms)\n- grid-explore: Gallery/exploratory browsing"
+      },
+      "clearComponents": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to clear ephemeral components when changing intent. Default true."
+      }
+    },
+    "required": ["intent"]
+  }
+}

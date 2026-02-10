@@ -1,0 +1,74 @@
+{
+  "id": "upsert_table_schema",
+  "name": "Update Table Schema",
+  "description": "Update schema.json for a table. Creates or modifies the schema that describes table structure, field types, and indexes. Automatically creates table directory if needed.",
+  "category": "data",
+  "function_name": "upsert_table_schema",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'worlds', 'users')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "schema": {
+        "type": "object",
+        "description": "Schema definition with fields and optional indexes",
+        "properties": {
+          "table_name": {
+            "type": "string",
+            "description": "Table name (must match table parameter)"
+          },
+          "fields": {
+            "type": "object",
+            "description": "Field definitions with types and constraints",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "description": "Field type (e.g., 'string', 'number', 'boolean', 'object', 'array')"
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "Whether field is required"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Field description"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          "indexes": {
+            "type": "array",
+            "description": "Optional: Field names to index for faster queries",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "fields"
+        ]
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Update schema in a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    },
+    "required": [
+      "table",
+      "schema"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

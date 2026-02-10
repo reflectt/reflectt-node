@@ -1,0 +1,47 @@
+{
+  "id": "search_knowledge_graph",
+  "name": "search_knowledge_graph",
+  "description": "Search stored facts and relationships in user's knowledge graph. Use this to find what the system has learned about the user.",
+  "category": "memory",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to search knowledge graph for"
+      },
+      "query": {
+        "type": "string",
+        "description": "Natural language query to search for"
+      },
+      "category": {
+        "type": "string",
+        "enum": [
+          "preference",
+          "fact",
+          "pattern",
+          "goal",
+          "domain_knowledge",
+          "behavior",
+          "relationship"
+        ],
+        "description": "Filter by fact category (optional)"
+      },
+      "min_confidence": {
+        "type": "number",
+        "description": "Minimum confidence threshold (0-1, default: 0.5)",
+        "default": 0.5
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of facts to return (default: 20)",
+        "default": 20
+      }
+    },
+    "required": [
+      "user_id",
+      "query"
+    ]
+  },
+  "function_name": "search_knowledge_graph"
+}

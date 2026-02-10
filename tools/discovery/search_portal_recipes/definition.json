@@ -1,0 +1,34 @@
+{
+  "id": "search_portal_recipes",
+  "name": "Search Portal Recipes",
+  "description": "Search pre-built portal recipes (multi-component patterns) for common use cases like 'super fun times', 'creative playground', 'game center', 'entertainment hub', etc. Returns complete component configurations that can be used to build engaging portals.",
+  "category": "discovery",
+  "function_name": "search_portal_recipes",
+  "parameters": {
+    "type": "object",
+    "required": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Natural language search query (e.g., 'fun portal', 'creative experience', 'games', 'entertainment', 'wellness', 'fitness')"
+      },
+      "limit": {
+        "type": "number",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 20,
+        "description": "Maximum number of recipes to return"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [
+    {"query": "super fun times", "limit": 3},
+    {"query": "creative portal with games", "limit": 5},
+    {"query": "entertainment hub"},
+    {"query": "I want to relax and meditate"},
+    {"query": "something for kids"}
+  ],
+  "tags": ["discovery", "recipes", "portals", "multi-component", "patterns"],
+  "version": "1.0.0"
+}

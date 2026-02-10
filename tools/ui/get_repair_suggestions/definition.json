@@ -1,0 +1,45 @@
+{
+  "id": "get_repair_suggestions",
+  "name": "Get Repair Suggestions",
+  "category": "ui",
+  "description": "Get AI-powered repair suggestions for component errors. Analyzes errors and provides actionable fixes with reasoning. Can optionally attempt automatic fixes for common issues.",
+  "function_name": "get_repair_suggestions",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The ID of the component with the error (e.g., 'form-1', 'table-results')"
+      },
+      "errorMessage": {
+        "type": "string",
+        "description": "The error message or description of the issue"
+      },
+      "errorType": {
+        "type": "string",
+        "enum": ["render", "props", "data", "interaction", "performance"],
+        "description": "Type of error if known. Helps provide more targeted suggestions.",
+        "default": "render"
+      },
+      "includeContext": {
+        "type": "boolean",
+        "description": "Include component state and props in analysis for better suggestions",
+        "default": true
+      },
+      "autoFix": {
+        "type": "boolean",
+        "description": "Attempt to automatically fix the issue if a safe auto-fix is available",
+        "default": false
+      },
+      "maxSuggestions": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 10,
+        "description": "Maximum number of suggestions to return",
+        "default": 5
+      }
+    },
+    "required": ["componentId", "errorMessage"]
+  }
+}

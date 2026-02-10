@@ -1,0 +1,86 @@
+{
+  "id": "update_grid_cells",
+  "name": "Update Grid Cells",
+  "category": "ui",
+  "description": "Update multiple cells in the DataGrid component (spreadsheet operations). Allows AI to programmatically set cell values, formulas, and perform auto-fill operations. Supports Excel-style cell references (A1, B2) and batch updates. Component must already be mounted.",
+  "function_name": "update_grid_cells",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "moduleId": {
+        "type": "string",
+        "description": "ID of the DataGrid component to control (must match existing module ID from render_manifest)",
+        "minLength": 1
+      },
+      "updates": {
+        "type": "array",
+        "description": "Array of cell updates to apply",
+        "items": {
+          "type": "object",
+          "properties": {
+            "cell": {
+              "type": "string",
+              "description": "Cell reference in Excel notation (e.g., 'A1', 'B2', 'AA10')",
+              "pattern": "^[A-Z]+[0-9]+$"
+            },
+            "row": {
+              "type": "number",
+              "description": "Alternative: row index (0-based)",
+              "minimum": 0
+            },
+            "column": {
+              "type": "string",
+              "description": "Alternative: column field name"
+            },
+            "value": {
+              "description": "Cell value (string, number, boolean, or null)"
+            },
+            "formula": {
+              "type": "string",
+              "description": "Excel formula (e.g., '=SUM(A1:A10)', '=B2*C2')"
+            }
+          }
+        },
+        "minItems": 1
+      },
+      "autoFill": {
+        "type": "object",
+        "description": "Auto-fill operation (extends pattern across range)",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "Start cell reference (e.g., 'A1')"
+          },
+          "to": {
+            "type": "string",
+            "description": "End cell reference (e.g., 'A10')"
+          },
+          "pattern": {
+            "type": "string",
+            "enum": ["copy", "series", "increment"],
+            "description": "Fill pattern: 'copy' repeats value, 'series' continues sequence, 'increment' adds step",
+            "default": "copy"
+          },
+          "step": {
+            "type": "number",
+            "description": "Step value for increment pattern (default: 1)",
+            "default": 1
+          }
+        },
+        "required": ["from", "to"]
+      },
+      "triggerRecalc": {
+        "type": "boolean",
+        "description": "Trigger formula recalculation after updates (default: true)",
+        "default": true
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Animate cell changes with highlight effect (default: true)",
+        "default": true
+      }
+    },
+    "required": ["moduleId"]
+  }
+}

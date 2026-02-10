@@ -1,0 +1,41 @@
+{
+  "name": "get_agent",
+  "description": "Get a specific agent configuration by ID or slug. Searches both space-specific and global locations with hierarchical fallback (space \u2192 global). Returns the agent configuration with source information.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "agent_id": {
+        "type": "string",
+        "description": "Agent ID (e.g., 'budget_tracker'). Will search all domains if slug not provided.",
+        "pattern": "^[a-z_]+$"
+      },
+      "slug": {
+        "type": "string",
+        "description": "Agent slug in format domain:agent_id (e.g., 'finance:budget_tracker'). Takes precedence over agent_id.",
+        "pattern": "^[a-z]+:[a-z_]+$"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Target a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      },
+      "search_global": {
+        "type": "boolean",
+        "description": "Whether to search in global data as fallback (default: true)",
+        "default": true
+      },
+      "search_space": {
+        "type": "boolean",
+        "description": "Whether to search in space-specific data first (default: true)",
+        "default": true
+      }
+    }
+  },
+  "function_name": "get_agent",
+  "id": "get_agent",
+  "category": "agent",
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

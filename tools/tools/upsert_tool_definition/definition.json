@@ -1,0 +1,43 @@
+{
+  "id": "upsert_tool_definition",
+  "name": "Upsert Tool Definition",
+  "description": "Create or update a tool's JSON definition file in definitions/[category]/[name].json",
+  "category": "tools",
+  "function_name": "upsert_tool_definition",
+  "parameters": {
+    "type": "object",
+    "required": ["tool_name", "category", "description", "parameters"],
+    "properties": {
+      "tool_name": {
+        "type": "string",
+        "description": "The function_name for this tool (snake_case)"
+      },
+      "category": {
+        "type": "string",
+        "description": "Tool category (data, agent, task, time, web, tools, workflows, storage, etc.)"
+      },
+      "description": {
+        "type": "string",
+        "description": "Human-readable description of what this tool does"
+      },
+      "parameters": {
+        "type": "object",
+        "description": "JSON Schema for tool parameters (must have type: 'object')"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space for space-specific tool"
+      },
+      "tags": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Optional tags for categorization"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["tools", "meta", "create", "update"],
+  "version": "1.0.0",
+  "dependencies": []
+}

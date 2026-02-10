@@ -1,0 +1,22 @@
+{
+  "name": "delete_component",
+  "description": "Delete/unmount a component from its slot. Automatically finds the component across all slots and removes it. Publishes component lifecycle events for cleanup.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "Module ID of the component to delete (not the componentId type)"
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Play exit animation before removing (default: true)"
+      },
+      "cleanupContext": {
+        "type": "boolean",
+        "description": "Cleanup component context from context bus (default: true)"
+      }
+    },
+    "required": ["componentId"]
+  }
+}

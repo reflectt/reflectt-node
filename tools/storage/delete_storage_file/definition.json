@@ -1,0 +1,34 @@
+{
+  "id": "delete_storage_file",
+  "name": "Delete From Storage",
+  "description": "Delete a file from storage/[category]/[filename]. Removes unstructured content from S3-style object storage. Automatically cleans up empty category directories.",
+  "category": "storage",
+  "function_name": "delete_storage_file",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "category": {
+        "type": "string",
+        "description": "Storage category/bucket (e.g., 'stories', 'characters', 'images', 'audio')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "filename": {
+        "type": "string",
+        "description": "Filename with extension to delete (e.g., 'my-story.md', 'hero.json')"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Delete from a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    },
+    "required": [
+      "category",
+      "filename"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

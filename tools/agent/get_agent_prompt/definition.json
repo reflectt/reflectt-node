@@ -1,0 +1,36 @@
+{
+  "name": "get_agent_prompt",
+  "function_name": "get_agent_prompt",
+  "id": "get_agent_prompt",
+  "category": "agent",
+  "description": "Get the prompt file content for a specific agent",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "agent_id": {
+        "type": "string",
+        "description": "The agent ID (e.g., 'market_researcher')"
+      },
+      "category": {
+        "type": "string",
+        "description": "The agent category (e.g., 'research', 'intelligence')"
+      },
+      "scope": {
+        "type": "string",
+        "enum": ["global", "space"],
+        "description": "Whether to look in global agents or space agents",
+        "default": "global"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Read from a specific named space (e.g., 'creative', 'education'). Overrides current space."
+      }
+    },
+    "required": ["agent_id", "category"]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

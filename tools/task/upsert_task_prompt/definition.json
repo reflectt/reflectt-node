@@ -1,0 +1,53 @@
+{
+  "name": "upsert_task_prompt",
+  "description": "Create or update the prompt.md file for a task. Searches for the task across agents and categories, then writes the prompt content.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "Task ID (e.g., 'create-budget', 'track-expense')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "agent": {
+        "type": "string",
+        "description": "Agent ID to narrow the search (e.g., 'budget_tracker')",
+        "pattern": "^[a-z_]+$"
+      },
+      "prompt": {
+        "type": "string",
+        "description": "The markdown content for the task prompt"
+      },
+      "category": {
+        "type": "string",
+        "description": "Optional: Agent category (e.g., 'finance', 'sales') to speed up search"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Target a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      },
+      "scope": {
+        "type": "string",
+        "enum": [
+          "space",
+          "global"
+        ],
+        "description": "Where to write the prompt: 'space' (default) or 'global'",
+        "default": "space"
+      }
+    },
+    "required": [
+      "task_id",
+      "agent",
+      "prompt"
+    ]
+  },
+  "function_name": "upsert_task_prompt",
+  "id": "upsert_task_prompt",
+  "category": "task",
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

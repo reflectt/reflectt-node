@@ -1,0 +1,39 @@
+{
+  "id": "delete_rule",
+  "name": "Delete Rule",
+  "description": "Remove a rule. Soft delete by default (marks as deprecated), hard delete permanently removes the rule.",
+  "category": "rule",
+  "function_name": "delete_rule",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "rule_id"
+    ],
+    "properties": {
+      "rule_id": {
+        "type": "string",
+        "description": "Rule to delete",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "hard_delete": {
+        "type": "boolean",
+        "description": "Permanently remove rule (default: false)",
+        "default": false
+      },
+      "reason": {
+        "type": "string",
+        "description": "Reason for deletion"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "rules",
+    "business-logic",
+    "delete",
+    "remove"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

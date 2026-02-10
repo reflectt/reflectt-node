@@ -1,0 +1,116 @@
+{
+  "id": "mix_audio",
+  "name": "Mix Audio",
+  "description": "Mix multiple audio files together into a single output file. Supports volume control, timing offsets, and crossfading. Perfect for combining vocals with instrumental tracks, creating layered soundscapes, or producing final song mixes.",
+  "category": "audio",
+  "function_name": "mix_audio",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tracks": {
+        "type": "array",
+        "description": "Array of audio tracks to mix together",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Path to audio file (storage path or absolute path)"
+            },
+            "volume": {
+              "type": "number",
+              "description": "Volume level for this track (0.0 to 1.0). Default: 1.0",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 1.0
+            },
+            "offset": {
+              "type": "number",
+              "description": "Time offset in seconds when this track starts. Default: 0",
+              "minimum": 0,
+              "default": 0
+            },
+            "fade_in": {
+              "type": "number",
+              "description": "Fade in duration in seconds. Default: 0",
+              "minimum": 0,
+              "default": 0
+            },
+            "fade_out": {
+              "type": "number",
+              "description": "Fade out duration in seconds. Default: 0",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          "required": ["path"]
+        },
+        "minItems": 2
+      },
+      "output_format": {
+        "type": "string",
+        "enum": ["mp3", "wav"],
+        "description": "Output audio format. Default: mp3",
+        "default": "mp3"
+      },
+      "output_filename": {
+        "type": "string",
+        "description": "Custom filename (without extension). Auto-generated if not provided.",
+        "pattern": "^[a-zA-Z0-9_-]+$"
+      },
+      "normalize": {
+        "type": "boolean",
+        "description": "Normalize output volume to prevent clipping. Default: true",
+        "default": true
+      }
+    },
+    "required": ["tracks"]
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "description": "Mix vocals with instrumental backing",
+      "input": {
+        "tracks": [
+          {
+            "path": "storage/audio/generated/vocals.mp3",
+            "volume": 1.0
+          },
+          {
+            "path": "storage/audio/generated/instrumental.mp3",
+            "volume": 0.6
+          }
+        ],
+        "output_filename": "final_song"
+      }
+    },
+    {
+      "description": "Layer multiple instruments with timing offsets",
+      "input": {
+        "tracks": [
+          {
+            "path": "storage/audio/generated/drums.wav",
+            "volume": 0.8,
+            "offset": 0
+          },
+          {
+            "path": "storage/audio/generated/bass.wav",
+            "volume": 0.7,
+            "offset": 2
+          },
+          {
+            "path": "storage/audio/generated/piano.wav",
+            "volume": 0.6,
+            "offset": 4,
+            "fade_in": 1.0
+          }
+        ],
+        "output_format": "mp3",
+        "normalize": true
+      }
+    }
+  ],
+  "tags": ["audio", "mixing", "combine", "merge", "production"],
+  "version": "1.0.0",
+  "dependencies": ["fluent-ffmpeg", "ffmpeg"]
+}

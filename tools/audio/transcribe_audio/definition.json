@@ -1,0 +1,77 @@
+{
+  "id": "transcribe_audio",
+  "name": "Transcribe Audio",
+  "description": "Convert speech to text using OpenAI Whisper API. Supports multiple languages, timestamps, and various output formats. Perfect for transcribing podcasts, meetings, interviews, and any audio content.",
+  "category": "audio",
+  "function_name": "transcribe_audio",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "audio_source"
+    ],
+    "properties": {
+      "audio_source": {
+        "type": "string",
+        "description": "File path or URL to audio file"
+      },
+      "audio_type": {
+        "type": "string",
+        "enum": [
+          "file_path",
+          "url"
+        ],
+        "default": "file_path",
+        "description": "Type of audio source provided"
+      },
+      "language": {
+        "type": "string",
+        "description": "ISO-639-1 language code (e.g., 'en', 'es', 'fr'). If not specified, language will be auto-detected."
+      },
+      "prompt": {
+        "type": "string",
+        "description": "Optional context to improve transcription accuracy. Can include specific terminology, names, or context."
+      },
+      "response_format": {
+        "type": "string",
+        "enum": [
+          "json",
+          "text",
+          "srt",
+          "vtt",
+          "verbose_json"
+        ],
+        "default": "verbose_json",
+        "description": "Format of the transcription output"
+      },
+      "temperature": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0,
+        "description": "Sampling temperature (0-1). Higher values make output more random."
+      },
+      "timestamp_granularities": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "word",
+            "segment"
+          ]
+        },
+        "description": "Include word-level and/or segment-level timestamps"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "audio",
+    "transcription",
+    "speech-to-text",
+    "whisper",
+    "openai"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

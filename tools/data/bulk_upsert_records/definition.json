@@ -1,0 +1,91 @@
+{
+  "id": "bulk_upsert_records",
+  "name": "Bulk Upsert Records",
+  "description": "Insert or update multiple records in one operation. Supports batch size limits, conflict handling, and progress tracking. Use this for efficient bulk data operations.",
+  "category": "data",
+  "function_name": "bulk_upsert_records",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'products')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "records": {
+        "type": "array",
+        "description": "Array of records to upsert. Each record should have consistent structure.",
+        "items": {
+          "type": "object"
+        },
+        "minItems": 1,
+        "maxItems": 1000
+      },
+      "conflictColumns": {
+        "type": "array",
+        "description": "Optional: Columns to check for conflicts (e.g., ['id', 'email']). Defaults to ['id'].",
+        "items": {
+          "type": "string"
+        }
+      },
+      "updateOnConflict": {
+        "type": "boolean",
+        "description": "If true, update existing records on conflict. If false, skip conflicts. Default: true",
+        "default": true
+      },
+      "returnRecords": {
+        "type": "boolean",
+        "description": "If true, return the created/updated records. Default: false (for performance)",
+        "default": false
+      },
+      "validate": {
+        "type": "boolean",
+        "description": "If true, validate records against schema before inserting. Default: true",
+        "default": true
+      },
+      "batchSize": {
+        "type": "number",
+        "description": "Number of records to process per batch. Default: 100",
+        "default": 100,
+        "minimum": 1,
+        "maximum": 1000
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Target specific space. Defaults to current space."
+      }
+    },
+    "required": [
+      "table",
+      "records"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "description": "Bulk insert user records",
+      "input": {
+        "table": "users",
+        "records": [
+          {"name": "Alice", "email": "alice@example.com"},
+          {"name": "Bob", "email": "bob@example.com"}
+        ]
+      }
+    },
+    {
+      "description": "Upsert products with conflict handling",
+      "input": {
+        "table": "products",
+        "records": [
+          {"id": "prod-1", "name": "Widget", "price": 19.99},
+          {"id": "prod-2", "name": "Gadget", "price": 29.99}
+        ],
+        "conflictColumns": ["id"],
+        "updateOnConflict": true
+      }
+    }
+  ],
+  "tags": ["bulk", "batch", "upsert", "insert", "update", "performance"],
+  "version": "1.0.0",
+  "dependencies": []
+}

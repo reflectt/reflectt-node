@@ -1,0 +1,45 @@
+{
+  "function_name": "translate_conversation",
+  "description": "Translate an entire conversation or chat thread to a target language. Maintains conversation structure and caches individual message translations. Useful for real-time multilingual chat or conversation history translation.",
+  "category": "translation",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "conversation_id": {
+        "type": "string",
+        "description": "Unique identifier for the conversation"
+      },
+      "messages": {
+        "type": "array",
+        "description": "Array of messages to translate",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Unique message ID"
+            },
+            "text": {
+              "type": "string",
+              "description": "Message text to translate"
+            },
+            "source_lang": {
+              "type": "string",
+              "description": "Source language code (optional, will be auto-detected if not provided)"
+            }
+          },
+          "required": ["id", "text"]
+        }
+      },
+      "target_lang": {
+        "type": "string",
+        "description": "Target language code (ISO 639-1). Examples: 'en', 'es', 'fr', 'de', 'ja', 'zh', etc."
+      },
+      "preserve_history": {
+        "type": "boolean",
+        "description": "Whether to preserve translation history in cache. Default: true"
+      }
+    },
+    "required": ["conversation_id", "messages", "target_lang"]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "id": "mark_notification_read",
+  "name": "Mark Notification Read",
+  "description": "Update a notification's read status, toggling between unread and read.",
+  "category": "notifications",
+  "function_name": "mark_notification_read",
+  "parameters": {
+    "type": "object",
+    "required": ["user_id", "notification_id"],
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User identifier that owns the notification."
+      },
+      "notification_id": {
+        "type": "string",
+        "description": "Notification identifier to update."
+      },
+      "read": {
+        "type": "boolean",
+        "description": "Set to true to mark as read, false to mark as unread.",
+        "default": true
+      },
+      "scope": {
+        "type": "string",
+        "description": "Location of the notification (global or space). Defaults to auto-detect (global first, then space).",
+        "enum": ["global", "space", "auto"],
+        "default": "auto"
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Space identifier when targeting a space-scoped notification outside the current context."
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["notifications", "ui", "alerts"],
+  "version": "1.0.0",
+  "dependencies": []
+}

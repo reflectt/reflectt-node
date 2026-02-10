@@ -1,0 +1,34 @@
+{
+  "id": "update_theme",
+  "name": "Update Theme",
+  "category": "ui",
+  "description": "Dynamically change the application mood/theme in real-time. This is a streaming UI tool that passes through the server and is handled client-side as it streams in. Use this to match the UI mood to conversation context - aurora for creative energy, oceanic for calm analysis, dark for late-night focus, solstice for warm collaboration, light for standard work. Each mood has 4 time-of-day gradients (morning/afternoon/evening/night) with unique color palettes. Theme changes can be animated for smooth transitions. Use the 'reason' parameter to document why you're changing the theme (e.g., 'User mentioned feeling stressed, switching to calming oceanic mood').",
+  "function_name": "update_theme",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mood": {
+        "type": "string",
+        "enum": ["light", "dark", "aurora", "oceanic", "solstice"],
+        "description": "Theme mood: 'light' (bright mission control), 'dark' (low-light focus), 'aurora' (vivid energy), 'oceanic' (calm analysis), 'solstice' (warm collaboration)"
+      },
+      "timeOfDay": {
+        "type": "string",
+        "enum": ["morning", "afternoon", "evening", "night"],
+        "description": "Optional time-of-day gradient variant: morning (dawn colors), afternoon (balanced), evening (dusk), night (dark mode)"
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Enable smooth animated transition between themes (default: true)",
+        "default": true
+      },
+      "reason": {
+        "type": "string",
+        "description": "Human-readable explanation of why the theme is changing (e.g., 'Matching user's creative energy', 'Late night work session'). Used for logging and context.",
+        "minLength": 3
+      }
+    },
+    "required": ["mood"]
+  }
+}

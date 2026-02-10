@@ -1,0 +1,34 @@
+{
+  "id": "select_rows",
+  "name": "Select Rows",
+  "category": "ui",
+  "description": "Select specific rows in a table component by ID or index. Useful for triggering batch operations, analyzing specific data, or testing selection-based workflows. Publishes selection changes via the context bus for other components to react.",
+  "function_name": "select_rows",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The ID of the table component (e.g., 'query-results', 'users-table'). This is the module ID assigned when the component was rendered."
+      },
+      "rowIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of row IDs to select. Row IDs are typically from the data's primary key field. Example: ['user-123', 'user-456']"
+      },
+      "selectAll": {
+        "type": "boolean",
+        "description": "Select all rows in the table (default: false). When true, ignores rowIds parameter.",
+        "default": false
+      },
+      "clearExisting": {
+        "type": "boolean",
+        "description": "Clear existing selection before applying new selection (default: true). If false, adds to existing selection.",
+        "default": true
+      }
+    }
+  }
+}

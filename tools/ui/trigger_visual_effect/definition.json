@@ -1,0 +1,85 @@
+{
+  "id": "trigger_visual_effect",
+  "name": "Trigger Visual Effect",
+  "description": "Trigger a dramatic visual effect in the user interface for celebrations, alerts, or fun interactions. Effects include confetti, balloons, fireworks, sparkles, red alerts, rainbows, snow, stars, hearts, and 2030-themed celebrations.",
+  "category": "ui",
+  "function_name": "trigger_visual_effect",
+  "parameters": {
+    "type": "object",
+    "required": ["effect"],
+    "properties": {
+      "effect": {
+        "type": "string",
+        "enum": ["confetti", "balloons", "fireworks", "sparkles", "red-alert", "rainbow", "snow", "stars", "hearts", "2030"],
+        "description": "The visual effect to trigger. Options: confetti (celebratory burst), balloons (floating balloons), fireworks (explosive display), sparkles (magical particles), red-alert (warning animation), rainbow (colorful gradient), snow (falling snow), stars (twinkling stars), hearts (love animation), 2030 (futuristic celebration)"
+      },
+      "duration": {
+        "type": "number",
+        "description": "Duration in milliseconds for the effect animation. Default: 3000",
+        "default": 3000
+      },
+      "intensity": {
+        "type": "string",
+        "enum": ["low", "medium", "high"],
+        "description": "Effect intensity level. Low = subtle, Medium = standard, High = dramatic. Default: medium",
+        "default": "medium"
+      },
+      "message": {
+        "type": "string",
+        "description": "Optional message to display with the effect (e.g., 'Congratulations!' or 'Alert: System warning')"
+      },
+      "position": {
+        "type": "string",
+        "enum": ["full-screen", "top", "center", "bottom"],
+        "description": "Where the effect should appear. Default: full-screen",
+        "default": "full-screen"
+      }
+    }
+  },
+  "use_tool_context": false,
+  "examples": [
+    {
+      "input": {
+        "effect": "confetti",
+        "duration": 3000,
+        "intensity": "high",
+        "message": "Task completed!"
+      },
+      "output": {
+        "success": true,
+        "effect_triggered": "confetti",
+        "message": "Visual effect triggered successfully"
+      },
+      "description": "Celebrate a successful task completion with confetti"
+    },
+    {
+      "input": {
+        "effect": "red-alert",
+        "duration": 2000,
+        "intensity": "high",
+        "message": "Warning: Critical error detected"
+      },
+      "output": {
+        "success": true,
+        "effect_triggered": "red-alert",
+        "message": "Visual effect triggered successfully"
+      },
+      "description": "Alert user to a critical error"
+    },
+    {
+      "input": {
+        "effect": "balloons",
+        "intensity": "medium"
+      },
+      "output": {
+        "success": true,
+        "effect_triggered": "balloons",
+        "message": "Visual effect triggered successfully"
+      },
+      "description": "Simple balloon animation without message"
+    }
+  ],
+  "tags": ["ui", "visual", "effects", "animation", "celebration"],
+  "version": "1.0.0",
+  "dependencies": []
+}

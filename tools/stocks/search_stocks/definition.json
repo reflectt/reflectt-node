@@ -1,0 +1,18 @@
+{
+  "id": "search_stocks",
+  "name": "Search Stocks",
+  "category": "stocks",
+  "description": "Search for stock symbols by company name or keywords.\n\nReturns list of matching symbols with company names, markets, and exchanges.\n\nUseful for:\n- Finding stock symbols from company names\n- Discovering related companies\n- Researching market sectors\n\nData is cached for 24 hours.\n\n** EXAMPLES **\n\n1. Search for Apple stocks:\n{\n  \"query\": \"Apple\"\n}\n\n2. Search for tech companies:\n{\n  \"query\": \"Microsoft\"\n}\n\n3. Search for banks:\n{\n  \"query\": \"Bank of America\"\n}",
+  "function_name": "search_stocks",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Company name or keyword to search for"
+      }
+    }
+  }
+}

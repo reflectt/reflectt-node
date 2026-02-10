@@ -1,0 +1,27 @@
+{
+  "id": "analyze_token_usage",
+  "name": "Analyze Token Usage",
+  "description": "Analyze token usage patterns and identify optimization opportunities. Helps reduce costs by finding inefficient token usage.",
+  "category": "debug",
+  "function_name": "analyze_token_usage",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to analyze"
+      },
+      "conversation_id": {
+        "type": "string",
+        "description": "Specific conversation ID (optional - if not provided, analyzes aggregate)"
+      },
+      "days": {
+        "type": "number",
+        "description": "Number of days to analyze (default: 7, used if no conversation_id)",
+        "default": 7
+      }
+    },
+    "required": ["user_id"]
+  },
+  "version": "1.0.0"
+}

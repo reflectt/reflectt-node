@@ -1,0 +1,18 @@
+{
+  "id": "track_crypto_portfolio",
+  "name": "Track Crypto Portfolio",
+  "category": "crypto",
+  "description": "Track and update a cryptocurrency portfolio with current prices and performance metrics.\n\nReturns:\n- Updated holdings with current prices\n- Gain/loss for each holding\n- Total portfolio value\n- Overall portfolio performance (gain/loss percentage)\n- Weighted allocation by coin\n\nAutomatically fetches latest prices for all holdings and calculates metrics.\n\n** EXAMPLES **\n\n1. Track crypto portfolio:\n{\n  \"portfolio_id\": \"my-crypto-portfolio\"\n}\n\n2. Track another user's portfolio:\n{\n  \"portfolio_id\": \"user-portfolio-2\"\n}",
+  "function_name": "track_crypto_portfolio",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["portfolio_id"],
+    "properties": {
+      "portfolio_id": {
+        "type": "string",
+        "description": "Portfolio identifier"
+      }
+    }
+  }
+}

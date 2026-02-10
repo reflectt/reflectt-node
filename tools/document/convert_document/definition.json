@@ -1,0 +1,85 @@
+{
+  "id": "convert_document",
+  "name": "Convert Document",
+  "description": "Convert between document formats: PDF↔Word, Markdown↔PDF, HTML↔PDF, and more. Preserves formatting and supports quality settings. Universal document converter.",
+  "category": "document",
+  "function_name": "convert_document",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "input_path",
+      "input_format",
+      "output_format"
+    ],
+    "properties": {
+      "input_path": {
+        "type": "string",
+        "description": "File path to input document"
+      },
+      "input_format": {
+        "type": "string",
+        "enum": [
+          "pdf",
+          "word",
+          "markdown",
+          "html",
+          "text"
+        ],
+        "description": "Input document format"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "pdf",
+          "markdown",
+          "html",
+          "text"
+        ],
+        "description": "Output document format"
+      },
+      "output_path": {
+        "type": "string",
+        "description": "Optional: Where to save converted document"
+      },
+      "conversion_options": {
+        "type": "object",
+        "description": "Conversion options",
+        "properties": {
+          "preserve_formatting": {
+            "type": "boolean",
+            "default": true,
+            "description": "Preserve formatting during conversion"
+          },
+          "extract_images": {
+            "type": "boolean",
+            "default": false,
+            "description": "Extract and include images"
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": "medium",
+            "description": "Conversion quality"
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "document",
+    "convert",
+    "transform",
+    "format",
+    "pdf",
+    "word",
+    "markdown"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

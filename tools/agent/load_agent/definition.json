@@ -1,0 +1,63 @@
+{
+  "id": "load_agent",
+  "name": "Load Agent",
+  "description": "Load an agent definition by name with hierarchical search (space → global). Use this to inspect agent configurations, load sub-agents, or prepare agents for execution.",
+  "category": "agent",
+  "function_name": "load_agent",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "agent_name"
+    ],
+    "properties": {
+      "agent_name": {
+        "type": "string",
+        "description": "Name, slug, or ID of the agent to load (e.g., \"student_tutor\", \"education:tutor\")"
+      },
+      "search_space": {
+        "type": "boolean",
+        "description": "Whether to search in current space first (default: true)"
+      },
+      "search_global": {
+        "type": "boolean",
+        "description": "Whether to search in global as fallback (default: true)"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Load an agent from space or global",
+      "parameters": {
+        "agent_name": "student_tutor"
+      },
+      "expected_result": "Returns agent definition from space if exists, otherwise from global"
+    },
+    {
+      "scenario": "Load only from global (skip space)",
+      "parameters": {
+        "agent_name": "system_builder",
+        "search_space": false,
+        "search_global": true
+      },
+      "expected_result": "Returns agent definition from global only"
+    },
+    {
+      "scenario": "Load space-specific override",
+      "parameters": {
+        "agent_name": "custom_tutor",
+        "search_space": true,
+        "search_global": false
+      },
+      "expected_result": "Returns agent definition from space only, ignoring global"
+    }
+  ],
+  "tags": [
+    "agent",
+    "load",
+    "hierarchical",
+    "discovery"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

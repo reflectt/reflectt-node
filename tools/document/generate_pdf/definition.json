@@ -1,0 +1,113 @@
+{
+  "id": "generate_pdf",
+  "name": "Generate Pdf",
+  "description": "Create PDFs from markdown, HTML, or plain text. Supports custom styling, headers/footers, page sizes, and margins. Perfect for generating reports, invoices, contracts, and formatted documents.",
+  "category": "document",
+  "function_name": "generate_pdf",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "content",
+      "content_type"
+    ],
+    "properties": {
+      "content": {
+        "type": "string",
+        "description": "Content to convert to PDF (markdown, HTML, or plain text)"
+      },
+      "content_type": {
+        "type": "string",
+        "enum": [
+          "markdown",
+          "html",
+          "text"
+        ],
+        "description": "Type of content provided"
+      },
+      "output_path": {
+        "type": "string",
+        "description": "Optional: Where to save the PDF (relative to space storage). If not provided, returns base64 data."
+      },
+      "options": {
+        "type": "object",
+        "description": "PDF generation options",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Document title (metadata)"
+          },
+          "author": {
+            "type": "string",
+            "description": "Document author (metadata)"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Document subject (metadata)"
+          },
+          "page_size": {
+            "type": "string",
+            "enum": [
+              "A4",
+              "Letter",
+              "Legal"
+            ],
+            "default": "A4",
+            "description": "Page size"
+          },
+          "margins": {
+            "type": "object",
+            "description": "Page margins in mm",
+            "properties": {
+              "top": {
+                "type": "number",
+                "default": 20
+              },
+              "right": {
+                "type": "number",
+                "default": 20
+              },
+              "bottom": {
+                "type": "number",
+                "default": 20
+              },
+              "left": {
+                "type": "number",
+                "default": 20
+              }
+            }
+          },
+          "header": {
+            "type": "string",
+            "description": "HTML for page header"
+          },
+          "footer": {
+            "type": "string",
+            "description": "HTML for page footer (can use {{page}} and {{totalPages}})"
+          },
+          "css": {
+            "type": "string",
+            "description": "Custom CSS styles"
+          },
+          "landscape": {
+            "type": "boolean",
+            "default": false,
+            "description": "Landscape orientation"
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "document",
+    "pdf",
+    "generate",
+    "create",
+    "markdown",
+    "html",
+    "report"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

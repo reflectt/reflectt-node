@@ -1,0 +1,74 @@
+{
+  "id": "execute_document_command",
+  "name": "Execute Document Command",
+  "category": "ui",
+  "description": "Execute AI commands in DocumentEditor (e.g., /summarize, /translate, /format, /continue). These slash commands are detected by the editor but need AI processing to execute. This tool triggers the AI operation and applies the results to the document. Component must already be mounted.",
+  "function_name": "execute_document_command",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "moduleId": {
+        "type": "string",
+        "description": "ID of the DocumentEditor component to control (must match existing module ID from render_manifest)",
+        "minLength": 1
+      },
+      "command": {
+        "type": "string",
+        "enum": ["summarize", "translate", "format", "continue", "improve", "rewrite", "outline"],
+        "description": "AI command to execute: 'summarize' condenses text, 'translate' to another language, 'format' improves structure, 'continue' extends writing, 'improve' enhances quality, 'rewrite' changes style, 'outline' generates structure"
+      },
+      "params": {
+        "type": "object",
+        "description": "Command-specific parameters",
+        "properties": {
+          "language": {
+            "type": "string",
+            "description": "Target language for translate command (e.g., 'Spanish', 'French')"
+          },
+          "style": {
+            "type": "string",
+            "description": "Writing style for rewrite command (e.g., 'formal', 'casual', 'technical')"
+          },
+          "length": {
+            "type": "string",
+            "enum": ["short", "medium", "long"],
+            "description": "Target length for summarize command"
+          },
+          "tone": {
+            "type": "string",
+            "description": "Tone for improve/rewrite (e.g., 'professional', 'friendly', 'persuasive')"
+          }
+        }
+      },
+      "selection": {
+        "type": "object",
+        "description": "Apply command only to selected text range (if omitted, applies to entire document)",
+        "properties": {
+          "start": {
+            "type": "number",
+            "description": "Start position (0-indexed)",
+            "minimum": 0
+          },
+          "end": {
+            "type": "number",
+            "description": "End position (0-indexed)",
+            "minimum": 0
+          }
+        },
+        "required": ["start", "end"]
+      },
+      "replaceOriginal": {
+        "type": "boolean",
+        "description": "Replace original content with result (true) or insert below (false). Default: true",
+        "default": true
+      },
+      "streamResponse": {
+        "type": "boolean",
+        "description": "Stream AI response for real-time display (default: true)",
+        "default": true
+      }
+    },
+    "required": ["moduleId", "command"]
+  }
+}

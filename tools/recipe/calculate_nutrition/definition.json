@@ -1,0 +1,31 @@
+{
+  "function_name": "calculate_nutrition",
+  "description": "Calculate detailed nutrition information for a recipe or ingredient list including calories, macros, and micronutrients",
+  "category": "recipe",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "recipe_id": {
+        "type": "string",
+        "description": "Recipe ID to analyze (optional if ingredients provided)"
+      },
+      "ingredients": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "amount": { "type": "number" },
+            "unit": { "type": "string" }
+          }
+        },
+        "description": "List of ingredients to analyze (optional if recipe_id provided)"
+      },
+      "servings": {
+        "type": "number",
+        "description": "Number of servings (default: 1)"
+      }
+    },
+    "required": []
+  }
+}

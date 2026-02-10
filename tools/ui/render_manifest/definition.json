@@ -1,0 +1,75 @@
+{
+  "id": "render_manifest",
+  "name": "Render Manifest",
+  "category": "ui",
+  "description": "Render components into semantic layout slots. Use set_layout_intent FIRST to establish layout pattern.\n\n** CRITICAL: Always call set_layout_intent before render_manifest to establish the correct layout pattern **\n\n** SEMANTIC SLOTS (v2.0.0) **\n- hero: Page header/banner (max 1 component)\n- main: Primary focus content\n- detail: Inspector/properties panel\n- context: Supporting info/sidebars\n- navigation: Menus/breadcrumbs (persistent)\n- status: Notifications/alerts\n- actions: Toolbars/FABs\n- overlay: Modals/dialogs\n- background: Ambient visuals\n\n** COMPONENT LIFECYCLE **\n- persistent: Navigation, menus (stays across intent changes)\n- ephemeral: Content components (cleared on intent change)\n- ambient: Notifications (auto-expire after TTL)\n\n** WORKFLOW **\n1. Call set_layout_intent({ intent: 'dashboard' })\n2. Call render_manifest({ components: [...] })",
+  "function_name": "render_manifest",
+  "version": "2.0.0",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "components": {
+        "type": "array",
+        "description": "Components to render (v2.0.0 format)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "componentId": {
+              "type": "string",
+              "description": "Component identifier from registry"
+            },
+            "slot": {
+              "type": "string",
+              "enum": [
+                "hero",
+                "main",
+                "detail",
+                "context",
+                "navigation",
+                "status",
+                "actions",
+                "overlay",
+                "background"
+              ],
+              "description": "Semantic slot for component placement:\n\n- hero: Page header/banner (max 1 component)\n- main: Primary focus content\n- detail: Inspector/properties panel\n- context: Supporting info/sidebars\n- navigation: Menus/breadcrumbs\n- status: Notifications/alerts\n- actions: Toolbars/FABs\n- overlay: Modals/dialogs\n- background: Ambient visuals"
+            },
+            "props": {
+              "type": "object",
+              "description": "Component props",
+              "additionalProperties": true
+            },
+            "lifecycle": {
+              "type": "string",
+              "enum": ["persistent", "ephemeral", "ambient"],
+              "description": "Component lifecycle:\n- persistent: Stays until explicitly removed (navigation)\n- ephemeral: Cleared on intent change (content)\n- ambient: Auto-expires after TTL (notifications)"
+            },
+            "size": {
+              "type": "string",
+              "enum": ["compact", "comfortable", "spacious", "fill"],
+              "default": "comfortable",
+              "description": "Display size variant"
+            },
+            "priority": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000,
+              "default": 500,
+              "description": "Priority for slot capacity (higher = more important)"
+            },
+            "ttl": {
+              "type": "number",
+              "description": "Time to live in milliseconds (for ambient lifecycle)"
+            },
+            "label": {
+              "type": "string",
+              "description": "Optional human-readable label"
+            }
+          },
+          "required": ["componentId", "slot"]
+        }
+      }
+    },
+    "required": ["components"]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "get_stock_fundamentals",
+  "name": "Get Stock Fundamentals",
+  "category": "stocks",
+  "description": "Get company fundamentals and financial metrics for a stock symbol.\n\nReturns:\n- P/E Ratio (Price-to-Earnings)\n- Market cap\n- Earnings Per Share (EPS)\n- Dividend yield\n- 52-week high/low\n- Sector and industry\n- Description of the company\n\nData is cached for 24 hours as fundamentals change less frequently.\n\n** EXAMPLES **\n\n1. Get fundamentals for Apple:\n{\n  \"symbol\": \"AAPL\"\n}\n\n2. Get fundamentals for Microsoft:\n{\n  \"symbol\": \"MSFT\"\n}\n\n3. Get fundamentals for Amazon:\n{\n  \"symbol\": \"AMZN\"\n}",
+  "function_name": "get_stock_fundamentals",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["symbol"],
+    "properties": {
+      "symbol": {
+        "type": "string",
+        "description": "Stock symbol (e.g., 'AAPL', 'MSFT', 'GOOGL')"
+      }
+    }
+  }
+}

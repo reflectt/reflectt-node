@@ -1,0 +1,101 @@
+{
+  "id": "merge_documents",
+  "name": "Merge Documents",
+  "description": "Combine multiple PDFs or documents into a single file. Supports page ranges, bookmarks, table of contents, and format conversion. Perfect for creating reports from multiple sources.",
+  "category": "document",
+  "function_name": "merge_documents",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "documents",
+      "output_format"
+    ],
+    "properties": {
+      "documents": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "path",
+            "type"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "File path to document"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "pdf",
+                "word",
+                "markdown",
+                "html",
+                "text"
+              ],
+              "description": "Document type"
+            },
+            "page_range": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "Optional: Page range for PDFs [start, end]"
+            }
+          }
+        },
+        "description": "Array of documents to merge"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "pdf"
+        ],
+        "description": "Output format (currently PDF only)"
+      },
+      "output_path": {
+        "type": "string",
+        "description": "Optional: Where to save merged document"
+      },
+      "merge_options": {
+        "type": "object",
+        "description": "Merge options",
+        "properties": {
+          "add_page_breaks": {
+            "type": "boolean",
+            "default": true,
+            "description": "Add page breaks between documents"
+          },
+          "add_table_of_contents": {
+            "type": "boolean",
+            "default": false,
+            "description": "Generate table of contents"
+          },
+          "preserve_formatting": {
+            "type": "boolean",
+            "default": true,
+            "description": "Preserve original formatting"
+          },
+          "add_bookmarks": {
+            "type": "boolean",
+            "default": false,
+            "description": "Add bookmarks for each document (PDF only)"
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "document",
+    "merge",
+    "combine",
+    "pdf",
+    "concatenate"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,43 @@
+{
+  "id": "convert_units",
+  "name": "Convert Units",
+  "category": "measurement",
+  "description": "Convert between different units of measurement. Supports length, weight, temperature, volume, speed, and area conversions.\n\nSupported categories:\n- Length: m, km, cm, mm, mi, yd, ft, in\n- Weight: kg, g, mg, lb, oz, ton, st\n- Temperature: C, F, K\n- Volume: L, mL, gal, qt, pt, cup, fl_oz, tbsp, tsp, m3, cm3\n- Speed: mph, kph, m/s, ft/s, knot\n- Area: sq_m, sq_km, sq_cm, sq_ft, sq_in, sq_mi, acre, hectare\n\nFeatures:\n- High-precision conversions using standard formulas\n- Cached conversion formulas for performance\n- Support for decimal precision\n- Common conversion presets (baking, distance, weight)\n- Bidirectional conversions\n\n** EXAMPLES **\n\n1. Convert length:\n{\n  \"value\": 100,\n  \"from\": \"ft\",\n  \"to\": \"m\"\n}\n\n2. Convert temperature:\n{\n  \"value\": 98.6,\n  \"from\": \"F\",\n  \"to\": \"C\",\n  \"precision\": 1\n}\n\n3. Batch convert to multiple units:\n{\n  \"value\": 1,\n  \"from\": \"cup\",\n  \"toUnits\": [\"mL\", \"tbsp\", \"tsp\", \"fl_oz\"]\n}\n\n4. Common baking conversions:\n{\n  \"value\": 2,\n  \"from\": \"cup\",\n  \"preset\": \"baking\"\n}",
+  "function_name": "convert_units",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["value", "from"],
+    "properties": {
+      "value": {
+        "type": "number",
+        "description": "The value to convert"
+      },
+      "from": {
+        "type": "string",
+        "description": "Source unit (e.g., 'm', 'ft', 'kg', 'lb', 'C', 'F', 'L', 'gal')"
+      },
+      "to": {
+        "type": "string",
+        "description": "Target unit (same category as source). Omit to use preset or toUnits."
+      },
+      "toUnits": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of target units for batch conversion"
+      },
+      "precision": {
+        "type": "number",
+        "description": "Decimal precision for result (default: 2)",
+        "default": 2
+      },
+      "preset": {
+        "type": "string",
+        "enum": ["baking", "distance", "weight"],
+        "description": "Use common conversion preset (automatically determines toUnits)"
+      }
+    }
+  }
+}

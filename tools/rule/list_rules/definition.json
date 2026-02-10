@@ -1,0 +1,59 @@
+{
+  "id": "list_rules",
+  "name": "List Rules",
+  "description": "List all available rules with optional filtering by type, tags, status, or domain. Returns rule summaries with key metadata.",
+  "category": "rule",
+  "function_name": "list_rules",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "type": {
+        "type": "string",
+        "enum": [
+          "validation",
+          "automation",
+          "transformation",
+          "conditional",
+          "composite"
+        ],
+        "description": "Filter by rule type"
+      },
+      "tags": {
+        "type": "array",
+        "description": "Filter by tags (rules must have ALL tags)",
+        "items": {
+          "type": "string"
+        }
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "active",
+          "draft",
+          "deprecated"
+        ],
+        "description": "Filter by status (default: active)",
+        "default": "active"
+      },
+      "domain": {
+        "type": "string",
+        "description": "Filter by domain (e.g., 'finance', 'inventory', 'sales')"
+      },
+      "include_deprecated": {
+        "type": "boolean",
+        "description": "Include deprecated rules (default: false)",
+        "default": false
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "rules",
+    "business-logic",
+    "list",
+    "search"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

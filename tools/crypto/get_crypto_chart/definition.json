@@ -1,0 +1,27 @@
+{
+  "id": "get_crypto_chart",
+  "name": "Get Crypto Chart",
+  "category": "crypto",
+  "description": "Get historical cryptocurrency price data for charting.\n\nSupports multiple time periods:\n- 1, 7, 30, 90, 365 days (price history)\n\nReturns array of price points with timestamps for charting.\n\nData is cached for 24 hours.\n\n** EXAMPLES **\n\n1. Get Bitcoin price history for last 7 days:\n{\n  \"coin_id\": \"bitcoin\",\n  \"days\": \"7\"\n}\n\n2. Get Ethereum price for last 30 days in EUR:\n{\n  \"coin_id\": \"ethereum\",\n  \"days\": \"30\",\n  \"currency\": \"eur\"\n}\n\n3. Get Cardano price for last year:\n{\n  \"coin_id\": \"cardano\",\n  \"days\": \"365\"\n}",
+  "function_name": "get_crypto_chart",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["coin_id", "days"],
+    "properties": {
+      "coin_id": {
+        "type": "string",
+        "description": "Cryptocurrency ID (e.g., 'bitcoin', 'ethereum')"
+      },
+      "days": {
+        "type": "string",
+        "enum": ["1", "7", "30", "90", "365"],
+        "description": "Number of days of price history"
+      },
+      "currency": {
+        "type": "string",
+        "description": "Currency code (e.g., 'usd', 'eur'). Default: 'usd'"
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "id": "delete_record",
+  "name": "Delete Record",
+  "description": "Delete a record from tables/[table]/rows/[id].json. Permanently removes structured data from PostgreSQL-style table storage.",
+  "category": "data",
+  "function_name": "delete_record",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'worlds', 'users')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "id": {
+        "type": "string",
+        "description": "Record ID to delete"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Delete from a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    },
+    "required": [
+      "table",
+      "id"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

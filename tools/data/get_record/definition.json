@@ -1,0 +1,34 @@
+{
+  "id": "get_record",
+  "name": "Get Record",
+  "description": "Get a single record by ID from tables/[table]/rows/[id].json. Retrieves structured data from PostgreSQL-style table storage.",
+  "category": "data",
+  "function_name": "get_record",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'worlds', 'users')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "id": {
+        "type": "string",
+        "description": "Record ID to retrieve"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: Get from a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    },
+    "required": [
+      "table",
+      "id"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

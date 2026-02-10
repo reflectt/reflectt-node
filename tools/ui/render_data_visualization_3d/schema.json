@@ -1,0 +1,92 @@
+{
+  "name": "render_data_visualization_3d",
+  "description": "Create immersive 3D data visualizations including scatter plots, line graphs, bar charts, network graphs, and surface plots. Perfect for showing complex data relationships, trends, networks, and multi-dimensional datasets in an interactive 3D space. Supports animations, custom color schemes, labels, and multiple visualization types.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "data": {
+        "type": "array",
+        "description": "Array of data points with x, y, z coordinates. Each point can have optional value, label, and color properties.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number", "description": "X coordinate position" },
+            "y": { "type": "number", "description": "Y coordinate position (height for bar charts)" },
+            "z": { "type": "number", "description": "Z coordinate position" },
+            "value": { "type": "number", "description": "Optional numeric value (used for sizing/coloring)" },
+            "label": { "type": "string", "description": "Optional label to display near the point" },
+            "color": { "type": "string", "description": "Optional hex color (e.g., '#ff0000')" }
+          },
+          "required": ["x", "y", "z"]
+        }
+      },
+      "type": {
+        "type": "string",
+        "enum": ["scatter", "line", "bar", "network", "surface"],
+        "description": "Type of visualization: 'scatter' for point clouds, 'line' for connected path, 'bar' for 3D bar chart, 'network' for connected nodes, 'surface' for mesh surfaces",
+        "default": "scatter"
+      },
+      "title": {
+        "type": "string",
+        "description": "Title displayed above the visualization"
+      },
+      "xLabel": {
+        "type": "string",
+        "description": "Label for X axis",
+        "default": "X"
+      },
+      "yLabel": {
+        "type": "string",
+        "description": "Label for Y axis",
+        "default": "Y"
+      },
+      "zLabel": {
+        "type": "string",
+        "description": "Label for Z axis",
+        "default": "Z"
+      },
+      "animate": {
+        "type": "boolean",
+        "description": "Enable smooth floating animations",
+        "default": true
+      },
+      "showGrid": {
+        "type": "boolean",
+        "description": "Display 3D grid reference",
+        "default": true
+      },
+      "showAxes": {
+        "type": "boolean",
+        "description": "Display labeled axes (X=red, Y=green, Z=blue)",
+        "default": true
+      },
+      "colorScheme": {
+        "type": "string",
+        "enum": ["rainbow", "gradient", "categorical", "heatmap"],
+        "description": "Color scheme: 'rainbow' for full spectrum, 'gradient' for blue gradient, 'categorical' for distinct colors, 'heatmap' for temperature-like colors",
+        "default": "gradient"
+      },
+      "cameraPosition": {
+        "type": "array",
+        "description": "Initial camera position [x, y, z]",
+        "items": { "type": "number" },
+        "minItems": 3,
+        "maxItems": 3,
+        "default": [8, 8, 8]
+      },
+      "environment": {
+        "type": "string",
+        "enum": ["studio", "sunset", "night", "space"],
+        "description": "Background environment: 'studio' for neutral gray, 'sunset' for warm, 'night' for dark blue, 'space' for black",
+        "default": "studio"
+      },
+      "slot": {
+        "type": "string",
+        "enum": ["primary", "secondary", "sidebar"],
+        "description": "Layout slot where the visualization should appear",
+        "default": "primary"
+      }
+    },
+    "required": ["data"]
+  }
+}

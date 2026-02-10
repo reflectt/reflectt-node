@@ -1,0 +1,28 @@
+{
+  "function_name": "generate_shopping_list",
+  "description": "Generate a shopping list from one or multiple recipes, automatically combining ingredients and organizing by category",
+  "category": "recipe",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "recipe_ids": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "List of recipe IDs to include in shopping list"
+      },
+      "servings": {
+        "type": "object",
+        "description": "Servings per recipe (e.g., {recipe1: 4, recipe2: 2})"
+      },
+      "organize_by_aisle": {
+        "type": "boolean",
+        "description": "If true, organize ingredients by grocery store aisle (default: true)"
+      },
+      "exclude_pantry_items": {
+        "type": "boolean",
+        "description": "If true, exclude common pantry items like salt, pepper, oil"
+      }
+    },
+    "required": ["recipe_ids"]
+  }
+}

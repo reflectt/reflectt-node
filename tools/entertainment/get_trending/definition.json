@@ -1,0 +1,33 @@
+{
+  "id": "get_trending",
+  "name": "Get Trending Entertainment",
+  "category": "entertainment",
+  "description": "Get trending movies and TV shows for today or this week. Discover what's popular and what everyone is watching.\n\nYou can:\n- Get trending movies and shows\n- View by time window (day or week)\n- See popularity metrics\n- Discover what's hot right now\n- Get ratings and release dates\n\nUses TMDB trending data updated hourly.\n\n** WHEN TO USE **\n- User asks \"what's trending\"\n- User wants popular/top movies\n- User wants to see what's popular now\n- User wants newest releases\n\n** WHEN NOT TO USE **\n- User wants specific movie info (use get_movie_details)\n- User wants to search (use search_movies)\n- User wants recommendations (use get_entertainment_recommendations)\n\n** EXAMPLES **\n\n1. Get trending movies this week:\n{\n  \"media_type\": \"movie\",\n  \"time_window\": \"week\",\n  \"limit\": 20\n}\n\n2. Get trending today:\n{\n  \"media_type\": \"all\",\n  \"time_window\": \"day\",\n  \"limit\": 15\n}\n\n3. Get trending TV shows:\n{\n  \"media_type\": \"tv\",\n  \"time_window\": \"week\"\n}",
+  "function_name": "get_trending",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "media_type": {
+        "type": "string",
+        "enum": ["movie", "tv", "all"],
+        "description": "Type of media to get (default: all)",
+        "default": "all"
+      },
+      "time_window": {
+        "type": "string",
+        "enum": ["day", "week"],
+        "description": "Time window for trending (default: week)",
+        "default": "week"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Number of results to return (1-20, default: 10)",
+        "minimum": 1,
+        "maximum": 20,
+        "default": 10
+      }
+    }
+  }
+}

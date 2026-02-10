@@ -1,0 +1,27 @@
+{
+  "id": "get_stock_chart",
+  "name": "Get Stock Chart",
+  "category": "stocks",
+  "description": "Get historical stock price data (OHLCV) for charting.\n\nSupports multiple time intervals:\n- Intraday: 1min, 5min, 15min, 30min, 60min (last 1 month)\n- Daily: Full historical data\n- Weekly: Full historical data\n\nReturns array of OHLCV points (Open, High, Low, Close, Volume) with timestamps for charting.\n\nData is cached based on interval (1 min for intraday, 24 hours for daily/weekly).\n\n** EXAMPLES **\n\n1. Get 5-minute intraday data for Apple:\n{\n  \"symbol\": \"AAPL\",\n  \"interval\": \"5min\"\n}\n\n2. Get daily chart for last 30 days:\n{\n  \"symbol\": \"MSFT\",\n  \"interval\": \"daily\",\n  \"period\": \"30\"\n}\n\n3. Get weekly data for Tesla:\n{\n  \"symbol\": \"TSLA\",\n  \"interval\": \"weekly\"\n}",
+  "function_name": "get_stock_chart",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["symbol", "interval"],
+    "properties": {
+      "symbol": {
+        "type": "string",
+        "description": "Stock symbol (e.g., 'AAPL', 'MSFT')"
+      },
+      "interval": {
+        "type": "string",
+        "enum": ["1min", "5min", "15min", "30min", "60min", "daily", "weekly"],
+        "description": "Time interval for data points"
+      },
+      "period": {
+        "type": "string",
+        "description": "Number of days of data to return (for daily/weekly). Default: 30"
+      }
+    }
+  }
+}

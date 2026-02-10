@@ -1,0 +1,39 @@
+{
+  "id": "web_fetch",
+  "name": "Web Fetch",
+  "description": "Fetch the content of a web page. Returns the text content of the page. Use this after web_search to get detailed information from specific URLs.",
+  "category": "web",
+  "function_name": "web_fetch",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "url"
+    ],
+    "properties": {
+      "url": {
+        "type": "string",
+        "format": "uri",
+        "description": "The URL to fetch"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Fetch content from a documentation page",
+      "parameters": {
+        "url": "https://example.com/docs/api-reference"
+      },
+      "expected_result": "Returns the text content of the page"
+    }
+  ],
+  "tags": [
+    "web",
+    "fetch",
+    "scrape",
+    "content",
+    "url"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "context_requirements": []
+}

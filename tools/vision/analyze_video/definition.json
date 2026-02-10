@@ -1,0 +1,91 @@
+{
+  "id": "analyze_video",
+  "name": "Analyze Video",
+  "description": "Analyze video content by extracting representative frames and analyzing them using Claude's vision capabilities. Provides a comprehensive summary of video content, scenes, objects, actions, and any visible text.",
+  "category": "vision",
+  "function_name": "analyze_video",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "video_source"
+    ],
+    "properties": {
+      "video_source": {
+        "type": "string",
+        "description": "Video source - can be a URL or file path to video file"
+      },
+      "video_type": {
+        "type": "string",
+        "enum": ["url", "file_path"],
+        "default": "file_path",
+        "description": "Type of video source provided"
+      },
+      "num_frames": {
+        "type": "number",
+        "default": 5,
+        "minimum": 1,
+        "maximum": 20,
+        "description": "Number of frames to extract and analyze (evenly distributed throughout video)"
+      },
+      "analysis_focus": {
+        "type": "string",
+        "description": "Optional: Specific aspect to focus on (e.g., 'actions', 'objects', 'text', 'people', 'scenes')",
+        "enum": ["general", "actions", "objects", "text", "people", "scenes", "summary"]
+      },
+      "include_timestamps": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to include approximate timestamps for each analyzed frame"
+      },
+      "max_tokens": {
+        "type": "number",
+        "default": 2048,
+        "description": "Maximum tokens for the response"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Analyze tutorial video content",
+      "parameters": {
+        "video_source": "/path/to/tutorial.mp4",
+        "video_type": "file_path",
+        "num_frames": 10,
+        "analysis_focus": "summary"
+      },
+      "expected_result": "Returns comprehensive summary of video content across 10 frames"
+    },
+    {
+      "scenario": "Extract actions from security footage",
+      "parameters": {
+        "video_source": "/path/to/security.mp4",
+        "video_type": "file_path",
+        "num_frames": 8,
+        "analysis_focus": "actions",
+        "include_timestamps": true
+      },
+      "expected_result": "Returns timeline of detected actions with timestamps"
+    },
+    {
+      "scenario": "Identify objects in product demo video",
+      "parameters": {
+        "video_source": "https://example.com/product-demo.mp4",
+        "video_type": "url",
+        "num_frames": 5,
+        "analysis_focus": "objects"
+      },
+      "expected_result": "Returns list of objects visible throughout the video"
+    }
+  ],
+  "tags": [
+    "vision",
+    "video",
+    "analyze",
+    "frames",
+    "ai",
+    "claude",
+    "content-analysis"
+  ],
+  "version": "1.0.0",
+  "dependencies": ["extract_frames_from_video"]
+}

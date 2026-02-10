@@ -1,0 +1,60 @@
+{
+  "id": "record_tool_use",
+  "name": "Record Tool Use",
+  "description": "Record a tool invocation during task execution. Captures tool name, input, output, and timestamp for debugging and analytics.",
+  "category": "task",
+  "function_name": "record_tool_use",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "run_path",
+      "tool_name",
+      "tool_input"
+    ],
+    "properties": {
+      "run_path": {
+        "type": "string",
+        "description": "Path to the task run file (relative to current space)"
+      },
+      "tool_name": {
+        "type": "string",
+        "description": "Name of the tool that was invoked"
+      },
+      "tool_input": {
+        "type": "object",
+        "description": "Input parameters passed to the tool"
+      },
+      "tool_output": {
+        "type": "object",
+        "description": "Optional output returned by the tool (truncated to 500 chars)"
+      }
+    }
+  },
+  "examples": [
+    {
+      "scenario": "Record a file read operation",
+      "parameters": {
+        "run_path": "tasks/tutor/lesson_plan/runs/2025-10-17.json",
+        "tool_name": "read_data_file",
+        "tool_input": {
+          "path": "templates/lesson.md",
+          "scope": "global"
+        },
+        "tool_output": {
+          "content": "# Lesson Plan Template..."
+        }
+      },
+      "expected_result": "Tool use recorded with timestamp in task run"
+    }
+  ],
+  "tags": [
+    "task",
+    "execution",
+    "tracking",
+    "tools",
+    "audit"
+  ],
+  "version": "1.0.0",
+  "dependencies": [],
+  "use_tool_context": true
+}

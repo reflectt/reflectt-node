@@ -1,0 +1,27 @@
+{
+  "id": "get_cost_insights",
+  "name": "get_cost_insights",
+  "description": "Analyze spending patterns to find optimization opportunities. Identifies expensive agents, anomalous costs, and provides actionable recommendations to reduce spending without sacrificing quality.",
+  "category": "cost",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to analyze (optional - defaults to current user)"
+      },
+      "look_back_days": {
+        "type": "number",
+        "description": "Number of days to analyze (default: 30)",
+        "default": 30
+      },
+      "min_savings_usd": {
+        "type": "number",
+        "description": "Minimum potential savings to report (default: 1.0)",
+        "default": 1.0
+      }
+    },
+    "required": []
+  },
+  "function_name": "get_cost_insights"
+}

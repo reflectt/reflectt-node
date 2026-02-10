@@ -1,0 +1,28 @@
+{
+  "id": "get_conversation_timeline",
+  "name": "Get Conversation Timeline",
+  "description": "Generate visual timeline of conversation execution. Shows the chronological flow of messages, tool calls, and events.",
+  "category": "debug",
+  "function_name": "get_conversation_timeline",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "conversation_id": {
+        "type": "string",
+        "description": "Conversation ID to visualize"
+      },
+      "user_id": {
+        "type": "string",
+        "description": "User ID who owns the conversation"
+      },
+      "format": {
+        "type": "string",
+        "enum": ["json", "text"],
+        "description": "Output format (default: text)",
+        "default": "text"
+      }
+    },
+    "required": ["conversation_id", "user_id"]
+  },
+  "version": "1.0.0"
+}

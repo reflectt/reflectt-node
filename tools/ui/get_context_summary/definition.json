@@ -1,0 +1,22 @@
+{
+  "id": "get_context_summary",
+  "name": "Get Context Summary",
+  "category": "ui",
+  "description": "Get summary of all component contexts showing what data, selections, and filters each component has. Provides an overview of the data state across all components without returning full data payloads. Useful for debugging data flow and understanding component state.",
+  "function_name": "get_context_summary",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "includeData": {
+        "type": "boolean",
+        "description": "Include full data payloads in the summary. Warning: this can be verbose for large datasets. Default: false (only include metadata about the data)",
+        "default": false
+      },
+      "componentType": {
+        "type": "string",
+        "description": "Optional filter to only include components of a specific type (e.g., 'query_results_table', 'portals:chart')"
+      }
+    }
+  }
+}

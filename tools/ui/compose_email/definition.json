@@ -1,0 +1,108 @@
+{
+  "id": "compose_email",
+  "name": "Compose Email",
+  "category": "ui",
+  "description": "Compose or modify emails in the EmailComposer component. Allows AI to programmatically create, edit, and send emails with full control over recipients, subject, body, attachments, templates, and scheduling. Supports both creating new emails and modifying drafts. Component must already be mounted.",
+  "function_name": "compose_email",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "moduleId": {
+        "type": "string",
+        "description": "ID of the EmailComposer component to control (must match existing module ID from render_manifest)",
+        "minLength": 1
+      },
+      "to": {
+        "type": "array",
+        "description": "Recipient email addresses (required for new emails)",
+        "items": {
+          "type": "string",
+          "format": "email"
+        },
+        "minItems": 1
+      },
+      "cc": {
+        "type": "array",
+        "description": "CC recipient email addresses (optional)",
+        "items": {
+          "type": "string",
+          "format": "email"
+        }
+      },
+      "bcc": {
+        "type": "array",
+        "description": "BCC recipient email addresses (optional)",
+        "items": {
+          "type": "string",
+          "format": "email"
+        }
+      },
+      "subject": {
+        "type": "string",
+        "description": "Email subject line",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "body": {
+        "type": "string",
+        "description": "Email body content (supports HTML or plain text)",
+        "minLength": 1
+      },
+      "attachments": {
+        "type": "array",
+        "description": "File attachments to include",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "File name"
+            },
+            "url": {
+              "type": "string",
+              "description": "File URL or data URI",
+              "format": "uri"
+            },
+            "size": {
+              "type": "number",
+              "description": "File size in bytes"
+            },
+            "type": {
+              "type": "string",
+              "description": "MIME type"
+            }
+          },
+          "required": ["name", "url"]
+        }
+      },
+      "template": {
+        "type": "string",
+        "description": "Template ID to use for email body (alternative to body parameter)"
+      },
+      "schedule": {
+        "type": "string",
+        "description": "ISO 8601 timestamp for scheduled send (e.g., '2025-11-04T10:00:00Z')",
+        "format": "date-time"
+      },
+      "priority": {
+        "type": "string",
+        "enum": ["low", "normal", "high"],
+        "description": "Email priority level (default: 'normal')",
+        "default": "normal"
+      },
+      "readReceipt": {
+        "type": "boolean",
+        "description": "Request read receipt (default: false)",
+        "default": false
+      },
+      "action": {
+        "type": "string",
+        "enum": ["compose", "send", "save_draft"],
+        "description": "Action to perform: 'compose' opens editor, 'send' sends immediately, 'save_draft' saves as draft",
+        "default": "compose"
+      }
+    },
+    "required": ["moduleId"]
+  }
+}

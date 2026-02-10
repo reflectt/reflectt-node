@@ -1,0 +1,97 @@
+{
+  "id": "set_layout_sequence",
+  "name": "Set Layout Sequence",
+  "category": "ui",
+  "description": "Orchestrate a sequence of layout changes with timing for progressive disclosure UX patterns. Perfect for guided tours, multi-step workflows, or automated demonstrations. Each step can have a different layout mode, slot configuration, and transition style.",
+  "function_name": "set_layout_sequence",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "steps": {
+        "type": "array",
+        "description": "Array of layout steps to execute in sequence. Each step defines the layout mode, duration, optional slot configuration, and transition style.",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "standard",
+                "split",
+                "sidebar-focus",
+                "fullscreen",
+                "dashboard",
+                "master-detail",
+                "app-shell",
+                "three-column",
+                "board",
+                "feed",
+                "tabs",
+                "accordion"
+              ],
+              "description": "Layout mode to use for this step"
+            },
+            "duration": {
+              "type": "number",
+              "description": "How long to stay in this layout before moving to next step (milliseconds). Use 0 to stay indefinitely (requires manual progression).",
+              "minimum": 0,
+              "default": 3000
+            },
+            "slots": {
+              "type": "object",
+              "description": "Optional slot configuration for this step. Same structure as set_ui_layout slots parameter.",
+              "additionalProperties": false,
+              "properties": {
+                "sidebar": {
+                  "type": "object",
+                  "properties": {
+                    "visible": { "type": "boolean" },
+                    "collapsed": { "type": "boolean" }
+                  }
+                },
+                "top": {
+                  "type": "object",
+                  "properties": {
+                    "visible": { "type": "boolean" }
+                  }
+                },
+                "primary": {
+                  "type": "object",
+                  "properties": {
+                    "visible": { "type": "boolean" }
+                  }
+                },
+                "secondary": {
+                  "type": "object",
+                  "properties": {
+                    "visible": { "type": "boolean" }
+                  }
+                }
+              }
+            },
+            "transition": {
+              "type": "string",
+              "enum": ["instant", "subtle", "normal", "dramatic"],
+              "description": "Transition animation style: 'instant' (no animation), 'subtle' (200ms fade), 'normal' (300ms ease), 'dramatic' (500ms spring with stagger).",
+              "default": "normal"
+            }
+          },
+          "required": ["mode"]
+        }
+      },
+      "loop": {
+        "type": "boolean",
+        "description": "Whether to loop back to the first step after the last step completes. Default: false.",
+        "default": false
+      },
+      "onComplete": {
+        "type": "string",
+        "description": "Optional: Message to send to chat when sequence completes (only if loop is false)."
+      }
+    },
+    "required": ["steps"]
+  }
+}

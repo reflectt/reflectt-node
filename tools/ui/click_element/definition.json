@@ -1,0 +1,27 @@
+{
+  "id": "click_element",
+  "name": "Click Element",
+  "category": "ui",
+  "description": "Simulate clicking a button, link, or interactive element in a rendered component. Use this to trigger actions like submitting forms, opening dialogs, or navigating. The tool will find the element by CSS selector, data attribute, or button text.",
+  "function_name": "click_element",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "The ID of the component containing the element (e.g., 'form-1', 'table-results'). This is the module ID assigned when the component was rendered."
+      },
+      "elementSelector": {
+        "type": "string",
+        "description": "CSS selector, data attribute, or button text to find the element. Examples: 'button[data-action=submit]', '#save-btn', 'Submit', '[aria-label=\"Close\"]'. If no element matches the selector, the tool will try to match by text content."
+      },
+      "waitForResponse": {
+        "type": "boolean",
+        "description": "Wait for component to respond before returning (default: true). Set to false for immediate return.",
+        "default": true
+      }
+    },
+    "required": ["componentId", "elementSelector"]
+  }
+}

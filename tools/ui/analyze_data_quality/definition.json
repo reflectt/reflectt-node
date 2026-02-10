@@ -1,0 +1,57 @@
+{
+  "id": "analyze_data_quality",
+  "name": "Analyze Data Quality",
+  "category": "ui",
+  "description": "Analyze data quality in tables and grids to detect issues, anomalies, and provide recommendations.\n\nThis tool performs comprehensive data quality analysis including:\n- Completeness checks (missing values, sparse columns)\n- Consistency checks (format mismatches, casing issues)\n- Validity checks (invalid formats, type mismatches)\n- Accuracy checks (statistical outliers, anomalies)\n- Timeliness checks (stale data, future dates)\n- Duplicate detection\n\nReturns quality scores (0-100), detailed issues list, and actionable recommendations.\n\n** USE CASES **\n\n1. Full analysis of a table:\n{\n  \"componentId\": \"query-results-table\",\n  \"analysisType\": \"full\"\n}\n\n2. Quick scan for critical issues:\n{\n  \"componentId\": \"data-grid-1\",\n  \"analysisType\": \"quick\",\n  \"detectionLevel\": \"normal\"\n}\n\n3. Analyze specific columns:\n{\n  \"componentId\": \"table-1\",\n  \"analysisType\": \"column\",\n  \"columns\": [\"email\", \"phone\", \"created_at\"]\n}\n\n4. Sample large datasets:\n{\n  \"componentId\": \"big-table\",\n  \"analysisType\": \"sample\",\n  \"sampleSize\": 1000\n}\n\n5. Auto-fix issues:\n{\n  \"componentId\": \"table-1\",\n  \"analysisType\": \"full\",\n  \"autoFix\": true\n}",
+  "function_name": "analyze_data_quality",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "componentId": {
+        "type": "string",
+        "description": "ID of the table/grid component to analyze. Omit to analyze all visible tables."
+      },
+      "analysisType": {
+        "type": "string",
+        "enum": ["full", "quick", "column", "sample"],
+        "description": "Type of analysis to perform. 'full' = comprehensive (default), 'quick' = fast scan for critical issues, 'column' = specific columns only, 'sample' = analyze sample of large dataset",
+        "default": "full"
+      },
+      "columns": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Specific columns to analyze (only for analysisType='column')"
+      },
+      "sampleSize": {
+        "type": "number",
+        "description": "Number of rows to sample for analysis (only for analysisType='sample' or large datasets). Default: auto-detect.",
+        "minimum": 100,
+        "maximum": 10000
+      },
+      "detectionLevel": {
+        "type": "string",
+        "enum": ["strict", "normal", "lenient"],
+        "description": "'strict' = catch everything, 'normal' = balanced (default), 'lenient' = only major issues",
+        "default": "normal"
+      },
+      "autoFix": {
+        "type": "boolean",
+        "description": "Automatically fix issues where possible (confidence > 90%). Default: false",
+        "default": false
+      },
+      "enableOutlierDetection": {
+        "type": "boolean",
+        "description": "Enable statistical outlier detection. Default: true",
+        "default": true
+      },
+      "enableDuplicateDetection": {
+        "type": "boolean",
+        "description": "Enable duplicate record detection. Default: true",
+        "default": true
+      }
+    }
+  }
+}

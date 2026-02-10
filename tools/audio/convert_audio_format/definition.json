@@ -1,0 +1,85 @@
+{
+  "id": "convert_audio_format",
+  "name": "Convert Audio Format",
+  "description": "Convert audio between formats and adjust quality settings using ffmpeg. Supports all common formats (mp3, wav, ogg, flac, m4a) with customizable bit rate, sample rate, and channels. Fast local processing with no API costs.",
+  "category": "audio",
+  "function_name": "convert_audio_format",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "audio_source",
+      "output_format"
+    ],
+    "properties": {
+      "audio_source": {
+        "type": "string",
+        "description": "File path to audio file"
+      },
+      "output_format": {
+        "type": "string",
+        "enum": [
+          "mp3",
+          "wav",
+          "ogg",
+          "flac",
+          "m4a",
+          "aac",
+          "opus"
+        ],
+        "description": "Output audio format"
+      },
+      "output_path": {
+        "type": "string",
+        "description": "Custom output path. If not specified, saves to storage/audio/converted/"
+      },
+      "bit_rate": {
+        "type": "string",
+        "description": "Bit rate (e.g., '128k', '192k', '320k')"
+      },
+      "sample_rate": {
+        "type": "number",
+        "enum": [
+          8000,
+          16000,
+          22050,
+          44100,
+          48000
+        ],
+        "description": "Sample rate in Hz"
+      },
+      "channels": {
+        "type": "number",
+        "enum": [
+          1,
+          2
+        ],
+        "description": "Number of audio channels (1=mono, 2=stereo)"
+      },
+      "codec": {
+        "type": "string",
+        "description": "Specific codec to use (e.g., 'libmp3lame', 'aac')"
+      },
+      "normalize_audio": {
+        "type": "boolean",
+        "default": false,
+        "description": "Normalize audio volume"
+      },
+      "remove_silence": {
+        "type": "boolean",
+        "default": false,
+        "description": "Trim silence from start and end"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "audio",
+    "convert",
+    "format",
+    "ffmpeg",
+    "encoding"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

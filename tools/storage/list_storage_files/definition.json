@@ -1,0 +1,33 @@
+{
+  "id": "list_storage_files",
+  "name": "List Storage",
+  "description": "List all files in a storage category with optional pattern filtering. Returns file metadata including size and modification date.",
+  "category": "storage",
+  "function_name": "list_storage_files",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "category": {
+        "type": "string",
+        "description": "Storage category/bucket to list (e.g., 'stories', 'characters', 'images', 'audio')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "pattern": {
+        "type": "string",
+        "description": "Optional: Filter files by pattern (substring match on filename)"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: List from a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    },
+    "required": [
+      "category"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

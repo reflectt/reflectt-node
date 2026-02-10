@@ -1,0 +1,58 @@
+{
+  "id": "chat_with_agent",
+  "name": "Chat With Agent",
+  "description": "Have a direct conversation with a specialist agent. Allows the concierge to chat with agents, pass context, maintain conversation history, and get responses. Perfect for complex interactions that need back-and-forth dialog with specialists.",
+  "category": "agent",
+  "function_name": "chat_with_agent",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "agent_slug",
+      "message"
+    ],
+    "properties": {
+      "agent_slug": {
+        "type": "string",
+        "pattern": "^[a-z]+:[a-z_]+$",
+        "description": "Agent slug in format domain:agent_id (e.g., 'finance:budget_manager', 'vision:vision_analyst')"
+      },
+      "message": {
+        "type": "string",
+        "description": "Message to send to the agent"
+      },
+      "context": {
+        "type": "object",
+        "description": "Optional context object to pass to the agent (user preferences, relevant data, etc.)"
+      },
+      "conversation_history": {
+        "type": "array",
+        "description": "Optional array of previous messages in this conversation",
+        "items": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "enum": [
+                "user",
+                "assistant"
+              ]
+            },
+            "content": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "max_tokens": {
+        "type": "number",
+        "default": 4096,
+        "description": "Maximum tokens for the agent's response"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

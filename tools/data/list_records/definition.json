@@ -1,0 +1,38 @@
+{
+  "id": "list_records",
+  "name": "List Records",
+  "description": "List/query records from a table with optional pagination. Returns records sorted by created_at (newest first). Use query_table for advanced filtering.",
+  "category": "data",
+  "function_name": "list_records",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "table": {
+        "type": "string",
+        "description": "Table name (e.g., 'stories', 'characters', 'worlds', 'users')",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Optional: Maximum number of records to return"
+      },
+      "offset": {
+        "type": "number",
+        "description": "Optional: Number of records to skip (for pagination)",
+        "default": 0
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional: List from a specific named space (e.g., 'creative', 'education'). Defaults to current space."
+      }
+    },
+    "required": [
+      "table"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [],
+  "version": "1.0.0",
+  "dependencies": []
+}

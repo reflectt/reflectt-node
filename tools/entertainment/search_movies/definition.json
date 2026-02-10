@@ -1,0 +1,35 @@
+{
+  "id": "search_movies",
+  "name": "Search Movies",
+  "category": "entertainment",
+  "description": "Search TMDB (The Movie Database) for movies and TV shows. Find films by title, genre, release year, and more.\n\nYou can:\n- Search for movies by title\n- Filter by release year\n- Get detailed movie information\n- Browse by genre\n- Access ratings and reviews\n\nUses TMDB API with comprehensive movie database.\n\n** WHEN TO USE **\n- User asks to \"search for a movie\"\n- User wants to find films by title or genre\n- User wants movie recommendations\n- User wants to discover new content\n\n** WHEN NOT TO USE **\n- User wants detailed movie info (use get_movie_details)\n- User wants to track watch list (use track_watch_list)\n- User wants trending content (use get_trending)\n\n** EXAMPLES **\n\n1. Search for a movie by title:\n{\n  \"query\": \"The Shawshank Redemption\",\n  \"limit\": 10\n}\n\n2. Search for movies from specific year:\n{\n  \"query\": \"Avatar\",\n  \"year\": 2022,\n  \"limit\": 5\n}\n\n3. Search for movies:\n{\n  \"query\": \"action\",\n  \"limit\": 20\n}",
+  "function_name": "search_movies",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query (movie title or keyword)"
+      },
+      "year": {
+        "type": "number",
+        "description": "Release year to filter by (optional)"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of results to return (1-20, default: 10)",
+        "minimum": 1,
+        "maximum": 20,
+        "default": 10
+      },
+      "page": {
+        "type": "number",
+        "description": "Page number for pagination (default: 1)",
+        "minimum": 1,
+        "default": 1
+      }
+    }
+  }
+}

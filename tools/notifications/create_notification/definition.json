@@ -1,0 +1,78 @@
+{
+  "id": "create_notification",
+  "name": "Create Notification",
+  "description": "Create a user-facing notification and persist it to the notifications store (global or space-scoped).",
+  "category": "notifications",
+  "function_name": "create_notification",
+  "parameters": {
+    "type": "object",
+    "required": ["user_id", "title", "message"],
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Target user identifier the notification belongs to."
+      },
+      "scope": {
+        "type": "string",
+        "description": "Where to persist the notification (global or space). Defaults to space scoped if a space_id is provided, otherwise global.",
+        "enum": ["global", "space"]
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Optional space to scope the notification. Required when scope=space for a different space than the current context."
+      },
+      "title": {
+        "type": "string",
+        "description": "Short title or subject line for the notification."
+      },
+      "message": {
+        "type": "string",
+        "description": "Longer body content that explains the notification."
+      },
+      "severity": {
+        "type": "string",
+        "description": "Visual severity hint for the UI (info, success, warning, error).",
+        "default": "info",
+        "enum": ["info", "success", "warning", "error"]
+      },
+      "category": {
+        "type": "string",
+        "description": "Logical category (scheduler, workflow, concierge, etc.)."
+      },
+      "source": {
+        "type": "string",
+        "description": "Optional identifier describing who or what generated the notification."
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Arbitrary metadata payload for the UI/agents to leverage.",
+        "additionalProperties": true
+      },
+      "actions": {
+        "type": "array",
+        "description": "Optional list of follow-up actions (links, tool calls, etc.).",
+        "items": {
+          "type": "object",
+          "properties": {
+            "label": { "type": "string" },
+            "action": { "type": "string" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "required": ["label", "action"]
+        }
+      },
+      "expires_at": {
+        "type": "string",
+        "description": "ISO timestamp after which the notification can be ignored/hidden."
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["notifications", "ui", "alerts"],
+  "version": "1.0.0",
+  "dependencies": []
+}

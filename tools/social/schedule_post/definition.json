@@ -1,0 +1,31 @@
+{
+  "function_name": "schedule_post",
+  "description": "Schedule social media posts for future publication across platforms",
+  "category": "social",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "platform": {
+        "type": "string",
+        "enum": ["twitter", "instagram", "facebook"],
+        "description": "Social media platform to post to"
+      },
+      "text": {
+        "type": "string",
+        "description": "Post content/caption"
+      },
+      "media_urls": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of media URLs to include"
+      },
+      "scheduled_for": {
+        "type": "string",
+        "description": "ISO 8601 timestamp for when to publish post"
+      }
+    },
+    "required": ["platform", "text", "scheduled_for"]
+  }
+}

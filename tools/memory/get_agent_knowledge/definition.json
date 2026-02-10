@@ -1,0 +1,29 @@
+{
+  "id": "get_agent_knowledge",
+  "name": "get_agent_knowledge",
+  "description": "Get agent-specific learned knowledge, tool patterns, and success contexts. This helps agents leverage what they've learned from past interactions.",
+  "category": "memory",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "agent_slug": {
+        "type": "string",
+        "description": "Agent slug (e.g., 'operator:concierge', 'finance:analyst')"
+      },
+      "include_tool_patterns": {
+        "type": "boolean",
+        "description": "Include tool usage patterns (default: true)",
+        "default": true
+      },
+      "include_success_contexts": {
+        "type": "boolean",
+        "description": "Include successful execution contexts (default: true)",
+        "default": true
+      }
+    },
+    "required": [
+      "agent_slug"
+    ]
+  },
+  "function_name": "get_agent_knowledge"
+}

@@ -1,0 +1,29 @@
+{
+  "id": "learn_from_conversation",
+  "name": "learn_from_conversation",
+  "description": "Extract learnings from a completed conversation and update user knowledge graph, preferences, and agent knowledge. This helps agents learn from every interaction.",
+  "category": "memory",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "conversation_id": {
+        "type": "string",
+        "description": "Conversation ID to learn from"
+      },
+      "user_id": {
+        "type": "string",
+        "description": "User ID for the conversation"
+      },
+      "auto_update": {
+        "type": "boolean",
+        "description": "Automatically update knowledge graph and profiles (default: true)",
+        "default": true
+      }
+    },
+    "required": [
+      "conversation_id",
+      "user_id"
+    ]
+  },
+  "function_name": "learn_from_conversation"
+}

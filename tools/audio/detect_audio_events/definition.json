@@ -1,0 +1,69 @@
+{
+  "id": "detect_audio_events",
+  "name": "Detect Audio Events",
+  "description": "Detect specific audio events like applause, music, silence, laughter, and more using AssemblyAI. Perfect for analyzing podcasts, meetings, and audio content to find key moments.",
+  "category": "audio",
+  "function_name": "detect_audio_events",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "audio_source"
+    ],
+    "properties": {
+      "audio_source": {
+        "type": "string",
+        "description": "File path or URL to audio file"
+      },
+      "audio_type": {
+        "type": "string",
+        "enum": [
+          "file_path",
+          "url"
+        ],
+        "default": "file_path",
+        "description": "Type of audio source provided"
+      },
+      "event_types": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "applause",
+            "music",
+            "silence",
+            "speech",
+            "laughter",
+            "noise"
+          ]
+        },
+        "default": [
+          "music",
+          "silence"
+        ],
+        "description": "Types of events to detect"
+      },
+      "silence_threshold": {
+        "type": "number",
+        "default": 500,
+        "description": "Minimum silence duration in milliseconds"
+      },
+      "min_event_duration": {
+        "type": "number",
+        "default": 100,
+        "description": "Minimum event duration in milliseconds"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "audio",
+    "events",
+    "detection",
+    "silence",
+    "music",
+    "assemblyai"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

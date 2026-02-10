@@ -1,0 +1,65 @@
+{
+  "id": "agent_annotate",
+  "name": "Agent Annotate",
+  "category": "ui",
+  "description": "Show a floating annotation bubble to narrate your actions in real-time. Use this to guide users through your thought process, explain what data you're analyzing, highlight interesting findings, or point out features. Creates an educational, transparent AI experience that feels like a guided tour. Perfect for explaining 'I'm pulling workflow data now' or 'Notice this spike in conversions'.",
+  "function_name": "agent_annotate",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "message": {
+        "type": "string",
+        "description": "The annotation message (keep it concise, 1-2 sentences max). Examples: 'Analyzing your workflow metrics...', 'Found 3 critical alerts that need attention', 'This campaign is crushing it - 106% of target!'",
+        "minLength": 5,
+        "maxLength": 200
+      },
+      "target": {
+        "type": "object",
+        "description": "What to point the annotation at. Use 'screen' for general narration, 'slot' to point at a slot area, or 'module' for specific components.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["screen", "slot", "module"],
+            "description": "'screen' = general narration (top-right), 'slot' = point at slot area, 'module' = point at specific component"
+          },
+          "slot": {
+            "type": "string",
+            "enum": ["primary", "secondary", "sidebar"],
+            "description": "Required if type='slot' or type='module'. Which slot to target."
+          },
+          "moduleId": {
+            "type": "string",
+            "description": "Required if type='module'. The specific module ID from render_manifest (e.g., 'stat-grid-123')"
+          }
+        },
+        "required": ["type"]
+      },
+      "icon": {
+        "type": "string",
+        "description": "Optional emoji icon (single emoji). Defaults based on severity. Examples: '🔍' (analyzing), '📊' (data), '✨' (insight), '⚠️' (alert), '🎉' (success)",
+        "maxLength": 4
+      },
+      "severity": {
+        "type": "string",
+        "enum": ["info", "working", "success", "insight", "warning"],
+        "description": "'info' (blue), 'working' (purple/animated), 'success' (green), 'insight' (amber), 'warning' (red). Affects bubble color.",
+        "default": "info"
+      },
+      "duration": {
+        "type": "number",
+        "description": "Auto-dismiss after this many milliseconds. Use 0 for persistent (user must dismiss). Default: 3000ms (3 seconds). Suggested: 2000-5000ms for most annotations.",
+        "minimum": 0,
+        "maximum": 10000,
+        "default": 3000
+      },
+      "position": {
+        "type": "string",
+        "enum": ["top", "bottom", "left", "right", "top-right"],
+        "description": "Where to position bubble relative to target. 'top-right' is default for screen-level. Auto-adjusts to avoid clipping.",
+        "default": "top"
+      }
+    },
+    "required": ["message", "target"]
+  }
+}

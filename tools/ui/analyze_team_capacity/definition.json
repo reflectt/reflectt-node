@@ -1,0 +1,32 @@
+{
+  "id": "analyze_team_capacity",
+  "name": "Analyze Team Capacity",
+  "category": "ui",
+  "description": "Analyze team capacity, workload distribution, and identify bottlenecks or skill gaps. Provides insights into team utilization and availability.\n\n** WHEN TO USE **\n- Before planning sprints or assigning new work\n- To identify overloaded or underutilized team members\n- To find skill bottlenecks (single points of failure)\n- To forecast team capacity for upcoming work\n- To understand current team availability\n\n** TIMEFRAMES **\n- current: Snapshot of current capacity\n- week: Next 7 days capacity\n- sprint: Next 2 weeks\n- month: Next 30 days\n\n** WHAT IT ANALYZES **\n- Current load per team member\n- Available capacity (hours and percentage)\n- Skill distribution and coverage\n- Bottlenecks (>80% capacity)\n- Skill gaps (skills needed but not available)\n- Utilization trends\n\n** RETURNS **\n- Total team capacity (hours)\n- Used vs available capacity\n- Per-member breakdown with load percentages\n- List of bottlenecked team members\n- Skill gap analysis\n- Recommendations for capacity management\n\n** EXAMPLE **\n{\n  \"timeframe\": \"sprint\",\n  \"includeSkillGaps\": true\n}\n\nReturns: Team: 120h total, 68h used (57%), Sarah 85% (bottleneck), skill gap: only Mike knows DevOps",
+  "function_name": "analyze_team_capacity",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "teamMembers": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Optional: Analyze only specific team member IDs"
+      },
+      "timeframe": {
+        "type": "string",
+        "enum": ["current", "week", "sprint", "month"],
+        "description": "Timeframe for capacity analysis",
+        "default": "current"
+      },
+      "includeSkillGaps": {
+        "type": "boolean",
+        "description": "Include skill gap analysis",
+        "default": false
+      }
+    },
+    "required": []
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "get_budget_status",
+  "name": "get_budget_status",
+  "description": "Check current budget status including spending, remaining budget, alerts, and projections. Shows if you're on track to stay within budget for the month.",
+  "category": "cost",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID to check budget for (optional - defaults to current user)"
+      },
+      "period": {
+        "type": "string",
+        "description": "Period to check (e.g., '2025-10' or 'current'). Default: current month",
+        "default": "current"
+      }
+    },
+    "required": []
+  },
+  "function_name": "get_budget_status"
+}

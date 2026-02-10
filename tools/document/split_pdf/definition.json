@@ -1,0 +1,76 @@
+{
+  "id": "split_pdf",
+  "name": "Split Pdf",
+  "description": "Split PDFs by pages, bookmarks, file size, or custom ranges. Creates multiple output files with configurable naming. Perfect for breaking up large documents or extracting specific sections.",
+  "category": "document",
+  "function_name": "split_pdf",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "pdf_source",
+      "split_method"
+    ],
+    "properties": {
+      "pdf_source": {
+        "type": "string",
+        "description": "File path to PDF"
+      },
+      "split_method": {
+        "type": "string",
+        "enum": [
+          "pages",
+          "bookmarks",
+          "size",
+          "ranges"
+        ],
+        "description": "Method to split the PDF"
+      },
+      "split_options": {
+        "type": "object",
+        "description": "Split options",
+        "properties": {
+          "pages_per_file": {
+            "type": "number",
+            "description": "Pages per output file (for 'pages' method)"
+          },
+          "max_file_size": {
+            "type": "number",
+            "description": "Maximum file size in MB (for 'size' method)"
+          },
+          "ranges": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "Array of page ranges [[start, end], ...] (for 'ranges' method)"
+          },
+          "output_directory": {
+            "type": "string",
+            "description": "Directory to save split files"
+          },
+          "output_prefix": {
+            "type": "string",
+            "default": "split",
+            "description": "Filename prefix for output files"
+          }
+        }
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "document",
+    "pdf",
+    "split",
+    "divide",
+    "extract"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

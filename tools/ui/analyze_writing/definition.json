@@ -1,0 +1,85 @@
+{
+  "id": "analyze_writing",
+  "name": "Analyze Writing",
+  "category": "ui",
+  "description": "Perform comprehensive writing analysis on document content. Analyzes readability (Flesch, Gunning Fog, SMOG), tone & sentiment, grammar & style issues, vocabulary richness, and sentence structure. Returns detailed metrics and suggestions for improvement. Can analyze the full document or just selected text.",
+  "function_name": "analyze_writing",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "moduleId": {
+        "type": "string",
+        "description": "ID of the DocumentEditor component to analyze (must match existing module ID from render_manifest). If omitted, analyzes the provided content instead.",
+        "minLength": 1
+      },
+      "content": {
+        "type": "string",
+        "description": "Text content to analyze. Use this if not analyzing a mounted DocumentEditor component.",
+        "minLength": 1
+      },
+      "analysisType": {
+        "type": "string",
+        "enum": ["full", "readability", "tone", "grammar", "style", "vocabulary", "sentences"],
+        "description": "Type of analysis to perform. 'full' runs all analyzers, or specify one: 'readability', 'tone', 'grammar', 'style', 'vocabulary', 'sentences'",
+        "default": "full"
+      },
+      "targetAudience": {
+        "type": "string",
+        "enum": ["general", "academic", "professional", "technical"],
+        "description": "Target audience for the writing. Adjusts recommendations accordingly.",
+        "default": "general"
+      },
+      "targetReadingLevel": {
+        "type": "number",
+        "description": "Target reading grade level (1-16+). Recommendations will aim for this level.",
+        "minimum": 1,
+        "maximum": 20
+      },
+      "selection": {
+        "type": "object",
+        "description": "Analyze only selected text range (if omitted, analyzes entire document)",
+        "properties": {
+          "start": {
+            "type": "number",
+            "description": "Start position (0-indexed)",
+            "minimum": 0
+          },
+          "end": {
+            "type": "number",
+            "description": "End position (0-indexed)",
+            "minimum": 0
+          }
+        },
+        "required": ["start", "end"]
+      },
+      "autoFix": {
+        "type": "object",
+        "description": "Automatically apply fixes for certain issue types",
+        "properties": {
+          "grammar": {
+            "type": "boolean",
+            "description": "Auto-fix grammar errors",
+            "default": false
+          },
+          "style": {
+            "type": "boolean",
+            "description": "Auto-fix style issues",
+            "default": false
+          },
+          "clarity": {
+            "type": "boolean",
+            "description": "Auto-fix clarity issues",
+            "default": false
+          }
+        }
+      },
+      "returnFormat": {
+        "type": "string",
+        "enum": ["detailed", "summary", "scores_only"],
+        "description": "Format of analysis results. 'detailed' includes all metrics and issues, 'summary' provides overview, 'scores_only' returns just numeric scores",
+        "default": "detailed"
+      }
+    }
+  }
+}

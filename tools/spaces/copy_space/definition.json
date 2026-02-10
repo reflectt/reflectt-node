@@ -1,0 +1,62 @@
+{
+  "id": "copy_space",
+  "name": "Copy Space",
+  "description": "Copy all data from one space to another. Creates the destination space if it doesn't exist. Copies all agents, tasks, tables (with schemas and rows), storage files, and metadata. Useful for creating backups, templates, or duplicating environments.",
+  "category": "spaces",
+  "function_name": "copy_space",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "source_space": {
+        "type": "string",
+        "description": "Name of the source space to copy from",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "destination_space": {
+        "type": "string",
+        "description": "Name of the destination space to copy to",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "overwrite": {
+        "type": "boolean",
+        "description": "Whether to overwrite existing files in destination space",
+        "default": false
+      },
+      "include_agents": {
+        "type": "boolean",
+        "description": "Copy agents",
+        "default": true
+      },
+      "include_tasks": {
+        "type": "boolean",
+        "description": "Copy tasks",
+        "default": true
+      },
+      "include_tables": {
+        "type": "boolean",
+        "description": "Copy tables and data",
+        "default": true
+      },
+      "include_storage": {
+        "type": "boolean",
+        "description": "Copy storage files",
+        "default": true
+      }
+    },
+    "required": [
+      "source_space",
+      "destination_space"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "space",
+    "management",
+    "copy",
+    "backup",
+    "duplicate"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

@@ -1,0 +1,30 @@
+{
+  "id": "get_conversation_stats",
+  "name": "Get Conversation Statistics",
+  "description": "Get usage statistics and cost analysis for conversations",
+  "category": "conversation",
+  "function_name": "get_conversation_stats",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "User ID (optional - defaults to current user)"
+      },
+      "date_from": {
+        "type": "string",
+        "description": "ISO date - stats from this date"
+      },
+      "date_to": {
+        "type": "string",
+        "description": "ISO date - stats until this date"
+      },
+      "group_by": {
+        "type": "string",
+        "enum": ["day", "week", "month", "agent", "type"],
+        "description": "Group statistics by (default: day)",
+        "default": "day"
+      }
+    }
+  }
+}

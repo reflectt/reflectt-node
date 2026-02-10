@@ -1,0 +1,43 @@
+{
+  "id": "trigger_event",
+  "name": "Trigger Event",
+  "description": "Create an event in the events table and automatically trigger all workflows that listen to this event type. This enables event-driven autonomous business processes where actions cascade through the system.",
+  "category": "events",
+  "function_name": "trigger_event",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "event_type": {
+        "type": "string",
+        "description": "Type of event (e.g., 'order.created', 'inventory.low', 'payment.received')",
+        "pattern": "^[a-z_]+\\.[a-z_]+$"
+      },
+      "data": {
+        "type": "object",
+        "description": "Event payload data"
+      },
+      "space": {
+        "type": "string",
+        "description": "Space where the event occurs (required - events must belong to a specific space)"
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Optional metadata about the event source"
+      }
+    },
+    "required": [
+      "event_type",
+      "data"
+    ]
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "autonomous",
+    "events",
+    "workflows",
+    "automation"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

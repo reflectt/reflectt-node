@@ -1,0 +1,65 @@
+{
+  "id": "record_routing_feedback",
+  "name": "Record Routing Feedback",
+  "description": "Record feedback on routing decisions to improve pattern recognition. Compares recommended routing vs actual routing, updates confidence scores, and learns new patterns.",
+  "category": "intelligence",
+  "function_name": "record_routing_feedback",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "user_id",
+      "message",
+      "actual_agent",
+      "outcome"
+    ],
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "Unique identifier for the user",
+        "pattern": "^[a-z0-9_-]+$"
+      },
+      "message": {
+        "type": "string",
+        "description": "The original user message"
+      },
+      "recommended_agent": {
+        "type": "string",
+        "description": "Agent that was recommended by analysis"
+      },
+      "actual_agent": {
+        "type": "string",
+        "description": "Agent that was actually used"
+      },
+      "outcome": {
+        "type": "string",
+        "enum": [
+          "success",
+          "partial",
+          "failure"
+        ],
+        "description": "How well the routing worked"
+      },
+      "clarifications_needed": {
+        "type": "array",
+        "description": "What clarifications were needed (if any)",
+        "items": {
+          "type": "string"
+        }
+      },
+      "notes": {
+        "type": "string",
+        "description": "Optional notes about the interaction"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "intelligence",
+    "learning",
+    "feedback",
+    "patterns"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

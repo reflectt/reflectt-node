@@ -1,0 +1,39 @@
+{
+  "id": "delete_portal",
+  "name": "delete_portal",
+  "description": "Remove a portal directory and its metadata from a space.",
+  "function_name": "delete_portal",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "portal_name": {
+        "type": "string",
+        "description": "Slug-style identifier of the portal to delete."
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Target space to modify. Defaults to the caller's current space."
+      },
+      "force": {
+        "type": "boolean",
+        "description": "Set true to allow deletion of reserved portals such as the default concierge portal.",
+        "default": false
+      }
+    },
+    "required": ["portal_name"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "portal_name": { "type": "string" },
+      "space": { "type": "string" },
+      "path": { "type": "string" },
+      "message": { "type": "string" },
+      "error": { "type": "string" }
+    },
+    "required": ["success", "portal_name", "space"],
+    "additionalProperties": false
+  }
+}

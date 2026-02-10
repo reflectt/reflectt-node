@@ -1,0 +1,30 @@
+{
+  "id": "get_tool",
+  "name": "Get Tool",
+  "description": "Get a tool's definition and implementation by name",
+  "category": "tools",
+  "function_name": "get_tool",
+  "parameters": {
+    "type": "object",
+    "required": ["tool_name"],
+    "properties": {
+      "tool_name": {
+        "type": "string",
+        "description": "The function_name of the tool to retrieve"
+      },
+      "target_space": {
+        "type": "string",
+        "description": "Optional target space to search for space-specific tools"
+      },
+      "include_source": {
+        "type": "boolean",
+        "description": "Include the TypeScript implementation source code"
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": ["tools", "meta", "get"],
+  "version": "1.0.0",
+  "dependencies": []
+}

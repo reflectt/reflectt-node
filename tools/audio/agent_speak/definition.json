@@ -1,0 +1,83 @@
+{
+  "id": "agent_speak",
+  "name": "Agent Speak",
+  "description": "Generate speech that will auto-play in the UI. Use this when you want to speak directly to the user with audio feedback. The audio will automatically play through the browser. Perfect for greetings, confirmations, warnings, or important messages. Keep text concise (max 1000 chars).",
+  "category": "audio",
+  "function_name": "agent_speak",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Text to speak to the user (max 1000 characters for optimal experience)",
+        "maxLength": 1000
+      },
+      "voice_preset": {
+        "type": "string",
+        "enum": [
+          "conversational",
+          "calm",
+          "energetic",
+          "dramatic",
+          "narrative"
+        ],
+        "default": "conversational",
+        "description": "Voice style for the speech. 'conversational' for natural dialogue, 'calm' for soothing messages, 'energetic' for excitement, 'dramatic' for emphasis, 'narrative' for storytelling."
+      },
+      "priority": {
+        "type": "string",
+        "enum": [
+          "low",
+          "normal",
+          "high",
+          "interrupt"
+        ],
+        "default": "normal",
+        "description": "Playback priority. 'low' queues after current audio, 'normal' plays when ready, 'high' plays soon, 'interrupt' stops current audio and plays immediately."
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [
+    {
+      "description": "Greet the user warmly",
+      "input": {
+        "text": "Hello! I'm ready to help you today. How can I assist you?",
+        "voice_preset": "conversational",
+        "priority": "normal"
+      }
+    },
+    {
+      "description": "Urgent warning message",
+      "input": {
+        "text": "Warning: This action cannot be undone. Please review your changes carefully.",
+        "voice_preset": "dramatic",
+        "priority": "high"
+      }
+    },
+    {
+      "description": "Calm confirmation",
+      "input": {
+        "text": "Your task has been completed successfully. Everything is working as expected.",
+        "voice_preset": "calm",
+        "priority": "normal"
+      }
+    }
+  ],
+  "tags": [
+    "audio",
+    "speech",
+    "tts",
+    "ui",
+    "feedback",
+    "agent",
+    "voice"
+  ],
+  "version": "1.0.0",
+  "dependencies": [
+    "text_to_speech"
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "function_name": "search_recipes",
+  "description": "Search for recipes with filters like cuisine, diet type, ingredients, cooking time, and nutritional requirements",
+  "category": "recipe",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Recipe search query (e.g., 'pasta carbonara', 'chicken curry')"
+      },
+      "cuisine": {
+        "type": "string",
+        "description": "Cuisine type (e.g., 'Italian', 'Mexican', 'Asian')"
+      },
+      "diet": {
+        "type": "string",
+        "enum": ["Vegetarian", "Vegan", "Gluten Free", "Ketogenic", "Paleo"],
+        "description": "Dietary restriction"
+      },
+      "intolerances": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Food intolerances to exclude (e.g., 'dairy', 'egg', 'peanut')"
+      },
+      "max_ready_time": {
+        "type": "number",
+        "description": "Maximum cooking time in minutes"
+      },
+      "max_calories": {
+        "type": "number",
+        "description": "Maximum calories per serving"
+      },
+      "min_protein": {
+        "type": "number",
+        "description": "Minimum protein in grams"
+      },
+      "include_ingredients": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Ingredients that must be included"
+      },
+      "exclude_ingredients": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Ingredients to exclude"
+      },
+      "limit": {
+        "type": "number",
+        "description": "Number of results to return (default: 10)"
+      }
+    },
+    "required": ["query"]
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "id": "search_components",
+  "name": "Search Components",
+  "category": "ui",
+  "description": "Universal component search that queries all 7 discovery systems (metadata, examples, recipes, use cases, capabilities, synergies, comparisons) and returns ranked results.\n\n** WHEN TO USE **\n- When user asks natural language questions about components (e.g., 'show data in table', 'kanban board', 'form with validation')\n- To find components matching specific capabilities or data shapes\n- To discover components by category, tags, or use cases\n- As the primary entry point for component discovery\n\n** DISCOVERY SYSTEMS SEARCHED **\n1. Metadata: Component names, descriptions, tags, categories\n2. Examples: Pre-built example configurations\n3. Recipes: Multi-component patterns and workflows\n4. Use Cases: Real-world scenarios and applications\n5. Capabilities: Interactive features and functionality\n6. Synergies: Components that work well together\n7. Comparisons: Alternative components for similar tasks\n\n** RETURNS **\n- Ranked component results with match scores\n- Match reasoning (why each component was selected)\n- Example props for quick rendering\n- Related components and synergies\n- Use case examples\n\n** EXAMPLE **\n{\n  \"query\": \"table with sorting and filtering\",\n  \"filters\": {\n    \"category\": \"data\",\n    \"capabilities\": [\"sortable\", \"filterable\"],\n    \"dataShape\": \"tabular\"\n  },\n  \"limit\": 10\n}\n\nReturns components ranked by relevance with context for each match.",
+  "function_name": "search_components",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Natural language query (e.g., 'show data in table', 'kanban board', 'form with validation')"
+      },
+      "filters": {
+        "type": "object",
+        "description": "Optional filters to narrow results",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Component category (e.g., 'data', 'visualization', 'forms')"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Required capabilities (e.g., ['sortable', 'filterable', 'interactive'])"
+          },
+          "complexity": {
+            "type": "string",
+            "enum": ["simple", "moderate", "complex"],
+            "description": "Component complexity level"
+          },
+          "dataShape": {
+            "type": "string",
+            "enum": ["tabular", "hierarchical", "graph", "time-series"],
+            "description": "Expected data structure shape"
+          }
+        },
+        "additionalProperties": false
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of results to return",
+        "default": 10,
+        "minimum": 1,
+        "maximum": 50
+      }
+    },
+    "required": ["query"]
+  }
+}

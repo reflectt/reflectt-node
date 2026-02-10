@@ -1,0 +1,53 @@
+{
+  "function_name": "log_food",
+  "description": "Log food intake with nutrition information for meal tracking and calorie counting",
+  "category": "nutrition",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "food_name": {
+        "type": "string",
+        "description": "Name of the food item"
+      },
+      "meal_type": {
+        "type": "string",
+        "enum": ["breakfast", "lunch", "dinner", "snack"],
+        "description": "Type of meal"
+      },
+      "serving_size": {
+        "type": "number",
+        "description": "Serving size (e.g., 1, 2.5)"
+      },
+      "serving_unit": {
+        "type": "string",
+        "description": "Unit of serving (e.g., 'cup', 'oz', 'grams', 'piece')"
+      },
+      "recipe_id": {
+        "type": "string",
+        "description": "Recipe ID if logging a recipe (optional)"
+      },
+      "nutrition": {
+        "type": "object",
+        "properties": {
+          "calories": { "type": "number" },
+          "protein_g": { "type": "number" },
+          "carbs_g": { "type": "number" },
+          "fat_g": { "type": "number" },
+          "fiber_g": { "type": "number" },
+          "sugar_g": { "type": "number" },
+          "sodium_mg": { "type": "number" }
+        },
+        "description": "Nutrition information (optional, will be looked up if not provided)"
+      },
+      "notes": {
+        "type": "string",
+        "description": "Additional notes about the food"
+      },
+      "logged_at": {
+        "type": "string",
+        "description": "Timestamp when food was consumed (ISO 8601, defaults to now)"
+      }
+    },
+    "required": ["food_name", "meal_type"]
+  }
+}

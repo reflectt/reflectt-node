@@ -1,0 +1,52 @@
+{
+  "id": "apply_rule",
+  "name": "Apply Rule",
+  "description": "Execute a rule with given input. Validates input, evaluates conditions, executes actions, and returns result. Supports dry-run mode for testing.\n\nSupported condition operators:\n- eq: Equal to\n- ne: Not equal to\n- gt: Greater than\n- gte: Greater than or equal to\n- lt: Less than\n- lte: Less than or equal to\n- contains: String contains substring\n- startsWith: String starts with value\n- endsWith: String ends with value\n- matches: Regex pattern matching\n- in: Value is in array\n- exists: Field exists and is not null",
+  "category": "rule",
+  "function_name": "apply_rule",
+  "parameters": {
+    "type": "object",
+    "required": [
+      "rule_id",
+      "input"
+    ],
+    "properties": {
+      "rule_id": {
+        "type": "string",
+        "description": "Rule to execute",
+        "pattern": "^[a-z0-9-]+$"
+      },
+      "input": {
+        "type": "object",
+        "description": "Input data for the rule"
+      },
+      "context": {
+        "type": "object",
+        "description": "Execution context (user, timestamp, etc.)"
+      },
+      "dry_run": {
+        "type": "boolean",
+        "description": "Test without side effects (default: false)",
+        "default": false
+      },
+      "log_execution": {
+        "type": "boolean",
+        "description": "Log execution metrics (default: true)",
+        "default": true
+      }
+    }
+  },
+  "use_tool_context": true,
+  "examples": [],
+  "tags": [
+    "rules",
+    "business-logic",
+    "execute",
+    "apply",
+    "run",
+    "validation",
+    "conditions"
+  ],
+  "version": "1.0.0",
+  "dependencies": []
+}

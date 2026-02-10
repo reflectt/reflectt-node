@@ -1,0 +1,24 @@
+{
+  "id": "get_weather",
+  "name": "Get Weather",
+  "category": "weather",
+  "description": "Get current weather conditions for a location including temperature, humidity, wind, precipitation, and atmospheric conditions.\n\nYou can:\n- Get current weather by city name (e.g., 'San Francisco', 'Tokyo, JP')\n- Get weather by coordinates (e.g., '37.7749,-122.4194')\n- Choose temperature units (metric, imperial, kelvin)\n- Get detailed atmospheric data (pressure, humidity, visibility)\n- Get wind conditions (speed, direction, gusts)\n- Get sunrise/sunset times\n\nThis tool caches results for 10 minutes to reduce API calls.\n\n** EXAMPLES **\n\n1. Get weather by city name:\n{\n  \"location\": \"San Francisco\"\n}\n\n2. Get weather with imperial units:\n{\n  \"location\": \"New York, US\",\n  \"units\": \"imperial\"\n}\n\n3. Get weather by coordinates:\n{\n  \"location\": \"37.7749,-122.4194\",\n  \"units\": \"metric\"\n}",
+  "function_name": "get_weather",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["location"],
+    "properties": {
+      "location": {
+        "type": "string",
+        "description": "Location name (e.g., 'San Francisco', 'Tokyo, JP') or coordinates (e.g., '37.7749,-122.4194')"
+      },
+      "units": {
+        "type": "string",
+        "enum": ["metric", "imperial", "kelvin"],
+        "description": "Temperature units: metric (°C), imperial (°F), kelvin (K)",
+        "default": "metric"
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "function_name": "log_sleep",
+  "description": "Log sleep duration, quality, and patterns for sleep tracking and analysis",
+  "category": "wellness",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "sleep_start": {
+        "type": "string",
+        "description": "When you went to bed (ISO 8601 timestamp)"
+      },
+      "sleep_end": {
+        "type": "string",
+        "description": "When you woke up (ISO 8601 timestamp)"
+      },
+      "duration_hours": {
+        "type": "number",
+        "description": "Total sleep duration in hours (optional, calculated from start/end)"
+      },
+      "quality": {
+        "type": "string",
+        "enum": ["poor", "fair", "good", "excellent"],
+        "description": "Subjective sleep quality rating"
+      },
+      "notes": {
+        "type": "string",
+        "description": "Notes about sleep (e.g., 'woke up 2 times', 'vivid dreams')"
+      },
+      "sync_from_fitbit": {
+        "type": "boolean",
+        "description": "If true, sync sleep data from Fitbit instead of manual entry"
+      }
+    },
+    "required": []
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "id": "upsert_portal",
+  "name": "upsert_portal",
+  "description": "Create or update a portal definition within a space, ensuring metadata and folder scaffolding are in place.",
+  "function_name": "upsert_portal",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "portal_name": {
+        "type": "string",
+        "description": "Slug-style identifier for the portal (lowercase letters, numbers, hyphens, underscores)."
+      },
+      "display_name": {
+        "type": "string",
+        "description": "Human-friendly name shown in the UI. Defaults to a title-cased version of the portal name."
+      },
+      "description": {
+        "type": "string",
+        "description": "Optional description of the portal's purpose."
+      },
+      "agent_slug": {
+        "type": "string",
+        "description": "Primary agent that should back this portal. Defaults to operator:concierge."
+      },
+      "metadata": {
+        "type": "object",
+        "description": "Additional structured metadata to merge into the portal definition.",
+        "additionalProperties": true
+      },
+      "space_id": {
+        "type": "string",
+        "description": "Target space to write into. Defaults to the caller's current space."
+      },
+      "ensure_directories": {
+        "type": "boolean",
+        "description": "When true, ensures the standard portal subdirectories (pages, workflows, integrations) exist. Default is false since portal data is now consolidated in portal.json.",
+        "default": false
+      }
+    },
+    "required": ["portal_name"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "portal_name": { "type": "string" },
+      "space": { "type": "string" },
+      "path": { "type": "string" },
+      "created_at": { "type": "string" },
+      "updated_at": { "type": "string" },
+      "message": { "type": "string" },
+      "error": { "type": "string" }
+    },
+    "required": ["success", "portal_name", "space"],
+    "additionalProperties": false
+  }
+}
