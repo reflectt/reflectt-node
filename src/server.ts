@@ -13,6 +13,7 @@ import { taskManager } from './tasks.js'
 import type { AgentMessage, Task } from './types.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 import { memoryManager } from './memory.js'
+import { eventBus } from './events.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -238,6 +239,25 @@ export async function createServer(): Promise<FastifyInstance> {
     } catch (err: any) {
       return { success: false, error: err.message }
     }
+  })
+
+  // ============ EVENT ENDPOINTS ============
+
+  // Subscribe to events via SSE
+  app.get('/events/subscribe', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const agent = query.agent
+    const topics = query.topics ? query.topics.split(',').map(t => t.trim()) : undefined
+
+    eventBus.subscribe(reply, agent, topics)
+    
+    // Keep the connection open - don't return anything
+    // The reply is handled by the event bus
+  })
+
+  // Get event bus status
+  app.get('/events/status', async () => {
+    return eventBus.getStatus()
   })
 
   // ============ OPENCLAW ENDPOINTS ============

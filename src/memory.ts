@@ -4,6 +4,7 @@
  */
 import { promises as fs } from 'fs'
 import { join } from 'path'
+import { eventBus } from './events.js'
 
 const WORKSPACE_BASE = '/Users/ryan/.openclaw'
 
@@ -131,6 +132,10 @@ class MemoryManager {
 
     try {
       await fs.appendFile(filePath, entry, 'utf-8')
+      
+      // Emit event to event bus
+      eventBus.emitMemoryWritten(agent, filename, filePath)
+      
       return { path: filePath, filename }
     } catch (err) {
       console.error('[Memory] Failed to append to daily:', err)

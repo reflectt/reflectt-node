@@ -5,6 +5,7 @@ import type { AgentMessage, ChatRoom } from './types.js'
 import { promises as fs } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { eventBus } from './events.js'
 // OpenClaw integration pending — chat works standalone for now
 
 const __filename = fileURLToPath(import.meta.url)
@@ -110,6 +111,9 @@ class ChatManager {
 
     // Notify local subscribers
     this.notifySubscribers(fullMessage)
+
+    // Emit event to event bus
+    eventBus.emitMessagePosted(fullMessage)
 
     // TODO: Send via OpenClaw when connected
 

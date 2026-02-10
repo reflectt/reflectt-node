@@ -5,6 +5,7 @@ import type { Task } from './types.js'
 import { promises as fs } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { eventBus } from './events.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -78,6 +79,13 @@ class TaskManager {
     this.tasks.set(task.id, task)
     await this.persistTasks()
     this.notifySubscribers(task, 'created')
+    
+    // Emit events to event bus
+    eventBus.emitTaskCreated(task)
+    if (task.assignee) {
+      eventBus.emitTaskAssigned(task)
+    }
+    
     return task
   }
 
@@ -135,6 +143,15 @@ class TaskManager {
     this.tasks.set(id, updated)
     await this.persistTasks()
     this.notifySubscribers(updated, 'updated')
+    
+    // Emit events to event bus
+    eventBus.emitTaskUpdated(updated, updates)
+    
+    // If assignee changed, emit task_assigned
+    if (updates.assignee && updates.assignee !== task.assignee) {
+      eventBus.emitTaskAssigned(updated)
+    }
+    
     return updated
   }
 

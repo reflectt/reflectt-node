@@ -1,0 +1,246 @@
+/**
+ * Server-Sent Events (SSE) Event Bus
+ * 
+ * Real-time event stream for agents to react to changes.
+ * Events are emitted when:
+ * - Messages are posted
+ * - Tasks are created, assigned, or updated
+ * - Memory entries are written
+ */
+
+import type { FastifyReply } from 'fastify'
+import type { AgentMessage, Task } from './types.js'
+
+export type EventType = 
+  | 'message_posted'
+  | 'task_created'
+  | 'task_assigned'
+  | 'task_updated'
+  | 'memory_written'
+
+export interface Event {
+  id: string
+  type: EventType
+  timestamp: number
+  data: unknown
+}
+
+interface Subscription {
+  id: string
+  reply: FastifyReply
+  agent?: string
+  topics?: string[]
+  createdAt: number
+}
+
+class EventBus {
+  private subscriptions = new Map<string, Subscription>()
+  private eventLog: Event[] = []
+  private maxLogSize = 1000
+
+  /**
+   * Subscribe to events via SSE
+   */
+  subscribe(reply: FastifyReply, agent?: string, topics?: string[]): string {
+    const id = `sub-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+    
+    // Set up SSE headers
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    })
+
+    const subscription: Subscription = {
+      id,
+      reply,
+      agent,
+      topics,
+      createdAt: Date.now(),
+    }
+
+    this.subscriptions.set(id, subscription)
+
+    // Send initial connection event
+    this.sendEvent(reply, {
+      id: `evt-${Date.now()}`,
+      type: 'message_posted',
+      timestamp: Date.now(),
+      data: { 
+        message: `Connected to event stream (subscription ${id})`,
+        agent,
+        topics,
+      },
+    })
+
+    // Clean up on close
+    reply.raw.on('close', () => {
+      this.subscriptions.delete(id)
+      console.log(`[Events] Subscription ${id} closed (${this.subscriptions.size} remaining)`)
+    })
+
+    console.log(`[Events] New subscription ${id} (agent: ${agent || 'all'}, topics: ${topics?.join(',') || 'all'})`)
+    
+    return id
+  }
+
+  /**
+   * Emit an event to all matching subscriptions
+   */
+  emit(event: Event): void {
+    // Add to log
+    this.eventLog.push(event)
+    if (this.eventLog.length > this.maxLogSize) {
+      this.eventLog.shift()
+    }
+
+    // Send to matching subscribers
+    let sent = 0
+    for (const [id, subscription] of this.subscriptions) {
+      if (this.shouldReceive(subscription, event)) {
+        try {
+          this.sendEvent(subscription.reply, event)
+          sent++
+        } catch (err) {
+          console.error(`[Events] Failed to send to ${id}:`, err)
+          // Clean up dead connection
+          this.subscriptions.delete(id)
+        }
+      }
+    }
+
+    if (sent > 0) {
+      console.log(`[Events] Emitted ${event.type} to ${sent} subscribers`)
+    }
+  }
+
+  /**
+   * Check if a subscription should receive an event
+   */
+  private shouldReceive(subscription: Subscription, event: Event): boolean {
+    // Filter by topic (e.g., "chat", "tasks", "memory")
+    if (subscription.topics && subscription.topics.length > 0) {
+      const eventTopic = event.type.split('_')[0] // "message_posted" -> "message"
+      if (!subscription.topics.some(topic => 
+        eventTopic.includes(topic) || event.type.includes(topic)
+      )) {
+        return false
+      }
+    }
+
+    // Filter by agent (for agent-specific events like task_assigned)
+    if (subscription.agent) {
+      const data = event.data as any
+      
+      // Check if event is relevant to this agent
+      if (event.type === 'task_assigned' && data.assignee !== subscription.agent) {
+        return false
+      }
+      
+      if (event.type === 'message_posted' && data.to && data.to !== subscription.agent) {
+        return false
+      }
+
+      if (event.type === 'memory_written' && data.agent !== subscription.agent) {
+        return false
+      }
+    }
+
+    return true
+  }
+
+  /**
+   * Send an event to an SSE connection
+   */
+  private sendEvent(reply: FastifyReply, event: Event): void {
+    const message = `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\nid: ${event.id}\n\n`
+    reply.raw.write(message)
+  }
+
+  /**
+   * Get event bus statistics
+   */
+  getStatus() {
+    return {
+      connected: this.subscriptions.size,
+      eventLog: this.eventLog.length,
+      subscriptions: Array.from(this.subscriptions.values()).map(sub => ({
+        id: sub.id,
+        agent: sub.agent,
+        topics: sub.topics,
+        connectedMs: Date.now() - sub.createdAt,
+      })),
+    }
+  }
+
+  /**
+   * Helper: Emit message_posted event
+   */
+  emitMessagePosted(message: AgentMessage): void {
+    this.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'message_posted',
+      timestamp: Date.now(),
+      data: message,
+    })
+  }
+
+  /**
+   * Helper: Emit task_created event
+   */
+  emitTaskCreated(task: Task): void {
+    this.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'task_created',
+      timestamp: Date.now(),
+      data: task,
+    })
+  }
+
+  /**
+   * Helper: Emit task_assigned event
+   */
+  emitTaskAssigned(task: Task): void {
+    if (task.assignee) {
+      this.emit({
+        id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        type: 'task_assigned',
+        timestamp: Date.now(),
+        data: task,
+      })
+    }
+  }
+
+  /**
+   * Helper: Emit task_updated event
+   */
+  emitTaskUpdated(task: Task, updates: Record<string, unknown>): void {
+    this.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'task_updated',
+      timestamp: Date.now(),
+      data: {
+        ...task,
+        updates,
+      },
+    })
+  }
+
+  /**
+   * Helper: Emit memory_written event
+   */
+  emitMemoryWritten(agent: string, filename: string, path: string): void {
+    this.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'memory_written',
+      timestamp: Date.now(),
+      data: {
+        agent,
+        filename,
+        path,
+      },
+    })
+  }
+}
+
+export const eventBus = new EventBus()
