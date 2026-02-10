@@ -12,6 +12,7 @@ import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import type { AgentMessage, Task } from './types.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
+import { memoryManager } from './memory.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -181,6 +182,46 @@ export async function createServer(): Promise<FastifyInstance> {
       return { error: 'Task not found' }
     }
     return { success: true }
+  })
+
+  // ============ MEMORY ENDPOINTS ============
+
+  // Get all memory files for an agent
+  app.get<{ Params: { agent: string } }>('/memory/:agent', async (request) => {
+    try {
+      const memories = await memoryManager.getMemories(request.params.agent)
+      return { success: true, memories }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Append to daily memory file
+  app.post<{ Params: { agent: string }; Body: { content: string } }>('/memory/:agent', async (request) => {
+    try {
+      const body = request.body as { content: string }
+      if (!body.content || typeof body.content !== 'string') {
+        return { success: false, error: 'content is required' }
+      }
+      const result = await memoryManager.appendToDaily(request.params.agent, body.content)
+      return { success: true, ...result }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Search memory files
+  app.get<{ Params: { agent: string }; Querystring: { q: string } }>('/memory/:agent/search', async (request) => {
+    try {
+      const query = (request.query as { q: string }).q
+      if (!query) {
+        return { success: false, error: 'query parameter "q" is required' }
+      }
+      const results = await memoryManager.searchMemories(request.params.agent, query)
+      return { success: true, results, count: results.length }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
   })
 
   // ============ OPENCLAW ENDPOINTS ============
