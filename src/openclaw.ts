@@ -85,18 +85,25 @@ export class OpenClawClient {
   private async handshake() {
     try {
       const response = await this.request('connect', {
-        minProtocol: 5,
-        maxProtocol: 5,
+        minProtocol: 3,
+        maxProtocol: 3,
         client: {
-          id: openclawConfig.agentId,
+          id: 'cli',
           displayName: 'Reflectt Node',
           version: '0.1.0',
           platform: 'node',
-          mode: 'service',
+          mode: 'cli',
         },
+        role: 'operator',
+        scopes: ['operator.read', 'operator.write'],
+        caps: [],
+        commands: [],
+        permissions: {},
         auth: openclawConfig.gatewayToken ? {
           token: openclawConfig.gatewayToken
         } : undefined,
+        locale: 'en-US',
+        userAgent: 'reflectt-node/0.1.0',
       })
       
       console.log('[OpenClaw] Handshake successful:', response)
@@ -115,7 +122,10 @@ export class OpenClawClient {
         if (msg.ok) {
           pending.resolve(msg.payload)
         } else {
-          pending.reject(new Error(msg.error || 'Request failed'))
+          const errorMsg = typeof msg.error === 'string' 
+            ? msg.error 
+            : JSON.stringify(msg.error) || 'Request failed'
+          pending.reject(new Error(errorMsg))
         }
       }
     } else if (msg.type === 'event') {
