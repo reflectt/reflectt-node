@@ -59,5 +59,6 @@ export interface InboxState {
   agent: string
   subscriptions: string[] // Channel names
   ackedMessageIds: string[] // Message IDs that have been acknowledged
+  lastReadTimestamp?: number // Timestamp of last inbox check (for filtering new messages)
   lastUpdated: number
 }

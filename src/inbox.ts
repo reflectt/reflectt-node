@@ -15,7 +15,7 @@ import { join } from 'path'
 import { INBOX_DIR } from './config.js'
 import { eventBus } from './events.js'
 
-const DEFAULT_SUBSCRIPTIONS = ['general', 'decisions']
+const DEFAULT_SUBSCRIPTIONS = ['general', 'decisions', 'problems', 'shipping']
 
 class InboxManager {
   private states = new Map<string, InboxState>()
@@ -64,6 +64,7 @@ class InboxManager {
         agent,
         subscriptions: [...DEFAULT_SUBSCRIPTIONS],
         ackedMessageIds: [],
+        lastReadTimestamp: 0, // Initialize to 0 so first check gets all messages
         lastUpdated: Date.now(),
       }
       this.states.set(agent, state)
@@ -167,6 +168,9 @@ class InboxManager {
   ): InboxMessage[] {
     const state = this.getState(agent)
     
+    // Determine the cutoff timestamp: use provided 'since' or lastReadTimestamp
+    const cutoffTimestamp = options?.since ?? state.lastReadTimestamp ?? 0
+    
     // Filter messages
     let inbox: InboxMessage[] = []
     
@@ -181,8 +185,8 @@ class InboxManager {
         continue
       }
       
-      // Skip if older than since
-      if (options?.since && message.timestamp < options.since) {
+      // Skip if older than cutoff timestamp
+      if (message.timestamp <= cutoffTimestamp) {
         continue
       }
       
@@ -219,20 +223,35 @@ class InboxManager {
       inbox = inbox.slice(0, options.limit)
     }
     
+    // Auto-update lastReadTimestamp to now
+    state.lastReadTimestamp = Date.now()
+    state.lastUpdated = Date.now()
+    this.persistState(state).catch(err => {
+      console.error(`[Inbox] Failed to persist state for ${agent}:`, err)
+    })
+    
     return inbox
   }
 
   /**
    * Acknowledge messages (mark as read)
+   * Can optionally update lastReadTimestamp
    */
-  async ackMessages(agent: string, messageIds: string[]): Promise<void> {
+  async ackMessages(agent: string, messageIds?: string[], timestamp?: number): Promise<void> {
     const state = this.getState(agent)
     
     // Add to acked list (avoid duplicates)
-    for (const id of messageIds) {
-      if (!state.ackedMessageIds.includes(id)) {
-        state.ackedMessageIds.push(id)
+    if (messageIds) {
+      for (const id of messageIds) {
+        if (!state.ackedMessageIds.includes(id)) {
+          state.ackedMessageIds.push(id)
+        }
       }
+    }
+    
+    // Update lastReadTimestamp if provided
+    if (timestamp !== undefined) {
+      state.lastReadTimestamp = timestamp
     }
     
     state.lastUpdated = Date.now()

@@ -17,6 +17,7 @@ import { memoryManager } from './memory.js'
 import { eventBus } from './events.js'
 import { presenceManager } from './presence.js'
 import type { PresenceStatus } from './presence.js'
+import { getDashboardHTML } from './dashboard.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -79,6 +80,12 @@ export async function createServer(): Promise<FastifyInstance> {
       inbox: inboxManager.getStats(),
       timestamp: Date.now(),
     }
+  })
+
+  // ============ DASHBOARD ============
+
+  app.get('/dashboard', async (_request, reply) => {
+    reply.type('text/html').send(getDashboardHTML())
   })
 
   // ============ CHAT ENDPOINTS ============
@@ -196,12 +203,15 @@ export async function createServer(): Promise<FastifyInstance> {
       since: query.since ? parseInt(query.since, 10) : undefined,
     })
     
+    // Auto-update presence when agent checks inbox
+    presenceManager.updatePresence(request.params.agent, 'working')
+    
     return { messages: inbox, count: inbox.length }
   })
 
   // Acknowledge messages
   app.post<{ Params: { agent: string } }>('/inbox/:agent/ack', async (request) => {
-    const body = request.body as { messageIds?: string[]; all?: boolean }
+    const body = request.body as { messageIds?: string[]; all?: boolean; timestamp?: number }
     
     if (body.all) {
       const allMessages = chatManager.getMessages()
@@ -209,11 +219,17 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: true, message: 'All messages acknowledged' }
     }
     
-    if (!body.messageIds || !Array.isArray(body.messageIds)) {
-      return { error: 'messageIds array or all=true is required' }
+    // Allow updating lastReadTimestamp without acking specific messages
+    if (body.timestamp !== undefined && !body.messageIds) {
+      await inboxManager.ackMessages(request.params.agent, undefined, body.timestamp)
+      return { success: true, message: 'lastReadTimestamp updated' }
     }
     
-    await inboxManager.ackMessages(request.params.agent, body.messageIds)
+    if (!body.messageIds || !Array.isArray(body.messageIds)) {
+      return { error: 'messageIds array, timestamp, or all=true is required' }
+    }
+    
+    await inboxManager.ackMessages(request.params.agent, body.messageIds, body.timestamp)
     return { success: true, count: body.messageIds.length }
   })
 
