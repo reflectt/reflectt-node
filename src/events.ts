@@ -17,6 +17,7 @@ export type EventType =
   | 'task_assigned'
   | 'task_updated'
   | 'memory_written'
+  | 'presence_updated'
 
 export interface Event {
   id: string
@@ -240,6 +241,52 @@ class EventBus {
         path,
       },
     })
+  }
+
+  /**
+   * Helper: Emit presence_updated event
+   */
+  emitPresenceUpdated(presence: any): void {
+    this.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'presence_updated',
+      timestamp: Date.now(),
+      data: presence,
+    })
+  }
+
+  /**
+   * Get event log for activity feed
+   */
+  getEvents(filters?: { agent?: string; limit?: number; since?: number }): Event[] {
+    let events = [...this.eventLog]
+
+    // Filter by timestamp
+    if (filters?.since) {
+      events = events.filter(e => e.timestamp >= filters.since!)
+    }
+
+    // Filter by agent (for agent-specific activity)
+    if (filters?.agent) {
+      events = events.filter(e => {
+        const data = e.data as any
+        
+        // Include events where the agent is involved
+        return (
+          data.agent === filters.agent ||
+          data.from === filters.agent ||
+          data.to === filters.agent ||
+          data.assignee === filters.agent ||
+          data.createdBy === filters.agent
+        )
+      })
+    }
+
+    // Apply limit (most recent first)
+    const limit = filters?.limit || 100
+    events = events.slice(-limit).reverse()
+
+    return events
   }
 }
 

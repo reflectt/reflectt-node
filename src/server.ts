@@ -14,12 +14,15 @@ import type { AgentMessage, Task } from './types.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 import { memoryManager } from './memory.js'
 import { eventBus } from './events.js'
+import { presenceManager } from './presence.js'
+import type { PresenceStatus } from './presence.js'
 
 // Schemas
 const SendMessageSchema = z.object({
   from: z.string().min(1),
   to: z.string().optional(),
   content: z.string().min(1),
+  channel: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
 })
 
@@ -280,6 +283,63 @@ export async function createServer(): Promise<FastifyInstance> {
     } catch (err: any) {
       return { success: false, error: err.message }
     }
+  })
+
+  // ============ PRESENCE ENDPOINTS ============
+
+  // Update agent presence
+  app.post<{ Params: { agent: string } }>('/presence/:agent', async (request) => {
+    try {
+      const body = request.body as { status: PresenceStatus; task?: string; since?: number }
+      
+      if (!body.status) {
+        return { success: false, error: 'status is required' }
+      }
+
+      const validStatuses = ['idle', 'working', 'reviewing', 'blocked', 'offline']
+      if (!validStatuses.includes(body.status)) {
+        return { success: false, error: `status must be one of: ${validStatuses.join(', ')}` }
+      }
+
+      const presence = presenceManager.updatePresence(
+        request.params.agent,
+        body.status,
+        body.task,
+        body.since
+      )
+
+      return { success: true, presence }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Get all agent presences
+  app.get('/presence', async () => {
+    const presences = presenceManager.getAllPresence()
+    return { presences }
+  })
+
+  // Get specific agent presence
+  app.get<{ Params: { agent: string } }>('/presence/:agent', async (request) => {
+    const presence = presenceManager.getPresence(request.params.agent)
+    if (!presence) {
+      return { presence: null, message: 'No presence data for this agent' }
+    }
+    return { presence }
+  })
+
+  // ============ ACTIVITY FEED ENDPOINT ============
+
+  // Get recent activity across all systems
+  app.get('/activity', async (request) => {
+    const query = request.query as Record<string, string>
+    const events = eventBus.getEvents({
+      agent: query.agent,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      since: query.since ? parseInt(query.since, 10) : undefined,
+    })
+    return { events, count: events.length }
   })
 
   // ============ EVENT ENDPOINTS ============
