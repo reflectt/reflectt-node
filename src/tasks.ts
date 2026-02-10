@@ -3,14 +3,12 @@
  */
 import type { Task } from './types.js'
 import { promises as fs } from 'fs'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { join } from 'path'
 import { eventBus } from './events.js'
+import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-const DATA_DIR = join(__dirname, '../data')
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
+const LEGACY_TASKS_FILE = join(LEGACY_DATA_DIR, 'tasks.jsonl')
 
 class TaskManager {
   private tasks = new Map<string, Task>()
@@ -29,6 +27,7 @@ class TaskManager {
       await fs.mkdir(DATA_DIR, { recursive: true })
 
       // Try to read existing tasks
+      let tasksLoaded = false
       try {
         const content = await fs.readFile(TASKS_FILE, 'utf-8')
         const lines = content.trim().split('\n').filter(line => line.length > 0)
@@ -43,12 +42,44 @@ class TaskManager {
         }
         
         console.log(`[Tasks] Loaded ${this.tasks.size} tasks from disk`)
+        tasksLoaded = true
       } catch (err: any) {
         if (err.code !== 'ENOENT') {
           throw err
         }
-        // File doesn't exist yet, that's fine
-        console.log('[Tasks] No existing tasks file, starting fresh')
+        // File doesn't exist yet - try legacy location
+      }
+
+      // Migration: Check legacy data directory
+      if (!tasksLoaded) {
+        try {
+          const legacyContent = await fs.readFile(LEGACY_TASKS_FILE, 'utf-8')
+          const lines = legacyContent.trim().split('\n').filter(line => line.length > 0)
+          
+          for (const line of lines) {
+            try {
+              const task = JSON.parse(line) as Task
+              this.tasks.set(task.id, task)
+            } catch (err) {
+              console.error('[Tasks] Failed to parse legacy task line:', err)
+            }
+          }
+          
+          console.log(`[Tasks] Migrated ${this.tasks.size} tasks from legacy location`)
+          
+          // Write to new location
+          if (this.tasks.size > 0) {
+            const lines = Array.from(this.tasks.values()).map(task => JSON.stringify(task))
+            await fs.writeFile(TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
+            console.log('[Tasks] Migration complete - tasks saved to new location')
+          }
+        } catch (err: any) {
+          if (err.code !== 'ENOENT') {
+            console.error('[Tasks] Failed to migrate from legacy location:', err)
+          }
+          // No legacy file either - starting fresh
+          console.log('[Tasks] No existing tasks file, starting fresh')
+        }
       }
     } finally {
       this.initialized = true

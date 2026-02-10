@@ -3,15 +3,13 @@
  */
 import type { AgentMessage, ChatRoom } from './types.js'
 import { promises as fs } from 'fs'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { join } from 'path'
 import { eventBus } from './events.js'
+import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 // OpenClaw integration pending — chat works standalone for now
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-const DATA_DIR = join(__dirname, '../data')
 const MESSAGES_FILE = join(DATA_DIR, 'messages.jsonl')
+const LEGACY_MESSAGES_FILE = join(LEGACY_DATA_DIR, 'messages.jsonl')
 
 class ChatManager {
   private messages: AgentMessage[] = []
@@ -39,6 +37,7 @@ class ChatManager {
       await fs.mkdir(DATA_DIR, { recursive: true })
 
       // Try to read existing messages
+      let messagesLoaded = false
       try {
         const content = await fs.readFile(MESSAGES_FILE, 'utf-8')
         const lines = content.trim().split('\n').filter(line => line.length > 0)
@@ -53,12 +52,44 @@ class ChatManager {
         }
         
         console.log(`[Chat] Loaded ${this.messages.length} messages from disk`)
+        messagesLoaded = true
       } catch (err: any) {
         if (err.code !== 'ENOENT') {
           throw err
         }
-        // File doesn't exist yet, that's fine
-        console.log('[Chat] No existing messages file, starting fresh')
+        // File doesn't exist yet - try legacy location
+      }
+
+      // Migration: Check legacy data directory
+      if (!messagesLoaded) {
+        try {
+          const legacyContent = await fs.readFile(LEGACY_MESSAGES_FILE, 'utf-8')
+          const lines = legacyContent.trim().split('\n').filter(line => line.length > 0)
+          
+          for (const line of lines) {
+            try {
+              const message = JSON.parse(line) as AgentMessage
+              this.messages.push(message)
+            } catch (err) {
+              console.error('[Chat] Failed to parse legacy message line:', err)
+            }
+          }
+          
+          console.log(`[Chat] Migrated ${this.messages.length} messages from legacy location`)
+          
+          // Write to new location
+          if (this.messages.length > 0) {
+            const content = this.messages.map(m => JSON.stringify(m)).join('\n') + '\n'
+            await fs.writeFile(MESSAGES_FILE, content, 'utf-8')
+            console.log('[Chat] Migration complete - messages saved to new location')
+          }
+        } catch (err: any) {
+          if (err.code !== 'ENOENT') {
+            console.error('[Chat] Failed to migrate from legacy location:', err)
+          }
+          // No legacy file either - starting fresh
+          console.log('[Chat] No existing messages file, starting fresh')
+        }
       }
     } finally {
       this.initialized = true
@@ -118,9 +149,43 @@ class ChatManager {
     // Emit event to event bus
     eventBus.emitMessagePosted(fullMessage)
 
+    // Route to agent inboxes (auto-routing)
+    // Note: We'll import inboxManager in a way that avoids circular dependency
+    this.routeToInboxes(fullMessage)
+
     // TODO: Send via OpenClaw when connected
 
     return fullMessage
+  }
+
+  /**
+   * Route message to agent inboxes
+   * This is called automatically when a message is posted
+   */
+  private routeToInboxes(message: AgentMessage): void {
+    // Import here to avoid circular dependency at module level
+    import('./inbox.js').then(({ inboxManager }) => {
+      // Get list of all agents from presence or a registry
+      // For now, we'll extract agents from message history
+      const agents = this.getKnownAgents()
+      inboxManager.routeMessage(message, agents)
+    }).catch(err => {
+      console.error('[Chat] Failed to route message to inboxes:', err)
+    })
+  }
+
+  /**
+   * Get list of all known agents from message history
+   */
+  private getKnownAgents(): string[] {
+    const agents = new Set<string>()
+    for (const message of this.messages) {
+      agents.add(message.from)
+      if (message.to) {
+        agents.add(message.to)
+      }
+    }
+    return Array.from(agents)
   }
 
   private handleIncomingMessage(message: AgentMessage) {

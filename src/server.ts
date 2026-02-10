@@ -10,6 +10,7 @@ import type { WebSocket } from 'ws'
 import { serverConfig, isDev } from './config.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
+import { inboxManager } from './inbox.js'
 import type { AgentMessage, Task } from './types.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 import { memoryManager } from './memory.js'
@@ -75,6 +76,7 @@ export async function createServer(): Promise<FastifyInstance> {
       openclaw: 'not configured',
       chat: chatManager.getStats(),
       tasks: taskManager.getStats(),
+      inbox: inboxManager.getStats(),
       timestamp: Date.now(),
     }
   })
@@ -179,6 +181,58 @@ export async function createServer(): Promise<FastifyInstance> {
       return { error: 'Message not found' }
     }
     return { messages: thread, count: thread.length }
+  })
+
+  // ============ INBOX ENDPOINTS ============
+
+  // Get inbox for an agent
+  app.get<{ Params: { agent: string } }>('/inbox/:agent', async (request) => {
+    const query = request.query as Record<string, string>
+    const allMessages = chatManager.getMessages()
+    
+    const inbox = inboxManager.getInbox(request.params.agent, allMessages, {
+      priority: query.priority as 'high' | 'medium' | 'low' | undefined,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      since: query.since ? parseInt(query.since, 10) : undefined,
+    })
+    
+    return { messages: inbox, count: inbox.length }
+  })
+
+  // Acknowledge messages
+  app.post<{ Params: { agent: string } }>('/inbox/:agent/ack', async (request) => {
+    const body = request.body as { messageIds?: string[]; all?: boolean }
+    
+    if (body.all) {
+      const allMessages = chatManager.getMessages()
+      await inboxManager.ackAll(request.params.agent, allMessages)
+      return { success: true, message: 'All messages acknowledged' }
+    }
+    
+    if (!body.messageIds || !Array.isArray(body.messageIds)) {
+      return { error: 'messageIds array or all=true is required' }
+    }
+    
+    await inboxManager.ackMessages(request.params.agent, body.messageIds)
+    return { success: true, count: body.messageIds.length }
+  })
+
+  // Update subscriptions
+  app.post<{ Params: { agent: string } }>('/inbox/:agent/subscribe', async (request) => {
+    const body = request.body as { channels: string[] }
+    
+    if (!body.channels || !Array.isArray(body.channels)) {
+      return { error: 'channels array is required' }
+    }
+    
+    const subscriptions = await inboxManager.updateSubscriptions(request.params.agent, body.channels)
+    return { success: true, subscriptions }
+  })
+
+  // Get subscriptions
+  app.get<{ Params: { agent: string } }>('/inbox/:agent/subscriptions', async (request) => {
+    const subscriptions = inboxManager.getSubscriptions(request.params.agent)
+    return { subscriptions }
   })
 
   // List rooms

@@ -49,3 +49,15 @@ export interface ChatRoom {
   participants: string[]
   createdAt: number
 }
+
+export interface InboxMessage extends AgentMessage {
+  priority: 'high' | 'medium' | 'low'
+  reason: 'mention' | 'dm' | 'subscribed' | 'general'
+}
+
+export interface InboxState {
+  agent: string
+  subscriptions: string[] // Channel names
+  ackedMessageIds: string[] // Message IDs that have been acknowledged
+  lastUpdated: number
+}
