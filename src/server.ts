@@ -121,10 +121,51 @@ export async function createServer(): Promise<FastifyInstance> {
     const messages = chatManager.getMessages({
       from: query.from,
       to: query.to,
+      channel: query.channel,
       limit: query.limit ? parseInt(query.limit, 10) : undefined,
       since: query.since ? parseInt(query.since, 10) : undefined,
     })
     return { messages }
+  })
+
+  // Add reaction to message
+  app.post<{ Params: { id: string } }>('/chat/messages/:id/react', async (request) => {
+    const body = request.body as { emoji: string; from: string }
+    if (!body.emoji || !body.from) {
+      return { error: 'emoji and from are required' }
+    }
+    const message = await chatManager.addReaction(request.params.id, body.emoji, body.from)
+    if (!message) {
+      return { error: 'Message not found' }
+    }
+    return { success: true, message }
+  })
+
+  // Get reactions for a message
+  app.get<{ Params: { id: string } }>('/chat/messages/:id/reactions', async (request) => {
+    const reactions = chatManager.getReactions(request.params.id)
+    if (reactions === null) {
+      return { error: 'Message not found' }
+    }
+    return { reactions }
+  })
+
+  // Get channels with message counts
+  app.get('/chat/channels', async () => {
+    const channels = chatManager.getChannels()
+    return { channels }
+  })
+
+  // Search messages
+  app.get('/chat/search', async (request) => {
+    const query = request.query as Record<string, string>
+    if (!query.q) {
+      return { error: 'query parameter "q" is required' }
+    }
+    const messages = chatManager.search(query.q, {
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+    })
+    return { messages, count: messages.length }
   })
 
   // List rooms

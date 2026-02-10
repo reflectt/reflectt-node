@@ -8,6 +8,8 @@ export interface AgentMessage {
   to?: string // undefined = broadcast
   content: string
   timestamp: number
+  channel?: string // Channel name (default: "general")
+  reactions?: Record<string, string[]> // emoji -> array of agent names
   metadata?: Record<string, unknown>
 }
 

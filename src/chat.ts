@@ -101,6 +101,8 @@ class ChatManager {
       ...message,
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: Date.now(),
+      channel: message.channel || 'general', // Default to general channel
+      reactions: message.reactions || {}, // Initialize empty reactions
     }
 
     // Store locally
@@ -131,6 +133,7 @@ class ChatManager {
   getMessages(options?: {
     from?: string
     to?: string
+    channel?: string
     limit?: number
     since?: number
   }): AgentMessage[] {
@@ -142,6 +145,10 @@ class ChatManager {
 
     if (options?.to) {
       filtered = filtered.filter(m => m.to === options.to)
+    }
+
+    if (options?.channel) {
+      filtered = filtered.filter(m => m.channel === options.channel)
     }
 
     if (options?.since) {
@@ -168,6 +175,126 @@ class ChatManager {
         console.error('[Chat] Subscriber error:', err)
       }
     })
+  }
+
+  /**
+   * Get all channels with message counts
+   */
+  getChannels(): Array<{ channel: string; count: number; lastActivity: number }> {
+    const channelMap = new Map<string, { count: number; lastActivity: number }>()
+    
+    // Default channels
+    const defaultChannels = ['general', 'problems', 'shipping', 'dev', 'decisions']
+    defaultChannels.forEach(channel => {
+      channelMap.set(channel, { count: 0, lastActivity: 0 })
+    })
+    
+    // Count messages per channel
+    this.messages.forEach(msg => {
+      const channel = msg.channel || 'general'
+      const existing = channelMap.get(channel)
+      if (existing) {
+        existing.count++
+        existing.lastActivity = Math.max(existing.lastActivity, msg.timestamp)
+      } else {
+        channelMap.set(channel, { count: 1, lastActivity: msg.timestamp })
+      }
+    })
+    
+    return Array.from(channelMap.entries())
+      .map(([channel, data]) => ({ channel, ...data }))
+      .sort((a, b) => b.lastActivity - a.lastActivity)
+  }
+
+  /**
+   * Add reaction to a message
+   */
+  async addReaction(messageId: string, emoji: string, from: string): Promise<AgentMessage | null> {
+    const message = this.messages.find(m => m.id === messageId)
+    if (!message) {
+      return null
+    }
+    
+    // Initialize reactions if needed
+    if (!message.reactions) {
+      message.reactions = {}
+    }
+    
+    // Add agent to reaction list (toggle off if already present)
+    if (!message.reactions[emoji]) {
+      message.reactions[emoji] = []
+    }
+    
+    const agents = message.reactions[emoji]
+    const index = agents.indexOf(from)
+    
+    if (index >= 0) {
+      // Remove reaction (toggle off)
+      agents.splice(index, 1)
+      if (agents.length === 0) {
+        delete message.reactions[emoji]
+      }
+    } else {
+      // Add reaction
+      agents.push(from)
+    }
+    
+    // Persist updated message (rewrite entire JSONL file)
+    await this.rewriteMessages()
+    
+    // Notify subscribers
+    this.notifySubscribers(message)
+    
+    // Emit event
+    eventBus.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'message_posted', // Using existing event type for now
+      timestamp: Date.now(),
+      data: { ...message, reactionUpdate: true },
+    })
+    
+    return message
+  }
+
+  /**
+   * Get reactions for a message
+   */
+  getReactions(messageId: string): Record<string, string[]> | null {
+    const message = this.messages.find(m => m.id === messageId)
+    return message ? (message.reactions || {}) : null
+  }
+
+  /**
+   * Search messages by content
+   */
+  search(query: string, options?: { limit?: number }): AgentMessage[] {
+    const lowerQuery = query.toLowerCase()
+    const results = this.messages.filter(msg => 
+      msg.content.toLowerCase().includes(lowerQuery) ||
+      msg.from.toLowerCase().includes(lowerQuery) ||
+      (msg.channel && msg.channel.toLowerCase().includes(lowerQuery))
+    )
+    
+    if (options?.limit) {
+      return results.slice(-options.limit)
+    }
+    
+    return results
+  }
+
+  /**
+   * Rewrite all messages to disk (for updates like reactions)
+   */
+  private async rewriteMessages(): Promise<void> {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      
+      // Write all messages as JSONL
+      const content = this.messages.map(m => JSON.stringify(m)).join('\n') + '\n'
+      await fs.writeFile(MESSAGES_FILE, content, 'utf-8')
+    } catch (err) {
+      console.error('[Chat] Failed to rewrite messages:', err)
+    }
   }
 
   getStats() {

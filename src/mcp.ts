@@ -34,11 +34,11 @@ server.tool(
     to: z.string().optional().describe("Recipient agent name (optional, omit for broadcast)"),
     metadata: z.record(z.unknown()).optional().describe("Optional metadata"),
   },
-  async ({ from, content, to, metadata }) => {
+  async ({ from, content, to, metadata }: { from: string; content: string; to?: string; metadata?: Record<string, unknown> }) => {
     const message = await chatManager.sendMessage({ from, content, to, metadata })
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ success: true, message })
       }]
     }
@@ -54,11 +54,11 @@ server.tool(
     limit: z.number().optional().describe("Max messages to return (default: 50)"),
     since: z.number().optional().describe("Unix timestamp - only return messages after this time"),
   },
-  async ({ from, to, limit, since }) => {
+  async ({ from, to, limit, since }: { from?: string; to?: string; limit?: number; since?: number }) => {
     const messages = chatManager.getMessages({ from, to, limit, since })
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ messages })
       }]
     }
@@ -69,11 +69,11 @@ server.tool(
   "list_rooms",
   "List all available chat rooms.",
   {},
-  async () => {
+  async (_params: Record<string, never>) => {
     const rooms = chatManager.listRooms()
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ rooms })
       }]
     }
@@ -87,11 +87,11 @@ server.tool(
     id: z.string().describe("Room ID (e.g., 'dev-chat', 'planning')"),
     name: z.string().describe("Room display name"),
   },
-  async ({ id, name }) => {
+  async ({ id, name }: { id: string; name: string }) => {
     const room = chatManager.createRoom(id, name)
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ success: true, room })
       }]
     }
@@ -117,7 +117,8 @@ server.tool(
     tags: z.array(z.string()).optional().describe("Tags for categorization"),
     metadata: z.record(z.unknown()).optional().describe("Optional metadata"),
   },
-  async ({ title, description, status, assignee, createdBy, priority, blocked_by, epic_id, tags, metadata }) => {
+  async (params: any) => {
+    const { title, description, status, assignee, createdBy, priority, blocked_by, epic_id, tags, metadata } = params
     const task = await taskManager.createTask({
       title,
       description,
@@ -132,7 +133,7 @@ server.tool(
     })
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ success: true, task })
       }]
     }
@@ -149,11 +150,12 @@ server.tool(
     priority: z.enum(["P0", "P1", "P2", "P3"]).optional().describe("Filter by priority"),
     tags: z.array(z.string()).optional().describe("Filter by tags (returns tasks with any of these tags)"),
   },
-  async ({ status, assignee, createdBy, priority, tags }) => {
+  async (params: any) => {
+    const { status, assignee, createdBy, priority, tags } = params
     const tasks = taskManager.listTasks({ status, assignee, createdBy, priority, tags })
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ tasks })
       }]
     }
@@ -166,19 +168,20 @@ server.tool(
   {
     id: z.string().describe("Task ID"),
   },
-  async ({ id }) => {
+  async (params: any) => {
+    const { id } = params
     const task = taskManager.getTask(id)
     if (!task) {
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: JSON.stringify({ error: "Task not found" })
         }]
       }
     }
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ task })
       }]
     }
@@ -200,7 +203,8 @@ server.tool(
     tags: z.array(z.string()).optional().describe("New tags"),
     metadata: z.record(z.unknown()).optional().describe("New metadata"),
   },
-  async ({ id, title, description, status, assignee, priority, blocked_by, epic_id, tags, metadata }) => {
+  async (params: any) => {
+    const { id, title, description, status, assignee, priority, blocked_by, epic_id, tags, metadata } = params
     const task = await taskManager.updateTask(id, {
       title,
       description,
@@ -215,14 +219,14 @@ server.tool(
     if (!task) {
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: JSON.stringify({ error: "Task not found" })
         }]
       }
     }
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ success: true, task })
       }]
     }
@@ -235,19 +239,20 @@ server.tool(
   {
     id: z.string().describe("Task ID"),
   },
-  async ({ id }) => {
+  async (params: any) => {
+    const { id } = params
     const deleted = await taskManager.deleteTask(id)
     if (!deleted) {
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: JSON.stringify({ error: "Task not found" })
         }]
       }
     }
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ success: true })
       }]
     }
@@ -260,19 +265,20 @@ server.tool(
   {
     agent: z.string().optional().describe("Agent name to filter tasks for (optional)"),
   },
-  async ({ agent }) => {
+  async (params: any) => {
+    const { agent } = params
     const task = taskManager.getNextTask(agent)
     if (!task) {
       return {
         content: [{
-          type: "text",
+          type: "text" as const,
           text: JSON.stringify({ task: null, message: "No available tasks" })
         }]
       }
     }
     return {
       content: [{
-        type: "text",
+        type: "text" as const,
         text: JSON.stringify({ task })
       }]
     }
