@@ -10,6 +10,8 @@ export interface AgentMessage {
   timestamp: number
   channel?: string // Channel name (default: "general")
   reactions?: Record<string, string[]> // emoji -> array of agent names
+  threadId?: string // If set, this message is a reply in that thread
+  replyCount?: number // Number of replies (calculated on fetch)
   metadata?: Record<string, unknown>
 }
 

@@ -96,13 +96,14 @@ class ChatManager {
     return Array.from(this.rooms.values())
   }
 
-  async sendMessage(message: Omit<AgentMessage, 'id' | 'timestamp'>): Promise<AgentMessage> {
+  async sendMessage(message: Omit<AgentMessage, 'id' | 'timestamp' | 'replyCount'>): Promise<AgentMessage> {
     const fullMessage: AgentMessage = {
       ...message,
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: Date.now(),
       channel: message.channel || 'general', // Default to general channel
       reactions: message.reactions || {}, // Initialize empty reactions
+      threadId: message.threadId, // Preserve threadId if provided
     }
 
     // Store locally
@@ -159,7 +160,35 @@ class ChatManager {
       filtered = filtered.slice(-options.limit)
     }
 
-    return filtered
+    // Calculate reply counts for each message
+    return this.addReplyCounts(filtered)
+  }
+
+  /**
+   * Add replyCount field to messages
+   */
+  private addReplyCounts(messages: AgentMessage[]): AgentMessage[] {
+    return messages.map(msg => {
+      const replyCount = this.messages.filter(m => m.threadId === msg.id).length
+      return { ...msg, replyCount }
+    })
+  }
+
+  /**
+   * Get all messages in a thread (parent + replies)
+   */
+  getThread(messageId: string): AgentMessage[] | null {
+    // Find the parent message
+    const parent = this.messages.find(m => m.id === messageId)
+    if (!parent) {
+      return null
+    }
+
+    // Get all replies to this message
+    const replies = this.messages.filter(m => m.threadId === messageId)
+
+    // Return parent + replies with reply counts
+    return this.addReplyCounts([parent, ...replies])
   }
 
   subscribe(callback: (message: AgentMessage) => void) {

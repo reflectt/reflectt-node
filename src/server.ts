@@ -23,6 +23,7 @@ const SendMessageSchema = z.object({
   to: z.string().optional(),
   content: z.string().min(1),
   channel: z.string().optional(),
+  threadId: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
 })
 
@@ -169,6 +170,15 @@ export async function createServer(): Promise<FastifyInstance> {
       limit: query.limit ? parseInt(query.limit, 10) : undefined,
     })
     return { messages, count: messages.length }
+  })
+
+  // Get thread (parent + all replies)
+  app.get<{ Params: { id: string } }>('/chat/messages/:id/thread', async (request) => {
+    const thread = chatManager.getThread(request.params.id)
+    if (!thread) {
+      return { error: 'Message not found' }
+    }
+    return { messages: thread, count: thread.length }
   })
 
   // List rooms
@@ -359,6 +369,25 @@ export async function createServer(): Promise<FastifyInstance> {
   // Get event bus status
   app.get('/events/status', async () => {
     return eventBus.getStatus()
+  })
+
+  // Get event batch configuration
+  app.get('/events/config', async () => {
+    return eventBus.getBatchConfig()
+  })
+
+  // Set event batch configuration
+  app.post('/events/config', async (request) => {
+    const body = request.body as { batchWindowMs: number }
+    if (typeof body.batchWindowMs !== 'number') {
+      return { error: 'batchWindowMs must be a number' }
+    }
+    try {
+      eventBus.setBatchConfig(body.batchWindowMs)
+      return { success: true, config: eventBus.getBatchConfig() }
+    } catch (err: any) {
+      return { error: err.message }
+    }
   })
 
   // ============ OPENCLAW ENDPOINTS ============

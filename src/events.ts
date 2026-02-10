@@ -38,6 +38,9 @@ class EventBus {
   private subscriptions = new Map<string, Subscription>()
   private eventLog: Event[] = []
   private maxLogSize = 1000
+  private batchWindowMs = 2000 // Default: 2 seconds
+  private pendingEvents: Event[] = []
+  private batchTimer: NodeJS.Timeout | null = null
 
   /**
    * Subscribe to events via SSE
@@ -86,7 +89,25 @@ class EventBus {
   }
 
   /**
-   * Emit an event to all matching subscriptions
+   * Get batch configuration
+   */
+  getBatchConfig(): { batchWindowMs: number } {
+    return { batchWindowMs: this.batchWindowMs }
+  }
+
+  /**
+   * Set batch configuration
+   */
+  setBatchConfig(batchWindowMs: number): void {
+    if (batchWindowMs < 0) {
+      throw new Error('batchWindowMs must be non-negative')
+    }
+    this.batchWindowMs = batchWindowMs
+    console.log(`[Events] Batch window set to ${batchWindowMs}ms`)
+  }
+
+  /**
+   * Emit an event to all matching subscriptions (with batching)
    */
   emit(event: Event): void {
     // Add to log
@@ -95,23 +116,72 @@ class EventBus {
       this.eventLog.shift()
     }
 
-    // Send to matching subscribers
+    // Add to pending batch
+    this.pendingEvents.push(event)
+
+    // Clear existing timer
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer)
+    }
+
+    // Set new timer to flush batch
+    this.batchTimer = setTimeout(() => {
+      this.flushBatch()
+    }, this.batchWindowMs)
+  }
+
+  /**
+   * Flush the pending event batch to subscribers
+   */
+  private flushBatch(): void {
+    if (this.pendingEvents.length === 0) {
+      return
+    }
+
+    const events = [...this.pendingEvents]
+    this.pendingEvents = []
+    this.batchTimer = null
+
+    // If only one event, send it normally (no batch wrapper)
+    if (events.length === 1) {
+      const event = events[0]
+      let sent = 0
+      for (const [id, subscription] of this.subscriptions) {
+        if (this.shouldReceive(subscription, event)) {
+          try {
+            this.sendEvent(subscription.reply, event)
+            sent++
+          } catch (err) {
+            console.error(`[Events] Failed to send to ${id}:`, err)
+            this.subscriptions.delete(id)
+          }
+        }
+      }
+      if (sent > 0) {
+        console.log(`[Events] Emitted ${event.type} to ${sent} subscribers`)
+      }
+      return
+    }
+
+    // Multiple events - send as batch
     let sent = 0
     for (const [id, subscription] of this.subscriptions) {
-      if (this.shouldReceive(subscription, event)) {
+      // Filter events for this subscription
+      const filteredEvents = events.filter(event => this.shouldReceive(subscription, event))
+      
+      if (filteredEvents.length > 0) {
         try {
-          this.sendEvent(subscription.reply, event)
+          this.sendBatchEvent(subscription.reply, filteredEvents)
           sent++
         } catch (err) {
-          console.error(`[Events] Failed to send to ${id}:`, err)
-          // Clean up dead connection
+          console.error(`[Events] Failed to send batch to ${id}:`, err)
           this.subscriptions.delete(id)
         }
       }
     }
 
     if (sent > 0) {
-      console.log(`[Events] Emitted ${event.type} to ${sent} subscribers`)
+      console.log(`[Events] Emitted batch of ${events.length} events to ${sent} subscribers`)
     }
   }
 
@@ -155,6 +225,20 @@ class EventBus {
    */
   private sendEvent(reply: FastifyReply, event: Event): void {
     const message = `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\nid: ${event.id}\n\n`
+    reply.raw.write(message)
+  }
+
+  /**
+   * Send a batch of events to an SSE connection
+   */
+  private sendBatchEvent(reply: FastifyReply, events: Event[]): void {
+    const batchData = events.map(e => ({
+      id: e.id,
+      type: e.type,
+      timestamp: e.timestamp,
+      data: e.data,
+    }))
+    const message = `event: batch\ndata: ${JSON.stringify(batchData)}\n\n`
     reply.raw.write(message)
   }
 
