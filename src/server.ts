@@ -11,6 +11,7 @@ import { serverConfig, isDev } from './config.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import type { AgentMessage, Task } from './types.js'
+import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -159,14 +160,14 @@ export async function createServer(): Promise<FastifyInstance> {
   // Create task
   app.post('/tasks', async (request) => {
     const data = CreateTaskSchema.parse(request.body)
-    const task = taskManager.createTask(data)
+    const task = await taskManager.createTask(data)
     return { success: true, task }
   })
 
   // Update task
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request) => {
     const updates = UpdateTaskSchema.parse(request.body)
-    const task = taskManager.updateTask(request.params.id, updates)
+    const task = await taskManager.updateTask(request.params.id, updates)
     if (!task) {
       return { error: 'Task not found' }
     }
@@ -175,7 +176,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Delete task
   app.delete<{ Params: { id: string } }>('/tasks/:id', async (request) => {
-    const deleted = taskManager.deleteTask(request.params.id)
+    const deleted = await taskManager.deleteTask(request.params.id)
     if (!deleted) {
       return { error: 'Task not found' }
     }
@@ -187,6 +188,51 @@ export async function createServer(): Promise<FastifyInstance> {
   // OpenClaw status (TODO: wire up when gateway token configured)
   app.get('/openclaw/status', async () => {
     return { connected: false, note: 'OpenClaw integration pending' }
+  })
+
+  // ============ MCP ENDPOINTS ============
+
+  // MCP HTTP endpoint (new protocol)
+  app.all('/mcp', async (request, reply) => {
+    const req = new Request(request.url, {
+      method: request.method,
+      headers: request.headers as any,
+      body: request.body as any,
+    })
+    const response = await handleMCPRequest(req)
+    reply.status(response.status)
+    response.headers.forEach((value, key) => {
+      reply.header(key, value)
+    })
+    const body = await response.text()
+    return body
+  })
+
+  // MCP SSE endpoint (legacy protocol)
+  app.get('/sse', async (request, reply) => {
+    const req = new Request(`http://localhost${request.url}`)
+    const response = await handleSSERequest(req)
+    reply.status(response.status)
+    response.headers.forEach((value, key) => {
+      reply.header(key, value)
+    })
+    reply.send(response.body)
+  })
+
+  // MCP messages endpoint (legacy protocol)
+  app.post('/mcp/messages', async (request, reply) => {
+    const req = new Request(`http://localhost${request.url}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request.body),
+    })
+    const response = await handleMessagesRequest(req)
+    reply.status(response.status)
+    response.headers.forEach((value, key) => {
+      reply.header(key, value)
+    })
+    const body = await response.text()
+    return body
   })
 
   return app

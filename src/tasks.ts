@@ -2,12 +2,72 @@
  * Task management system
  */
 import type { Task } from './types.js'
+import { promises as fs } from 'fs'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
+const DATA_DIR = join(__dirname, '../data')
+const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
 
 class TaskManager {
   private tasks = new Map<string, Task>()
   private subscribers = new Set<(task: Task, action: 'created' | 'updated' | 'deleted') => void>()
+  private initialized = false
 
-  createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Task {
+  constructor() {
+    this.loadTasks().catch(err => {
+      console.error('[Tasks] Failed to load tasks:', err)
+    })
+  }
+
+  private async loadTasks(): Promise<void> {
+    try {
+      // Ensure data directory exists
+      await fs.mkdir(DATA_DIR, { recursive: true })
+
+      // Try to read existing tasks
+      try {
+        const content = await fs.readFile(TASKS_FILE, 'utf-8')
+        const lines = content.trim().split('\n').filter(line => line.length > 0)
+        
+        for (const line of lines) {
+          try {
+            const task = JSON.parse(line) as Task
+            this.tasks.set(task.id, task)
+          } catch (err) {
+            console.error('[Tasks] Failed to parse task line:', err)
+          }
+        }
+        
+        console.log(`[Tasks] Loaded ${this.tasks.size} tasks from disk`)
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          throw err
+        }
+        // File doesn't exist yet, that's fine
+        console.log('[Tasks] No existing tasks file, starting fresh')
+      }
+    } finally {
+      this.initialized = true
+    }
+  }
+
+  private async persistTasks(): Promise<void> {
+    try {
+      // Ensure data directory exists
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      
+      // Write all tasks as JSONL
+      const lines = Array.from(this.tasks.values()).map(task => JSON.stringify(task))
+      await fs.writeFile(TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
+    } catch (err) {
+      console.error('[Tasks] Failed to persist tasks:', err)
+    }
+  }
+
+  async createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task> {
     const task: Task = {
       ...data,
       id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -16,6 +76,7 @@ class TaskManager {
     }
 
     this.tasks.set(task.id, task)
+    await this.persistTasks()
     this.notifySubscribers(task, 'created')
     return task
   }
@@ -53,7 +114,7 @@ class TaskManager {
     return tasks.sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
-  updateTask(id: string, updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>): Task | undefined {
+  async updateTask(id: string, updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>): Promise<Task | undefined> {
     const task = this.tasks.get(id)
     if (!task) return undefined
 
@@ -64,15 +125,17 @@ class TaskManager {
     }
 
     this.tasks.set(id, updated)
+    await this.persistTasks()
     this.notifySubscribers(updated, 'updated')
     return updated
   }
 
-  deleteTask(id: string): boolean {
+  async deleteTask(id: string): Promise<boolean> {
     const task = this.tasks.get(id)
     if (!task) return false
 
     this.tasks.delete(id)
+    await this.persistTasks()
     this.notifySubscribers(task, 'deleted')
     return true
   }
