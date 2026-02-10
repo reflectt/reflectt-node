@@ -194,10 +194,11 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // MCP HTTP endpoint (new protocol)
   app.all('/mcp', async (request, reply) => {
-    const req = new Request(request.url, {
+    const fullUrl = `http://${request.headers.host || 'localhost'}${request.url}`
+    const req = new Request(fullUrl, {
       method: request.method,
       headers: request.headers as any,
-      body: request.body as any,
+      body: request.body ? JSON.stringify(request.body) : undefined,
     })
     const response = await handleMCPRequest(req)
     reply.status(response.status)
@@ -210,7 +211,8 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // MCP SSE endpoint (legacy protocol)
   app.get('/sse', async (request, reply) => {
-    const req = new Request(`http://localhost${request.url}`)
+    const fullUrl = `http://${request.headers.host || 'localhost'}${request.url}`
+    const req = new Request(fullUrl)
     const response = await handleSSERequest(req)
     reply.status(response.status)
     response.headers.forEach((value, key) => {
@@ -221,7 +223,8 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // MCP messages endpoint (legacy protocol)
   app.post('/mcp/messages', async (request, reply) => {
-    const req = new Request(`http://localhost${request.url}`, {
+    const fullUrl = `http://${request.headers.host || 'localhost'}${request.url}`
+    const req = new Request(fullUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request.body),
