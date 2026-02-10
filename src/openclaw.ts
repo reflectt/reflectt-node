@@ -208,5 +208,13 @@ export class OpenClawClient {
   }
 }
 
-// Singleton instance
-export const openclawClient = new OpenClawClient()
+// Singleton instance — lazy init, doesn't crash if OpenClaw unavailable
+let _client: OpenClawClient | null = null
+export const openclawClient = {
+  get instance(): OpenClawClient {
+    if (!_client) _client = new OpenClawClient()
+    return _client
+  },
+  close() { _client?.close() },
+  isConnected() { return _client?.isConnected() ?? false },
+}

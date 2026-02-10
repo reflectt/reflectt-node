@@ -5,7 +5,7 @@
  */
 import { createServer } from './server.js'
 import { serverConfig } from './config.js'
-import { openclawClient } from './openclaw.js'
+// OpenClaw connection is optional — server works for chat/tasks without it
 
 async function main() {
   console.log('🚀 Starting reflectt-node...')
@@ -26,7 +26,7 @@ async function main() {
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       console.log(`\n${signal} received, shutting down...`)
-      openclawClient.close()
+      // openclawClient.close()
       await app.close()
       process.exit(0)
     }

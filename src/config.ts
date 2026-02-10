@@ -6,7 +6,7 @@ import type { ServerConfig, OpenClawConfig } from './types.js'
 
 export const serverConfig: ServerConfig = {
   port: parseInt(process.env.PORT || '4445', 10),
-  host: process.env.HOST || '127.0.0.1',
+  host: process.env.HOST || '0.0.0.0',
   corsEnabled: process.env.CORS_ENABLED !== 'false',
 }
 

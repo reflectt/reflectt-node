@@ -2,7 +2,7 @@
  * Agent-to-agent messaging system
  */
 import type { AgentMessage, ChatRoom } from './types.js'
-import { openclawClient } from './openclaw.js'
+// OpenClaw integration pending — chat works standalone for now
 
 class ChatManager {
   private messages: AgentMessage[] = []
@@ -10,12 +10,9 @@ class ChatManager {
   private subscribers = new Set<(message: AgentMessage) => void>()
 
   constructor() {
-    // Listen for incoming messages from OpenClaw
-    openclawClient.on('message', (payload: unknown) => {
-      if (typeof payload === 'object' && payload !== null && 'content' in payload) {
-        this.handleIncomingMessage(payload as AgentMessage)
-      }
-    })
+    // OpenClaw listener disabled for now — chat works standalone
+    // TODO: re-enable when OpenClaw connection is configured
+    // openclawClient.on('message', ...)
 
     // Create default room
     this.createRoom('general', 'General Chat')
@@ -53,12 +50,7 @@ class ChatManager {
     // Notify local subscribers
     this.notifySubscribers(fullMessage)
 
-    // Send via OpenClaw (will broadcast to other agents)
-    try {
-      await openclawClient.sendMessage(fullMessage)
-    } catch (err) {
-      console.error('[Chat] Failed to send via OpenClaw:', err)
-    }
+    // TODO: Send via OpenClaw when connected
 
     return fullMessage
   }

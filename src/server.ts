@@ -10,7 +10,6 @@ import type { WebSocket } from 'ws'
 import { serverConfig, isDev } from './config.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
-import { openclawClient } from './openclaw.js'
 import type { AgentMessage, Task } from './types.js'
 
 // Schemas
@@ -62,7 +61,7 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/health', async () => {
     return {
       status: 'ok',
-      openclaw: openclawClient.isConnected() ? 'connected' : 'disconnected',
+      openclaw: 'not configured',
       chat: chatManager.getStats(),
       tasks: taskManager.getStats(),
       timestamp: Date.now(),
@@ -185,25 +184,9 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ============ OPENCLAW ENDPOINTS ============
 
-  // Run agent via OpenClaw
-  app.post('/agent/run', async (request) => {
-    const body = request.body as { prompt: string; agentId?: string }
-    try {
-      const result = await openclawClient.runAgent(body.prompt, body.agentId)
-      return { success: true, result }
-    } catch (err) {
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : 'Unknown error',
-      }
-    }
-  })
-
-  // OpenClaw status
+  // OpenClaw status (TODO: wire up when gateway token configured)
   app.get('/openclaw/status', async () => {
-    return {
-      connected: openclawClient.isConnected(),
-    }
+    return { connected: false, note: 'OpenClaw integration pending' }
   })
 
   return app
