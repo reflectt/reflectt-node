@@ -295,6 +295,67 @@ class InboxManager {
   }
 
   /**
+   * Get count of unread mentions for an agent
+   */
+  getUnreadMentionsCount(agent: string, allMessages: AgentMessage[]): number {
+    const state = this.getState(agent)
+    let count = 0
+    
+    for (const message of allMessages) {
+      // Skip sender's own messages
+      if (message.from === agent) {
+        continue
+      }
+      
+      // Skip acked messages
+      if (state.ackedMessageIds.includes(message.id)) {
+        continue
+      }
+      
+      // Only count mentions (high priority)
+      if (this.isMentioned(message, agent)) {
+        count++
+      }
+    }
+    
+    return count
+  }
+  
+  /**
+   * Get unread mentions for an agent
+   */
+  getUnreadMentions(agent: string, allMessages: AgentMessage[]): InboxMessage[] {
+    const state = this.getState(agent)
+    const mentions: InboxMessage[] = []
+    
+    for (const message of allMessages) {
+      // Skip sender's own messages
+      if (message.from === agent) {
+        continue
+      }
+      
+      // Skip acked messages
+      if (state.ackedMessageIds.includes(message.id)) {
+        continue
+      }
+      
+      // Only include mentions
+      if (this.isMentioned(message, agent)) {
+        mentions.push({
+          ...message,
+          priority: 'high',
+          reason: 'mention',
+        })
+      }
+    }
+    
+    // Sort by newest first
+    mentions.sort((a, b) => b.timestamp - a.timestamp)
+    
+    return mentions
+  }
+
+  /**
    * Get inbox statistics
    */
   getStats() {

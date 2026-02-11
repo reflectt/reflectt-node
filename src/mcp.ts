@@ -21,11 +21,17 @@ const server = new McpServer({
   version: "0.1.0",
 })
 
+// Wrapper to avoid TS2589 (excessively deep type instantiation) with MCP SDK + Zod
+// The SDK's .tool() generic causes infinite recursion in tsc with complex schemas.
+// Using `any` for the schema/handler params breaks the deep inference chain while
+// keeping runtime behavior identical.
+const tool: (...args: any[]) => void = server.tool.bind(server)
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Chat Tools
 // ═══════════════════════════════════════════════════════════════════════════════
 
-server.tool(
+tool(
   "send_message",
   "Send a message to the team chat. Use this to communicate with other agents.",
   {
@@ -34,7 +40,7 @@ server.tool(
     to: z.string().optional().describe("Recipient agent name (optional, omit for broadcast)"),
     metadata: z.record(z.unknown()).optional().describe("Optional metadata"),
   },
-  async ({ from, content, to, metadata }) => {
+  async ({ from, content, to, metadata }: any) => {
     const message = await chatManager.sendMessage({ from, content, to, metadata })
     return {
       content: [{
@@ -45,7 +51,7 @@ server.tool(
   }
 )
 
-server.tool(
+tool(
   "get_messages",
   "Get chat messages. Returns recent messages, optionally filtered by sender/recipient.",
   {
@@ -54,7 +60,7 @@ server.tool(
     limit: z.number().optional().describe("Max messages to return (default: 50)"),
     since: z.number().optional().describe("Unix timestamp - only return messages after this time"),
   },
-  async ({ from, to, limit, since }) => {
+  async ({ from, to, limit, since }: any) => {
     const messages = chatManager.getMessages({ from, to, limit, since })
     return {
       content: [{
@@ -65,7 +71,7 @@ server.tool(
   }
 )
 
-server.tool(
+tool(
   "list_rooms",
   "List all available chat rooms.",
   {},
@@ -80,14 +86,14 @@ server.tool(
   }
 )
 
-server.tool(
+tool(
   "create_room",
   "Create a new chat room.",
   {
     id: z.string().describe("Room ID (e.g., 'dev-chat', 'planning')"),
     name: z.string().describe("Room display name"),
   },
-  async ({ id, name }) => {
+  async ({ id, name }: any) => {
     const room = chatManager.createRoom(id, name)
     return {
       content: [{
@@ -102,7 +108,7 @@ server.tool(
 // Task Tools
 // ═══════════════════════════════════════════════════════════════════════════════
 
-server.tool(
+tool(
   "create_task",
   "Create a new task. Use this to track work that needs to be done.",
   {
@@ -117,7 +123,7 @@ server.tool(
     tags: z.array(z.string()).optional().describe("Tags for categorization"),
     metadata: z.record(z.unknown()).optional().describe("Optional metadata"),
   },
-  async ({ title, description, status, assignee, createdBy, priority, blocked_by, epic_id, tags, metadata }) => {
+  async ({ title, description, status, assignee, createdBy, priority, blocked_by, epic_id, tags, metadata }: any) => {
     const task = await taskManager.createTask({
       title,
       description,
@@ -139,7 +145,7 @@ server.tool(
   }
 )
 
-server.tool(
+tool(
   "list_tasks",
   "List tasks, optionally filtered by status, assignee, priority, or tags.",
   {
@@ -149,7 +155,7 @@ server.tool(
     priority: z.enum(["P0", "P1", "P2", "P3"]).optional().describe("Filter by priority"),
     tags: z.array(z.string()).optional().describe("Filter by tags (returns tasks with any of these tags)"),
   },
-  async ({ status, assignee, createdBy, priority, tags }) => {
+  async ({ status, assignee, createdBy, priority, tags }: any) => {
     const tasks = taskManager.listTasks({ status, assignee, createdBy, priority, tags })
     return {
       content: [{
@@ -160,13 +166,13 @@ server.tool(
   }
 )
 
-server.tool(
+tool(
   "get_task",
   "Get details for a specific task by ID.",
   {
     id: z.string().describe("Task ID"),
   },
-  async ({ id }) => {
+  async ({ id }: any) => {
     const task = taskManager.getTask(id)
     if (!task) {
       return {
@@ -185,7 +191,7 @@ server.tool(
   }
 )
 
-server.tool(
+tool(
   "update_task",
   "Update an existing task. Can change status, assignee, description, etc.",
   {
@@ -200,7 +206,7 @@ server.tool(
     tags: z.array(z.string()).optional().describe("New tags"),
     metadata: z.record(z.unknown()).optional().describe("New metadata"),
   },
-  async ({ id, title, description, status, assignee, priority, blocked_by, epic_id, tags, metadata }) => {
+  async ({ id, title, description, status, assignee, priority, blocked_by, epic_id, tags, metadata }: any) => {
     const task = await taskManager.updateTask(id, {
       title,
       description,
@@ -229,13 +235,13 @@ server.tool(
   }
 )
 
-server.tool(
+tool(
   "delete_task",
   "Delete a task permanently.",
   {
     id: z.string().describe("Task ID"),
   },
-  async ({ id }) => {
+  async ({ id }: any) => {
     const deleted = await taskManager.deleteTask(id)
     if (!deleted) {
       return {
@@ -254,13 +260,13 @@ server.tool(
   }
 )
 
-server.tool(
+tool(
   "get_next_task",
   "Get the next highest-priority task to work on (pull-based assignment). Returns unassigned todo tasks, prioritized P0 > P1 > P2 > P3, oldest first.",
   {
     agent: z.string().optional().describe("Agent name to filter tasks for (optional)"),
   },
-  async ({ agent }) => {
+  async ({ agent }: any) => {
     const task = taskManager.getNextTask(agent)
     if (!task) {
       return {

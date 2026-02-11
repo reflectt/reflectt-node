@@ -17,7 +17,9 @@ import { memoryManager } from './memory.js'
 import { eventBus } from './events.js'
 import { presenceManager } from './presence.js'
 import type { PresenceStatus } from './presence.js'
+import { analyticsManager } from './analytics.js'
 import { getDashboardHTML } from './dashboard.js'
+import { healthMonitor } from './health.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -70,6 +72,25 @@ export async function createServer(): Promise<FastifyInstance> {
 
   await app.register(fastifyWebsocket)
 
+  // Request tracking middleware for system health monitoring
+  app.addHook('onRequest', async (request) => {
+    ;(request as any).startTime = Date.now()
+  })
+
+  app.addHook('onResponse', async (request, reply) => {
+    const duration = Date.now() - ((request as any).startTime || Date.now())
+    healthMonitor.trackRequest(duration)
+    
+    if (reply.statusCode >= 400) {
+      healthMonitor.trackError()
+    }
+  })
+
+  // Periodic health snapshot (every request, but throttled internally)
+  app.addHook('onResponse', async () => {
+    await healthMonitor.recordSnapshot().catch(() => {}) // Silent fail
+  })
+
   // Health check
   app.get('/health', async () => {
     return {
@@ -82,10 +103,96 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Team health monitoring
+  app.get('/health/team', async () => {
+    return await healthMonitor.getHealth()
+  })
+
+  // Team health summary (quick view)
+  app.get('/health/team/summary', async () => {
+    const summary = await healthMonitor.getSummary()
+    return { summary }
+  })
+
+  // Team health history (trends over time)
+  app.get('/health/team/history', async (request) => {
+    const query = request.query as Record<string, string>
+    const days = query.days ? parseInt(query.days, 10) : 7
+    const history = healthMonitor.getHealthHistory(days)
+    return { history, count: history.length, days }
+  })
+
+  // System health (uptime, performance, errors)
+  app.get('/health/system', async () => {
+    return healthMonitor.getSystemHealth()
+  })
+
+  // Error logs (for debugging)
+  app.get('/logs', async (request) => {
+    const query = request.query as Record<string, string>
+    const level = query.level || 'error'
+    const since = query.since ? parseInt(query.since, 10) : Date.now() - (24 * 60 * 60 * 1000)
+    
+    // For now, return empty array with note
+    // In production, this would read from actual log files
+    return {
+      logs: [],
+      message: 'Log storage not implemented yet. Use system logs or monitoring service.',
+      level,
+      since,
+    }
+  })
+
   // ============ DASHBOARD ============
 
   app.get('/dashboard', async (_request, reply) => {
     reply.type('text/html').send(getDashboardHTML())
+  })
+
+  // Serve avatar images
+  app.get<{ Params: { filename: string } }>('/avatars/:filename', async (request, reply) => {
+    const { filename } = request.params
+    // Basic security: only allow .png files with alphanumeric names
+    if (!/^[a-z]+\.png$/.test(filename)) {
+      return reply.code(404).send({ error: 'Not found' })
+    }
+    
+    try {
+      const { promises: fs } = await import('fs')
+      const { join } = await import('path')
+      const { fileURLToPath } = await import('url')
+      const { dirname } = await import('path')
+      
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const publicDir = join(__dirname, '..', 'public', 'avatars')
+      const filePath = join(publicDir, filename)
+      
+      const data = await fs.readFile(filePath)
+      reply.type('image/png').send(data)
+    } catch (err) {
+      reply.code(404).send({ error: 'Avatar not found' })
+    }
+  })
+
+  // Serve dashboard animations CSS
+  app.get('/dashboard-animations.css', async (_request, reply) => {
+    try {
+      const { promises: fs } = await import('fs')
+      const { join } = await import('path')
+      const { fileURLToPath } = await import('url')
+      const { dirname } = await import('path')
+      
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const publicDir = join(__dirname, '..', 'public')
+      const filePath = join(publicDir, 'dashboard-animations.css')
+      
+      const data = await fs.readFile(filePath, 'utf-8')
+      reply.type('text/css').send(data)
+    } catch (err) {
+      reply.code(404).send({ error: 'Animations CSS not found' })
+    }
   })
 
   // ============ CHAT ENDPOINTS ============
@@ -125,6 +232,13 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/chat/messages', async (request) => {
     const data = SendMessageSchema.parse(request.body)
     const message = await chatManager.sendMessage(data)
+    
+    // Auto-update presence: if you're posting, you're active
+    if (data.from) {
+      presenceManager.recordActivity(data.from, 'message')
+      presenceManager.updatePresence(data.from, 'working')
+    }
+    
     return { success: true, message }
   })
 
@@ -137,6 +251,8 @@ export async function createServer(): Promise<FastifyInstance> {
       channel: query.channel,
       limit: query.limit ? parseInt(query.limit, 10) : undefined,
       since: query.since ? parseInt(query.since, 10) : undefined,
+      before: query.before ? parseInt(query.before, 10) : undefined,
+      after: query.after ? parseInt(query.after, 10) : undefined,
     })
     return { messages }
   })
@@ -195,7 +311,14 @@ export async function createServer(): Promise<FastifyInstance> {
   // Get inbox for an agent
   app.get<{ Params: { agent: string } }>('/inbox/:agent', async (request) => {
     const query = request.query as Record<string, string>
-    const allMessages = chatManager.getMessages()
+    
+    // For inbox, get more messages than default to scan for @mentions etc.
+    // But still cap it to avoid blowing through context windows
+    // Get last 100 messages or since timestamp if provided
+    const allMessages = chatManager.getMessages({
+      limit: 100,
+      since: query.since ? parseInt(query.since, 10) : undefined,
+    })
     
     const inbox = inboxManager.getInbox(request.params.agent, allMessages, {
       priority: query.priority as 'high' | 'medium' | 'low' | undefined,
@@ -251,6 +374,28 @@ export async function createServer(): Promise<FastifyInstance> {
     return { subscriptions }
   })
 
+  // Get unread mentions count (for notification badge)
+  app.get<{ Params: { agent: string } }>('/inbox/:agent/unread', async (request) => {
+    const allMessages = chatManager.getMessages({ limit: 1000 })
+    const count = inboxManager.getUnreadMentionsCount(request.params.agent, allMessages)
+    return { count, agent: request.params.agent }
+  })
+
+  // Get unread mentions (for dropdown/panel)
+  app.get<{ Params: { agent: string } }>('/inbox/:agent/mentions', async (request) => {
+    const query = request.query as Record<string, string>
+    const limit = query.limit ? parseInt(query.limit, 10) : 20
+    
+    const allMessages = chatManager.getMessages({ limit: 1000 })
+    const mentions = inboxManager.getUnreadMentions(request.params.agent, allMessages)
+    
+    return { 
+      mentions: mentions.slice(0, limit), 
+      count: mentions.length,
+      agent: request.params.agent
+    }
+  })
+
   // List rooms
   app.get('/chat/rooms', async () => {
     const rooms = chatManager.listRooms()
@@ -290,19 +435,48 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Create task
   app.post('/tasks', async (request) => {
-    const data = CreateTaskSchema.parse(request.body)
-    const task = await taskManager.createTask(data)
-    return { success: true, task }
+    try {
+      const data = CreateTaskSchema.parse(request.body)
+      const task = await taskManager.createTask(data)
+      
+      // Auto-update presence: creating tasks = working
+      if (data.createdBy) {
+        presenceManager.updatePresence(data.createdBy, 'working')
+      }
+      
+      return { success: true, task }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to create task' }
+    }
   })
 
   // Update task
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request) => {
-    const updates = UpdateTaskSchema.parse(request.body)
-    const task = await taskManager.updateTask(request.params.id, updates)
-    if (!task) {
-      return { error: 'Task not found' }
+    try {
+      const updates = UpdateTaskSchema.parse(request.body)
+      const task = await taskManager.updateTask(request.params.id, updates)
+      if (!task) {
+        return { error: 'Task not found' }
+      }
+      
+      // Auto-update presence on task activity
+      if (task.assignee) {
+        if (updates.status === 'done') {
+          presenceManager.recordActivity(task.assignee, 'task_completed')
+          presenceManager.updatePresence(task.assignee, 'working')
+        } else if (updates.status === 'doing') {
+          presenceManager.updatePresence(task.assignee, 'working')
+        } else if (updates.status === 'blocked') {
+          presenceManager.updatePresence(task.assignee, 'blocked')
+        } else if (updates.status === 'validating') {
+          presenceManager.updatePresence(task.assignee, 'reviewing')
+        }
+      }
+      
+      return { success: true, task }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to update task' }
     }
-    return { success: true, task }
   })
 
   // Delete task
@@ -396,17 +570,82 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Get all agent presences
   app.get('/presence', async () => {
-    const presences = presenceManager.getAllPresence()
-    return { presences }
+    const explicitPresences = presenceManager.getAllPresence()
+    const allActivity = presenceManager.getAllActivity()
+    
+    // Build map of explicit presence by agent
+    const presenceMap = new Map(explicitPresences.map(p => [p.agent, p]))
+    
+    // Add inferred presence for agents with only activity
+    const now = Date.now()
+    for (const activity of allActivity) {
+      if (!presenceMap.has(activity.agent) && activity.last_active) {
+        const inactiveMs = now - activity.last_active
+        
+        let status: PresenceStatus = 'offline'
+        if (inactiveMs < 10 * 60 * 1000) { // Active in last 10 minutes
+          status = activity.tasks_completed_today > 0 ? 'working' : 'idle'
+        }
+        
+        presenceMap.set(activity.agent, {
+          agent: activity.agent,
+          status,
+          since: activity.first_seen_today || activity.last_active,
+          lastUpdate: activity.last_active,
+          last_active: activity.last_active,
+        })
+      }
+    }
+    
+    return { presences: Array.from(presenceMap.values()) }
   })
 
   // Get specific agent presence
   app.get<{ Params: { agent: string } }>('/presence/:agent', async (request) => {
-    const presence = presenceManager.getPresence(request.params.agent)
+    let presence = presenceManager.getPresence(request.params.agent)
+    
+    // If no explicit presence, infer from activity
+    if (!presence) {
+      const activity = presenceManager.getAgentActivity(request.params.agent)
+      if (activity && activity.last_active) {
+        const now = Date.now()
+        const inactiveMs = now - activity.last_active
+        
+        // Infer status based on recent activity
+        let status: PresenceStatus = 'offline'
+        if (inactiveMs < 10 * 60 * 1000) { // Active in last 10 minutes
+          status = activity.tasks_completed_today > 0 ? 'working' : 'idle'
+        }
+        
+        presence = {
+          agent: request.params.agent,
+          status,
+          since: activity.first_seen_today || activity.last_active,
+          lastUpdate: activity.last_active,
+          last_active: activity.last_active,
+        }
+      }
+    }
+    
     if (!presence) {
       return { presence: null, message: 'No presence data for this agent' }
     }
     return { presence }
+  })
+
+  // Get all agent activity metrics
+  app.get('/agents/activity', async () => {
+    const activity = presenceManager.getAllActivity()
+    return { activity }
+  })
+
+  // Get specific agent activity metrics
+  app.get<{ Params: { agent: string } }>('/agents/:agent/activity', async (request) => {
+    const activity = presenceManager.getAgentActivity(request.params.agent)
+    if (!activity) {
+      return { activity: null, message: 'No activity data for this agent' }
+    }
+    return { activity }
   })
 
   // ============ ACTIVITY FEED ENDPOINT ============
@@ -420,6 +659,49 @@ export async function createServer(): Promise<FastifyInstance> {
       since: query.since ? parseInt(query.since, 10) : undefined,
     })
     return { events, count: events.length }
+  })
+
+  // ============ ANALYTICS ENDPOINTS ============
+
+  // Get Vercel analytics for forAgents.dev
+  app.get('/analytics/foragents', async (request) => {
+    const query = request.query as Record<string, string>
+    const period = (query.period || '7d') as '1h' | '24h' | '7d' | '30d'
+    
+    const analytics = await analyticsManager.getForAgentsAnalytics(period)
+    
+    if (!analytics) {
+      return { 
+        error: 'Vercel analytics not configured', 
+        message: 'Set VERCEL_TOKEN and VERCEL_PROJECT_ID in .env' 
+      }
+    }
+    
+    return { analytics }
+  })
+
+  // Get dev.to + forAgents content performance
+  app.get('/content/performance', async () => {
+    const performance = await analyticsManager.getContentPerformance()
+    return { performance }
+  })
+
+  // Get task analytics
+  app.get('/tasks/analytics', async (request) => {
+    const query = request.query as Record<string, string>
+    const since = query.since ? parseInt(query.since, 10) : undefined
+    
+    const analytics = analyticsManager.getTaskAnalytics(since)
+    return { analytics }
+  })
+
+  // Get summary metrics dashboard
+  app.get('/metrics/summary', async (request) => {
+    const query = request.query as Record<string, string>
+    const includeContent = query.includeContent !== 'false'
+    
+    const summary = await analyticsManager.getMetricsSummary(includeContent)
+    return { summary }
   })
 
   // ============ EVENT ENDPOINTS ============

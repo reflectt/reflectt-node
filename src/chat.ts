@@ -202,6 +202,8 @@ class ChatManager {
     channel?: string
     limit?: number
     since?: number
+    before?: number  // Get messages before this timestamp (cursor pagination)
+    after?: number   // Get messages after this timestamp (cursor pagination)
   }): AgentMessage[] {
     let filtered = [...this.messages]
 
@@ -221,8 +223,19 @@ class ChatManager {
       filtered = filtered.filter(m => m.timestamp >= options.since!)
     }
 
-    if (options?.limit) {
-      filtered = filtered.slice(-options.limit)
+    // Cursor pagination: before/after
+    if (options?.before) {
+      filtered = filtered.filter(m => m.timestamp < options.before!)
+    }
+
+    if (options?.after) {
+      filtered = filtered.filter(m => m.timestamp > options.after!)
+    }
+
+    // Apply limit (default to 20 to avoid context window blow-up)
+    const limit = options?.limit !== undefined ? options.limit : 20
+    if (limit > 0) {
+      filtered = filtered.slice(-limit)
     }
 
     // Calculate reply counts for each message

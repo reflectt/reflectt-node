@@ -1,0 +1,350 @@
+/* Dashboard UI Animations - Pixel Design System
+ * Subtle, purposeful motion for reflectt-node dashboard
+ * Drop-in stylesheet for enhanced user experience
+ */
+
+/* ============================================
+   Core Animation Variables
+   ============================================ */
+:root {
+  --transition-fast: 150ms;
+  --transition-base: 250ms;
+  --transition-slow: 400ms;
+  --easing-smooth: cubic-bezier(0.4, 0.0, 0.2, 1);
+  --easing-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  --easing-ease-out: cubic-bezier(0.0, 0.0, 0.2, 1);
+}
+
+/* ============================================
+   Task Card Interactions
+   ============================================ */
+.task-card {
+  transition: all var(--transition-base) var(--easing-smooth);
+  transform: translateY(0);
+}
+
+.task-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.task-card:active {
+  transform: translateY(0);
+  transition-duration: var(--transition-fast);
+}
+
+/* Task card appearing animation */
+.task-card {
+  animation: fadeSlideIn var(--transition-slow) var(--easing-ease-out);
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Stagger animation for task lists */
+.task-card:nth-child(1) { animation-delay: 0ms; }
+.task-card:nth-child(2) { animation-delay: 50ms; }
+.task-card:nth-child(3) { animation-delay: 100ms; }
+.task-card:nth-child(4) { animation-delay: 150ms; }
+.task-card:nth-child(5) { animation-delay: 200ms; }
+.task-card:nth-child(n+6) { animation-delay: 250ms; }
+
+/* ============================================
+   Priority Badge Animations
+   ============================================ */
+.priority-badge {
+  transition: transform var(--transition-fast) var(--easing-bounce);
+}
+
+.task-card:hover .priority-badge {
+  transform: scale(1.1);
+}
+
+/* Priority-specific pulse animations */
+.priority-P0 {
+  animation: pulseCritical 2s ease-in-out infinite;
+}
+
+@keyframes pulseCritical {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* ============================================
+   Status Transitions
+   ============================================ */
+.status-badge {
+  transition: all var(--transition-base) var(--easing-smooth);
+}
+
+/* Smooth status change indicator */
+.task-card[data-status-changed="true"] {
+  animation: statusFlash var(--transition-slow) ease-out;
+}
+
+@keyframes statusFlash {
+  0% { background-color: rgba(34, 197, 94, 0.1); }
+  100% { background-color: transparent; }
+}
+
+/* ============================================
+   Modal Animations
+   ============================================ */
+.modal-overlay {
+  animation: fadeIn var(--transition-base) ease-out;
+}
+
+.modal-content {
+  animation: slideUpFade var(--transition-slow) var(--easing-ease-out);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Modal close animation */
+.modal-overlay.closing {
+  animation: fadeOut var(--transition-fast) ease-in;
+}
+
+.modal-content.closing {
+  animation: slideDownFade var(--transition-fast) ease-in;
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes slideDownFade {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+/* ============================================
+   Button Interactions
+   ============================================ */
+button, .button {
+  transition: all var(--transition-fast) var(--easing-smooth);
+  position: relative;
+}
+
+button:hover, .button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+button:active, .button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Button ripple effect */
+button::after, .button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+  transition: width var(--transition-slow), height var(--transition-slow), opacity var(--transition-slow);
+  opacity: 0;
+}
+
+button:active::after, .button:active::after {
+  width: 200px;
+  height: 200px;
+  opacity: 1;
+  transition: 0s;
+}
+
+/* ============================================
+   Avatar Animations
+   ============================================ */
+.avatar {
+  transition: transform var(--transition-base) var(--easing-smooth);
+}
+
+.avatar:hover {
+  transform: scale(1.1) rotate(5deg);
+}
+
+/* Avatar loading skeleton */
+.avatar-skeleton {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ============================================
+   Agent Status Indicator
+   ============================================ */
+.status-indicator {
+  transition: all var(--transition-base) var(--easing-smooth);
+}
+
+.status-indicator.active {
+  animation: breathe 2s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.1); }
+}
+
+/* ============================================
+   Kanban Column Transitions
+   ============================================ */
+.kanban-column {
+  transition: background-color var(--transition-base) var(--easing-smooth);
+}
+
+.kanban-column:hover {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.kanban-column[data-drag-over="true"] {
+  background-color: rgba(59, 130, 246, 0.1);
+  animation: shimmer 1s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: 200px 0; }
+}
+
+/* ============================================
+   Toast Notifications
+   ============================================ */
+.toast {
+  animation: toastSlideIn var(--transition-slow) var(--easing-ease-out);
+}
+
+.toast.removing {
+  animation: toastSlideOut var(--transition-base) var(--easing-smooth);
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes toastSlideOut {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%) scale(0.9);
+  }
+}
+
+/* ============================================
+   Loading States
+   ============================================ */
+.loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, 
+    rgba(0, 0, 0, 0.06) 25%, 
+    rgba(0, 0, 0, 0.1) 50%, 
+    rgba(0, 0, 0, 0.06) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmerSkeleton 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmerSkeleton {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ============================================
+   Focus States (Accessibility)
+   ============================================ */
+:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+  transition: outline-offset var(--transition-fast) var(--easing-smooth);
+}
+
+:focus-visible:not(:active) {
+  outline-offset: 4px;
+}
+
+/* ============================================
+   Reduced Motion Preferences
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================
+   Performance Optimizations
+   ============================================ */
+.task-card,
+.modal-content,
+button,
+.avatar {
+  will-change: transform;
+}
+
+/* Remove will-change after animation completes */
+.task-card:not(:hover),
+.modal-content.loaded,
+button:not(:hover),
+.avatar:not(:hover) {
+  will-change: auto;
+}
