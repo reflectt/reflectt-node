@@ -236,6 +236,44 @@ export function getDashboardHTML(): string {
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  
+  /* Team Health Widget */
+  .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .health-card {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 12px 14px; display: flex; align-items: center; gap: 10px; transition: all 0.2s;
+  }
+  .health-card:hover { border-color: var(--accent); }
+  .health-indicator {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+    box-shadow: 0 0 8px currentColor;
+  }
+  .health-indicator.active { background: var(--green); color: var(--green); }
+  .health-indicator.idle { background: var(--yellow); color: var(--yellow); }
+  .health-indicator.silent { background: var(--orange); color: var(--orange); }
+  .health-indicator.blocked, .health-indicator.offline { background: var(--red); color: var(--red); }
+  .health-info { flex: 1; min-width: 0; }
+  .health-name { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+  .health-status { font-size: 11px; color: var(--text-muted); }
+  .health-task { font-size: 11px; color: var(--purple); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .health-section { margin-bottom: 16px; }
+  .health-section:last-child { margin-bottom: 0; }
+  .health-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
+  .blocker-item {
+    background: var(--red-dim); border-left: 3px solid var(--red); padding: 8px 10px;
+    border-radius: var(--radius-sm); margin-bottom: 6px; font-size: 12px;
+  }
+  .blocker-item:last-child { margin-bottom: 0; }
+  .blocker-agent { font-weight: 600; color: var(--red); }
+  .blocker-text { color: var(--text); margin-top: 3px; line-height: 1.4; }
+  .blocker-meta { font-size: 10px; color: var(--text-muted); margin-top: 3px; }
+  .overlap-item {
+    background: var(--yellow-dim); border-left: 3px solid var(--yellow); padding: 8px 10px;
+    border-radius: var(--radius-sm); margin-bottom: 6px; font-size: 12px;
+  }
+  .overlap-item:last-child { margin-bottom: 0; }
+  .overlap-agents { font-weight: 600; color: var(--yellow); }
+  .overlap-topic { color: var(--text); margin-top: 3px; }
 
   /* ============================================
      Dashboard Animations - Pixel Design System
@@ -410,6 +448,11 @@ export function getDashboardHTML(): string {
     <div class="panel-header">📋 Task Board <span class="count" id="task-count"></span></div>
     <div class="project-tabs" id="project-tabs"></div>
     <div class="kanban" id="kanban"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">🏥 Team Health <span class="count" id="health-count"></span></div>
+    <div class="panel-body" id="health-body"></div>
   </div>
 
   <div class="two-col">
@@ -680,13 +723,86 @@ async function loadActivity() {
   } catch (e) {}
 }
 
+// ---- Team Health ----
+async function loadHealth() {
+  try {
+    const r = await fetch(BASE + '/health/team');
+    const d = await r.json();
+    const health = d;
+    
+    const statusCounts = { active: 0, idle: 0, silent: 0, blocked: 0, offline: 0 };
+    (health.agents || []).forEach(a => statusCounts[a.status]++);
+    
+    const healthSummary = \`\${statusCounts.active} active • \${statusCounts.silent} silent • \${statusCounts.blocked} blocked\`;
+    document.getElementById('health-count').textContent = healthSummary;
+    
+    const body = document.getElementById('health-body');
+    const agents = health.agents || [];
+    const blockers = health.blockers || [];
+    const overlaps = health.overlaps || [];
+    
+    let html = '';
+    
+    // Agent Health Grid
+    if (agents.length > 0) {
+      html += '<div class="health-section"><div class="health-section-title">Agent Status</div><div class="health-grid">';
+      html += agents.map(a => {
+        const statusText = a.minutesSinceLastSeen < 1 ? 'just now' : ago(a.lastSeen) + ' ago';
+        const taskDisplay = a.currentTask ? \`<div class="health-task">📋 \${esc(truncate(a.currentTask, 35))}</div>\` : '';
+        return \`
+        <div class="health-card">
+          <div class="health-indicator \${a.status}"></div>
+          <div class="health-info">
+            <div class="health-name">\${esc(a.agent)}</div>
+            <div class="health-status">\${statusText}\${a.status === 'blocked' ? ' • 🚫 blocked' : ''}</div>
+            \${taskDisplay}
+          </div>
+        </div>\`;
+      }).join('');
+      html += '</div></div>';
+    }
+    
+    // Blockers
+    if (blockers.length > 0) {
+      html += '<div class="health-section"><div class="health-section-title">🚫 Active Blockers</div>';
+      html += blockers.slice(0, 5).map(b => \`
+        <div class="blocker-item">
+          <div class="blocker-agent">\${esc(b.agent)}</div>
+          <div class="blocker-text">\${esc(b.blocker)}</div>
+          <div class="blocker-meta">Mentioned \${b.mentionCount}x • Last: \${ago(b.lastMentioned)}</div>
+        </div>\`).join('');
+      html += '</div>';
+    }
+    
+    // Overlaps
+    if (overlaps.length > 0) {
+      html += '<div class="health-section"><div class="health-section-title">⚠️ Overlapping Work</div>';
+      html += overlaps.slice(0, 3).map(o => \`
+        <div class="overlap-item">
+          <div class="overlap-agents">\${o.agents.join(', ')}</div>
+          <div class="overlap-topic">\${esc(o.topic)} (\${o.confidence} confidence)</div>
+        </div>\`).join('');
+      html += '</div>';
+    }
+    
+    if (agents.length === 0 && blockers.length === 0 && overlaps.length === 0) {
+      html = '<div class="empty">No health data available</div>';
+    }
+    
+    body.innerHTML = html;
+  } catch (e) {
+    console.error('Health load error:', e);
+    document.getElementById('health-body').innerHTML = '<div class="empty">Failed to load health data</div>';
+  }
+}
+
 function updateClock() {
   document.getElementById('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 async function refresh() {
   await loadTasks();
-  await Promise.all([loadPresence(), loadChat(), loadActivity()]);
+  await Promise.all([loadPresence(), loadChat(), loadActivity(), loadHealth()]);
 }
 
 // ---- Task Modal ----
