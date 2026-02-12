@@ -21,6 +21,8 @@ export interface Task {
   description?: string
   status: 'todo' | 'doing' | 'blocked' | 'validating' | 'done'
   assignee?: string
+  reviewer?: string
+  done_criteria?: string[]
   createdBy: string
   createdAt: number
   updatedAt: number
@@ -49,6 +51,8 @@ export interface RecurringTask {
   title: string
   description?: string
   assignee?: string
+  reviewer?: string
+  done_criteria?: string[]
   createdBy: string
   priority?: 'P0' | 'P1' | 'P2' | 'P3'
   blocked_by?: string[]

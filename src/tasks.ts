@@ -19,6 +19,21 @@ class TaskManager {
   private recurringInitialized = false
   private recurringTicker: NodeJS.Timeout
 
+  private validateLifecycleGates(task: Pick<Task, 'status' | 'reviewer' | 'done_criteria'>): void {
+    if (task.status === 'todo') return
+
+    const hasReviewer = Boolean(task.reviewer && task.reviewer.trim().length > 0)
+    const hasDoneCriteria = Boolean(task.done_criteria && task.done_criteria.length > 0)
+
+    if (!hasDoneCriteria) {
+      throw new Error('Lifecycle gate: done_criteria is required before starting task work')
+    }
+
+    if (!hasReviewer) {
+      throw new Error('Lifecycle gate: reviewer is required before starting task work')
+    }
+  }
+
   constructor() {
     this.loadTasks()
       .then(() => this.loadRecurringTasks())
@@ -199,6 +214,8 @@ class TaskManager {
             description: recurring.description,
             status: recurring.status ?? 'todo',
             assignee: recurring.assignee,
+            reviewer: recurring.reviewer,
+            done_criteria: recurring.done_criteria,
             createdBy: recurring.createdBy,
             priority: recurring.priority,
             blocked_by: recurring.blocked_by,
@@ -244,6 +261,8 @@ class TaskManager {
   }
 
   async createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task> {
+    this.validateLifecycleGates(data)
+
     // Validate blocked_by references
     if (data.blocked_by && data.blocked_by.length > 0) {
       for (const blockerId of data.blocked_by) {
@@ -277,6 +296,8 @@ class TaskManager {
     title: string
     description?: string
     assignee?: string
+    reviewer?: string
+    done_criteria?: string[]
     createdBy: string
     priority?: Task['priority']
     blocked_by?: string[]
@@ -301,6 +322,8 @@ class TaskManager {
       title: data.title,
       description: data.description,
       assignee: data.assignee,
+      reviewer: data.reviewer,
+      done_criteria: data.done_criteria,
       createdBy: data.createdBy,
       priority: data.priority,
       blocked_by: data.blocked_by,
@@ -440,6 +463,8 @@ class TaskManager {
       updatedAt: Date.now(),
     }
 
+    this.validateLifecycleGates(updated)
+
     this.tasks.set(id, updated)
     await this.persistTasks()
     this.notifySubscribers(updated, 'updated')
@@ -573,6 +598,25 @@ class TaskManager {
     })
 
     return tasks[0]
+  }
+
+  getLifecycleInstrumentation() {
+    const tasks = Array.from(this.tasks.values())
+    const active = tasks.filter(t => t.status !== 'todo' && t.status !== 'done')
+    const missingReviewer = active.filter(t => !t.reviewer || t.reviewer.trim().length === 0)
+    const missingDoneCriteria = active.filter(t => !t.done_criteria || t.done_criteria.length === 0)
+
+    return {
+      activeCount: active.length,
+      gateViolations: {
+        missingReviewer: missingReviewer.length,
+        missingDoneCriteria: missingDoneCriteria.length,
+      },
+      violatingTaskIds: {
+        missingReviewer: missingReviewer.map(t => t.id),
+        missingDoneCriteria: missingDoneCriteria.map(t => t.id),
+      },
+    }
   }
 
   getStats() {

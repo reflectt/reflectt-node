@@ -38,6 +38,8 @@ const CreateTaskSchema = z.object({
   description: z.string().optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).default('todo'),
   assignee: z.string().optional(),
+  reviewer: z.string().optional(),
+  done_criteria: z.array(z.string().min(1)).optional(),
   createdBy: z.string().min(1),
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
   blocked_by: z.array(z.string()).optional(),
@@ -51,6 +53,8 @@ const UpdateTaskSchema = z.object({
   description: z.string().optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).optional(),
   assignee: z.string().optional(),
+  reviewer: z.string().optional(),
+  done_criteria: z.array(z.string().min(1)).optional(),
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
   blocked_by: z.array(z.string()).optional(),
   epic_id: z.string().optional(),
@@ -76,6 +80,8 @@ const CreateRecurringTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   assignee: z.string().optional(),
+  reviewer: z.string().optional(),
+  done_criteria: z.array(z.string().min(1)).optional(),
   createdBy: z.string().min(1),
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
   blocked_by: z.array(z.string()).optional(),
@@ -670,6 +676,12 @@ export async function createServer(): Promise<FastifyInstance> {
       return { task: null, message: 'No available tasks' }
     }
     return { task }
+  })
+
+  // Task lifecycle instrumentation: reviewer + done criteria gates
+  app.get('/tasks/instrumentation/lifecycle', async () => {
+    const instrumentation = taskManager.getLifecycleInstrumentation()
+    return { instrumentation }
   })
 
   // ============ MEMORY ENDPOINTS ============
