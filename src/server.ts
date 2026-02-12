@@ -58,6 +58,35 @@ const UpdateTaskSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 })
 
+const RecurringTaskScheduleSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('weekly'),
+    dayOfWeek: z.number().int().min(0).max(6),
+    hour: z.number().int().min(0).max(23).optional(),
+    minute: z.number().int().min(0).max(59).optional(),
+  }),
+  z.object({
+    kind: z.literal('interval'),
+    everyMs: z.number().int().min(60_000),
+    anchorAt: z.number().int().positive().optional(),
+  }),
+])
+
+const CreateRecurringTaskSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  assignee: z.string().optional(),
+  createdBy: z.string().min(1),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  blocked_by: z.array(z.string()).optional(),
+  epic_id: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  metadata: z.record(z.unknown()).optional(),
+  schedule: RecurringTaskScheduleSchema,
+  enabled: z.boolean().optional(),
+  status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).optional(),
+})
+
 const DEFAULT_LIMITS = {
   chatMessages: 50,
   chatSearch: 25,
@@ -538,6 +567,34 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     return payload
+  })
+
+  // List recurring task definitions
+  app.get('/tasks/recurring', async (request) => {
+    const query = request.query as Record<string, string>
+    const enabled = query.enabled === undefined
+      ? undefined
+      : query.enabled === 'true'
+
+    const recurring = taskManager.listRecurringTasks({ enabled })
+    return { recurring, count: recurring.length }
+  })
+
+  // Create recurring task definition
+  app.post('/tasks/recurring', async (request) => {
+    try {
+      const data = CreateRecurringTaskSchema.parse(request.body)
+      const recurring = await taskManager.createRecurringTask(data)
+      return { success: true, recurring }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to create recurring task' }
+    }
+  })
+
+  // Force recurring materialization pass
+  app.post('/tasks/recurring/materialize', async () => {
+    const result = await taskManager.materializeDueRecurringTasks()
+    return { success: true, ...result }
   })
 
   // Get task

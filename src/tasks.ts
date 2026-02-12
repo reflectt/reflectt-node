@@ -1,7 +1,7 @@
 /**
  * Task management system
  */
-import type { Task } from './types.js'
+import type { Task, RecurringTask, RecurringTaskSchedule } from './types.js'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { eventBus } from './events.js'
@@ -9,16 +9,30 @@ import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
 const LEGACY_TASKS_FILE = join(LEGACY_DATA_DIR, 'tasks.jsonl')
+const RECURRING_TASKS_FILE = join(DATA_DIR, 'tasks.recurring.jsonl')
 
 class TaskManager {
   private tasks = new Map<string, Task>()
   private subscribers = new Set<(task: Task, action: 'created' | 'updated' | 'deleted') => void>()
+  private recurringTasks = new Map<string, RecurringTask>()
   private initialized = false
+  private recurringInitialized = false
+  private recurringTicker: NodeJS.Timeout
 
   constructor() {
-    this.loadTasks().catch(err => {
-      console.error('[Tasks] Failed to load tasks:', err)
-    })
+    this.loadTasks()
+      .then(() => this.loadRecurringTasks())
+      .then(() => this.materializeDueRecurringTasks())
+      .catch(err => {
+        console.error('[Tasks] Failed to load tasks:', err)
+      })
+
+    this.recurringTicker = setInterval(() => {
+      this.materializeDueRecurringTasks().catch(err => {
+        console.error('[Tasks] Recurring materialization failed:', err)
+      })
+    }, 60_000)
+    this.recurringTicker.unref()
   }
 
   private async loadTasks(): Promise<void> {
@@ -86,6 +100,136 @@ class TaskManager {
     }
   }
 
+  private async loadRecurringTasks(): Promise<void> {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+
+      try {
+        const content = await fs.readFile(RECURRING_TASKS_FILE, 'utf-8')
+        const lines = content.trim().split('\n').filter(line => line.length > 0)
+
+        for (const line of lines) {
+          try {
+            const recurring = JSON.parse(line) as RecurringTask
+            this.recurringTasks.set(recurring.id, recurring)
+          } catch (err) {
+            console.error('[Tasks] Failed to parse recurring task line:', err)
+          }
+        }
+
+        console.log(`[Tasks] Loaded ${this.recurringTasks.size} recurring task definitions`)
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          throw err
+        }
+        console.log('[Tasks] No recurring task definitions yet')
+      }
+    } finally {
+      this.recurringInitialized = true
+    }
+  }
+
+  private async persistRecurringTasks(): Promise<void> {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      const lines = Array.from(this.recurringTasks.values()).map(task => JSON.stringify(task))
+      await fs.writeFile(RECURRING_TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
+    } catch (err) {
+      console.error('[Tasks] Failed to persist recurring tasks:', err)
+    }
+  }
+
+  private computeNextRunAt(
+    schedule: RecurringTaskSchedule,
+    fromMs: number,
+    createdAt: number,
+  ): number {
+    if (schedule.kind === 'interval') {
+      const everyMs = Math.max(60_000, schedule.everyMs)
+      const anchor = schedule.anchorAt ?? createdAt
+      if (fromMs < anchor) return anchor
+      const periods = Math.floor((fromMs - anchor) / everyMs) + 1
+      return anchor + periods * everyMs
+    }
+
+    const hour = schedule.hour ?? 9
+    const minute = schedule.minute ?? 0
+    const candidate = new Date(fromMs)
+    candidate.setSeconds(0, 0)
+    candidate.setHours(hour, minute, 0, 0)
+
+    let dayDelta = schedule.dayOfWeek - candidate.getDay()
+    if (dayDelta < 0 || (dayDelta === 0 && candidate.getTime() <= fromMs)) {
+      dayDelta += 7
+    }
+
+    candidate.setDate(candidate.getDate() + dayDelta)
+
+    if (candidate.getTime() <= fromMs) {
+      candidate.setDate(candidate.getDate() + 7)
+    }
+
+    return candidate.getTime()
+  }
+
+  private hasMaterializedRun(recurringId: string, scheduledFor: number): boolean {
+    for (const task of this.tasks.values()) {
+      const recurringMeta = (task.metadata as any)?.recurring
+      if (recurringMeta?.id === recurringId && recurringMeta?.scheduledFor === scheduledFor) {
+        return true
+      }
+    }
+    return false
+  }
+
+  async materializeDueRecurringTasks(now = Date.now()): Promise<{ created: number }> {
+    let created = 0
+    let recurringChanged = false
+
+    for (const recurring of this.recurringTasks.values()) {
+      if (!recurring.enabled) continue
+
+      let safetyCounter = 0
+      while (recurring.nextRunAt <= now && safetyCounter < 16) {
+        const scheduledFor = recurring.nextRunAt
+
+        if (!this.hasMaterializedRun(recurring.id, scheduledFor)) {
+          await this.createTask({
+            title: recurring.title,
+            description: recurring.description,
+            status: recurring.status ?? 'todo',
+            assignee: recurring.assignee,
+            createdBy: recurring.createdBy,
+            priority: recurring.priority,
+            blocked_by: recurring.blocked_by,
+            epic_id: recurring.epic_id,
+            tags: recurring.tags,
+            metadata: {
+              ...(recurring.metadata || {}),
+              recurring: {
+                id: recurring.id,
+                scheduledFor,
+              },
+            },
+          })
+          created += 1
+        }
+
+        recurring.lastRunAt = scheduledFor
+        recurring.nextRunAt = this.computeNextRunAt(recurring.schedule, scheduledFor, recurring.createdAt)
+        recurring.updatedAt = Date.now()
+        recurringChanged = true
+        safetyCounter += 1
+      }
+    }
+
+    if (recurringChanged) {
+      await this.persistRecurringTasks()
+    }
+
+    return { created }
+  }
+
   private async persistTasks(): Promise<void> {
     try {
       // Ensure data directory exists
@@ -129,6 +273,63 @@ class TaskManager {
     return task
   }
 
+  async createRecurringTask(data: {
+    title: string
+    description?: string
+    assignee?: string
+    createdBy: string
+    priority?: Task['priority']
+    blocked_by?: string[]
+    epic_id?: string
+    tags?: string[]
+    metadata?: Record<string, unknown>
+    schedule: RecurringTaskSchedule
+    enabled?: boolean
+    status?: Task['status']
+  }): Promise<RecurringTask> {
+    if (data.blocked_by && data.blocked_by.length > 0) {
+      for (const blockerId of data.blocked_by) {
+        if (!this.tasks.has(blockerId)) {
+          throw new Error(`Invalid blocked_by reference: task ${blockerId} does not exist`)
+        }
+      }
+    }
+
+    const now = Date.now()
+    const recurring: RecurringTask = {
+      id: `rtask-${now}-${Math.random().toString(36).substr(2, 9)}`,
+      title: data.title,
+      description: data.description,
+      assignee: data.assignee,
+      createdBy: data.createdBy,
+      priority: data.priority,
+      blocked_by: data.blocked_by,
+      epic_id: data.epic_id,
+      tags: data.tags,
+      metadata: data.metadata,
+      schedule: data.schedule,
+      enabled: data.enabled ?? true,
+      status: data.status ?? 'todo',
+      nextRunAt: this.computeNextRunAt(data.schedule, now, now),
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    this.recurringTasks.set(recurring.id, recurring)
+    await this.persistRecurringTasks()
+    await this.materializeDueRecurringTasks()
+
+    return recurring
+  }
+
+  listRecurringTasks(options?: { enabled?: boolean }): RecurringTask[] {
+    let tasks = Array.from(this.recurringTasks.values())
+    if (typeof options?.enabled === 'boolean') {
+      tasks = tasks.filter(task => task.enabled === options.enabled)
+    }
+    return tasks.sort((a, b) => a.nextRunAt - b.nextRunAt)
+  }
+
   getTask(id: string): Task | undefined {
     return this.tasks.get(id)
   }
@@ -142,6 +343,8 @@ class TaskManager {
     tags?: string[]
     includeBlocked?: boolean // If false, filter out blocked tasks (default: true)
   }): Task[] {
+    void this.materializeDueRecurringTasks().catch(() => {})
+
     // Helper: check if a task is blocked by incomplete dependencies
     const isBlocked = (task: Task): boolean => {
       if (!task.blocked_by || task.blocked_by.length === 0) return false
@@ -321,6 +524,8 @@ class TaskManager {
   }
 
   getNextTask(agent?: string): Task | undefined {
+    void this.materializeDueRecurringTasks().catch(() => {})
+
     // Priority order: P0 > P1 > P2 > P3
     const priorityOrder: Record<string, number> = {
       'P0': 0,
