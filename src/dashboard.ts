@@ -189,6 +189,11 @@ export function getDashboardHTML(): string {
   }
   .channel-tab:hover { background: var(--surface-raised); color: var(--text); }
   .channel-tab.active { background: var(--surface-raised); color: var(--accent); }
+  .channel-tab .meta { font-size: 10px; color: var(--text-muted); margin-left: 6px; }
+  .channel-tab .mention-dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent); margin-left: 6px; box-shadow: 0 0 8px rgba(77, 166, 255, 0.6);
+  }
   .msg { padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
   .msg:last-child { border-bottom: none; }
   .msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
@@ -204,6 +209,11 @@ export function getDashboardHTML(): string {
     font-size: 11px; color: var(--accent); font-style: italic;
   }
   .msg-content.expanded { max-height: none; cursor: pointer; }
+  .msg.mentioned {
+    border-left: 2px solid var(--accent);
+    padding-left: 8px;
+    background: linear-gradient(90deg, rgba(77, 166, 255, 0.08), transparent 65%);
+  }
   .event-row { padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: 12px; display: flex; align-items: center; gap: 8px; }
   .event-row:last-child { border-bottom: none; }
   .event-type { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; background: var(--border); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; flex-shrink: 0; }
@@ -251,7 +261,12 @@ export function getDashboardHTML(): string {
   .health-indicator.active { background: var(--green); color: var(--green); }
   .health-indicator.idle { background: var(--yellow); color: var(--yellow); }
   .health-indicator.silent { background: var(--orange); color: var(--orange); }
+  .health-indicator.watch { background: var(--yellow); color: var(--yellow); }
   .health-indicator.blocked, .health-indicator.offline { background: var(--red); color: var(--red); }
+  .health-card.needs-review {
+    border-color: rgba(212, 160, 23, 0.45);
+    background: linear-gradient(90deg, rgba(212, 160, 23, 0.08), transparent 70%);
+  }
   .health-info { flex: 1; min-width: 0; }
   .health-name { font-size: 13px; font-weight: 600; color: var(--text-bright); }
   .health-status { font-size: 11px; color: var(--text-muted); }
@@ -274,6 +289,23 @@ export function getDashboardHTML(): string {
   .overlap-item:last-child { margin-bottom: 0; }
   .overlap-agents { font-weight: 600; color: var(--yellow); }
   .overlap-topic { color: var(--text); margin-top: 3px; }
+
+  @media (max-width: 768px) {
+    .header { padding: 12px 14px; }
+    .header-right { gap: 10px; font-size: 12px; }
+    .agent-strip { padding: 12px 14px; gap: 8px; }
+    .agent-card { min-width: 170px; padding: 8px 10px; }
+    .main { padding: 14px; gap: 14px; }
+    .panel-header { padding: 12px 14px; font-size: 14px; }
+    .panel-body { padding: 12px 14px; max-height: 360px; }
+    .project-tabs, .channel-tabs { padding-left: 12px; padding-right: 12px; }
+    .kanban { padding: 12px; }
+    .chat-input-bar { padding: 10px 12px; flex-wrap: wrap; }
+    .chat-input-bar select { min-width: 105px; flex: 0 0 auto; }
+    .chat-input-bar input { min-width: 0; width: 100%; }
+    .chat-input-bar button { width: 100%; }
+    .health-grid { grid-template-columns: 1fr; gap: 8px; }
+  }
 
   /* ============================================
      Dashboard Animations - Pixel Design System
@@ -518,6 +550,21 @@ function ago(ts) {
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
+function mentionsRyan(message) { return /@ryan\b/i.test(message || ''); }
+
+function deriveHealthSignal(agent) {
+  if (agent.status !== 'blocked') return { status: agent.status, lowConfidence: false };
+
+  const blockers = agent.recentBlockers || [];
+  if (blockers.length === 0) return { status: 'blocked', lowConfidence: false };
+
+  const likelyNoise = blockers.some(b => /no blockers?|unblocked|not blocked|blocked-state|blocker tracking|false.?alarm|status update|dashboard/i.test(b));
+  if (likelyNoise || blockers.length === 1) {
+    return { status: agent.minutesSinceLastSeen >= 60 ? 'silent' : 'watch', lowConfidence: true };
+  }
+
+  return { status: 'blocked', lowConfidence: false };
+}
 
 function classifyProject(task) {
   const text = ((task.title || '') + ' ' + (task.description || '')).toLowerCase();
@@ -694,17 +741,37 @@ async function loadChat(forceFull = false) {
   }
   const channels = new Set(['all']);
   allMessages.forEach(m => { if (m.channel) channels.add(m.channel); });
+
+  const channelStats = new Map();
+  allMessages.forEach(m => {
+    const ch = m.channel || 'general';
+    if (!channelStats.has(ch)) channelStats.set(ch, { total: 0, mentions: 0 });
+    const stats = channelStats.get(ch);
+    stats.total += 1;
+    if (mentionsRyan(m.content)) stats.mentions += 1;
+  });
+
   const tabs = document.getElementById('channel-tabs');
-  tabs.innerHTML = Array.from(channels).map(ch =>
-    \`<button class="channel-tab \${ch === currentChannel ? 'active' : ''}" onclick="switchChannel('\${ch}')">\${ch === 'all' ? '🌐 all' : '#' + esc(ch)}</button>\`
-  ).join('');
+  tabs.innerHTML = Array.from(channels).map(ch => {
+    const stats = ch === 'all'
+      ? { total: allMessages.length, mentions: allMessages.filter(m => mentionsRyan(m.content)).length }
+      : (channelStats.get(ch) || { total: 0, mentions: 0 });
+    const label = ch === 'all' ? '🌐 all' : '#' + esc(ch);
+    const countMeta = \`<span class="meta">\${stats.total}</span>\`;
+    const mentionDot = (stats.mentions > 0 && ch !== 'all') ? '<span class="mention-dot" title="mentions"></span>' : '';
+    return \`<button class="channel-tab \${ch === currentChannel ? 'active' : ''}" data-channel="\${esc(ch)}" onclick="switchChannel('\${ch}')">\${label}\${countMeta}\${mentionDot}</button>\`;
+  }).join('');
   renderChat();
 }
 function switchChannel(ch) {
   currentChannel = ch;
+  const sendChannel = document.getElementById('chat-channel');
+  if (sendChannel && ch !== 'all' && Array.from(sendChannel.options).some(o => o.value === ch)) {
+    sendChannel.value = ch;
+  }
   document.querySelectorAll('.channel-tab').forEach(t => {
-    const label = t.textContent.replace('#', '').replace('🌐 ', '');
-    t.classList.toggle('active', label === ch);
+    const normalized = t.getAttribute('data-channel') || '';
+    t.classList.toggle('active', normalized === ch);
   });
   renderChat();
 }
@@ -718,8 +785,9 @@ function renderChat() {
     const long = m.content && m.content.length > 200;
     const agent = AGENTS.find(a => a.name === m.from);
     const roleTag = agent ? \`<span class="msg-role">\${esc(agent.role)}</span>\` : '';
+    const mentioned = mentionsRyan(m.content);
     return \`
-    <div class="msg">
+    <div class="msg \${mentioned ? 'mentioned' : ''}">
       <div class="msg-header">
         <span class="msg-from">\${esc(m.from)}</span>
         \${roleTag}
@@ -753,10 +821,24 @@ async function sendChat() {
   input.focus();
 }
 
-// Enter key sends
+// Enter key sends + quick channel switching
+function rotateChannel(direction) {
+  const tabs = Array.from(document.querySelectorAll('.channel-tab'));
+  if (!tabs.length) return;
+  const channels = tabs.map(t => t.getAttribute('data-channel') || '').filter(Boolean);
+  const currentIndex = Math.max(0, channels.indexOf(currentChannel));
+  const nextIndex = (currentIndex + direction + channels.length) % channels.length;
+  switchChannel(channels[nextIndex]);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chat-input').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); rotateChannel(1); }
+    if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); rotateChannel(-1); }
   });
 });
 
@@ -813,38 +895,49 @@ async function loadHealth() {
 
     const health = cachedHealth || { agents: [], blockers: [], overlaps: [] };
 
-    const statusCounts = { active: 0, idle: 0, silent: 0, blocked: 0, offline: 0 };
-    (health.agents || []).forEach(a => statusCounts[a.status]++);
-
-    const healthSummary = \`\${statusCounts.active} active • \${statusCounts.silent} silent • \${statusCounts.blocked} blocked\`;
-    document.getElementById('health-count').textContent = healthSummary;
-
-    const body = document.getElementById('health-body');
     const agents = health.agents || [];
     const blockers = health.blockers || [];
     const overlaps = health.overlaps || [];
-    
+
+    const statusCounts = { active: 0, idle: 0, silent: 0, blocked: 0, offline: 0, watch: 0 };
+    const displayAgents = agents.map(a => {
+      const derived = deriveHealthSignal(a);
+      const displayStatus = a.status === 'silent'
+        ? (a.minutesSinceLastSeen >= 120 ? 'blocked' : (a.minutesSinceLastSeen >= 60 ? 'silent' : 'watch'))
+        : derived.status;
+      statusCounts[displayStatus] = (statusCounts[displayStatus] || 0) + 1;
+      return { ...a, displayStatus, lowConfidence: derived.lowConfidence };
+    });
+
+    const healthSummary = \`\${statusCounts.active} active • \${statusCounts.watch + statusCounts.silent} quiet • \${statusCounts.blocked} blocked\`;
+    document.getElementById('health-count').textContent = healthSummary;
+
+    const body = document.getElementById('health-body');
     let html = '';
-    
+
     // Agent Health Grid
-    if (agents.length > 0) {
+    if (displayAgents.length > 0) {
       html += '<div class="health-section"><div class="health-section-title">Agent Status</div><div class="health-grid">';
-      html += agents.map(a => {
+      html += displayAgents.map(a => {
         const statusText = a.minutesSinceLastSeen < 1 ? 'just now' : ago(a.lastSeen) + ' ago';
         const taskDisplay = a.currentTask ? \`<div class="health-task">📋 \${esc(truncate(a.currentTask, 35))}</div>\` : '';
+        const statusLabel = a.displayStatus === 'blocked'
+          ? ' • 🚫 blocked'
+          : (a.displayStatus === 'silent' ? ' • ⚠️ quiet' : (a.displayStatus === 'watch' ? ' • 👀 watch' : ''));
+        const confidenceLabel = a.lowConfidence ? ' • needs review' : '';
         return \`
-        <div class="health-card">
-          <div class="health-indicator \${a.status}"></div>
+        <div class="health-card \${a.lowConfidence ? 'needs-review' : ''}">
+          <div class="health-indicator \${a.displayStatus}"></div>
           <div class="health-info">
             <div class="health-name">\${esc(a.agent)}</div>
-            <div class="health-status">\${statusText}\${a.status === 'blocked' ? ' • 🚫 blocked' : ''}</div>
+            <div class="health-status">\${statusText}\${statusLabel}\${confidenceLabel}</div>
             \${taskDisplay}
           </div>
         </div>\`;
       }).join('');
       html += '</div></div>';
     }
-    
+
     // Blockers
     if (blockers.length > 0) {
       html += '<div class="health-section"><div class="health-section-title">🚫 Active Blockers</div>';
