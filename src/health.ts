@@ -172,6 +172,12 @@ class TeamHealthMonitor {
   private readonly cadenceAlertCooldownMin = Number(process.env.CADENCE_ALERT_COOLDOWN_MIN || 30)
   private cadenceAlertState = new Map<string, number>()
 
+  // Mention rescue fallback: if Ryan pings trio and nobody replies quickly, emit a direct system ack.
+  private readonly mentionRescueEnabled = process.env.MENTION_RESCUE_ENABLED !== 'false'
+  private readonly mentionRescueDelayMin = Number(process.env.MENTION_RESCUE_DELAY_MIN || 0)
+  private readonly mentionRescueCooldownMin = Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10)
+  private mentionRescueState = new Map<string, number>()
+
   private systemStartTime = Date.now()
   private requestCount = 0
   private errorCount = 0
@@ -281,31 +287,43 @@ class TeamHealthMonitor {
   }
 
   private findLastValidStatusAt(messages: any[], agent: string): number | null {
-    const last = messages.find((m: any) => {
-      if ((m.from || '').toLowerCase() !== agent) return false
-      if ((m.channel || 'general') !== 'general') return false
-      const content = typeof m.content === 'string' ? m.content : ''
+    let lastAt: number | null = null
 
+    for (const m of messages) {
+      if ((m.from || '').toLowerCase() !== agent) continue
+      if ((m.channel || 'general') !== 'general') continue
+
+      const content = typeof m.content === 'string' ? m.content : ''
       const hasTask = /\btask-[a-z0-9-]+\b/i.test(content)
       const hasFormat = /1\)\s*(?:\*\*)?\s*shipped\s*(?:\*\*)?\s*:/i.test(content)
         && /2\)\s*(?:\*\*)?\s*blocker\s*(?:\*\*)?\s*:/i.test(content)
         && /3\)\s*(?:\*\*)?\s*next\s*(?:\*\*)?\s*:/i.test(content)
 
-      return hasTask && hasFormat
-    })
+      if (!hasTask || !hasFormat) continue
 
-    return last?.timestamp || null
+      const ts = Number(m.timestamp || 0)
+      if (!ts) continue
+      if (!lastAt || ts > lastAt) lastAt = ts
+    }
+
+    return lastAt
   }
 
   private findLastTrioGeneralUpdate(messages: any[]): number {
     const trioSet = new Set(this.trioAgents)
-    const last = messages.find((m: any) => {
+    let lastAt = 0
+
+    for (const m of messages) {
       const from = (m.from || '').toLowerCase()
       const channel = (m.channel || 'general')
-      return trioSet.has(from as typeof this.trioAgents[number]) && channel === 'general'
-    })
+      if (!trioSet.has(from as typeof this.trioAgents[number])) continue
+      if (channel !== 'general') continue
 
-    return last?.timestamp || Date.now()
+      const ts = Number(m.timestamp || 0)
+      if (ts > lastAt) lastAt = ts
+    }
+
+    return lastAt || Date.now()
   }
 
   private async getComplianceIncidents(now: number, messages: any[]): Promise<ComplianceIncident[]> {
@@ -662,12 +680,32 @@ class TeamHealthMonitor {
     }
 
     const trioSet = new Set(this.trioAgents)
-    const workingTasks = tasks.filter(t => t.status === 'doing' && t.assignee && trioSet.has((t.assignee || '').toLowerCase() as typeof this.trioAgents[number]))
+    const doingByAgent = new Map<string, typeof tasks[number]>()
+
+    for (const task of tasks) {
+      if (task.status !== 'doing' || !task.assignee) continue
+      const agent = (task.assignee || '').toLowerCase()
+      if (!trioSet.has(agent as typeof this.trioAgents[number])) continue
+
+      const current = doingByAgent.get(agent)
+      const taskTs = Number(task.updatedAt || task.createdAt || 0)
+      const currentTs = current ? Number(current.updatedAt || current.createdAt || 0) : 0
+      if (!current || taskTs >= currentTs) {
+        doingByAgent.set(agent, task)
+      }
+    }
+
+    const workingTasks = Array.from(doingByAgent.values())
 
     for (const task of workingTasks) {
       const agent = (task.assignee || '').toLowerCase()
-      const lastGeneral = messages.find((m: any) => (m.from || '').toLowerCase() === agent && (m.channel || 'general') === 'general')
-      const lastAt = lastGeneral?.timestamp || 0
+      let lastAt = 0
+      for (const m of messages) {
+        if ((m.from || '').toLowerCase() !== agent) continue
+        if ((m.channel || 'general') !== 'general') continue
+        const ts = Number(m.timestamp || 0)
+        if (ts > lastAt) lastAt = ts
+      }
       const staleMin = lastAt > 0 ? Math.floor((now - lastAt) / 60_000) : 9999
 
       if (staleMin < this.cadenceWorkingStaleMin) continue
@@ -694,6 +732,58 @@ class TeamHealthMonitor {
     }
 
     return { alerts }
+  }
+
+  async runMentionRescueTick(now = Date.now(), options?: { dryRun?: boolean }): Promise<{ rescued: string[] }> {
+    const dryRun = options?.dryRun === true
+    const rescued: string[] = []
+
+    if (!this.mentionRescueEnabled) {
+      return { rescued }
+    }
+
+    const messages = chatManager.getMessages({ limit: 300 })
+    const mentions = messages.filter((m: any) => {
+      const from = (m.from || '').toLowerCase()
+      const channel = (m.channel || 'general')
+      const content = typeof m.content === 'string' ? m.content : ''
+      if (channel !== 'general' || from !== 'ryan') return false
+      return /@(kai|link|pixel)\b/i.test(content)
+    })
+
+    const trioSet = new Set(this.trioAgents)
+    const delayMs = this.mentionRescueDelayMin * 60_000
+    const cooldownMs = this.mentionRescueCooldownMin * 60_000
+
+    for (const mention of mentions) {
+      const mentionId = String(mention.id || mention.timestamp || '')
+      if (!mentionId) continue
+
+      const mentionAt = Number(mention.timestamp || 0)
+      if (!mentionAt || now - mentionAt < delayMs) continue
+
+      const replied = messages.some((m: any) => {
+        const from = (m.from || '').toLowerCase()
+        if (!trioSet.has(from as typeof this.trioAgents[number])) return false
+        const ts = Number(m.timestamp || 0)
+        return ts > mentionAt
+      })
+
+      if (replied) continue
+
+      const lastRescueAt = this.mentionRescueState.get(mentionId) || 0
+      if (now - lastRescueAt < cooldownMs) continue
+
+      const content = `[[reply_to:${mentionId}]] system fallback: mention received. @kai @link @pixel are being nudged to respond.`
+      rescued.push(content)
+
+      if (!dryRun) {
+        await chatManager.sendMessage({ from: 'system', channel: 'general', content })
+        this.mentionRescueState.set(mentionId, now)
+      }
+    }
+
+    return { rescued }
   }
 
   async runIdleNudgeTick(
