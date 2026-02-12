@@ -1,0 +1,8 @@
+# Baseline debug
+curl -sS -m 10 http://127.0.0.1:4445/health/idle-nudge/debug
+
+# Dry-run tick (POST)
+curl -sS -m 10 -X POST "http://127.0.0.1:4445/health/idle-nudge/tick?dryRun=true"
+
+# Real tick (POST)
+curl -sS -m 10 -X POST "http://127.0.0.1:4445/health/idle-nudge/tick"
