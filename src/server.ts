@@ -20,6 +20,7 @@ import type { PresenceStatus } from './presence.js'
 import { analyticsManager } from './analytics.js'
 import { getDashboardHTML } from './dashboard.js'
 import { healthMonitor } from './health.js'
+import { contentManager } from './content.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -55,6 +56,52 @@ const UpdateTaskSchema = z.object({
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
 })
+
+const DEFAULT_LIMITS = {
+  chatMessages: 50,
+  chatSearch: 25,
+  inbox: 30,
+  unreadMentions: 20,
+  activity: 60,
+  tasks: 50,
+  contentCalendar: 50,
+  contentPublished: 50,
+} as const
+
+const MAX_LIMITS = {
+  chatMessages: 200,
+  chatSearch: 100,
+  inbox: 100,
+  unreadMentions: 100,
+  activity: 200,
+  tasks: 200,
+  contentCalendar: 200,
+  contentPublished: 200,
+  inboxScanMessages: 150,
+  unreadScanMessages: 300,
+} as const
+
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined
+  return parsed
+}
+
+function parseEpochMs(value: string | undefined): number | undefined {
+  const parsed = parsePositiveInt(value)
+  return parsed
+}
+
+function boundedLimit(
+  value: string | undefined,
+  defaultsTo: number,
+  max: number,
+): number {
+  const parsed = parsePositiveInt(value)
+  if (!parsed) return defaultsTo
+  return Math.min(parsed, max)
+}
 
 export async function createServer(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -249,10 +296,10 @@ export async function createServer(): Promise<FastifyInstance> {
       from: query.from,
       to: query.to,
       channel: query.channel,
-      limit: query.limit ? parseInt(query.limit, 10) : undefined,
-      since: query.since ? parseInt(query.since, 10) : undefined,
-      before: query.before ? parseInt(query.before, 10) : undefined,
-      after: query.after ? parseInt(query.after, 10) : undefined,
+      limit: boundedLimit(query.limit, DEFAULT_LIMITS.chatMessages, MAX_LIMITS.chatMessages),
+      since: parseEpochMs(query.since),
+      before: parseEpochMs(query.before),
+      after: parseEpochMs(query.after),
     })
     return { messages }
   })
@@ -292,7 +339,7 @@ export async function createServer(): Promise<FastifyInstance> {
       return { error: 'query parameter "q" is required' }
     }
     const messages = chatManager.search(query.q, {
-      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      limit: boundedLimit(query.limit, DEFAULT_LIMITS.chatSearch, MAX_LIMITS.chatSearch),
     })
     return { messages, count: messages.length }
   })
@@ -316,14 +363,14 @@ export async function createServer(): Promise<FastifyInstance> {
     // But still cap it to avoid blowing through context windows
     // Get last 100 messages or since timestamp if provided
     const allMessages = chatManager.getMessages({
-      limit: 100,
-      since: query.since ? parseInt(query.since, 10) : undefined,
+      limit: MAX_LIMITS.inboxScanMessages,
+      since: parseEpochMs(query.since),
     })
     
     const inbox = inboxManager.getInbox(request.params.agent, allMessages, {
       priority: query.priority as 'high' | 'medium' | 'low' | undefined,
-      limit: query.limit ? parseInt(query.limit, 10) : undefined,
-      since: query.since ? parseInt(query.since, 10) : undefined,
+      limit: boundedLimit(query.limit, DEFAULT_LIMITS.inbox, MAX_LIMITS.inbox),
+      since: parseEpochMs(query.since),
     })
     
     // Auto-update presence when agent checks inbox
@@ -376,7 +423,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Get unread mentions count (for notification badge)
   app.get<{ Params: { agent: string } }>('/inbox/:agent/unread', async (request) => {
-    const allMessages = chatManager.getMessages({ limit: 1000 })
+    const allMessages = chatManager.getMessages({ limit: MAX_LIMITS.unreadScanMessages })
     const count = inboxManager.getUnreadMentionsCount(request.params.agent, allMessages)
     return { count, agent: request.params.agent }
   })
@@ -384,9 +431,9 @@ export async function createServer(): Promise<FastifyInstance> {
   // Get unread mentions (for dropdown/panel)
   app.get<{ Params: { agent: string } }>('/inbox/:agent/mentions', async (request) => {
     const query = request.query as Record<string, string>
-    const limit = query.limit ? parseInt(query.limit, 10) : 20
+    const limit = boundedLimit(query.limit, DEFAULT_LIMITS.unreadMentions, MAX_LIMITS.unreadMentions)
     
-    const allMessages = chatManager.getMessages({ limit: 1000 })
+    const allMessages = chatManager.getMessages({ limit: MAX_LIMITS.unreadScanMessages })
     const mentions = inboxManager.getUnreadMentions(request.params.agent, allMessages)
     
     return { 
@@ -414,13 +461,23 @@ export async function createServer(): Promise<FastifyInstance> {
   // List tasks
   app.get('/tasks', async (request) => {
     const query = request.query as Record<string, string>
-    const tasks = taskManager.listTasks({
+    const updatedSince = parseEpochMs(query.updatedSince || query.since)
+    const limit = boundedLimit(query.limit, DEFAULT_LIMITS.tasks, MAX_LIMITS.tasks)
+
+    let tasks = taskManager.listTasks({
       status: query.status as Task['status'] | undefined,
       assignee: query.assignee || query.assignedTo, // Support both for backward compatibility
       createdBy: query.createdBy,
       priority: query.priority as Task['priority'] | undefined,
       tags: query.tags ? query.tags.split(',') : undefined,
     })
+
+    if (updatedSince) {
+      tasks = tasks.filter(task => task.updatedAt >= updatedSince)
+    }
+
+    tasks = tasks.slice(0, limit)
+
     return { tasks }
   })
 
@@ -655,8 +712,8 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     const events = eventBus.getEvents({
       agent: query.agent,
-      limit: query.limit ? parseInt(query.limit, 10) : undefined,
-      since: query.since ? parseInt(query.since, 10) : undefined,
+      limit: boundedLimit(query.limit, DEFAULT_LIMITS.activity, MAX_LIMITS.activity),
+      since: parseEpochMs(query.since),
     })
     return { events, count: events.length }
   })
@@ -702,6 +759,164 @@ export async function createServer(): Promise<FastifyInstance> {
     
     const summary = await analyticsManager.getMetricsSummary(includeContent)
     return { summary }
+  })
+
+  // ============ CONTENT ENDPOINTS ============
+
+  // Log a published piece of content
+  app.post('/content/published', async (request) => {
+    try {
+      const body = request.body as {
+        title: string
+        topic: string
+        url: string
+        platform: 'dev.to' | 'foragents.dev' | 'medium' | 'substack' | 'twitter' | 'linkedin' | 'other'
+        publishedBy: string
+        publishedAt?: number
+        tags?: string[]
+        metadata?: Record<string, unknown>
+      }
+
+      if (!body.title || !body.topic || !body.url || !body.platform || !body.publishedBy) {
+        return {
+          success: false,
+          error: 'title, topic, url, platform, and publishedBy are required',
+        }
+      }
+
+      const publication = await contentManager.logPublication(body)
+
+      // Update presence: publishing content = working
+      if (body.publishedBy) {
+        presenceManager.recordActivity(body.publishedBy, 'message')
+        presenceManager.updatePresence(body.publishedBy, 'working')
+      }
+
+      return { success: true, publication }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Get content calendar (scheduled/published/draft)
+  app.get('/content/calendar', async (request) => {
+    const query = request.query as Record<string, string>
+    const calendar = contentManager.getCalendar({
+      status: query.status as 'draft' | 'scheduled' | 'published' | undefined,
+      assignee: query.assignee,
+      platform: query.platform,
+      tags: query.tags ? query.tags.split(',') : undefined,
+      limit: boundedLimit(query.limit, DEFAULT_LIMITS.contentCalendar, MAX_LIMITS.contentCalendar),
+      since: parseEpochMs(query.since),
+    })
+    return { calendar, count: calendar.length }
+  })
+
+  // Get publication log
+  app.get('/content/published', async (request) => {
+    const query = request.query as Record<string, string>
+    const publications = contentManager.getPublications({
+      platform: query.platform as any,
+      publishedBy: query.publishedBy,
+      tags: query.tags ? query.tags.split(',') : undefined,
+      limit: boundedLimit(query.limit, DEFAULT_LIMITS.contentPublished, MAX_LIMITS.contentPublished),
+      since: parseEpochMs(query.since),
+    })
+    return { publications, count: publications.length }
+  })
+
+  // Add or update calendar item
+  app.post('/content/calendar', async (request) => {
+    try {
+      const body = request.body as {
+        id?: string
+        title: string
+        topic: string
+        status: 'draft' | 'scheduled' | 'published'
+        assignee?: string
+        createdBy: string
+        scheduledFor?: number
+        publishedAt?: number
+        platform?: string
+        url?: string
+        tags?: string[]
+        notes?: string
+        metadata?: Record<string, unknown>
+      }
+
+      if (!body.title || !body.topic || !body.status || !body.createdBy) {
+        return {
+          success: false,
+          error: 'title, topic, status, and createdBy are required',
+        }
+      }
+
+      const item = await contentManager.upsertCalendarItem(body)
+
+      // Update presence when adding content to calendar
+      if (body.createdBy) {
+        presenceManager.updatePresence(body.createdBy, 'working')
+      }
+
+      return { success: true, item }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Update content performance metrics
+  app.patch<{ Params: { id: string } }>('/content/published/:id/performance', async (request) => {
+    try {
+      const body = request.body as {
+        views?: number
+        reactions?: number
+        comments?: number
+        shares?: number
+      }
+
+      const publication = await contentManager.updatePerformance(request.params.id, body)
+
+      if (!publication) {
+        return { success: false, error: 'Publication not found' }
+      }
+
+      return { success: true, publication }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  // Get single publication
+  app.get<{ Params: { id: string } }>('/content/published/:id', async (request) => {
+    const publication = contentManager.getPublication(request.params.id)
+    if (!publication) {
+      return { error: 'Publication not found' }
+    }
+    return { publication }
+  })
+
+  // Get single calendar item
+  app.get<{ Params: { id: string } }>('/content/calendar/:id', async (request) => {
+    const item = contentManager.getCalendarItem(request.params.id)
+    if (!item) {
+      return { error: 'Calendar item not found' }
+    }
+    return { item }
+  })
+
+  // Delete calendar item
+  app.delete<{ Params: { id: string } }>('/content/calendar/:id', async (request) => {
+    const deleted = await contentManager.deleteCalendarItem(request.params.id)
+    if (!deleted) {
+      return { error: 'Calendar item not found' }
+    }
+    return { success: true }
+  })
+
+  // Get content stats
+  app.get('/content/stats', async () => {
+    const stats = contentManager.getStats()
+    return { stats }
   })
 
   // ============ EVENT ENDPOINTS ============
