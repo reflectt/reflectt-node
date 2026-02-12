@@ -484,6 +484,17 @@ let currentChannel = 'all';
 let currentProject = 'all';
 let allMessages = [];
 let allTasks = [];
+let allEvents = [];
+
+// Delta cursors for lower payload refreshes
+let lastTaskSync = 0;
+let lastChatSync = 0;
+let lastActivitySync = 0;
+
+// Health caching: summary each refresh, detail every 60s
+let cachedHealth = null;
+let lastHealthDetailSync = 0;
+let refreshCount = 0;
 
 const AGENTS = [
   { name: 'ryan', emoji: '👤', role: 'Founder' },
@@ -555,12 +566,30 @@ async function loadPresence() {
 }
 
 // ---- Tasks ----
-async function loadTasks() {
+async function loadTasks(forceFull = false) {
   try {
-    const r = await fetch(BASE + '/tasks');
+    const useDelta = !forceFull && lastTaskSync > 0;
+    const qs = new URLSearchParams();
+    qs.set('limit', '120');
+    if (useDelta) qs.set('updatedSince', String(lastTaskSync));
+
+    const r = await fetch(BASE + '/tasks?' + qs.toString());
     const d = await r.json();
-    allTasks = d.tasks || [];
-  } catch (e) { allTasks = []; }
+    const incoming = d.tasks || [];
+
+    if (useDelta) {
+      const byId = new Map(allTasks.map(t => [t.id, t]));
+      incoming.forEach(t => byId.set(t.id, t));
+      allTasks = Array.from(byId.values());
+    } else {
+      allTasks = incoming;
+    }
+
+    const maxUpdated = incoming.reduce((max, t) => Math.max(max, t.updatedAt || 0), 0);
+    if (maxUpdated > 0) lastTaskSync = Math.max(lastTaskSync, maxUpdated);
+  } catch (e) {
+    if (!allTasks.length) allTasks = [];
+  }
   renderProjectTabs();
   renderKanban();
   document.getElementById('task-count').textContent = allTasks.length + ' tasks';
@@ -630,12 +659,31 @@ function renderKanban() {
 }
 
 // ---- Chat ----
-async function loadChat() {
+async function loadChat(forceFull = false) {
   try {
-    const r = await fetch(BASE + '/chat/messages?limit=200');
+    const qs = new URLSearchParams();
+    qs.set('limit', '120');
+    if (!forceFull && lastChatSync > 0) qs.set('since', String(lastChatSync));
+
+    const r = await fetch(BASE + '/chat/messages?' + qs.toString());
     const d = await r.json();
-    allMessages = (d.messages || []).sort((a, b) => b.timestamp - a.timestamp);
-  } catch (e) { allMessages = []; }
+    const incoming = d.messages || [];
+
+    if (!forceFull && lastChatSync > 0) {
+      const byId = new Map(allMessages.map(m => [m.id, m]));
+      incoming.forEach(m => byId.set(m.id, m));
+      allMessages = Array.from(byId.values())
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .slice(0, 300);
+    } else {
+      allMessages = incoming.sort((a, b) => b.timestamp - a.timestamp);
+    }
+
+    const maxTs = incoming.reduce((max, m) => Math.max(max, m.timestamp || 0), 0);
+    if (maxTs > 0) lastChatSync = Math.max(lastChatSync, maxTs);
+  } catch (e) {
+    if (!allMessages.length) allMessages = [];
+  }
   const channels = new Set(['all']);
   allMessages.forEach(m => { if (m.channel) channels.add(m.channel); });
   const tabs = document.getElementById('channel-tabs');
@@ -691,7 +739,7 @@ async function sendChat() {
       body: JSON.stringify({ from: 'ryan', content, channel }),
     });
     input.value = '';
-    await loadChat();
+    await loadChat(true);
   } catch (e) { console.error('Send error:', e); }
   btn.disabled = false;
   input.focus();
@@ -705,15 +753,31 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ---- Activity ----
-async function loadActivity() {
+async function loadActivity(forceFull = false) {
   try {
-    const r = await fetch(BASE + '/activity?limit=30');
+    const qs = new URLSearchParams();
+    qs.set('limit', '40');
+    if (!forceFull && lastActivitySync > 0) qs.set('since', String(lastActivitySync));
+
+    const r = await fetch(BASE + '/activity?' + qs.toString());
     const d = await r.json();
-    const events = d.events || [];
-    document.getElementById('activity-count').textContent = events.length + ' events';
+    const incoming = d.events || [];
+
+    if (!forceFull && lastActivitySync > 0) {
+      const seen = new Set(allEvents.map(e => e.id));
+      const merged = [...incoming.filter(e => !seen.has(e.id)), ...allEvents];
+      allEvents = merged.sort((a, b) => b.timestamp - a.timestamp).slice(0, 120);
+    } else {
+      allEvents = incoming;
+    }
+
+    const maxTs = incoming.reduce((max, e) => Math.max(max, e.timestamp || 0), 0);
+    if (maxTs > 0) lastActivitySync = Math.max(lastActivitySync, maxTs);
+
+    document.getElementById('activity-count').textContent = allEvents.length + ' events';
     const body = document.getElementById('activity-body');
-    if (events.length === 0) { body.innerHTML = '<div class="empty">No recent activity</div>'; return; }
-    body.innerHTML = events.slice(0, 25).map(e => \`
+    if (allEvents.length === 0) { body.innerHTML = '<div class="empty">No recent activity</div>'; return; }
+    body.innerHTML = allEvents.slice(0, 25).map(e => \`
       <div class="event-row">
         <span class="event-type">\${esc(e.type || 'event')}</span>
         \${e.agent ? '<span class="event-agent">' + esc(e.agent) + '</span>' : ''}
@@ -726,16 +790,23 @@ async function loadActivity() {
 // ---- Team Health ----
 async function loadHealth() {
   try {
-    const r = await fetch(BASE + '/health/team');
-    const d = await r.json();
-    const health = d;
-    
+    const now = Date.now();
+    const shouldRefreshDetail = !cachedHealth || (now - lastHealthDetailSync) > 60000;
+
+    if (shouldRefreshDetail) {
+      const r = await fetch(BASE + '/health/team');
+      cachedHealth = await r.json();
+      lastHealthDetailSync = now;
+    }
+
+    const health = cachedHealth || { agents: [], blockers: [], overlaps: [] };
+
     const statusCounts = { active: 0, idle: 0, silent: 0, blocked: 0, offline: 0 };
     (health.agents || []).forEach(a => statusCounts[a.status]++);
-    
+
     const healthSummary = \`\${statusCounts.active} active • \${statusCounts.silent} silent • \${statusCounts.blocked} blocked\`;
     document.getElementById('health-count').textContent = healthSummary;
-    
+
     const body = document.getElementById('health-body');
     const agents = health.agents || [];
     const blockers = health.blockers || [];
@@ -801,8 +872,10 @@ function updateClock() {
 }
 
 async function refresh() {
-  await loadTasks();
-  await Promise.all([loadPresence(), loadChat(), loadActivity(), loadHealth()]);
+  refreshCount += 1;
+  const forceFull = refreshCount % 16 === 0; // full sync every ~4 minutes
+  await loadTasks(forceFull);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadHealth()]);
 }
 
 // ---- Task Modal ----
