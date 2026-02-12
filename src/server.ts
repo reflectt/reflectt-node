@@ -212,6 +212,16 @@ export async function createServer(): Promise<FastifyInstance> {
     await healthMonitor.recordSnapshot().catch(() => {}) // Silent fail
   })
 
+  // System idle nudge watchdog (process-in-code guardrail)
+  const idleNudgeTimer = setInterval(() => {
+    healthMonitor.runIdleNudgeTick().catch(() => {})
+  }, 60 * 1000)
+  idleNudgeTimer.unref()
+
+  app.addHook('onClose', async () => {
+    clearInterval(idleNudgeTimer)
+  })
+
   // Health check
   app.get('/health', async () => {
     return {

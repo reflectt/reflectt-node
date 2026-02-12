@@ -97,6 +97,11 @@ type WatchdogIncidentLog = {
   workingSinceAt?: number
 }
 
+type IdleNudgeState = {
+  lastNudgeAt: number
+  lastTier: 1 | 2
+}
+
 class TeamHealthMonitor {
   private blockerKeywords = [
     'blocked',
@@ -122,6 +127,20 @@ class TeamHealthMonitor {
   private readonly leadCadenceMaxMin = 60
   private readonly blockedEscalationMin = 20
   private readonly trioSilenceMaxMin = 60
+
+  // System idle nudge settings (configurable via env)
+  private readonly idleNudgeEnabled = process.env.IDLE_NUDGE_ENABLED !== 'false'
+  private readonly idleNudgeWarnMin = Number(process.env.IDLE_NUDGE_WARN_MIN || 45)
+  private readonly idleNudgeEscalateMin = Number(process.env.IDLE_NUDGE_ESCALATE_MIN || 60)
+  private readonly idleNudgeCooldownMin = Number(process.env.IDLE_NUDGE_COOLDOWN_MIN || 30)
+  private readonly idleNudgeSuppressRecentMin = Number(process.env.IDLE_NUDGE_SUPPRESS_RECENT_MIN || 10)
+  private readonly idleNudgeExcluded = new Set(
+    (process.env.IDLE_NUDGE_EXCLUDE || 'ryan,system,diag')
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean),
+  )
+  private idleNudgeState = new Map<string, IdleNudgeState>()
 
   private systemStartTime = Date.now()
   private requestCount = 0
@@ -559,6 +578,76 @@ class TeamHealthMonitor {
       .split(/\W+/)
       .filter(word => word.length > 3 && !stopWords.has(word))
       .slice(0, 5) // Top 5 keywords
+  }
+
+  async runIdleNudgeTick(now = Date.now()): Promise<{ nudged: string[] }> {
+    if (!this.idleNudgeEnabled) {
+      return { nudged: [] }
+    }
+
+    const nudged: string[] = []
+    const presences = presenceManager.getAllPresence()
+    const tasks = taskManager.listTasks({})
+    const messages = chatManager.getMessages({ limit: 300 })
+
+    for (const presence of presences) {
+      const agent = (presence.agent || '').toLowerCase()
+      if (!agent) continue
+      if (this.idleNudgeExcluded.has(agent)) continue
+      if (presence.status === 'offline') continue
+
+      const lastActiveAt = presence.last_active || presence.lastUpdate || 0
+      if (!lastActiveAt) continue
+
+      const inactivityMin = Math.floor((now - lastActiveAt) / 60_000)
+      if (inactivityMin < this.idleNudgeWarnMin) continue
+
+      const tier: 1 | 2 = inactivityMin >= this.idleNudgeEscalateMin ? 2 : 1
+
+      const lastAgentMessage = messages.find((m: any) => (m.from || '').toLowerCase() === agent)
+      if (lastAgentMessage?.timestamp) {
+        const sinceLastMessageMin = Math.floor((now - lastAgentMessage.timestamp) / 60_000)
+        if (sinceLastMessageMin < this.idleNudgeSuppressRecentMin) {
+          continue
+        }
+      }
+
+      const state = this.idleNudgeState.get(agent)
+      if (state) {
+        const sinceNudgeMin = Math.floor((now - state.lastNudgeAt) / 60_000)
+        if (sinceNudgeMin < this.idleNudgeCooldownMin && state.lastTier >= tier) {
+          continue
+        }
+      }
+
+      const activeTask = tasks.find((t) => t.assignee === agent && t.status === 'doing')
+      const taskId = activeTask?.id || '<task-id>'
+
+      const intro = tier === 1
+        ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
+        : `@${agent} @kai system escalation: ${inactivityMin}m idle. Post required status format now.`
+
+      const template = [
+        `Task: ${taskId}`,
+        '1) Shipped: <artifact/commit/file>',
+        '2) Blocker: <none or explicit blocker>',
+        '3) Next: <next deliverable + ETA>',
+      ].join('\n')
+
+      await chatManager.sendMessage({
+        from: 'system',
+        channel: 'general',
+        content: `${intro}\n${template}`,
+      })
+
+      this.idleNudgeState.set(agent, {
+        lastNudgeAt: now,
+        lastTier: tier,
+      })
+      nudged.push(agent)
+    }
+
+    return { nudged }
   }
 
   /**
