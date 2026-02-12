@@ -570,12 +570,16 @@ async function loadTasks(forceFull = false) {
   try {
     const useDelta = !forceFull && lastTaskSync > 0;
     const qs = new URLSearchParams();
-    qs.set('limit', '120');
+    qs.set('limit', '80');
     if (useDelta) qs.set('updatedSince', String(lastTaskSync));
 
     const r = await fetch(BASE + '/tasks?' + qs.toString());
     const d = await r.json();
     const incoming = d.tasks || [];
+
+    if (useDelta && incoming.length === 0) {
+      return;
+    }
 
     if (useDelta) {
       const byId = new Map(allTasks.map(t => [t.id, t]));
@@ -662,19 +666,23 @@ function renderKanban() {
 async function loadChat(forceFull = false) {
   try {
     const qs = new URLSearchParams();
-    qs.set('limit', '120');
+    qs.set('limit', '80');
     if (!forceFull && lastChatSync > 0) qs.set('since', String(lastChatSync));
 
     const r = await fetch(BASE + '/chat/messages?' + qs.toString());
     const d = await r.json();
     const incoming = d.messages || [];
 
+    if (!forceFull && lastChatSync > 0 && incoming.length === 0) {
+      return;
+    }
+
     if (!forceFull && lastChatSync > 0) {
       const byId = new Map(allMessages.map(m => [m.id, m]));
       incoming.forEach(m => byId.set(m.id, m));
       allMessages = Array.from(byId.values())
         .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 300);
+        .slice(0, 200);
     } else {
       allMessages = incoming.sort((a, b) => b.timestamp - a.timestamp);
     }
@@ -756,12 +764,16 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadActivity(forceFull = false) {
   try {
     const qs = new URLSearchParams();
-    qs.set('limit', '40');
+    qs.set('limit', '25');
     if (!forceFull && lastActivitySync > 0) qs.set('since', String(lastActivitySync));
 
     const r = await fetch(BASE + '/activity?' + qs.toString());
     const d = await r.json();
     const incoming = d.events || [];
+
+    if (!forceFull && lastActivitySync > 0 && incoming.length === 0) {
+      return;
+    }
 
     if (!forceFull && lastActivitySync > 0) {
       const seen = new Set(allEvents.map(e => e.id));
@@ -777,7 +789,7 @@ async function loadActivity(forceFull = false) {
     document.getElementById('activity-count').textContent = allEvents.length + ' events';
     const body = document.getElementById('activity-body');
     if (allEvents.length === 0) { body.innerHTML = '<div class="empty">No recent activity</div>'; return; }
-    body.innerHTML = allEvents.slice(0, 25).map(e => \`
+    body.innerHTML = allEvents.slice(0, 20).map(e => \`
       <div class="event-row">
         <span class="event-type">\${esc(e.type || 'event')}</span>
         \${e.agent ? '<span class="event-agent">' + esc(e.agent) + '</span>' : ''}
@@ -791,7 +803,7 @@ async function loadActivity(forceFull = false) {
 async function loadHealth() {
   try {
     const now = Date.now();
-    const shouldRefreshDetail = !cachedHealth || (now - lastHealthDetailSync) > 60000;
+    const shouldRefreshDetail = !cachedHealth || (now - lastHealthDetailSync) > 120000;
 
     if (shouldRefreshDetail) {
       const r = await fetch(BASE + '/health/team');
@@ -873,10 +885,40 @@ function updateClock() {
 
 async function refresh() {
   refreshCount += 1;
-  const forceFull = refreshCount % 16 === 0; // full sync every ~4 minutes
+  const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
   await loadTasks(forceFull);
   await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadHealth()]);
 }
+
+let refreshTimer = null;
+let refreshInFlight = false;
+
+function getRefreshIntervalMs() {
+  if (document.hidden) return 60000; // background tabs poll lightly
+  const recentActivityMs = Date.now() - Math.max(lastChatSync || 0, lastActivitySync || 0, lastTaskSync || 0);
+  if (recentActivityMs < 2 * 60 * 1000) return 20000; // active team chatter
+  return 30000; // normal foreground cadence
+}
+
+async function scheduleNextRefresh() {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    await refresh();
+  } finally {
+    refreshInFlight = false;
+    refreshTimer = setTimeout(scheduleNextRefresh, getRefreshIntervalMs());
+  }
+}
+
+function startAdaptiveRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(scheduleNextRefresh, getRefreshIntervalMs());
+}
+
+document.addEventListener('visibilitychange', () => {
+  startAdaptiveRefresh();
+});
 
 // ---- Task Modal ----
 let currentTask = null;
@@ -947,7 +989,7 @@ async function updateTaskAssignee() {
 updateClock();
 setInterval(updateClock, 30000);
 refresh();
-setInterval(refresh, 15000);
+startAdaptiveRefresh();
 </script>
 
 <!-- Task Modal -->
