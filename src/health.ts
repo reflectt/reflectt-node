@@ -102,6 +102,29 @@ type IdleNudgeState = {
   lastTier: 1 | 2
 }
 
+export type IdleNudgeDecision = {
+  agent: string
+  taskId: string | null
+  idleMinutes: number
+  warnMin: number
+  escalateMin: number
+  cooldownMin: number
+  recentSuppressMin: number
+  decision: 'none' | 'warn' | 'escalate'
+  reason:
+    | 'disabled'
+    | 'excluded'
+    | 'offline'
+    | 'no-last-active'
+    | 'below-warn-threshold'
+    | 'recent-activity-suppressed'
+    | 'cooldown-active'
+    | 'missing-active-task'
+    | 'eligible'
+  renderedMessage: string | null
+  at: number
+}
+
 class TeamHealthMonitor {
   private blockerKeywords = [
     'blocked',
@@ -141,6 +164,7 @@ class TeamHealthMonitor {
       .filter(Boolean),
   )
   private idleNudgeState = new Map<string, IdleNudgeState>()
+  private idleNudgeLastDecisions: IdleNudgeDecision[] = []
 
   private systemStartTime = Date.now()
   private requestCount = 0
@@ -580,12 +604,14 @@ class TeamHealthMonitor {
       .slice(0, 5) // Top 5 keywords
   }
 
-  async runIdleNudgeTick(now = Date.now()): Promise<{ nudged: string[] }> {
-    if (!this.idleNudgeEnabled) {
-      return { nudged: [] }
-    }
-
+  async runIdleNudgeTick(
+    now = Date.now(),
+    options?: { dryRun?: boolean },
+  ): Promise<{ nudged: string[]; decisions: IdleNudgeDecision[] }> {
+    const dryRun = options?.dryRun === true
     const nudged: string[] = []
+    const decisions: IdleNudgeDecision[] = []
+
     const presences = presenceManager.getAllPresence()
     const tasks = taskManager.listTasks({})
     const messages = chatManager.getMessages({ limit: 300 })
@@ -593,21 +619,54 @@ class TeamHealthMonitor {
     for (const presence of presences) {
       const agent = (presence.agent || '').toLowerCase()
       if (!agent) continue
-      if (this.idleNudgeExcluded.has(agent)) continue
-      if (presence.status === 'offline') continue
 
       const lastActiveAt = presence.last_active || presence.lastUpdate || 0
-      if (!lastActiveAt) continue
-
-      const inactivityMin = Math.floor((now - lastActiveAt) / 60_000)
-      if (inactivityMin < this.idleNudgeWarnMin) continue
-
+      const inactivityMin = lastActiveAt ? Math.floor((now - lastActiveAt) / 60_000) : 0
       const tier: 1 | 2 = inactivityMin >= this.idleNudgeEscalateMin ? 2 : 1
+      const activeTask = tasks.find((t) => t.assignee === agent && t.status === 'doing')
+      const taskId = activeTask?.id || null
+
+      const baseDecision: Omit<IdleNudgeDecision, 'reason' | 'decision' | 'renderedMessage'> = {
+        agent,
+        taskId,
+        idleMinutes: inactivityMin,
+        warnMin: this.idleNudgeWarnMin,
+        escalateMin: this.idleNudgeEscalateMin,
+        cooldownMin: this.idleNudgeCooldownMin,
+        recentSuppressMin: this.idleNudgeSuppressRecentMin,
+        at: now,
+      }
+
+      if (!this.idleNudgeEnabled) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'disabled', renderedMessage: null })
+        continue
+      }
+
+      if (this.idleNudgeExcluded.has(agent)) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'excluded', renderedMessage: null })
+        continue
+      }
+
+      if (presence.status === 'offline') {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'offline', renderedMessage: null })
+        continue
+      }
+
+      if (!lastActiveAt) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'no-last-active', renderedMessage: null })
+        continue
+      }
+
+      if (inactivityMin < this.idleNudgeWarnMin) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'below-warn-threshold', renderedMessage: null })
+        continue
+      }
 
       const lastAgentMessage = messages.find((m: any) => (m.from || '').toLowerCase() === agent)
       if (lastAgentMessage?.timestamp) {
         const sinceLastMessageMin = Math.floor((now - lastAgentMessage.timestamp) / 60_000)
         if (sinceLastMessageMin < this.idleNudgeSuppressRecentMin) {
+          decisions.push({ ...baseDecision, decision: 'none', reason: 'recent-activity-suppressed', renderedMessage: null })
           continue
         }
       }
@@ -616,12 +675,16 @@ class TeamHealthMonitor {
       if (state) {
         const sinceNudgeMin = Math.floor((now - state.lastNudgeAt) / 60_000)
         if (sinceNudgeMin < this.idleNudgeCooldownMin && state.lastTier >= tier) {
+          decisions.push({ ...baseDecision, decision: 'none', reason: 'cooldown-active', renderedMessage: null })
           continue
         }
       }
 
-      const activeTask = tasks.find((t) => t.assignee === agent && t.status === 'doing')
-      const taskId = activeTask?.id || '<task-id>'
+      // Safety guard: never emit invalid placeholder task ids.
+      if (!taskId || !/^task-[a-z0-9-]+$/i.test(taskId)) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'missing-active-task', renderedMessage: null })
+        continue
+      }
 
       const intro = tier === 1
         ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
@@ -634,10 +697,23 @@ class TeamHealthMonitor {
         '3) Next: <next deliverable + ETA>',
       ].join('\n')
 
+      const renderedMessage = `${intro}\n${template}`
+
+      decisions.push({
+        ...baseDecision,
+        decision: tier === 1 ? 'warn' : 'escalate',
+        reason: 'eligible',
+        renderedMessage,
+      })
+
+      if (dryRun) {
+        continue
+      }
+
       await chatManager.sendMessage({
         from: 'system',
         channel: 'general',
-        content: `${intro}\n${template}`,
+        content: renderedMessage,
       })
 
       this.idleNudgeState.set(agent, {
@@ -647,7 +723,40 @@ class TeamHealthMonitor {
       nudged.push(agent)
     }
 
-    return { nudged }
+    this.idleNudgeLastDecisions = decisions
+    return { nudged, decisions }
+  }
+
+  getIdleNudgeDebug(): {
+    config: {
+      enabled: boolean
+      warnMin: number
+      escalateMin: number
+      cooldownMin: number
+      recentSuppressMin: number
+      excluded: string[]
+    }
+    state: Array<{ agent: string; lastNudgeAt: number; lastTier: 1 | 2 }>
+    lastDecisions: IdleNudgeDecision[]
+    timestamp: number
+  } {
+    return {
+      config: {
+        enabled: this.idleNudgeEnabled,
+        warnMin: this.idleNudgeWarnMin,
+        escalateMin: this.idleNudgeEscalateMin,
+        cooldownMin: this.idleNudgeCooldownMin,
+        recentSuppressMin: this.idleNudgeSuppressRecentMin,
+        excluded: Array.from(this.idleNudgeExcluded.values()).sort(),
+      },
+      state: Array.from(this.idleNudgeState.entries()).map(([agent, s]) => ({
+        agent,
+        lastNudgeAt: s.lastNudgeAt,
+        lastTier: s.lastTier,
+      })),
+      lastDecisions: this.idleNudgeLastDecisions,
+      timestamp: Date.now(),
+    }
   }
 
   /**

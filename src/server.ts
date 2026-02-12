@@ -253,6 +253,24 @@ export async function createServer(): Promise<FastifyInstance> {
     return payload
   })
 
+  // Idle-nudge debug surface (deterministic proof support)
+  app.get('/health/idle-nudge/debug', async () => {
+    return healthMonitor.getIdleNudgeDebug()
+  })
+
+  // One-shot idle-nudge tick (dry-run and real modes)
+  app.post('/health/idle-nudge/tick', async (request) => {
+    const query = request.query as Record<string, string>
+    const dryRun = query.dryRun === 'true'
+    const result = await healthMonitor.runIdleNudgeTick(Date.now(), { dryRun })
+    return {
+      success: true,
+      dryRun,
+      ...result,
+      timestamp: Date.now(),
+    }
+  })
+
   // Team health summary (quick view)
   app.get('/health/team/summary', async (request, reply) => {
     const summary = await healthMonitor.getSummary()
