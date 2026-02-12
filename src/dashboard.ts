@@ -602,7 +602,7 @@ function statusTemplateFor(agent, taskId) {
     '1) Shipped: <artifact/commit/file>',
     '2) Blocker: <none or explicit blocker>',
     '3) Next: <next deliverable + ETA>',
-  ].join('\n');
+  ].join('\\n');
 }
 
 async function copyStatusTemplate(agent, taskId) {
