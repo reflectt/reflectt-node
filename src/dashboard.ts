@@ -595,7 +595,13 @@ function complianceState(value, threshold) {
 }
 
 function statusTemplateFor(agent, taskId) {
-  const mentions = agent === 'pixel' ? '@kai @link' : '@kai @pixel';
+  const mentions = agent === 'pixel'
+    ? '@kai @link'
+    : agent === 'link'
+      ? '@kai @pixel'
+      : agent === 'kai'
+        ? '@link @pixel'
+        : '@kai @pixel';
   return [
     mentions,
     'Task: ' + (taskId || '<task-id>'),

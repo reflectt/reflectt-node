@@ -238,9 +238,9 @@ class TeamHealthMonitor {
       const content = typeof m.content === 'string' ? m.content : ''
 
       const hasTask = /\btask-[a-z0-9-]+\b/i.test(content)
-      const hasFormat = /1\)\s*shipped\s*:/i.test(content)
-        && /2\)\s*blocker\s*:/i.test(content)
-        && /3\)\s*next\s*:/i.test(content)
+      const hasFormat = /1\)\s*(?:\*\*)?\s*shipped\s*(?:\*\*)?\s*:/i.test(content)
+        && /2\)\s*(?:\*\*)?\s*blocker\s*(?:\*\*)?\s*:/i.test(content)
+        && /3\)\s*(?:\*\*)?\s*next\s*(?:\*\*)?\s*:/i.test(content)
 
       return hasTask && hasFormat
     })
