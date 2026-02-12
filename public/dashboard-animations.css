@@ -348,3 +348,34 @@ button:not(:hover),
 .avatar:not(:hover) {
   will-change: auto;
 }
+
+/* ============================================
+   Collaboration Compliance States
+   ============================================ */
+.compliance-state-ok {
+  animation: complianceCalm 2.4s ease-in-out infinite;
+}
+
+.compliance-state-warning {
+  animation: complianceWarn 1.4s ease-in-out infinite;
+}
+
+.compliance-state-violation,
+.compliance-state-escalated {
+  animation: complianceAlert 1s ease-in-out infinite;
+}
+
+@keyframes complianceCalm {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.18); }
+  50% { box-shadow: 0 0 0 6px rgba(63, 185, 80, 0); }
+}
+
+@keyframes complianceWarn {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 160, 23, 0.2); }
+  50% { box-shadow: 0 0 0 8px rgba(212, 160, 23, 0); }
+}
+
+@keyframes complianceAlert {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.26); }
+  50% { box-shadow: 0 0 0 10px rgba(248, 81, 73, 0); }
+}

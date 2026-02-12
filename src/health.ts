@@ -1,13 +1,15 @@
 /**
  * Team Health Monitoring
- * 
+ *
  * Real-time team health diagnostics:
  * - Silence detection (>3 heartbeats = ~45min)
  * - Blocker tracking from messages
  * - Overlapping work detection
- * - Activity patterns
+ * - Collaboration compliance (protocol v1)
  */
 
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
@@ -19,6 +21,7 @@ export interface TeamHealthMetrics {
   overlaps: OverlapAlert[]
   silentAgents: string[]
   activeAgents: string[]
+  compliance: CollaborationCompliance
 }
 
 export interface AgentHealthStatus {
@@ -45,6 +48,55 @@ export interface OverlapAlert {
   confidence: 'low' | 'medium' | 'high'
 }
 
+export type ComplianceState = 'ok' | 'warning' | 'violation' | 'escalated'
+
+export interface ComplianceSummary {
+  workerCadenceMaxMin: number
+  leadCadenceMaxMin: number
+  blockedEscalationMin: number
+  trioSilenceMaxMin: number
+  workerWorstAgeMin: number
+  leadAgeMin: number
+  oldestBlockerMin: number
+  trioSilenceMin: number
+}
+
+export interface ComplianceAgentStatus {
+  agent: string
+  taskId: string | null
+  lastValidStatusAt: number | null
+  lastValidStatusAgeMin: number
+  expectedCadenceMin: number
+  state: ComplianceState
+}
+
+export interface ComplianceIncident {
+  id: string
+  agent: string
+  taskId: string | null
+  type: 'trio-silence' | 'stale-working' | 'blocked-overdue'
+  minutesOver: number
+  escalateTo: string[]
+  openedAt: number
+}
+
+export interface CollaborationCompliance {
+  summary: ComplianceSummary
+  agents: ComplianceAgentStatus[]
+  incidents: ComplianceIncident[]
+}
+
+type WatchdogIncidentLog = {
+  type?: string
+  at?: number
+  agent?: string
+  taskId?: string | null
+  thresholdMs?: number
+  lastUpdateAt?: number
+  blockedSinceAt?: number
+  workingSinceAt?: number
+}
+
 class TeamHealthMonitor {
   private blockerKeywords = [
     'blocked',
@@ -63,7 +115,14 @@ class TeamHealthMonitor {
   private readonly MAX_HISTORY = 168 // 7 days at hourly snapshots
   private lastSnapshotTime = 0
   private readonly SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
-  
+
+  private readonly trioAgents = ['kai', 'link', 'pixel'] as const
+  private readonly workerAgents = ['link', 'pixel'] as const
+  private readonly workerCadenceMaxMin = 45
+  private readonly leadCadenceMaxMin = 60
+  private readonly blockedEscalationMin = 20
+  private readonly trioSilenceMaxMin = 60
+
   private systemStartTime = Date.now()
   private requestCount = 0
   private errorCount = 0
@@ -78,6 +137,7 @@ class TeamHealthMonitor {
     const agents = await this.getAgentHealthStatuses(now)
     const blockers = await this.extractBlockers()
     const overlaps = await this.detectOverlaps()
+    const compliance = await this.getCollaborationCompliance(now)
 
     const silentAgents = agents
       .filter(a => a.status === 'silent')
@@ -94,7 +154,220 @@ class TeamHealthMonitor {
       overlaps,
       silentAgents,
       activeAgents,
+      compliance,
     }
+  }
+
+  async getCollaborationCompliance(now = Date.now()): Promise<CollaborationCompliance> {
+    const tasks = taskManager.listTasks({})
+    const messages = chatManager.getMessages({ limit: 300 })
+    const incidents = await this.getComplianceIncidents(now, messages)
+
+    const complianceAgents: ComplianceAgentStatus[] = this.trioAgents.map((agent) => {
+      const expectedCadenceMin = agent === 'kai' ? this.leadCadenceMaxMin : this.workerCadenceMaxMin
+      const lastValidStatusAt = this.findLastValidStatusAt(messages, agent)
+      const lastValidStatusAgeMin = lastValidStatusAt
+        ? Math.floor((now - lastValidStatusAt) / 1000 / 60)
+        : 9999
+
+      let state: ComplianceState = 'ok'
+      if (lastValidStatusAgeMin > expectedCadenceMin) {
+        state = 'violation'
+      } else if (lastValidStatusAgeMin >= Math.max(0, expectedCadenceMin - 10)) {
+        state = 'warning'
+      }
+
+      const hasEscalation = incidents.some(i => i.agent === agent)
+      if (hasEscalation) {
+        state = 'escalated'
+      }
+
+      const activeTask = tasks.find(t => t.assignee === agent && t.status === 'doing')
+
+      return {
+        agent,
+        taskId: activeTask?.id || null,
+        lastValidStatusAt,
+        lastValidStatusAgeMin,
+        expectedCadenceMin,
+        state,
+      }
+    })
+
+    const workerWorstAgeMin = Math.max(
+      ...complianceAgents
+        .filter(a => this.workerAgents.includes(a.agent as typeof this.workerAgents[number]))
+        .map(a => a.lastValidStatusAgeMin),
+      0,
+    )
+
+    const leadAgeMin = complianceAgents.find(a => a.agent === 'kai')?.lastValidStatusAgeMin ?? 9999
+
+    const blockerMessages = messages.filter(
+      m => typeof m.content === 'string'
+        && /\bblocker\s*:\s*(?!none|no|n\/a|na\b).+/i.test(m.content)
+        && this.trioAgents.includes((m.from || '').toLowerCase() as typeof this.trioAgents[number]),
+    )
+    const oldestBlockerMin = blockerMessages.length > 0
+      ? Math.max(...blockerMessages.map(m => Math.floor((now - (m.timestamp || now)) / 1000 / 60)))
+      : 0
+
+    const lastTrioGeneralUpdate = this.findLastTrioGeneralUpdate(messages)
+    const trioSilenceMin = Math.floor((now - lastTrioGeneralUpdate) / 1000 / 60)
+
+    return {
+      summary: {
+        workerCadenceMaxMin: this.workerCadenceMaxMin,
+        leadCadenceMaxMin: this.leadCadenceMaxMin,
+        blockedEscalationMin: this.blockedEscalationMin,
+        trioSilenceMaxMin: this.trioSilenceMaxMin,
+        workerWorstAgeMin,
+        leadAgeMin,
+        oldestBlockerMin,
+        trioSilenceMin,
+      },
+      agents: complianceAgents,
+      incidents,
+    }
+  }
+
+  private findLastValidStatusAt(messages: any[], agent: string): number | null {
+    const last = messages.find((m: any) => {
+      if ((m.from || '').toLowerCase() !== agent) return false
+      if ((m.channel || 'general') !== 'general') return false
+      const content = typeof m.content === 'string' ? m.content : ''
+
+      const hasTask = /\btask-[a-z0-9-]+\b/i.test(content)
+      const hasFormat = /1\)\s*shipped\s*:/i.test(content)
+        && /2\)\s*blocker\s*:/i.test(content)
+        && /3\)\s*next\s*:/i.test(content)
+
+      return hasTask && hasFormat
+    })
+
+    return last?.timestamp || null
+  }
+
+  private findLastTrioGeneralUpdate(messages: any[]): number {
+    const trioSet = new Set(this.trioAgents)
+    const last = messages.find((m: any) => {
+      const from = (m.from || '').toLowerCase()
+      const channel = (m.channel || 'general')
+      return trioSet.has(from as typeof this.trioAgents[number]) && channel === 'general'
+    })
+
+    return last?.timestamp || Date.now()
+  }
+
+  private async getComplianceIncidents(now: number, messages: any[]): Promise<ComplianceIncident[]> {
+    const fromWatchdog = await this.readWatchdogIncidents(now)
+    const inMemory: ComplianceIncident[] = []
+
+    const lastTrioGeneralUpdate = this.findLastTrioGeneralUpdate(messages)
+    const trioSilenceMin = Math.floor((now - lastTrioGeneralUpdate) / 1000 / 60)
+    if (trioSilenceMin > this.trioSilenceMaxMin) {
+      inMemory.push({
+        id: `inc-trio-${lastTrioGeneralUpdate}`,
+        agent: 'trio',
+        taskId: null,
+        type: 'trio-silence',
+        minutesOver: trioSilenceMin - this.trioSilenceMaxMin,
+        escalateTo: ['kai', 'link', 'pixel'],
+        openedAt: lastTrioGeneralUpdate + this.trioSilenceMaxMin * 60 * 1000,
+      })
+    }
+
+    return [...fromWatchdog, ...inMemory].sort((a, b) => b.openedAt - a.openedAt)
+  }
+
+  private async readWatchdogIncidents(now: number): Promise<ComplianceIncident[]> {
+    const paths = [
+      process.env.WATCHDOG_INCIDENT_LOG,
+      resolve(process.cwd(), '../workspace-link/openclaw-plugin-reflectt-node/incidents/watchdog-incidents.jsonl'),
+      resolve(process.cwd(), '../../workspace-link/openclaw-plugin-reflectt-node/incidents/watchdog-incidents.jsonl'),
+    ].filter((p): p is string => Boolean(p))
+
+    for (const path of paths) {
+      try {
+        const raw = await readFile(path, 'utf8')
+        const lines = raw.trim().split('\n').filter(Boolean)
+        const recent = lines.slice(-100)
+        const incidents = recent
+          .map((line) => {
+            try {
+              return JSON.parse(line) as WatchdogIncidentLog
+            } catch {
+              return null
+            }
+          })
+          .filter((v): v is WatchdogIncidentLog => v !== null)
+          .map((entry, idx) => this.mapWatchdogIncident(entry, idx, now))
+          .filter((v): v is ComplianceIncident => v !== null)
+
+        if (incidents.length > 0) {
+          return incidents
+        }
+      } catch {
+        // try next path
+      }
+    }
+
+    return []
+  }
+
+  private mapWatchdogIncident(entry: WatchdogIncidentLog, idx: number, now: number): ComplianceIncident | null {
+    const openedAt = entry.at || now
+    const taskId = entry.taskId ?? null
+    const rawType = entry.type || ''
+
+    if (rawType === 'trio_general_silence') {
+      const thresholdMin = Math.floor((entry.thresholdMs || this.trioSilenceMaxMin * 60_000) / 60_000)
+      const reference = entry.lastUpdateAt || openedAt
+      const minutesOver = Math.max(0, Math.floor((now - reference) / 60_000) - thresholdMin)
+      return {
+        id: `inc-watchdog-trio-${openedAt}-${idx}`,
+        agent: 'trio',
+        taskId,
+        type: 'trio-silence',
+        minutesOver,
+        escalateTo: ['kai', 'link', 'pixel'],
+        openedAt,
+      }
+    }
+
+    if (rawType === 'stale_working') {
+      const agent = entry.agent || 'unknown'
+      const thresholdMin = Math.floor((entry.thresholdMs || this.workerCadenceMaxMin * 60_000) / 60_000)
+      const reference = entry.lastUpdateAt || openedAt
+      const minutesOver = Math.max(0, Math.floor((now - reference) / 60_000) - thresholdMin)
+      return {
+        id: `inc-watchdog-stale-${agent}-${openedAt}-${idx}`,
+        agent,
+        taskId,
+        type: 'stale-working',
+        minutesOver,
+        escalateTo: agent === 'pixel' ? ['kai', 'link'] : ['kai', 'pixel'],
+        openedAt,
+      }
+    }
+
+    if (rawType === 'blocked_without_handoff') {
+      const agent = entry.agent || 'unknown'
+      const thresholdMin = Math.floor((entry.thresholdMs || this.blockedEscalationMin * 60_000) / 60_000)
+      const reference = entry.lastUpdateAt || entry.blockedSinceAt || openedAt
+      const minutesOver = Math.max(0, Math.floor((now - reference) / 60_000) - thresholdMin)
+      return {
+        id: `inc-watchdog-blocked-${agent}-${openedAt}-${idx}`,
+        agent,
+        taskId,
+        type: 'blocked-overdue',
+        minutesOver,
+        escalateTo: agent === 'pixel' ? ['kai', 'link'] : ['kai', 'pixel'],
+        openedAt,
+      }
+    }
+
+    return null
   }
 
   /**
@@ -168,10 +441,10 @@ class TeamHealthMonitor {
 
     for (const msg of messages) {
       const blockers = this.findBlockersInMessages([msg])
-      
+
       for (const blocker of blockers) {
         const key = `${msg.from}:${blocker}`
-        
+
         if (blockerMap.has(key)) {
           const existing = blockerMap.get(key)!
           existing.mentionCount++
@@ -201,9 +474,9 @@ class TeamHealthMonitor {
 
     for (const msg of messages) {
       const content = msg.content.toLowerCase()
-      
+
       // Skip status reports and completed work mentions
-      if (content.includes('was blocked') || 
+      if (content.includes('was blocked') ||
           content.includes('unblocked') ||
           content.includes('fixed') ||
           content.includes('resolved') ||
@@ -211,17 +484,17 @@ class TeamHealthMonitor {
           content.includes('done')) {
         continue
       }
-      
+
       for (const keyword of this.blockerKeywords) {
         if (content.includes(keyword)) {
           // Additional context check: must be near agent name or "I" to be real blocker
-          const hasContext = content.includes(' i ') || 
+          const hasContext = content.includes(' i ') ||
                             content.includes('i\'m') ||
                             content.includes('we\'re') ||
                             content.match(/@\w+/)
-          
+
           if (!hasContext) continue
-          
+
           // Extract context around the keyword
           const index = content.indexOf(keyword)
           const start = Math.max(0, index - 20)
@@ -250,7 +523,7 @@ class TeamHealthMonitor {
       if (!task.assignee) continue
 
       const keywords = this.extractKeywords(task.title + ' ' + (task.description || ''))
-      
+
       for (const keyword of keywords) {
         if (!tasksByKeywords.has(keyword)) {
           tasksByKeywords.set(keyword, [])
@@ -262,7 +535,7 @@ class TeamHealthMonitor {
     // Find overlaps
     for (const [topic, agents] of tasksByKeywords) {
       const uniqueAgents = Array.from(new Set(agents))
-      
+
       if (uniqueAgents.length >= 2) {
         overlaps.push({
           agents: uniqueAgents,
@@ -280,7 +553,7 @@ class TeamHealthMonitor {
    */
   private extractKeywords(text: string): string[] {
     const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'])
-    
+
     return text
       .toLowerCase()
       .split(/\W+/)
@@ -293,7 +566,7 @@ class TeamHealthMonitor {
    */
   async getSummary(): Promise<string> {
     const health = await this.getHealth()
-    
+
     const lines = [
       `🏥 **Team Health** (${new Date(health.timestamp).toLocaleTimeString()})`,
       '',
@@ -325,7 +598,7 @@ class TeamHealthMonitor {
    */
   async recordSnapshot(): Promise<void> {
     const now = Date.now()
-    
+
     // Only snapshot once per hour
     if (now - this.lastSnapshotTime < this.SNAPSHOT_INTERVAL_MS) {
       return
@@ -355,7 +628,7 @@ class TeamHealthMonitor {
   trackRequest(duration: number): void {
     this.requestCount++
     this.requestTimes.push(duration)
-    
+
     // Keep only recent request times
     if (this.requestTimes.length > this.MAX_REQUEST_TIMES) {
       this.requestTimes = this.requestTimes.slice(-this.MAX_REQUEST_TIMES)

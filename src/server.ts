@@ -233,6 +233,16 @@ export async function createServer(): Promise<FastifyInstance> {
     return health
   })
 
+  // Team health compliance payload (dashboard panel)
+  app.get('/health/compliance', async (request, reply) => {
+    const compliance = await healthMonitor.getCollaborationCompliance()
+    const payload = { compliance, timestamp: Date.now() }
+    if (applyConditionalCaching(request, reply, payload, payload.timestamp)) {
+      return
+    }
+    return payload
+  })
+
   // Team health summary (quick view)
   app.get('/health/team/summary', async (request, reply) => {
     const summary = await healthMonitor.getSummary()

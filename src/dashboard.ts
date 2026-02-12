@@ -290,6 +290,37 @@ export function getDashboardHTML(): string {
   .overlap-agents { font-weight: 600; color: var(--yellow); }
   .overlap-topic { color: var(--text); margin-top: 3px; }
 
+  /* Collaboration Compliance */
+  .compliance-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .sla-chip {
+    border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 12px;
+    display: flex; justify-content: space-between; gap: 8px; background: var(--bg);
+  }
+  .sla-chip.ok { border-color: rgba(63,185,80,.4); background: rgba(63,185,80,.08); }
+  .sla-chip.warning { border-color: rgba(212,160,23,.45); background: rgba(212,160,23,.1); }
+  .sla-chip.violation, .sla-chip.escalated { border-color: rgba(248,81,73,.5); background: rgba(248,81,73,.12); }
+  .compliance-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  .compliance-table th, .compliance-table td { text-align: left; padding: 8px; font-size: 12px; border-bottom: 1px solid var(--border-subtle); }
+  .compliance-table th { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+  .state-pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+  .state-pill.ok { color: var(--green); background: var(--green-dim); }
+  .state-pill.warning { color: var(--yellow); background: var(--yellow-dim); }
+  .state-pill.violation, .state-pill.escalated { color: var(--red); background: var(--red-dim); }
+  .copy-template-btn {
+    background: var(--surface-raised); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 5px 8px; font-size: 11px; cursor: pointer;
+  }
+  .copy-template-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .incident-item {
+    border-left: 3px solid var(--orange); background: var(--orange-dim); border-radius: var(--radius-sm);
+    padding: 8px 10px; margin-bottom: 6px; font-size: 12px;
+  }
+  .incident-type { font-weight: 600; color: var(--text-bright); }
+  .template-box {
+    margin-top: 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; font-size: 11px; color: var(--text-muted);
+  }
+
   @media (max-width: 768px) {
     .header { padding: 12px 14px; }
     .header-right { gap: 10px; font-size: 12px; }
@@ -487,6 +518,11 @@ export function getDashboardHTML(): string {
     <div class="panel-body" id="health-body"></div>
   </div>
 
+  <div class="panel">
+    <div class="panel-header">🛡️ Collaboration Compliance <span class="count" id="compliance-count"></span></div>
+    <div class="panel-body" id="compliance-body"></div>
+  </div>
+
   <div class="two-col">
     <div class="panel">
       <div class="panel-header">💬 Chat <span class="count" id="chat-count"></span></div>
@@ -551,6 +587,95 @@ function ago(ts) {
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
 function mentionsRyan(message) { return /@ryan\b/i.test(message || ''); }
+
+function complianceState(value, threshold) {
+  if (value > threshold) return 'violation';
+  if (value >= Math.max(0, threshold - 10)) return 'warning';
+  return 'ok';
+}
+
+function statusTemplateFor(agent, taskId) {
+  const mentions = agent === 'pixel' ? '@kai @link' : '@kai @pixel';
+  return [
+    mentions,
+    'Task: ' + (taskId || '<task-id>'),
+    '1) Shipped: <artifact/commit/file>',
+    '2) Blocker: <none or explicit blocker>',
+    '3) Next: <next deliverable + ETA>',
+  ].join('\n');
+}
+
+async function copyStatusTemplate(agent, taskId) {
+  const text = statusTemplateFor(agent, taskId);
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
+}
+
+function renderCompliance(compliance) {
+  const body = document.getElementById('compliance-body');
+  const count = document.getElementById('compliance-count');
+
+  if (!compliance) {
+    count.textContent = 'no data';
+    body.innerHTML = '<div class="empty">No compliance data available</div>';
+    return;
+  }
+
+  const s = compliance.summary || {};
+  const chips = [
+    { label: 'Working updates <= 45m', value: s.workerWorstAgeMin || 0, threshold: s.workerCadenceMaxMin || 45 },
+    { label: 'Lead watchdog <= 60m', value: s.leadAgeMin || 0, threshold: s.leadCadenceMaxMin || 60 },
+    { label: 'Blocked unresolved > 20m', value: s.oldestBlockerMin || 0, threshold: s.blockedEscalationMin || 20 },
+    { label: 'Trio silence <= 60m', value: s.trioSilenceMin || 0, threshold: s.trioSilenceMaxMin || 60 },
+  ];
+
+  const agents = compliance.agents || [];
+  const incidents = compliance.incidents || [];
+  count.textContent = incidents.length + ' incident' + (incidents.length === 1 ? '' : 's');
+
+  const chipsHtml = chips.map(c => {
+    const state = complianceState(c.value, c.threshold);
+    return '<div class="sla-chip ' + state + '"><span>' + esc(c.label) + '</span><strong>' + c.value + 'm</strong></div>';
+  }).join('');
+
+  const rows = agents.map(a => {
+    const taskValue = a.taskId || '';
+    return '<tr>' +
+      '<td>' + esc(a.agent) + '</td>' +
+      '<td>' + esc(a.taskId || '—') + '</td>' +
+      '<td>' + a.lastValidStatusAgeMin + 'm</td>' +
+      '<td>' + a.expectedCadenceMin + 'm</td>' +
+      '<td><span class="state-pill ' + a.state + ' compliance-state-' + a.state + '">' + esc(a.state) + '</span></td>' +
+      '<td><button class="copy-template-btn" data-agent="' + esc(a.agent) + '" data-task="' + esc(taskValue) + '" onclick="copyStatusTemplate(this.dataset.agent, this.dataset.task)">Copy template</button></td>' +
+      '</tr>';
+  }).join('');
+
+  const incidentsHtml = incidents.length > 0
+    ? incidents.map(i => '<div class="incident-item"><div class="incident-type">' + esc(i.type) + '</div><div>@' + esc(i.agent) + ' • ' + esc(i.taskId || 'no-task') + ' • ' + i.minutesOver + 'm over • escalate ' + esc((i.escalateTo || []).map(function(a){ return '@' + a; }).join(' ')) + '</div></div>').join('')
+    : '<div class="empty">No active compliance incidents</div>';
+
+  const linkRow = agents.find(function(a){ return a.agent === 'link'; });
+  const linkTemplate = statusTemplateFor('link', (linkRow && linkRow.taskId) || '<task-id>');
+
+  body.innerHTML =
+    '<div class="compliance-summary">' + chipsHtml + '</div>' +
+    '<table class="compliance-table">' +
+      '<thead><tr><th>Agent</th><th>Task</th><th>Last status age</th><th>Cadence</th><th>State</th><th>Action</th></tr></thead>' +
+      '<tbody>' + (rows || '<tr><td colspan="6" class="empty">No agent compliance data</td></tr>') + '</tbody>' +
+    '</table>' +
+    '<div class="health-section-title">Incident Queue</div>' +
+    incidentsHtml +
+    '<div class="health-section-title" style="margin-top:10px;">Status Template</div>' +
+    '<div class="template-box">' + esc(linkTemplate) + '</div>';
+}
 
 function deriveHealthSignal(agent) {
   if (agent.status !== 'blocked') return { status: agent.status, lowConfidence: false };
@@ -893,11 +1018,12 @@ async function loadHealth() {
       lastHealthDetailSync = now;
     }
 
-    const health = cachedHealth || { agents: [], blockers: [], overlaps: [] };
+    const health = cachedHealth || { agents: [], blockers: [], overlaps: [], compliance: null };
 
     const agents = health.agents || [];
     const blockers = health.blockers || [];
     const overlaps = health.overlaps || [];
+    const compliance = health.compliance || null;
 
     const statusCounts = { active: 0, idle: 0, silent: 0, blocked: 0, offline: 0, watch: 0 };
     const displayAgents = agents.map(a => {
@@ -966,9 +1092,11 @@ async function loadHealth() {
     }
     
     body.innerHTML = html;
+    renderCompliance(compliance);
   } catch (e) {
     console.error('Health load error:', e);
     document.getElementById('health-body').innerHTML = '<div class="empty">Failed to load health data</div>';
+    document.getElementById('compliance-body').innerHTML = '<div class="empty">Failed to load compliance data</div>';
   }
 }
 
