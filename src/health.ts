@@ -8,8 +8,8 @@
  * - Collaboration compliance (protocol v1)
  */
 
-import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
 import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
@@ -165,6 +165,12 @@ class TeamHealthMonitor {
   )
   private idleNudgeState = new Map<string, IdleNudgeState>()
   private idleNudgeLastDecisions: IdleNudgeDecision[] = []
+
+  private readonly cadenceWatchdogEnabled = process.env.CADENCE_WATCHDOG_ENABLED !== 'false'
+  private readonly cadenceSilenceMin = Number(process.env.CADENCE_SILENCE_MIN || 60)
+  private readonly cadenceWorkingStaleMin = Number(process.env.CADENCE_WORKING_STALE_MIN || 45)
+  private readonly cadenceAlertCooldownMin = Number(process.env.CADENCE_ALERT_COOLDOWN_MIN || 30)
+  private cadenceAlertState = new Map<string, number>()
 
   private systemStartTime = Date.now()
   private requestCount = 0
@@ -602,6 +608,92 @@ class TeamHealthMonitor {
       .split(/\W+/)
       .filter(word => word.length > 3 && !stopWords.has(word))
       .slice(0, 5) // Top 5 keywords
+  }
+
+  private shouldEmitCadenceAlert(key: string, now: number): boolean {
+    const lastAt = this.cadenceAlertState.get(key)
+    if (!lastAt) return true
+    const cooldownMs = this.cadenceAlertCooldownMin * 60_000
+    return now - lastAt >= cooldownMs
+  }
+
+  private markCadenceAlert(key: string, now: number): void {
+    this.cadenceAlertState.set(key, now)
+  }
+
+  private async logWatchdogIncident(entry: Record<string, unknown>): Promise<void> {
+    const path = process.env.WATCHDOG_INCIDENT_LOG
+      || resolve(process.cwd(), 'incidents/watchdog-incidents.jsonl')
+    await mkdir(dirname(path), { recursive: true })
+    await appendFile(path, `${JSON.stringify(entry)}\n`, 'utf8')
+  }
+
+  async runCadenceWatchdogTick(now = Date.now(), options?: { dryRun?: boolean }): Promise<{ alerts: string[] }> {
+    const dryRun = options?.dryRun === true
+    const alerts: string[] = []
+
+    if (!this.cadenceWatchdogEnabled) {
+      return { alerts }
+    }
+
+    const tasks = taskManager.listTasks({})
+    const messages = chatManager.getMessages({ limit: 300 })
+
+    const lastTrioGeneralUpdate = this.findLastTrioGeneralUpdate(messages)
+    const trioSilenceMin = Math.floor((now - lastTrioGeneralUpdate) / 60_000)
+
+    if (trioSilenceMin >= this.cadenceSilenceMin) {
+      const key = 'trio_general_silence'
+      if (this.shouldEmitCadenceAlert(key, now)) {
+        const content = `@kai @link @pixel system watchdog: no #general update from trio for ${trioSilenceMin}m (threshold ${this.cadenceSilenceMin}m). Post status now using 1) shipped 2) blocker 3) next+ETA.`
+        alerts.push(content)
+
+        if (!dryRun) {
+          await chatManager.sendMessage({ from: 'system', channel: 'general', content })
+          await this.logWatchdogIncident({
+            type: 'trio_general_silence',
+            at: now,
+            thresholdMs: this.cadenceSilenceMin * 60_000,
+            lastUpdateAt: lastTrioGeneralUpdate,
+          })
+          this.markCadenceAlert(key, now)
+        }
+      }
+    }
+
+    const trioSet = new Set(this.trioAgents)
+    const workingTasks = tasks.filter(t => t.status === 'doing' && t.assignee && trioSet.has((t.assignee || '').toLowerCase() as typeof this.trioAgents[number]))
+
+    for (const task of workingTasks) {
+      const agent = (task.assignee || '').toLowerCase()
+      const lastGeneral = messages.find((m: any) => (m.from || '').toLowerCase() === agent && (m.channel || 'general') === 'general')
+      const lastAt = lastGeneral?.timestamp || 0
+      const staleMin = lastAt > 0 ? Math.floor((now - lastAt) / 60_000) : 9999
+
+      if (staleMin < this.cadenceWorkingStaleMin) continue
+
+      const key = `stale_working:${agent}:${task.id}`
+      if (!this.shouldEmitCadenceAlert(key, now)) continue
+
+      const content = `@${agent} @kai @pixel system watchdog: status=working with no #general update for ${staleMin}m on ${task.id}. Post required status now: 1) shipped 2) blocker 3) next+ETA.`
+      alerts.push(content)
+
+      if (!dryRun) {
+        await chatManager.sendMessage({ from: 'system', channel: 'general', content })
+        await this.logWatchdogIncident({
+          type: 'stale_working',
+          at: now,
+          agent,
+          taskId: task.id,
+          thresholdMs: this.cadenceWorkingStaleMin * 60_000,
+          lastUpdateAt: lastAt || null,
+          workingSinceAt: task.updatedAt || task.createdAt || null,
+        })
+        this.markCadenceAlert(key, now)
+      }
+    }
+
+    return { alerts }
   }
 
   async runIdleNudgeTick(

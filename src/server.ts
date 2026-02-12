@@ -218,8 +218,15 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 60 * 1000)
   idleNudgeTimer.unref()
 
+  // Collaboration cadence watchdog (trio silence + stale working alerts)
+  const cadenceWatchdogTimer = setInterval(() => {
+    healthMonitor.runCadenceWatchdogTick().catch(() => {})
+  }, 60 * 1000)
+  cadenceWatchdogTimer.unref()
+
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
+    clearInterval(cadenceWatchdogTimer)
   })
 
   // Health check
@@ -263,6 +270,19 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     const dryRun = query.dryRun === 'true'
     const result = await healthMonitor.runIdleNudgeTick(Date.now(), { dryRun })
+    return {
+      success: true,
+      dryRun,
+      ...result,
+      timestamp: Date.now(),
+    }
+  })
+
+  // One-shot cadence-watchdog tick (dry-run and real modes)
+  app.post('/health/cadence-watchdog/tick', async (request) => {
+    const query = request.query as Record<string, string>
+    const dryRun = query.dryRun === 'true'
+    const result = await healthMonitor.runCadenceWatchdogTick(Date.now(), { dryRun })
     return {
       success: true,
       dryRun,
