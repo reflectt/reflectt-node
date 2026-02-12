@@ -286,6 +286,30 @@ class TeamHealthMonitor {
     }
   }
 
+  private parseTimestamp(value: unknown): number {
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'string') {
+      const asNum = Number(value)
+      if (Number.isFinite(asNum) && asNum > 0) return asNum
+      const asDate = Date.parse(value)
+      if (Number.isFinite(asDate) && asDate > 0) return asDate
+    }
+    return 0
+  }
+
+  private getLatestGeneralMessageAt(messages: any[], author: string): number {
+    let lastAt = 0
+
+    for (const m of messages) {
+      if ((m.from || '').toLowerCase() !== author) continue
+      if ((m.channel || 'general') !== 'general') continue
+      const ts = this.parseTimestamp(m.timestamp)
+      if (ts > lastAt) lastAt = ts
+    }
+
+    return lastAt
+  }
+
   private findLastValidStatusAt(messages: any[], agent: string): number | null {
     let lastAt: number | null = null
 
@@ -301,7 +325,7 @@ class TeamHealthMonitor {
 
       if (!hasTask || !hasFormat) continue
 
-      const ts = Number(m.timestamp || 0)
+      const ts = this.parseTimestamp(m.timestamp)
       if (!ts) continue
       if (!lastAt || ts > lastAt) lastAt = ts
     }
@@ -313,14 +337,9 @@ class TeamHealthMonitor {
     const trioSet = new Set(this.trioAgents)
     let lastAt = 0
 
-    for (const m of messages) {
-      const from = (m.from || '').toLowerCase()
-      const channel = (m.channel || 'general')
-      if (!trioSet.has(from as typeof this.trioAgents[number])) continue
-      if (channel !== 'general') continue
-
-      const ts = Number(m.timestamp || 0)
-      if (ts > lastAt) lastAt = ts
+    for (const agent of trioSet) {
+      const agentLast = this.getLatestGeneralMessageAt(messages, agent)
+      if (agentLast > lastAt) lastAt = agentLast
     }
 
     return lastAt || Date.now()
@@ -699,13 +718,7 @@ class TeamHealthMonitor {
 
     for (const task of workingTasks) {
       const agent = (task.assignee || '').toLowerCase()
-      let lastAt = 0
-      for (const m of messages) {
-        if ((m.from || '').toLowerCase() !== agent) continue
-        if ((m.channel || 'general') !== 'general') continue
-        const ts = Number(m.timestamp || 0)
-        if (ts > lastAt) lastAt = ts
-      }
+      const lastAt = this.getLatestGeneralMessageAt(messages, agent)
       const staleMin = lastAt > 0 ? Math.floor((now - lastAt) / 60_000) : 9999
 
       if (staleMin < this.cadenceWorkingStaleMin) continue
