@@ -5,6 +5,7 @@ import Fastify from 'fastify'
 import fastifyWebsocket from '@fastify/websocket'
 import fastifyCors from '@fastify/cors'
 import { z } from 'zod'
+import { createHash } from 'crypto'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { serverConfig, isDev } from './config.js'
@@ -103,6 +104,44 @@ function boundedLimit(
   return Math.min(parsed, max)
 }
 
+function generateWeakETag(payload: unknown): string {
+  const body = JSON.stringify(payload)
+  const digest = createHash('sha1').update(body).digest('base64url')
+  return `W/"${digest}"`
+}
+
+function applyConditionalCaching(
+  request: FastifyRequest,
+  reply: any,
+  payload: unknown,
+  lastModifiedMs?: number,
+): boolean {
+  const etag = generateWeakETag(payload)
+  reply.header('ETag', etag)
+  reply.header('Cache-Control', 'private, max-age=0, must-revalidate')
+
+  if (lastModifiedMs) {
+    reply.header('Last-Modified', new Date(lastModifiedMs).toUTCString())
+  }
+
+  const ifNoneMatch = request.headers['if-none-match']
+  if (ifNoneMatch && ifNoneMatch === etag) {
+    reply.code(304).send()
+    return true
+  }
+
+  const ifModifiedSince = request.headers['if-modified-since']
+  if (lastModifiedMs && ifModifiedSince) {
+    const sinceMs = Date.parse(ifModifiedSince)
+    if (!Number.isNaN(sinceMs) && lastModifiedMs <= sinceMs) {
+      reply.code(304).send()
+      return true
+    }
+  }
+
+  return false
+}
+
 export async function createServer(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: isDev ? {
@@ -151,14 +190,23 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Team health monitoring
-  app.get('/health/team', async () => {
-    return await healthMonitor.getHealth()
+  app.get('/health/team', async (request, reply) => {
+    const health = await healthMonitor.getHealth()
+    if (applyConditionalCaching(request, reply, health, health.timestamp)) {
+      return
+    }
+    return health
   })
 
   // Team health summary (quick view)
-  app.get('/health/team/summary', async () => {
+  app.get('/health/team/summary', async (request, reply) => {
     const summary = await healthMonitor.getSummary()
-    return { summary }
+    const payload = { summary }
+    const cacheBucketMs = Math.floor(Date.now() / 30000) * 30000 // 30s cache bucket
+    if (applyConditionalCaching(request, reply, payload, cacheBucketMs)) {
+      return
+    }
+    return payload
   })
 
   // Team health history (trends over time)
@@ -290,7 +338,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Get messages
-  app.get('/chat/messages', async (request) => {
+  app.get('/chat/messages', async (request, reply) => {
     const query = request.query as Record<string, string>
     const messages = chatManager.getMessages({
       from: query.from,
@@ -301,7 +349,12 @@ export async function createServer(): Promise<FastifyInstance> {
       before: parseEpochMs(query.before),
       after: parseEpochMs(query.after),
     })
-    return { messages }
+    const payload = { messages }
+    const lastModified = messages.length > 0 ? Math.max(...messages.map(m => m.timestamp || 0)) : undefined
+    if (applyConditionalCaching(request, reply, payload, lastModified)) {
+      return
+    }
+    return payload
   })
 
   // Add reaction to message
@@ -459,7 +512,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // ============ TASK ENDPOINTS ============
 
   // List tasks
-  app.get('/tasks', async (request) => {
+  app.get('/tasks', async (request, reply) => {
     const query = request.query as Record<string, string>
     const updatedSince = parseEpochMs(query.updatedSince || query.since)
     const limit = boundedLimit(query.limit, DEFAULT_LIMITS.tasks, MAX_LIMITS.tasks)
@@ -478,7 +531,13 @@ export async function createServer(): Promise<FastifyInstance> {
 
     tasks = tasks.slice(0, limit)
 
-    return { tasks }
+    const payload = { tasks }
+    const lastModified = tasks.length > 0 ? Math.max(...tasks.map(t => t.updatedAt || 0)) : undefined
+    if (applyConditionalCaching(request, reply, payload, lastModified)) {
+      return
+    }
+
+    return payload
   })
 
   // Get task
@@ -708,14 +767,19 @@ export async function createServer(): Promise<FastifyInstance> {
   // ============ ACTIVITY FEED ENDPOINT ============
 
   // Get recent activity across all systems
-  app.get('/activity', async (request) => {
+  app.get('/activity', async (request, reply) => {
     const query = request.query as Record<string, string>
     const events = eventBus.getEvents({
       agent: query.agent,
       limit: boundedLimit(query.limit, DEFAULT_LIMITS.activity, MAX_LIMITS.activity),
       since: parseEpochMs(query.since),
     })
-    return { events, count: events.length }
+    const payload = { events, count: events.length }
+    const lastModified = events.length > 0 ? Math.max(...events.map(e => e.timestamp || 0)) : undefined
+    if (applyConditionalCaching(request, reply, payload, lastModified)) {
+      return
+    }
+    return payload
   })
 
   // ============ ANALYTICS ENDPOINTS ============
@@ -753,12 +817,25 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Get summary metrics dashboard
-  app.get('/metrics/summary', async (request) => {
+  app.get('/metrics/summary', async (request, reply) => {
     const query = request.query as Record<string, string>
     const includeContent = query.includeContent !== 'false'
     
     const summary = await analyticsManager.getMetricsSummary(includeContent)
-    return { summary }
+    const rawTimestamp = (summary as any)?.timestamp || Date.now()
+    const cacheBucketMs = Math.floor(rawTimestamp / 30000) * 30000 // 30s bucket
+
+    const payload = {
+      summary: {
+        ...(summary as any),
+        timestamp: cacheBucketMs,
+      },
+    }
+
+    if (applyConditionalCaching(request, reply, payload, cacheBucketMs)) {
+      return
+    }
+    return payload
   })
 
   // ============ CONTENT ENDPOINTS ============
