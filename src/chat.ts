@@ -232,6 +232,11 @@ class ChatManager {
       filtered = filtered.filter(m => m.timestamp > options.after!)
     }
 
+    // Normalize ordering by timestamp (not insertion order).
+    // This prevents backfilled/late-arriving historical events from skewing
+    // recency-based consumers (watchdogs, cadence checks, compliance panels).
+    filtered.sort((a, b) => (Number(a.timestamp || 0) - Number(b.timestamp || 0)))
+
     // Apply limit (default to 20 to avoid context window blow-up)
     const limit = options?.limit !== undefined ? options.limit : 20
     if (limit > 0) {
