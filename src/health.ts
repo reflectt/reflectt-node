@@ -319,11 +319,16 @@ class TeamHealthMonitor {
 
       const content = typeof m.content === 'string' ? m.content : ''
       const hasTask = /\btask-[a-z0-9-]+\b/i.test(content)
-      const hasFormat = /1\)\s*(?:\*\*)?\s*shipped\s*(?:\*\*)?\s*:/i.test(content)
-        && /2\)\s*(?:\*\*)?\s*blocker\s*(?:\*\*)?\s*:/i.test(content)
-        && /3\)\s*(?:\*\*)?\s*next\s*(?:\*\*)?\s*:/i.test(content)
 
-      if (!hasTask || !hasFormat) continue
+      const hasStrictTriplet = /1\)\s*(?:\*\*)?[^\n]*\bshipped\b/i.test(content)
+        && /2\)\s*(?:\*\*)?[^\n]*\bblocker\b/i.test(content)
+        && /3\)\s*(?:\*\*)?[^\n]*\bnext\b/i.test(content)
+
+      const hasLooseStatusSignals = (/\bshipped\b|\bartifact(?:s)?\b|\bcommit\b/i.test(content))
+        && /\bblocker\b/i.test(content)
+        && (/\bnext\b/i.test(content) || /\beta\b/i.test(content))
+
+      if (!hasTask || (!hasStrictTriplet && !hasLooseStatusSignals)) continue
 
       const ts = this.parseTimestamp(m.timestamp)
       if (!ts) continue
@@ -559,7 +564,23 @@ class TeamHealthMonitor {
     const blockers: string[] = []
 
     for (const msg of messages) {
-      const content = msg.content.toLowerCase()
+      const from = (msg?.from || '').toLowerCase()
+      if (from === 'system' || from === 'watchdog') {
+        continue
+      }
+
+      const rawContent = typeof msg?.content === 'string' ? msg.content : ''
+      if (!rawContent) continue
+      const content = rawContent.toLowerCase()
+
+      // Skip known non-actionable watchdog/template/fallback chatter.
+      if (content.includes('post shipped / blocker / next+eta now') ||
+          content.includes('system watchdog') ||
+          content.includes('system fallback') ||
+          content.includes('idle nudge') ||
+          content.includes('required status now')) {
+        continue
+      }
 
       // Skip status reports and completed work mentions
       if (content.includes('was blocked') ||
@@ -585,7 +606,7 @@ class TeamHealthMonitor {
           const index = content.indexOf(keyword)
           const start = Math.max(0, index - 20)
           const end = Math.min(content.length, index + keyword.length + 40)
-          const context = msg.content.substring(start, end).trim()
+          const context = rawContent.substring(start, end).trim()
           blockers.push(context)
           break // Only one blocker per message
         }
