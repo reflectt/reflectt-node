@@ -120,6 +120,7 @@ export type IdleNudgeDecision = {
     | 'recent-activity-suppressed'
     | 'cooldown-active'
     | 'missing-active-task'
+    | 'stale-active-task'
     | 'eligible'
   renderedMessage: string | null
   at: number
@@ -157,6 +158,7 @@ class TeamHealthMonitor {
   private readonly idleNudgeEscalateMin = Number(process.env.IDLE_NUDGE_ESCALATE_MIN || 60)
   private readonly idleNudgeCooldownMin = Number(process.env.IDLE_NUDGE_COOLDOWN_MIN || 30)
   private readonly idleNudgeSuppressRecentMin = Number(process.env.IDLE_NUDGE_SUPPRESS_RECENT_MIN || 10)
+  private readonly idleNudgeActiveTaskMaxAgeMin = Number(process.env.IDLE_NUDGE_ACTIVE_TASK_MAX_AGE_MIN || 180)
   private readonly idleNudgeExcluded = new Set(
     (process.env.IDLE_NUDGE_EXCLUDE || 'ryan,system,diag')
       .split(',')
@@ -839,8 +841,12 @@ class TeamHealthMonitor {
       const lastActiveAt = presence.last_active || presence.lastUpdate || 0
       const inactivityMin = lastActiveAt ? Math.floor((now - lastActiveAt) / 60_000) : 0
       const tier: 1 | 2 = inactivityMin >= this.idleNudgeEscalateMin ? 2 : 1
-      const activeTask = tasks.find((t) => t.assignee === agent && t.status === 'doing')
+      const activeTask = tasks
+        .filter((t) => t.assignee === agent && t.status === 'doing')
+        .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))[0]
       const taskId = activeTask?.id || null
+      const activeTaskUpdatedAt = Number(activeTask?.updatedAt || activeTask?.createdAt || 0)
+      const activeTaskAgeMin = activeTaskUpdatedAt > 0 ? Math.floor((now - activeTaskUpdatedAt) / 60_000) : null
 
       const baseDecision: Omit<IdleNudgeDecision, 'reason' | 'decision' | 'renderedMessage'> = {
         agent,
@@ -896,9 +902,15 @@ class TeamHealthMonitor {
         }
       }
 
-      // Safety guard: never emit invalid placeholder task ids.
+      // Safety guard: never emit when an active task is missing/invalid.
       if (!taskId || !/^task-[a-z0-9-]+$/i.test(taskId)) {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'missing-active-task', renderedMessage: null })
+        continue
+      }
+
+      // Additional guard: suppress stale "doing" tasks that likely represent lane drift.
+      if (activeTaskAgeMin !== null && activeTaskAgeMin > this.idleNudgeActiveTaskMaxAgeMin) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'stale-active-task', renderedMessage: null })
         continue
       }
 
@@ -950,6 +962,7 @@ class TeamHealthMonitor {
       escalateMin: number
       cooldownMin: number
       recentSuppressMin: number
+      activeTaskMaxAgeMin: number
       excluded: string[]
     }
     state: Array<{ agent: string; lastNudgeAt: number; lastTier: 1 | 2 }>
@@ -963,6 +976,7 @@ class TeamHealthMonitor {
         escalateMin: this.idleNudgeEscalateMin,
         cooldownMin: this.idleNudgeCooldownMin,
         recentSuppressMin: this.idleNudgeSuppressRecentMin,
+        activeTaskMaxAgeMin: this.idleNudgeActiveTaskMaxAgeMin,
         excluded: Array.from(this.idleNudgeExcluded.values()).sort(),
       },
       state: Array.from(this.idleNudgeState.entries()).map(([agent, s]) => ({
