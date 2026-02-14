@@ -7,6 +7,7 @@ on:
     paths:
       - 'src/**'
       - 'tools/test-idle-nudge-lane-fixtures.ts'
+      - 'tools/task-linkify-regression-harness.ts'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/idle-nudge-regression.yml'
@@ -14,6 +15,7 @@ on:
     paths:
       - 'src/**'
       - 'tools/test-idle-nudge-lane-fixtures.ts'
+      - 'tools/task-linkify-regression-harness.ts'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/idle-nudge-regression.yml'
@@ -41,3 +43,37 @@ jobs:
 
       - name: Run idle-nudge laneReason fixture gate
         run: npm run test:idle-nudge:fixtures
+
+  task-linkify-regression-gate:
+    name: task-linkify-regression-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Ensure task-linkify artifact directory exists
+        run: mkdir -p artifacts/task-linkify
+
+      - name: Run task-linkify regression harness
+        run: npm run test:task-linkify:regression | tee artifacts/task-linkify/task-linkify-regression-harness-output.json
+
+      - name: Upload task-linkify regression artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-linkify-regression-output
+          path: artifacts/task-linkify/task-linkify-regression-harness-output.json
+          if-no-files-found: warn
