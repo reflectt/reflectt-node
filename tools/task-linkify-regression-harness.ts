@@ -8,8 +8,10 @@ type Check = {
   criteria: string
 }
 
-const dashboardPath = resolve(process.cwd(), 'src/dashboard.ts')
-const src = readFileSync(dashboardPath, 'utf8')
+const dashboardJsPath = resolve(process.cwd(), 'public/dashboard.js')
+const dashboardTsPath = resolve(process.cwd(), 'src/dashboard.ts')
+const dashboardPath = dashboardJsPath
+const src = readFileSync(dashboardJsPath, 'utf8') + readFileSync(dashboardTsPath, 'utf8')
 
 const checks: Check[] = [
   {

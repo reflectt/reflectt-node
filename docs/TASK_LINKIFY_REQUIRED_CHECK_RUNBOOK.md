@@ -13,6 +13,7 @@ Promote CI status check `task-linkify-regression-gate` from standalone (informat
 - Branch rule target: `main`
 
 ## Promotion Toggle Sequence (next cycle)
+### UI Path
 1. Open GitHub: **Settings → Branches → Branch protection rule (`main`)**.
 2. Ensure **Require status checks to pass before merging** is enabled.
 3. Ensure **Require branches to be up to date before merging** is enabled. *(hardening add-on)*
@@ -23,13 +24,28 @@ Promote CI status check `task-linkify-regression-gate` from standalone (informat
    - check executes and reports status,
    - merges are blocked if check fails.
 
+### API/CLI Path (merge-safe)
+Use `tools/task-linkify-branch-protection-playbook.sh`:
+- Non-mutating read: `./tools/task-linkify-branch-protection-playbook.sh read`
+- Apply (with explicit confirmation guard): `./tools/task-linkify-branch-protection-playbook.sh apply`
+
+**Merge-safe mutation behavior:**
+- reads existing required contexts,
+- appends `task-linkify-regression-gate` only if missing,
+- PATCHes the full merged context set (no clobber of existing checks),
+- sets `strict=true` to enforce up-to-date requirement.
+
 ## Rollback Path (unexpected merge blockage)
-1. Open branch protection rule for `main`.
-2. Remove `task-linkify-regression-gate` from required checks
-   - or temporarily disable required checks gate.
-3. Save changes to unblock urgent merges.
-4. Keep workflow job running standalone while patching.
-5. Re-validate with fresh run evidence; re-enable required check in next safe window.
+### Primary rollback (preferred)
+1. Restore full branch-protection snapshot backup:
+   - `./tools/task-linkify-branch-protection-playbook.sh rollback-restore <backup-json-path>`
+2. Verify restored state with read mode.
+
+### Emergency rollback (temporary degraded mode only)
+- `./tools/task-linkify-branch-protection-playbook.sh rollback-temporary-degraded`
+- This is explicitly temporary/scoped incident mitigation.
+- It must be followed by backup restore or re-apply of full intended protection state ASAP.
+
 
 ## Validation Evidence Requirements
 Capture and store in artifacts:

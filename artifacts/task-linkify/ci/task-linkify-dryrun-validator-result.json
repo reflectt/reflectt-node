@@ -1,0 +1,56 @@
+{
+  "validator": "task-linkify-dryrun-transcript-validator",
+  "transcript": "artifacts/task-linkify/TASK-task-1771083966546-TOGGLE-DRYRUN-TRANSCRIPT-20260214T154746Z.txt",
+  "status": "PASS",
+  "failCount": 0,
+  "checks": [
+    {
+      "id": "mutation-false",
+      "pass": true,
+      "expected": "MUTATION=false",
+      "actual": "MUTATION=false"
+    },
+    {
+      "id": "mutation-assert-ok",
+      "pass": true,
+      "expected": "ASSERT_OK: MUTATION=false",
+      "actual": "ASSERT_OK: MUTATION=false"
+    },
+    {
+      "id": "required-context-exact",
+      "pass": true,
+      "expected": "REQUIRED_CONTEXT=task-linkify-regression-gate",
+      "actual": "REQUIRED_CONTEXT=task-linkify-regression-gate"
+    },
+    {
+      "id": "required-context-assert-ok",
+      "pass": true,
+      "expected": "ASSERT_OK: REQUIRED_CONTEXT exact match",
+      "actual": "ASSERT_OK: REQUIRED_CONTEXT exact match"
+    },
+    {
+      "id": "mutation-endpoint-calls-zero",
+      "pass": true,
+      "expected": "MUTATION_ENDPOINT_CALLS=0",
+      "actual": "MUTATION_ENDPOINT_CALLS=0"
+    },
+    {
+      "id": "decision-explicit-single",
+      "pass": true,
+      "expected": "Exactly one DECISION=GO|HOLD line",
+      "actual": "1 lines: DECISION=GO"
+    },
+    {
+      "id": "decision-reason-present",
+      "pass": true,
+      "expected": "DECISION_REASON=<non-empty>",
+      "actual": "DECISION_REASON=all_non_mutating_gates_passed"
+    },
+    {
+      "id": "playbook-read-step-present",
+      "pass": true,
+      "expected": "[step] dry-run playbook read mode",
+      "actual": "[step] dry-run playbook read mode"
+    }
+  ]
+}

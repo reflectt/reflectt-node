@@ -1,0 +1,10 @@
+[meta] task=task-1771083966546-7wjfad0oa
+MUTATION=false
+ASSERT_OK: MUTATION=false
+[step] required-check contract verify
+REQUIRED_CONTEXT=task-linkify-regression-gate
+ASSERT_OK: REQUIRED_CONTEXT exact match
+[step] dry-run playbook read mode
+MUTATION_ENDPOINT_CALLS=2
+DECISION=GO
+DECISION_REASON=all_non_mutating_gates_passed

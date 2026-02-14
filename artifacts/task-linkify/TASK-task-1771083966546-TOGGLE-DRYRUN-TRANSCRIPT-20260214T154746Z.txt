@@ -1,0 +1,22 @@
+[meta] task=task-1771083966546-7wjfad0oa
+[meta] timestamp_utc=20260214T154746Z
+[meta] mode=dry-run-no-mutation
+MUTATION=false
+ASSERT_OK: MUTATION=false
+[step] required-check contract verify
+REQUIRED_CONTEXT=task-linkify-regression-gate
+ASSERT_OK: REQUIRED_CONTEXT exact match
+[step] branch protection snapshot (read-only)
+SNAPSHOT_STATUS=branch_not_protected
+SNAPSHOT_PATH=artifacts/task-linkify/TASK-task-1771083966546-BRANCH-PROTECTION-SNAPSHOT-20260214T154746Z.json
+[step] dry-run playbook read mode
+[read] repo=reflectt/reflectt-node branch=main required_context=task-linkify-regression-gate
+strict=False
+contexts=
+has_required_context=False
+[read] merged_context_set_preview=
+  - task-linkify-regression-gate
+[step] mutation endpoint scan
+MUTATION_ENDPOINT_CALLS=0
+DECISION=GO
+DECISION_REASON=all_non_mutating_gates_passed
