@@ -636,7 +636,6 @@ const SSOT_LINKS = [
 ];
 
 const SSOT_INDEX_RAW_URL = 'https://raw.githubusercontent.com/reflectt/reflectt-node/main/docs/TASK_LINKIFY_PROMOTION_EVIDENCE_INDEX.md';
-const SSOT_LAST_VERIFIED_FALLBACK_UTC = '2026-02-14T13:28:32Z';
 let ssotMetaCache = { fetchedAt: 0, lastVerifiedUtc: null };
 const SSOT_META_CACHE_MS = 5 * 60 * 1000;
 
@@ -674,12 +673,12 @@ async function fetchSSOTMeta() {
     const match = text.match(/^-\s*last_verified_utc:\s*(.+)$/m);
     ssotMetaCache = {
       fetchedAt: now,
-      lastVerifiedUtc: match ? match[1].trim() : SSOT_LAST_VERIFIED_FALLBACK_UTC,
+      lastVerifiedUtc: match ? match[1].trim() : null,
     };
   } catch {
     ssotMetaCache = {
       fetchedAt: now,
-      lastVerifiedUtc: SSOT_LAST_VERIFIED_FALLBACK_UTC,
+      lastVerifiedUtc: null,
     };
   }
 
