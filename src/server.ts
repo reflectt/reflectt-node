@@ -902,6 +902,46 @@ export async function createServer(): Promise<FastifyInstance> {
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
     try {
       const parsed = UpdateTaskSchema.parse(request.body)
+
+      // ── Task-close gate: enforce proof + reviewer sign-off before done ──
+      if (parsed.status === 'done') {
+        const existing = taskManager.getTask(request.params.id)
+        if (!existing) {
+          reply.code(404)
+          return { success: false, error: 'Task not found' }
+        }
+
+        // Merge incoming metadata with existing for gate checks
+        const mergedMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
+        const artifacts = mergedMeta.artifacts as string[] | undefined
+
+        // Gate 1: require artifacts (links, PR URLs, evidence)
+        if (!artifacts || !Array.isArray(artifacts) || artifacts.length === 0) {
+          reply.code(422)
+          return {
+            success: false,
+            error: 'Task-close gate: metadata.artifacts required (array of proof links/evidence)',
+            gate: 'artifacts',
+            hint: 'Include metadata.artifacts: ["https://github.com/.../pull/7", "tested locally"]',
+          }
+        }
+
+        // Gate 2: reviewer sign-off (if task has a reviewer assigned)
+        if (existing.reviewer) {
+          const signedOff = mergedMeta.reviewer_approved as boolean | undefined
+          if (!signedOff) {
+            reply.code(422)
+            return {
+              success: false,
+              error: `Task-close gate: reviewer sign-off required from "${existing.reviewer}"`,
+              gate: 'reviewer_signoff',
+              hint: `Reviewer "${existing.reviewer}" must approve via: PATCH with metadata.reviewer_approved: true`,
+            }
+          }
+        }
+      }
+      // ── End task-close gate ──
+
       const { actor, metadata, ...rest } = parsed
       const updates = {
         ...rest,
