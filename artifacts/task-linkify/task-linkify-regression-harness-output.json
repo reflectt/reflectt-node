@@ -1,0 +1,46 @@
+
+> reflectt-node@0.1.0 test:task-linkify:regression
+> tsx tools/task-linkify-regression-harness.ts
+
+TASK_LINKIFY_REGRESSION_HARNESS_RESULT
+{
+  "harness": "task-linkify-regression-harness",
+  "dashboardPath": "/Users/ryan/.openclaw/workspace/projects/reflectt-node/src/dashboard.ts",
+  "command": "npm run test:task-linkify:regression",
+  "ci": {
+    "now": "Run in CI as a standalone step after build",
+    "next": "Gate merges by wiring this script into PR workflow required checks"
+  },
+  "summary": {
+    "caseCount": 4,
+    "passCount": 4,
+    "failCount": 0,
+    "status": "PASS"
+  },
+  "checks": [
+    {
+      "id": "click-existing-task",
+      "desc": "existing task token renders clickable link + click opens modal",
+      "pass": true,
+      "criteria": "task-id token renders .task-id-link and click route invokes openTaskModal(taskId)"
+    },
+    {
+      "id": "click-missing-task",
+      "desc": "missing task token opens explicit not-found modal state",
+      "pass": true,
+      "criteria": "missing task branch shows explicit not-found messaging and disables edit controls"
+    },
+    {
+      "id": "keyboard-enter-space",
+      "desc": "keyboard activation supports Enter + Space on focused task links",
+      "pass": true,
+      "criteria": "keydown path must trigger modal open for Enter and Space"
+    },
+    {
+      "id": "collapse-non-link",
+      "desc": "collapse/expand remains on non-link msg-content clicks",
+      "pass": true,
+      "criteria": "link clicks must not collapse; non-link msg-content clicks must toggle collapsed/expanded"
+    }
+  ]
+}
