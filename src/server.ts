@@ -22,6 +22,7 @@ import { analyticsManager } from './analytics.js'
 import { getDashboardHTML } from './dashboard.js'
 import { healthMonitor } from './health.js'
 import { contentManager } from './content.js'
+import { experimentsManager } from './experiments.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -91,6 +92,20 @@ const CreateRecurringTaskSchema = z.object({
   schedule: RecurringTaskScheduleSchema,
   enabled: z.boolean().optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).optional(),
+})
+
+const CreateExperimentSchema = z.object({
+  name: z.string().trim().min(1),
+  hypothesis: z.string().trim().min(1),
+  type: z.enum(['fake-door', 'pricing', 'messaging', 'onboarding', 'activation', 'retention', 'other']),
+  owner: z.string().trim().min(1),
+  status: z.enum(['planned', 'active', 'paused', 'completed', 'canceled']),
+  startAt: z.number().int().positive().optional(),
+  endAt: z.number().int().positive().nullable().optional(),
+  metricPrimary: z.string().trim().min(1),
+  metricGuardrail: z.string().trim().min(1).optional(),
+  channel: z.string().trim().min(1).optional(),
+  notes: z.string().trim().optional(),
 })
 
 const DEFAULT_LIMITS = {
@@ -224,9 +239,16 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 60 * 1000)
   cadenceWatchdogTimer.unref()
 
+  // Mention rescue fallback (if Ryan mentions trio and no response arrives)
+  const mentionRescueTimer = setInterval(() => {
+    healthMonitor.runMentionRescueTick().catch(() => {})
+  }, 30 * 1000)
+  mentionRescueTimer.unref()
+
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
     clearInterval(cadenceWatchdogTimer)
+    clearInterval(mentionRescueTimer)
   })
 
   // Health check
@@ -283,6 +305,19 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     const dryRun = query.dryRun === 'true'
     const result = await healthMonitor.runCadenceWatchdogTick(Date.now(), { dryRun })
+    return {
+      success: true,
+      dryRun,
+      ...result,
+      timestamp: Date.now(),
+    }
+  })
+
+  // One-shot mention-rescue tick (dry-run and real modes)
+  app.post('/health/mention-rescue/tick', async (request) => {
+    const query = request.query as Record<string, string>
+    const dryRun = query.dryRun === 'true'
+    const result = await healthMonitor.runMentionRescueTick(Date.now(), { dryRun })
     return {
       success: true,
       dryRun,
@@ -740,6 +775,25 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/tasks/instrumentation/lifecycle', async () => {
     const instrumentation = taskManager.getLifecycleInstrumentation()
     return { instrumentation }
+  })
+
+  // ============ EXPERIMENT ENDPOINTS ============
+
+  // Create experiment
+  app.post('/experiments', async (request) => {
+    try {
+      const data = CreateExperimentSchema.parse(request.body)
+      const experiment = await experimentsManager.createExperiment(data)
+      return { success: true, experiment }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to create experiment' }
+    }
+  })
+
+  // List active experiments
+  app.get('/experiments/active', async () => {
+    const experiments = experimentsManager.getActiveExperiments()
+    return { experiments, count: experiments.length }
   })
 
   // ============ MEMORY ENDPOINTS ============
