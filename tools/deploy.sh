@@ -101,7 +101,19 @@ if [ $elapsed -ge $HEALTH_TIMEOUT ]; then
   fail "Server did not become healthy within ${HEALTH_TIMEOUT}s"
 fi
 
-# ── Step 5: Wait for SSE reconnect ──
+# ── Step 5: Restart OpenClaw gateway ──
+# SIGUSR1 (soft reload) kills the SSE plugin's abortSignal permanently
+# and startAccount never re-runs. Full restart is required.
+log "Restarting OpenClaw gateway (full restart for SSE plugin re-init)..."
+if command -v openclaw &>/dev/null; then
+  openclaw gateway restart 2>/dev/null && ok "Gateway restart triggered" || warn "Gateway restart failed"
+  sleep 5
+else
+  warn "openclaw CLI not found — gateway restart skipped"
+  warn "Run manually: openclaw gateway restart"
+fi
+
+# ── Step 6: Wait for SSE reconnect ──
 log "Waiting for SSE subscribers to reconnect..."
 elapsed=0
 while [ $elapsed -lt $SSE_CHECK_TIMEOUT ]; do
@@ -117,8 +129,8 @@ while [ $elapsed -lt $SSE_CHECK_TIMEOUT ]; do
 done
 
 if [ $elapsed -ge $SSE_CHECK_TIMEOUT ]; then
-  warn "No SSE subscribers after ${SSE_CHECK_TIMEOUT}s — gateway may need restart"
-  warn "Run: openclaw gateway restart"
+  warn "No SSE subscribers after ${SSE_CHECK_TIMEOUT}s"
+  warn "Check: openclaw gateway status"
 fi
 
 # ── Summary ──
