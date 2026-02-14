@@ -52,6 +52,27 @@ export function getDashboardHTML(): string {
   .header-logo { font-size: 18px; font-weight: 700; color: var(--text-bright); letter-spacing: -0.3px; }
   .header-logo span { color: var(--accent); }
   .header-right { display: flex; align-items: center; gap: 16px; font-size: 13px; color: var(--text-muted); }
+  .release-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    background: var(--surface-raised);
+  }
+  .release-badge.stale {
+    border-color: var(--orange);
+    background: var(--orange-dim);
+    color: #f4c27a;
+  }
+  .release-badge.fresh {
+    border-color: var(--green);
+    background: var(--green-dim);
+    color: #9de6a8;
+  }
   .status-dot {
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
     background: var(--green); margin-right: 5px; vertical-align: middle;
@@ -316,6 +337,10 @@ export function getDashboardHTML(): string {
     border-color: rgba(212, 160, 23, 0.45);
     background: linear-gradient(90deg, rgba(212, 160, 23, 0.08), transparent 70%);
   }
+  .health-card.stuck-active-task {
+    border-color: rgba(248, 81, 73, 0.55);
+    background: linear-gradient(90deg, rgba(248, 81, 73, 0.14), transparent 75%);
+  }
   .health-info { flex: 1; min-width: 0; }
   .health-name { font-size: 13px; font-weight: 600; color: var(--text-bright); }
   .health-status { font-size: 11px; color: var(--text-muted); }
@@ -360,6 +385,28 @@ export function getDashboardHTML(): string {
     border-radius: var(--radius-sm); padding: 5px 8px; font-size: 11px; cursor: pointer;
   }
   .copy-template-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Review Queue Panel */
+  .review-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 12px; border-bottom: 1px solid var(--border-subtle);
+    font-size: 13px; transition: background 0.15s;
+  }
+  .review-item:last-child { border-bottom: none; }
+  .review-item:hover { background: var(--surface-raised); cursor: pointer; }
+  .review-item-left { flex: 1; min-width: 0; }
+  .review-item-title { color: var(--text-bright); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .review-item-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .review-item-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .sla-badge {
+    display: inline-flex; align-items: center; padding: 3px 8px;
+    border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+  }
+  .sla-badge.ok { color: var(--green); background: var(--green-dim); border: 1px solid rgba(63,185,80,.3); }
+  .sla-badge.warning { color: var(--yellow); background: var(--yellow-dim); border: 1px solid rgba(212,160,23,.3); }
+  .sla-badge.breach { color: var(--red); background: var(--red-dim); border: 1px solid rgba(248,81,73,.3); animation: sla-pulse 2s ease-in-out infinite; }
+  @keyframes sla-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+  .review-empty { text-align: center; padding: 24px; color: var(--text-muted); font-size: 13px; }
   .incident-item {
     border-left: 3px solid var(--orange); background: var(--orange-dim); border-radius: var(--radius-sm);
     padding: 8px 10px; margin-bottom: 6px; font-size: 12px;
@@ -549,6 +596,7 @@ export function getDashboardHTML(): string {
   </div>
   <div class="header-right">
     <span><span class="status-dot"></span>Running</span>
+    <span id="release-badge" class="release-badge" title="Deploy status">deploy: checking…</span>
     <span id="clock"></span>
   </div>
 </div>
@@ -562,9 +610,19 @@ export function getDashboardHTML(): string {
     <div class="kanban" id="kanban"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel" id="review-queue-panel">
+    <div class="panel-header">👀 Review Queue <span class="count" id="review-queue-count"></span></div>
+    <div class="panel-body" id="review-queue-body" style="max-height:350px;overflow-y:auto"></div>
+  </div>
+
+  <div class="panel" id="backlog-panel">
     <div class="panel-header">📦 Available Work <span class="count" id="backlog-count"></span></div>
     <div class="panel-body" id="backlog-body" style="max-height:300px;overflow-y:auto"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">🔍 Research Intake <span class="count" id="research-count"></span></div>
+    <div class="panel-body" id="research-body" style="max-height:260px;overflow-y:auto"></div>
   </div>
 
   <div class="panel">

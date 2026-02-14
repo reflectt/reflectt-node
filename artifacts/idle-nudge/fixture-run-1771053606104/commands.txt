@@ -1,0 +1,8 @@
+# 1) Run deterministic fixture proof
+cd /Users/ryan/.openclaw/workspace/projects/reflectt-node
+npx tsx tools/idle-nudge-fixture-proof.ts
+
+# 2) Inspect outputs
+cat /Users/ryan/.openclaw/workspace/projects/reflectt-node/artifacts/idle-nudge/fixture-run-1771053606104/summary.json
+cat /Users/ryan/.openclaw/workspace/projects/reflectt-node/artifacts/idle-nudge/fixture-run-1771053606104/tick-real.json
+cat /Users/ryan/.openclaw/workspace/projects/reflectt-node/artifacts/idle-nudge/fixture-run-1771053606104/tick-second.json

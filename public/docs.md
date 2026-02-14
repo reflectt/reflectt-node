@@ -10,6 +10,7 @@ Base URL: `http://localhost:4445`
 |--------|------|-------------|
 | GET | `/health` | System health — task counts, chat stats, inbox stats |
 | GET | `/health/team` | Team health metrics with compliance per agent |
+| GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
 | GET | `/health/system` | System info (uptime, memory, versions) |
 | GET | `/health/team/summary` | Compact team health summary |
@@ -25,12 +26,15 @@ Base URL: `http://localhost:4445`
 |--------|------|-------------|
 | GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `updatedSince` |
 | GET | `/tasks/:id` | Get task by ID |
-| POST | `/tasks` | Create task. Body: `title` (required), `description`, `assignee`, `reviewer`, `priority` (P0-P3), `status`, `done_criteria` (string[]), `tags` (string[]) |
-| PATCH | `/tasks/:id` | Update task (partial). Any task field |
+| GET | `/tasks/:id/history` | Task event log (who did what when): create/assign/status changes with timestamps + actor |
+| GET | `/tasks/:id/comments` | List task discussion comments. Returns `{ comments, count }` |
+| POST | `/tasks/:id/comments` | Add task comment. Body: `{ "author": "agent", "content": "text" }` |
+| POST | `/tasks` | Create task. Required: `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria` (string[]), `eta`. Optional: `description`, `priority` (P0-P3), `status`, `tags`, `metadata`. Status contract: `validating` also requires `metadata.artifact_path`. |
+| PATCH | `/tasks/:id` | Update task (partial). Any task field, plus optional `actor` for history attribution. Status contract: `doing` requires reviewer + `metadata.eta`; `validating` requires `metadata.artifact_path`. |
 | DELETE | `/tasks/:id` | Delete task |
 | GET | `/tasks/next` | Pull-based assignment. Query: `agent` |
 | GET | `/tasks/analytics` | Task completion analytics and velocity |
-| GET | `/tasks/instrumentation/lifecycle` | Reviewer + done criteria gate stats |
+| GET | `/tasks/instrumentation/lifecycle` | Reviewer/done-criteria gates + status-contract violations (`doing` missing ETA, `validating` missing artifact path) |
 
 ## Recurring Tasks
 
@@ -38,7 +42,7 @@ Base URL: `http://localhost:4445`
 |--------|------|-------------|
 | GET | `/tasks/recurring` | List recurring task definitions |
 | POST | `/tasks/recurring` | Create recurring task definition |
-| POST | `/tasks/recurring/materialize` | Materialize due recurring tasks |
+| POST | `/tasks/recurring/materialize` | Materialize due recurring tasks; skips creation when previous instance is still open. Query: `force=true` to override skip guard |
 
 ## Backlog (Self-Serve)
 
@@ -46,6 +50,14 @@ Base URL: `http://localhost:4445`
 |--------|------|-------------|
 | GET | `/tasks/backlog` | Unassigned todo tasks ranked by priority then age. Returns `{ tasks, count }` |
 | POST | `/tasks/:id/claim` | Self-assign a task → moves to "doing". Body: `{ "agent": "name" }`. Rejects if already assigned |
+
+## Release / Deploy
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/release/status` | Compare startup code snapshot vs current repo state. Returns `stale` + reasons for code/server mismatch detection. |
+| GET | `/release/notes` | Generate deploy changelog from completed tasks. Query: `since` (epoch ms), `limit`. Returns markdown + structured task list. |
+| POST | `/release/deploy` | Mark deploy timestamp. Body (optional): `{ "deployedBy": "agent", "note": "text" }` |
 
 ## Chat
 
@@ -95,6 +107,15 @@ Base URL: `http://localhost:4445`
 |--------|------|-------------|
 | POST | `/experiments` | Create experiment |
 | GET | `/experiments/active` | List active experiments |
+
+## Research
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/research/requests` | List research requests. Query: `status`, `owner`, `category`, `limit` |
+| POST | `/research/requests` | Create research request. Body: `title`, `question`, `requestedBy`; optional: `owner`, `category`, `priority`, `taskId`, `dueAt`, `slaHours` |
+| GET | `/research/findings` | List findings. Query: `requestId`, `author`, `limit` |
+| POST | `/research/findings` | Add finding linked to request. Body: `requestId`, `title`, `summary`, `author`; optional `artifactUrl`, `confidence`, `highlights[]` |
 
 ## Content
 

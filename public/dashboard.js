@@ -17,6 +17,7 @@ let lastActivitySync = 0;
 let cachedHealth = null;
 let lastHealthDetailSync = 0;
 let refreshCount = 0;
+let lastReleaseStatusSync = 0;
 
 const AGENTS = [
   { name: 'ryan', emoji: '👤', role: 'Founder' },
@@ -52,8 +53,44 @@ function ago(ts) {
   if (s < 86400) return Math.floor(s / 3600) + 'h';
   return Math.floor(s / 86400) + 'd';
 }
+
+function formatProductiveText(agent) {
+  if (!agent || !agent.lastProductiveAt) return 'No recent shipped signal';
+  return 'Last shipped signal: ' + ago(agent.lastProductiveAt) + ' ago';
+}
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
+function renderTaskTags(tags) {
+  if (!Array.isArray(tags) || tags.length === 0) return '';
+  const shown = tags.filter(Boolean).slice(0, 3);
+  if (shown.length === 0) return '';
+  return shown.map(tag => `<span class="assignee-tag" style="color:var(--purple)">#${esc(String(tag))}</span>`).join(' ');
+}
+
+function getStatusContractWarnings(task) {
+  if (!task || !task.status) return [];
+  const warnings = [];
+  const eta = task?.metadata?.eta;
+  const artifactPath = task?.metadata?.artifact_path;
+
+  if (task.status === 'doing') {
+    if (!task.reviewer) warnings.push('doing: missing reviewer');
+    if (!eta) warnings.push('doing: missing ETA');
+  }
+
+  if (task.status === 'validating') {
+    if (!artifactPath) warnings.push('validating: missing artifact_path');
+  }
+
+  return warnings;
+}
+
+function renderStatusContractWarning(task) {
+  const warnings = getStatusContractWarnings(task);
+  if (warnings.length === 0) return '';
+  return `<div style="margin-top:6px;font-size:11px;color:var(--yellow)">⚠ ${esc(warnings.join(' · '))}</div>`;
+}
+
 function mentionsRyan(message) { return /@ryan\b/i.test(message || ''); }
 
 function resolveSSOTState(lastVerifiedUtc) {
@@ -326,6 +363,27 @@ function renderCompliance(compliance) {
     '<div class="template-box">' + esc(linkTemplate) + '</div>';
 }
 
+function renderIdleNudgeSummary(idleNudgeDebug) {
+  if (!idleNudgeDebug || !idleNudgeDebug.summary) {
+    return '<div class="health-section"><div class="health-section-title">🔕 Idle Nudge Summary</div><div class="empty">No idle-nudge summary available</div></div>';
+  }
+
+  const reasonCounts = idleNudgeDebug.summary.reasonCounts || {};
+  const suppressedReasons = ['recent-activity-suppressed', 'validating-task-suppressed', 'missing-active-task'];
+  const rows = suppressedReasons
+    .map(reason => ({ reason, count: Number(reasonCounts[reason] || 0) }))
+    .filter(row => row.count > 0);
+
+  const totalSuppressed = rows.reduce((sum, row) => sum + row.count, 0);
+  const totalNudged = Number((idleNudgeDebug.summary.decisionCounts || {}).warn || 0) + Number((idleNudgeDebug.summary.decisionCounts || {}).escalate || 0);
+
+  const detail = rows.length > 0
+    ? rows.map(row => `<div class="event-row"><span class="event-type">suppressed</span><span class="event-desc">${esc(row.reason)}: ${row.count}</span></div>`).join('')
+    : '<div class="empty">No suppressions in latest tick</div>';
+
+  return `<div class="health-section"><div class="health-section-title">🔕 Idle Nudge Summary</div><div class="event-row"><span class="event-type">nudged</span><span class="event-desc">warn/escalate: ${totalNudged}</span></div><div class="event-row"><span class="event-type">suppressed</span><span class="event-desc">total: ${totalSuppressed}</span></div>${detail}</div>`;
+}
+
 function deriveHealthSignal(agent) {
   if (agent.status !== 'blocked') return { status: agent.status, lowConfidence: false };
 
@@ -464,7 +522,10 @@ function renderKanban() {
           <div class="task-meta">
             ${t.priority ? '<span class="priority-badge ' + t.priority + '">' + t.priority + '</span>' : ''}
             ${assigneeDisplay}
+            ${(t.commentCount || 0) > 0 ? '<span class="assignee-tag">💬 ' + t.commentCount + '</span>' : ''}
+            ${renderTaskTags(t.tags)}
           </div>
+          ${renderStatusContractWarning(t)}
         </div>`;
       }).join('');
     const extra = isDone && items.length > 3
@@ -492,9 +553,10 @@ function renderKanban() {
 
 // ---- Backlog (Available Work) ----
 function renderBacklog() {
+  const panel = document.getElementById('backlog-panel');
   const body = document.getElementById('backlog-body');
   const count = document.getElementById('backlog-count');
-  if (!body) return;
+  if (!body || !panel) return;
 
   const pOrder = { P0: 0, P1: 1, P2: 2, P3: 3 };
   const backlog = allTasks
@@ -506,26 +568,67 @@ function renderBacklog() {
       return a.createdAt - b.createdAt;
     });
 
-  if (count) count.textContent = backlog.length + ' items';
-
   if (backlog.length === 0) {
-    body.innerHTML = '<div style="color:var(--text-muted);padding:12px;font-size:13px">No unassigned tasks — all work is claimed ✅</div>';
+    panel.style.display = 'none';
+    if (count) count.textContent = '0 items';
+    body.innerHTML = '';
     return;
   }
 
+  panel.style.display = '';
+  if (count) count.textContent = backlog.length + ' items';
+
   body.innerHTML = backlog.map(t => {
-    const criteria = (t.done_criteria || []).length;
+    const criteriaList = Array.isArray(t.done_criteria) ? t.done_criteria : [];
+    const criteriaCount = criteriaList.length;
+    const criteriaPreview = criteriaCount > 0 ? esc(truncate(criteriaList[0], 72)) : 'No done criteria listed';
+
     return `<div class="backlog-item" style="padding:10px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="openTaskModal('${t.id}')">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
         ${t.priority ? '<span class="priority-badge ' + t.priority + '">' + t.priority + '</span>' : ''}
         <span style="color:var(--text-bright);font-size:13px;font-weight:500">${esc(truncate(t.title, 70))}</span>
       </div>
       <div style="font-size:11px;color:var(--text-muted)">
-        ${criteria > 0 ? criteria + ' done criteria' : ''}
-        ${t.reviewer ? ' · reviewer: ' + esc(t.reviewer) : ''}
+        ${criteriaCount} done criteria${t.reviewer ? ' · reviewer: ' + esc(t.reviewer) : ''}${(t.commentCount || 0) > 0 ? ' · 💬 ' + t.commentCount : ''}
+      </div>
+      ${Array.isArray(t.tags) && t.tags.length > 0 ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px">${renderTaskTags(t.tags)}</div>` : ''}
+      ${renderStatusContractWarning(t)}
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px">
+        <div style="font-size:11px;color:var(--text-dim)">↳ ${criteriaPreview}</div>
+        <button onclick="claimBacklogTask('${t.id}', event)" style="background:var(--accent);border:0;border-radius:8px;color:white;font-size:11px;padding:4px 9px;cursor:pointer;white-space:nowrap">Claim</button>
       </div>
     </div>`;
   }).join('');
+}
+
+async function claimBacklogTask(taskId, event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  const defaultAgent = localStorage.getItem('reflectt-dashboard-agent') || 'scout';
+  const agent = (window.prompt('Claim this task as which agent?', defaultAgent) || '').trim().toLowerCase();
+  if (!agent) return;
+
+  localStorage.setItem('reflectt-dashboard-agent', agent);
+
+  try {
+    const r = await fetch(`${BASE}/tasks/${taskId}/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent }),
+    });
+    const d = await r.json();
+    if (!d.success) {
+      alert(d.error || 'Failed to claim task');
+      return;
+    }
+    await loadTasks(true);
+  } catch (err) {
+    console.error('Claim failed:', err);
+    alert('Failed to claim task');
+  }
 }
 
 // ---- Chat ----
@@ -701,6 +804,66 @@ async function loadActivity(forceFull = false) {
   } catch (e) {}
 }
 
+function getSlaBadge(dueAt, status) {
+  if (!dueAt || status === 'answered' || status === 'archived') return '<span class="assignee-tag">no SLA</span>';
+  const ms = dueAt - Date.now();
+  if (ms <= 0) return '<span class="assignee-tag" style="color:var(--red)">overdue</span>';
+  const hours = Math.ceil(ms / (60 * 60 * 1000));
+  if (hours <= 24) return `<span class="assignee-tag" style="color:var(--yellow)">${hours}h left</span>`;
+  const days = Math.ceil(hours / 24);
+  return `<span class="assignee-tag" style="color:var(--green)">${days}d left</span>`;
+}
+
+// ---- Research Intake ----
+async function loadResearch() {
+  try {
+    const [reqRes, findingRes] = await Promise.all([
+      fetch(BASE + '/research/requests?limit=12'),
+      fetch(BASE + '/research/findings?limit=20'),
+    ]);
+
+    const reqData = await reqRes.json();
+    const findingData = await findingRes.json();
+
+    const requests = reqData.requests || [];
+    const findings = findingData.findings || [];
+    const findingMap = new Map();
+    findings.forEach(f => {
+      findingMap.set(f.requestId, (findingMap.get(f.requestId) || 0) + 1);
+    });
+
+    const body = document.getElementById('research-body');
+    const count = document.getElementById('research-count');
+    if (!body || !count) return;
+
+    count.textContent = requests.length + ' requests';
+
+    if (requests.length === 0) {
+      body.innerHTML = '<div class="empty">No research requests yet</div>';
+      return;
+    }
+
+    body.innerHTML = requests.map(r => {
+      const q = esc(truncate(r.question || '', 88));
+      const findingCount = findingMap.get(r.id) || 0;
+      const sla = getSlaBadge(r.dueAt, r.status);
+      return `<div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <div style="font-size:13px;color:var(--text-bright);font-weight:500">${esc(truncate(r.title || 'Untitled request', 58))}</div>
+          ${sla}
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${q}</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:5px">
+          ${r.category ? '#' + esc(r.category) + ' · ' : ''}${r.owner ? 'owner: ' + esc(r.owner) + ' · ' : ''}status: ${esc(r.status || 'open')} · findings: ${findingCount}
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    const body = document.getElementById('research-body');
+    if (body) body.innerHTML = '<div class="empty">Failed to load research requests</div>';
+  }
+}
+
 // ---- Team Health ----
 async function loadHealth() {
   try {
@@ -708,29 +871,75 @@ async function loadHealth() {
     const shouldRefreshDetail = !cachedHealth || (now - lastHealthDetailSync) > 120000;
 
     if (shouldRefreshDetail) {
-      const r = await fetch(BASE + '/health/team');
-      cachedHealth = await r.json();
+      const [teamRes, agentsRes, idleNudgeRes] = await Promise.all([
+        fetch(BASE + '/health/team'),
+        fetch(BASE + '/health/agents'),
+        fetch(BASE + '/health/idle-nudge/debug'),
+      ]);
+      const team = await teamRes.json();
+      const agentsSummary = await agentsRes.json();
+      const idleNudgeDebug = await idleNudgeRes.json();
+      cachedHealth = { team, agentsSummary, idleNudgeDebug };
       lastHealthDetailSync = now;
     }
 
-    const health = cachedHealth || { agents: [], blockers: [], overlaps: [], compliance: null };
+    const health = cachedHealth || { team: { blockers: [], overlaps: [], compliance: null }, agentsSummary: { agents: [] }, idleNudgeDebug: null };
 
-    const agents = health.agents || [];
-    const blockers = health.blockers || [];
-    const overlaps = health.overlaps || [];
-    const compliance = health.compliance || null;
+    const team = health.team || { blockers: [], overlaps: [], compliance: null, agents: [] };
+    const agentsSummary = health.agentsSummary || { agents: [] };
+    const idleNudgeDebug = health.idleNudgeDebug || null;
+
+    const teamAgentsByName = new Map((team.agents || []).map(a => [a.agent, a]));
+    const summaryRows = (agentsSummary.agents && agentsSummary.agents.length > 0)
+      ? agentsSummary.agents
+      : (team.agents || []).map(a => ({
+          agent: a.agent,
+          state: a.idleWithActiveTask ? 'stuck' : (a.status === 'active' ? 'healthy' : (a.status === 'offline' ? 'offline' : 'idle')),
+          last_seen: a.lastSeen,
+          heartbeat_age_ms: Math.max(0, a.minutesSinceLastSeen || 0) * 60000,
+          active_task: a.currentTask || null,
+          last_shipped_at: a.lastProductiveAt || null,
+          shipped_age_ms: a.minutesSinceProductive == null ? null : Math.max(0, a.minutesSinceProductive) * 60000,
+          stale_reason: a.idleWithActiveTask ? 'active-task-idle-over-60m' : null,
+          idle_with_active_task: Boolean(a.idleWithActiveTask),
+        }));
+    const agents = summaryRows.map(row => {
+      const fromTeam = teamAgentsByName.get(row.agent) || {};
+      const minutesSinceLastSeen = Math.floor((Number(row.heartbeat_age_ms || 0)) / 60000);
+      const mappedStatus = row.state === 'stuck'
+        ? 'blocked'
+        : (row.state === 'healthy' ? 'active' : (row.state === 'idle' ? 'silent' : 'offline'));
+      return {
+        agent: row.agent,
+        status: mappedStatus,
+        lastSeen: Number(row.last_seen || 0),
+        minutesSinceLastSeen,
+        currentTask: row.active_task || fromTeam.currentTask || null,
+        recentBlockers: fromTeam.recentBlockers || [],
+        messageCount24h: fromTeam.messageCount24h || 0,
+        lastProductiveAt: row.last_shipped_at || row.last_productive_at || null,
+        minutesSinceProductive: (row.shipped_age_ms ?? row.productive_age_ms) == null ? null : Math.floor(Number(row.shipped_age_ms ?? row.productive_age_ms) / 60000),
+        staleReason: row.stale_reason || null,
+        idleWithActiveTask: Boolean(row.idle_with_active_task),
+      };
+    });
+    const blockers = team.blockers || [];
+    const overlaps = team.overlaps || [];
+    const compliance = team.compliance || null;
 
     const statusCounts = { active: 0, idle: 0, silent: 0, blocked: 0, offline: 0, watch: 0 };
+    let stuckActiveCount = 0;
     const displayAgents = agents.map(a => {
       const derived = deriveHealthSignal(a);
       const displayStatus = a.status === 'silent'
         ? (a.minutesSinceLastSeen >= 120 ? 'blocked' : (a.minutesSinceLastSeen >= 60 ? 'silent' : 'watch'))
         : derived.status;
       statusCounts[displayStatus] = (statusCounts[displayStatus] || 0) + 1;
+      if (a.idleWithActiveTask) stuckActiveCount += 1;
       return { ...a, displayStatus, lowConfidence: derived.lowConfidence };
     });
 
-    const healthSummary = `${statusCounts.active} active • ${statusCounts.watch + statusCounts.silent} quiet • ${statusCounts.blocked} blocked`;
+    const healthSummary = `${statusCounts.active} active • ${statusCounts.watch + statusCounts.silent} quiet • ${statusCounts.blocked} blocked • ${stuckActiveCount} stuck`;
     document.getElementById('health-count').textContent = healthSummary;
 
     const body = document.getElementById('health-body');
@@ -742,17 +951,26 @@ async function loadHealth() {
       html += displayAgents.map(a => {
         const statusText = a.minutesSinceLastSeen < 1 ? 'just now' : ago(a.lastSeen) + ' ago';
         const taskDisplay = a.currentTask ? `<div class="health-task">📋 ${esc(truncate(a.currentTask, 35))}</div>` : '';
+        const productiveText = `<div class="health-task">🧾 ${esc(formatProductiveText(a))}</div>`;
         const statusLabel = a.displayStatus === 'blocked'
           ? ' • 🚫 blocked'
           : (a.displayStatus === 'silent' ? ' • ⚠️ quiet' : (a.displayStatus === 'watch' ? ' • 👀 watch' : ''));
         const confidenceLabel = a.lowConfidence ? ' • needs review' : '';
+        const stuckLabel = a.idleWithActiveTask ? ' • ⛔ active-task idle>60m' : '';
+        const staleReasonLabel = a.staleReason ? ' • ' + a.staleReason : '';
+        const cardClasses = [
+          'health-card',
+          a.lowConfidence ? 'needs-review' : '',
+          a.idleWithActiveTask ? 'stuck-active-task' : '',
+        ].filter(Boolean).join(' ');
         return `
-        <div class="health-card ${a.lowConfidence ? 'needs-review' : ''}">
-          <div class="health-indicator ${a.displayStatus}"></div>
+        <div class="${cardClasses}">
+          <div class="health-indicator ${a.idleWithActiveTask ? 'blocked' : a.displayStatus}"></div>
           <div class="health-info">
             <div class="health-name">${esc(a.agent)}</div>
-            <div class="health-status">${statusText}${statusLabel}${confidenceLabel}</div>
+            <div class="health-status">${statusText}${statusLabel}${confidenceLabel}${stuckLabel}${staleReasonLabel}</div>
             ${taskDisplay}
+            ${productiveText}
           </div>
         </div>`;
       }).join('');
@@ -781,8 +999,10 @@ async function loadHealth() {
         </div>`).join('');
       html += '</div>';
     }
+
+    html += renderIdleNudgeSummary(idleNudgeDebug);
     
-    if (agents.length === 0 && blockers.length === 0 && overlaps.length === 0) {
+    if (agents.length === 0 && blockers.length === 0 && overlaps.length === 0 && !idleNudgeDebug) {
       html = '<div class="empty">No health data available</div>';
     }
     
@@ -796,15 +1016,175 @@ async function loadHealth() {
   }
 }
 
+async function loadReleaseStatus(force = false) {
+  const badge = document.getElementById('release-badge');
+  if (!badge) return;
+
+  const now = Date.now();
+  if (!force && (now - lastReleaseStatusSync) < 30000) return;
+
+  try {
+    const r = await fetch(BASE + '/release/status');
+    const status = await r.json();
+
+    const stale = Boolean(status.stale);
+    badge.classList.toggle('stale', stale);
+    badge.classList.toggle('fresh', !stale);
+    badge.textContent = stale ? 'deploy: stale' : 'deploy: in sync';
+
+    const reasons = Array.isArray(status.reasons) ? status.reasons : [];
+    const startupCommit = status.startup && status.startup.commit ? status.startup.commit.slice(0, 8) : 'unknown';
+    const currentCommit = status.current && status.current.commit ? status.current.commit.slice(0, 8) : 'unknown';
+    const reasonText = reasons.length > 0 ? reasons.join('; ') : 'no mismatch detected';
+    badge.title = `startup ${startupCommit} • current ${currentCommit} • ${reasonText}`;
+
+    lastReleaseStatusSync = now;
+  } catch (err) {
+    badge.classList.remove('fresh');
+    badge.classList.add('stale');
+    badge.textContent = 'deploy: unknown';
+    badge.title = 'Failed to load deploy status';
+  }
+}
+
 function updateClock() {
   document.getElementById('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// ---- Review Queue Panel ----
+const REVIEW_SLA_HOURS = 4; // 4h default SLA for reviews
+const REVIEW_SLA_WARNING_HOURS = 2; // warning at 2h
+
+function getReviewSlaState(timeInReviewMs) {
+  const hours = timeInReviewMs / (1000 * 60 * 60);
+  if (hours >= REVIEW_SLA_HOURS) return 'breach';
+  if (hours >= REVIEW_SLA_WARNING_HOURS) return 'warning';
+  return 'ok';
+}
+
+function getReviewSlaLabel(state) {
+  if (state === 'breach') return '⏰ SLA BREACH';
+  if (state === 'warning') return '⚠ Near SLA';
+  return '✓ On track';
+}
+
+function formatDuration(ms) {
+  const totalMin = Math.floor(ms / 60000);
+  if (totalMin < 60) return totalMin + 'm';
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h < 24) return h + 'h ' + m + 'm';
+  const d = Math.floor(h / 24);
+  return d + 'd ' + (h % 24) + 'h';
+}
+
+function renderReviewQueue() {
+  const panel = document.getElementById('review-queue-panel');
+  const body = document.getElementById('review-queue-body');
+  const count = document.getElementById('review-queue-count');
+  if (!body || !panel) return;
+
+  const now = Date.now();
+  const validating = allTasks
+    .filter(t => t.status === 'validating')
+    .map(t => {
+      const enteredAt = t.metadata?.entered_validating_at || t.updatedAt || t.createdAt;
+      const timeInReview = now - enteredAt;
+      const slaState = getReviewSlaState(timeInReview);
+      return { ...t, timeInReview, slaState, enteredAt };
+    })
+    .sort((a, b) => {
+      // Breaches first, then by time descending
+      const order = { breach: 0, warning: 1, ok: 2 };
+      const diff = (order[a.slaState] || 2) - (order[b.slaState] || 2);
+      if (diff !== 0) return diff;
+      return b.timeInReview - a.timeInReview;
+    });
+
+  if (validating.length === 0) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+  count.textContent = validating.length + ' awaiting review';
+
+  const breachCount = validating.filter(t => t.slaState === 'breach').length;
+  const headerExtra = breachCount > 0
+    ? ' <span style="color:var(--red);font-size:11px;font-weight:600">' + breachCount + ' breach' + (breachCount > 1 ? 'es' : '') + '</span>'
+    : '';
+  count.innerHTML = validating.length + ' awaiting review' + headerExtra;
+
+  body.innerHTML = validating.map(t => {
+    const reviewer = t.reviewer || '<span style="color:var(--yellow)">unassigned</span>';
+    const assignee = t.assignee || '?';
+    const priority = t.priority || 'P3';
+    const slaLabel = getReviewSlaLabel(t.slaState);
+    const duration = formatDuration(t.timeInReview);
+    const tags = renderTaskTags(t.tags);
+
+    return '<div class="review-item" onclick="openTaskModal(\'' + esc(t.id) + '\')">'
+      + '<div class="review-item-left">'
+      + '<div class="review-item-title">' + esc(truncate(t.title, 70)) + '</div>'
+      + '<div class="review-item-meta">'
+      + '<span>👤 ' + reviewer + '</span>'
+      + '<span>⏱ ' + esc(duration) + '</span>'
+      + '<span class="assignee-tag">' + esc(priority) + '</span>'
+      + '<span>by ' + esc(assignee) + '</span>'
+      + (tags ? ' ' + tags : '')
+      + '</div>'
+      + '</div>'
+      + '<div class="review-item-right">'
+      + '<span class="sla-badge ' + t.slaState + '">' + slaLabel + '</span>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+
+  bindTaskLinkHandlers(body);
+
+  // SLA breach escalation: post to watchdog if any breach found
+  if (breachCount > 0) {
+    escalateReviewBreaches(validating.filter(t => t.slaState === 'breach'));
+  }
+}
+
+let lastReviewEscalationAt = 0;
+const REVIEW_ESCALATION_COOLDOWN = 20 * 60 * 1000; // 20m
+
+async function escalateReviewBreaches(breachedTasks) {
+  const now = Date.now();
+  if (now - lastReviewEscalationAt < REVIEW_ESCALATION_COOLDOWN) return;
+  lastReviewEscalationAt = now;
+
+  const lines = breachedTasks.slice(0, 5).map(t => {
+    const reviewer = t.reviewer || 'unassigned';
+    return '- ' + t.id + ' (' + (t.title || '').slice(0, 50) + ') — reviewer: @' + reviewer + ', waiting ' + formatDuration(t.timeInReview);
+  });
+
+  const content = '@kai Review SLA breach detected:\n' + lines.join('\n');
+
+  try {
+    await fetch(BASE + '/chat/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'system',
+        content,
+        channel: 'general',
+        timestamp: now
+      })
+    });
+  } catch (err) {
+    console.error('Failed to escalate review breach:', err);
+  }
 }
 
 async function refresh() {
   refreshCount += 1;
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
   await loadTasks(forceFull);
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadHealth()]);
+  renderReviewQueue();
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull)]);
   await renderPromotionSSOT();
 }
 

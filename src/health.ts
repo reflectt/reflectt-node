@@ -25,6 +25,18 @@ export interface TeamHealthMetrics {
   compliance: CollaborationCompliance
 }
 
+export interface AgentHealthSummaryRow {
+  agent: string
+  last_seen: number
+  active_task: string | null
+  heartbeat_age_ms: number
+  last_shipped_at: number | null
+  shipped_age_ms: number | null
+  stale_reason: string | null
+  idle_with_active_task: boolean
+  state: 'healthy' | 'idle' | 'stuck' | 'offline'
+}
+
 export interface AgentHealthStatus {
   agent: string
   status: 'active' | 'idle' | 'silent' | 'blocked' | 'offline'
@@ -33,6 +45,9 @@ export interface AgentHealthStatus {
   currentTask?: string
   recentBlockers: string[]
   messageCount24h: number
+  lastProductiveAt: number | null
+  minutesSinceProductive: number | null
+  idleWithActiveTask: boolean
 }
 
 export interface BlockerAlert {
@@ -122,6 +137,7 @@ export type IdleNudgeDecision = {
     | 'below-warn-threshold'
     | 'recent-activity-suppressed'
     | 'cooldown-active'
+    | 'validating-task-suppressed'
     | 'missing-active-task'
     | 'stale-active-task'
     | 'ambiguous-active-task'
@@ -163,7 +179,7 @@ class TeamHealthMonitor {
   private readonly idleNudgeWarnMin = Number(process.env.IDLE_NUDGE_WARN_MIN || 45)
   private readonly idleNudgeEscalateMin = Number(process.env.IDLE_NUDGE_ESCALATE_MIN || 60)
   private readonly idleNudgeCooldownMin = Number(process.env.IDLE_NUDGE_COOLDOWN_MIN || 30)
-  private readonly idleNudgeSuppressRecentMin = Number(process.env.IDLE_NUDGE_SUPPRESS_RECENT_MIN || 10)
+  private readonly idleNudgeSuppressRecentMin = Number(process.env.IDLE_NUDGE_SUPPRESS_RECENT_MIN || 20)
   private readonly idleNudgeActiveTaskMaxAgeMin = Number(process.env.IDLE_NUDGE_ACTIVE_TASK_MAX_AGE_MIN || 180)
   private readonly idleNudgeExcluded = new Set(
     (process.env.IDLE_NUDGE_EXCLUDE || 'ryan,system,diag')
@@ -219,6 +235,53 @@ class TeamHealthMonitor {
       silentAgents,
       activeAgents,
       compliance,
+    }
+  }
+
+  async getAgentHealthSummary(now = Date.now()): Promise<{ agents: AgentHealthSummaryRow[]; thresholds: { healthyMaxMs: number; stuckMinMs: number; offlineMinMs: number }; timestamp: number }> {
+    const agents = await this.getAgentHealthStatuses(now)
+
+    const healthyMaxMs = 45 * 60 * 1000
+    const stuckMinMs = 60 * 60 * 1000
+    const offlineMinMs = 120 * 60 * 1000
+
+    const rows: AgentHealthSummaryRow[] = agents.map((agent) => {
+      const heartbeatAgeMs = Math.max(0, agent.minutesSinceLastSeen) * 60_000
+
+      let state: AgentHealthSummaryRow['state'] = 'healthy'
+      let staleReason: string | null = null
+      if (agent.lastSeen <= 0 || heartbeatAgeMs >= offlineMinMs) {
+        state = 'offline'
+        staleReason = 'offline-no-heartbeat'
+      } else if (agent.idleWithActiveTask && heartbeatAgeMs >= stuckMinMs) {
+        state = 'stuck'
+        staleReason = 'active-task-idle-over-60m'
+      } else if (heartbeatAgeMs > healthyMaxMs) {
+        state = 'idle'
+        staleReason = 'heartbeat-age-over-45m'
+      }
+
+      return {
+        agent: agent.agent,
+        last_seen: agent.lastSeen,
+        active_task: agent.currentTask || null,
+        heartbeat_age_ms: heartbeatAgeMs,
+        last_shipped_at: agent.lastProductiveAt,
+        shipped_age_ms: agent.minutesSinceProductive === null ? null : Math.max(0, agent.minutesSinceProductive) * 60_000,
+        stale_reason: staleReason,
+        idle_with_active_task: agent.idleWithActiveTask,
+        state,
+      }
+    })
+
+    return {
+      agents: rows,
+      thresholds: {
+        healthyMaxMs,
+        stuckMinMs,
+        offlineMinMs,
+      },
+      timestamp: now,
     }
   }
 
@@ -359,6 +422,27 @@ class TeamHealthMonitor {
     return lastAt || Date.now()
   }
 
+  private findLastProductiveActionAt(messages: any[], agent: string): number | null {
+    let lastAt: number | null = null
+
+    for (const m of messages) {
+      if ((m.from || '').toLowerCase() !== agent) continue
+
+      const content = typeof m.content === 'string' ? m.content : ''
+      if (!content) continue
+
+      // Productive shipping signal: artifact/commit/proof/merged/shipped references.
+      const hasProductiveSignal = /\b(shipped|shipped:|artifact|artifacts|commit|proof|merged|pr\s*#?\d+|pull request|deployed)\b/i.test(content)
+      if (!hasProductiveSignal) continue
+
+      const ts = this.parseTimestamp(m.timestamp)
+      if (!ts) continue
+      if (!lastAt || ts > lastAt) lastAt = ts
+    }
+
+    return lastAt
+  }
+
   private async getComplianceIncidents(now: number, messages: any[]): Promise<ComplianceIncident[]> {
     const fromWatchdog = await this.readWatchdogIncidents(now)
     const inMemory: ComplianceIncident[] = []
@@ -476,7 +560,7 @@ class TeamHealthMonitor {
   private async getAgentHealthStatuses(now: number): Promise<AgentHealthStatus[]> {
     const presences = presenceManager.getAllPresence()
     const tasks = taskManager.listTasks({})
-    const messages = chatManager.getMessages({ limit: 100 })
+    const messages = chatManager.getMessages({ limit: 300 })
 
     const agentStatuses: AgentHealthStatus[] = []
 
@@ -488,7 +572,13 @@ class TeamHealthMonitor {
 
     for (const agent of agentSet) {
       const presence = presences.find((p: any) => p.agent === agent)
-      const agentTasks = tasks.filter((t: any) => t.assignee === agent && t.status === 'doing')
+      const agentTasks = tasks
+        .filter((t: any) => t.assignee === agent && t.status === 'doing')
+        .sort((a: any, b: any) => {
+          const aTs = Number(a.updatedAt || a.createdAt || 0)
+          const bTs = Number(b.updatedAt || b.createdAt || 0)
+          return bTs - aTs
+        })
       const agentMessages = messages.filter((m: any) => m.from === agent)
 
       const lastSeen = presence?.lastUpdate || 0
@@ -497,6 +587,10 @@ class TeamHealthMonitor {
       // Count messages in last 24h
       const oneDayAgo = now - (24 * 60 * 60 * 1000)
       const messageCount24h = agentMessages.filter((m: any) => m.timestamp > oneDayAgo).length
+      const lastProductiveAt = this.findLastProductiveActionAt(messages, agent)
+      const minutesSinceProductive = lastProductiveAt
+        ? Math.floor((now - lastProductiveAt) / 1000 / 60)
+        : null
 
       // Determine status
       let status: AgentHealthStatus['status'] = 'offline'
@@ -518,6 +612,9 @@ class TeamHealthMonitor {
         status = 'blocked'
       }
 
+      const hasActiveTask = Boolean(agentTasks[0])
+      const idleWithActiveTask = hasActiveTask && minutesSinceLastSeen > 60
+
       agentStatuses.push({
         agent,
         status,
@@ -526,6 +623,9 @@ class TeamHealthMonitor {
         currentTask: agentTasks[0]?.title,
         recentBlockers,
         messageCount24h,
+        lastProductiveAt,
+        minutesSinceProductive,
+        idleWithActiveTask,
       })
     }
 
@@ -911,12 +1011,10 @@ class TeamHealthMonitor {
         continue
       }
 
-      const lastAgentMessage = [...messages]
-        .reverse()
-        .find((m: any) => (m.from || '').toLowerCase() === agent)
-      if (lastAgentMessage?.timestamp) {
-        const sinceLastMessageMin = Math.floor((now - lastAgentMessage.timestamp) / 60_000)
-        if (sinceLastMessageMin < this.idleNudgeSuppressRecentMin) {
+      const lastValidStatusAt = this.findLastValidStatusAt(messages, agent)
+      if (lastValidStatusAt) {
+        const sinceLastStatusMin = Math.floor((now - lastValidStatusAt) / 60_000)
+        if (sinceLastStatusMin < this.idleNudgeSuppressRecentMin) {
           decisions.push({ ...baseDecision, decision: 'none', reason: 'recent-activity-suppressed', renderedMessage: null })
           continue
         }
@@ -929,6 +1027,12 @@ class TeamHealthMonitor {
           decisions.push({ ...baseDecision, decision: 'none', reason: 'cooldown-active', renderedMessage: null })
           continue
         }
+      }
+
+      const hasValidatingTask = tasks.some((t: any) => (t.assignee || '').toLowerCase() === agent && t.status === 'validating')
+      if (hasValidatingTask) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'validating-task-suppressed', renderedMessage: null })
+        continue
       }
 
       if (lane.laneReason === 'no-active-lane') {

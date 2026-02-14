@@ -1,0 +1,63 @@
+{
+  "task_id": "task-1771075581699-ahbf0oa6h",
+  "timestamp_utc": "2026-02-14T19:16:22Z",
+  "mutation": false,
+  "required_check_contract": "task-linkify-regression-gate",
+  "repo": "reflectt/reflectt-node",
+  "workflow": "idle-nudge-regression.yml",
+  "run_id": "22022801143",
+  "schema": [
+    "step",
+    "expected",
+    "actual",
+    "status",
+    "note"
+  ],
+  "steps": [
+    {
+      "step": "auth",
+      "expected": "authenticated gh session",
+      "actual": "github.com\n  \u2713 Logged in to github.com account itskai-dev (keyring)\n  - Active account: true\n  - Git operations protocol: https\n  - Token: gho_************************************\n  - Token scopes: 'gist', 'project', 'read:org', 'repo', 'user', 'workflow'",
+      "status": "PASS",
+      "note": ""
+    },
+    {
+      "step": "repo_target",
+      "expected": "repo is reflectt/reflectt-node and default branch main",
+      "actual": "{\"defaultBranchRef\":{\"name\":\"main\"},\"nameWithOwner\":\"reflectt/reflectt-node\",\"url\":\"https://github.com/reflectt/reflectt-node\"}",
+      "status": "PASS",
+      "note": ""
+    },
+    {
+      "step": "branch_protection_read",
+      "expected": "read outputs strict/contexts/required-check presence",
+      "actual": "[read] repo=reflectt/reflectt-node branch=main required_context=task-linkify-regression-gate\nstrict=True\ncontexts=\n  - task-linkify-regression-gate\nhas_required_context=True\n[read] merged_context_set_preview=",
+      "status": "PASS",
+      "note": ""
+    },
+    {
+      "step": "latest_run_lookup",
+      "expected": "latest workflow run available",
+      "actual": "[{\"conclusion\":\"success\",\"createdAt\":\"2026-02-14T19:13:12Z\",\"databaseId\":22022801143,\"event\":\"pull_request\",\"status\":\"completed\",\"url\":\"https://github.com/reflectt/reflectt-node/actions/runs/22022801143\"}]",
+      "status": "PASS",
+      "note": ""
+    },
+    {
+      "step": "artifact_lookup",
+      "expected": "artifact task-linkify-regression-output exists and is valid",
+      "actual": "{\"total_count\":3,\"artifacts\":[{\"id\":5512396720,\"node_id\":\"MDg6QXJ0aWZhY3Q1NTEyMzk2NzIw\",\"name\":\"task-linkify-regression-output\",\"size_in_bytes\":870,\"url\":\"https://api.github.com/repos/reflectt/reflectt-node/actions/artifacts/5512396720\",\"archive_download_url\":\"https://api.github.com/repos/reflectt/reflectt-node/actions/artifacts/5512396720/zip\",\"expired\":false,\"digest\":\"sha256:9983ff0983fffc672684e971584fb42c6e6bbf644383c73f2231dea65c634352\",\"created_at\":\"2026-02-14T19:13:27Z\",\"updated_at\":\"2026-02-14T19:13:27Z\",\"expires_at\":\"2026-05-15T19:13:12Z\",\"workflow_run\":{\"id\":22022801143,\"repository_id\":1154745875,\"head_repository_id\":1154745875,\"head_branch\":\"link/pr-event-validation-task-linkify-gate\",\"head_sha\":\"2ca41f7b85e5ddfd1b4ea1046b7f9f307c815de3\"}},{\"id\":5512396740,\"node_id\":\"MDg6QXJ0aWZhY3Q1NTEyMzk2NzQw\",\"name\":\"task-linkify-dryrun-negative-fixtures-report\",\"size_in_bytes\":1245,\"url\":\"https://api.github.com/repos/reflectt/reflectt-node/actions/artifacts/5512396740\",\"archive_download_url\":\"https://api.github.com/repos/reflectt/reflectt-node/actions/artifacts/5512396740/zip\",\"expired\":false,\"digest\":\"sha256:e9f8fc6b694fe9c3fcc30ee079cd1a917de383d7e73936fef3cdba7e7a374ec8\",\"created_at\":\"2026-02-14T19:13:27Z\",\"updated_at\":\"2026-02-14T19:13:27Z\",\"expires_at\":\"2026-05-15T19:13:12Z\",\"workflow_run\":{\"id\":22022801143,\"repository_id\":1154745875,\"head_repository_id\":1154745875,\"head_branch\":\"link/pr-event-validation-task-linkify-gate\",\"head_sha\":\"2ca41f7b85e5ddfd1b4ea1046b7f9f307c815de3\"}},{\"id\":5512396776,\"node_id\":\"MDg6QXJ0aWZhY3Q1NTEyMzk2Nzc2\",\"name\":\"task-linkify-dryrun-validator-report\",\"size_in_bytes\":1468,\"url\":\"https://api.github.com/repos/reflectt/reflectt-node/actions/artifacts/5512396776\",\"archive_download_url\":\"https://api.github.com/repos/reflectt/reflectt-node/actions/artifacts/5512396776/zip\",\"expired\":false,\"digest\":\"sha256:989ede49806be4f15321ee1d6a1573e3a718dbe082a02263376ad9f45dd519d2\",\"created_at\":\"2026-02-14T19:13:27Z\",\"updated_at\":\"2026-02-14T19:13:27Z\",\"expires_at\":\"2026-05-15T19:13:12Z\",\"workflow_run\":{\"id\":22022801143,\"repository_id\":1154745875,\"head_repository_id\":1154745875,\"head_branch\":\"link/pr-event-validation-task-linkify-gate\",\"head_sha\":\"2ca41f7b85e5ddfd1b4ea1046b7f9f307c815de3\"}}]}",
+      "status": "PASS",
+      "note": ""
+    }
+  ],
+  "has_required_check_in_read": true,
+  "artifact": {
+    "name": "task-linkify-regression-output",
+    "non_expired": true,
+    "size_bytes": 870,
+    "run_id_match": true,
+    "ok": true
+  },
+  "blocking_failures": [],
+  "decision": "GO"
+}

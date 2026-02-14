@@ -1,7 +1,7 @@
 /**
  * Task management system
  */
-import type { Task, RecurringTask, RecurringTaskSchedule } from './types.js'
+import type { Task, RecurringTask, RecurringTaskSchedule, TaskHistoryEvent, TaskComment } from './types.js'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { eventBus } from './events.js'
@@ -10,20 +10,28 @@ import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
 const LEGACY_TASKS_FILE = join(LEGACY_DATA_DIR, 'tasks.jsonl')
 const RECURRING_TASKS_FILE = join(DATA_DIR, 'tasks.recurring.jsonl')
+const TASK_HISTORY_FILE = join(DATA_DIR, 'tasks.history.jsonl')
+const TASK_COMMENTS_FILE = join(DATA_DIR, 'tasks.comments.jsonl')
 
 class TaskManager {
   private tasks = new Map<string, Task>()
   private subscribers = new Set<(task: Task, action: 'created' | 'updated' | 'deleted') => void>()
   private recurringTasks = new Map<string, RecurringTask>()
+  private taskHistory = new Map<string, TaskHistoryEvent[]>()
+  private taskComments = new Map<string, TaskComment[]>()
   private initialized = false
   private recurringInitialized = false
   private recurringTicker: NodeJS.Timeout
 
-  private validateLifecycleGates(task: Pick<Task, 'status' | 'reviewer' | 'done_criteria'>): void {
+  private validateLifecycleGates(task: Pick<Task, 'status' | 'reviewer' | 'done_criteria' | 'metadata'>): void {
     if (task.status === 'todo') return
 
     const hasReviewer = Boolean(task.reviewer && task.reviewer.trim().length > 0)
     const hasDoneCriteria = Boolean(task.done_criteria && task.done_criteria.length > 0)
+    const eta = (task.metadata as any)?.eta
+    const hasEta = typeof eta === 'string' && eta.trim().length > 0
+    const artifactPath = (task.metadata as any)?.artifact_path
+    const hasArtifactPath = typeof artifactPath === 'string' && artifactPath.trim().length > 0
 
     if (!hasDoneCriteria) {
       throw new Error('Lifecycle gate: done_criteria is required before starting task work')
@@ -32,10 +40,20 @@ class TaskManager {
     if (!hasReviewer) {
       throw new Error('Lifecycle gate: reviewer is required before starting task work')
     }
+
+    if (task.status === 'doing' && !hasEta) {
+      throw new Error('Status contract: doing requires metadata.eta')
+    }
+
+    if (task.status === 'validating' && !hasArtifactPath) {
+      throw new Error('Status contract: validating requires metadata.artifact_path')
+    }
   }
 
   constructor() {
     this.loadTasks()
+      .then(() => this.loadTaskHistory())
+      .then(() => this.loadTaskComments())
       .then(() => this.loadRecurringTasks())
       .then(() => this.materializeDueRecurringTasks())
       .catch(err => {
@@ -144,6 +162,126 @@ class TaskManager {
     }
   }
 
+  private async loadTaskHistory(): Promise<void> {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+
+      try {
+        const content = await fs.readFile(TASK_HISTORY_FILE, 'utf-8')
+        const lines = content.trim().split('\n').filter(line => line.length > 0)
+
+        for (const line of lines) {
+          try {
+            const event = JSON.parse(line) as TaskHistoryEvent
+            const existing = this.taskHistory.get(event.taskId) || []
+            existing.push(event)
+            this.taskHistory.set(event.taskId, existing)
+          } catch (err) {
+            console.error('[Tasks] Failed to parse task history line:', err)
+          }
+        }
+
+        for (const [taskId, events] of this.taskHistory.entries()) {
+          events.sort((a, b) => a.timestamp - b.timestamp)
+          this.taskHistory.set(taskId, events)
+        }
+
+        const loadedCount = Array.from(this.taskHistory.values()).reduce((sum, events) => sum + events.length, 0)
+        console.log(`[Tasks] Loaded ${loadedCount} task history events`)
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          throw err
+        }
+        console.log('[Tasks] No task history yet')
+      }
+    } catch (err) {
+      console.error('[Tasks] Failed to load task history:', err)
+    }
+  }
+
+  private async loadTaskComments(): Promise<void> {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+
+      try {
+        const content = await fs.readFile(TASK_COMMENTS_FILE, 'utf-8')
+        const lines = content.trim().split('\n').filter(line => line.length > 0)
+
+        for (const line of lines) {
+          try {
+            const comment = JSON.parse(line) as TaskComment
+            const existing = this.taskComments.get(comment.taskId) || []
+            existing.push(comment)
+            this.taskComments.set(comment.taskId, existing)
+          } catch (err) {
+            console.error('[Tasks] Failed to parse task comment line:', err)
+          }
+        }
+
+        for (const [taskId, comments] of this.taskComments.entries()) {
+          comments.sort((a, b) => a.timestamp - b.timestamp)
+          this.taskComments.set(taskId, comments)
+        }
+
+        const loadedCount = Array.from(this.taskComments.values()).reduce((sum, comments) => sum + comments.length, 0)
+        console.log(`[Tasks] Loaded ${loadedCount} task comments`)
+      } catch (err: any) {
+        if (err.code !== 'ENOENT') {
+          throw err
+        }
+        console.log('[Tasks] No task comments yet')
+      }
+    } catch (err) {
+      console.error('[Tasks] Failed to load task comments:', err)
+    }
+  }
+
+  private async appendTaskHistory(event: TaskHistoryEvent): Promise<void> {
+    const existing = this.taskHistory.get(event.taskId) || []
+    existing.push(event)
+    existing.sort((a, b) => a.timestamp - b.timestamp)
+    this.taskHistory.set(event.taskId, existing)
+
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      await fs.appendFile(TASK_HISTORY_FILE, `${JSON.stringify(event)}\n`, 'utf-8')
+    } catch (err) {
+      console.error('[Tasks] Failed to append task history:', err)
+    }
+  }
+
+  private async recordTaskHistoryEvent(
+    taskId: string,
+    type: TaskHistoryEvent['type'],
+    actor: string,
+    data?: Record<string, unknown>,
+  ): Promise<void> {
+    const event: TaskHistoryEvent = {
+      id: `thevt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      taskId,
+      type,
+      actor,
+      timestamp: Date.now(),
+      data,
+    }
+
+    await this.appendTaskHistory(event)
+  }
+
+  private async appendTaskComment(comment: TaskComment): Promise<void> {
+    const existing = this.taskComments.get(comment.taskId) || []
+    existing.push(comment)
+    existing.sort((a, b) => a.timestamp - b.timestamp)
+    this.taskComments.set(comment.taskId, existing)
+
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      await fs.appendFile(TASK_COMMENTS_FILE, `${JSON.stringify(comment)}\n`, 'utf-8')
+    } catch (err) {
+      console.error('[Tasks] Failed to append task comment:', err)
+    }
+  }
+
   private async persistRecurringTasks(): Promise<void> {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
@@ -197,8 +335,17 @@ class TaskManager {
     return false
   }
 
-  async materializeDueRecurringTasks(now = Date.now()): Promise<{ created: number }> {
+  private getLatestRecurringInstance(recurringId: string): Task | undefined {
+    const instances = Array.from(this.tasks.values())
+      .filter(task => (task.metadata as any)?.recurring?.id === recurringId)
+      .sort((a, b) => b.createdAt - a.createdAt)
+
+    return instances[0]
+  }
+
+  async materializeDueRecurringTasks(now = Date.now(), options?: { force?: boolean }): Promise<{ created: number; skipped: number }> {
     let created = 0
+    let skipped = 0
     let recurringChanged = false
 
     for (const recurring of this.recurringTasks.values()) {
@@ -208,7 +355,19 @@ class TaskManager {
       while (recurring.nextRunAt <= now && safetyCounter < 16) {
         const scheduledFor = recurring.nextRunAt
 
-        if (!this.hasMaterializedRun(recurring.id, scheduledFor)) {
+        const previousInstance = this.getLatestRecurringInstance(recurring.id)
+        const shouldSkipForOpenPredecessor =
+          !options?.force &&
+          previousInstance !== undefined &&
+          previousInstance.status !== 'done'
+
+        if (shouldSkipForOpenPredecessor) {
+          const reason = `skip: previous recurring instance still open (${previousInstance!.id}, status=${previousInstance!.status})`
+          recurring.lastSkipAt = Date.now()
+          recurring.lastSkipReason = reason
+          console.log(`[Tasks] Recurring materialization skipped for ${recurring.id}: ${reason}`)
+          skipped += 1
+        } else if (!this.hasMaterializedRun(recurring.id, scheduledFor)) {
           await this.createTask({
             title: recurring.title,
             description: recurring.description,
@@ -244,7 +403,7 @@ class TaskManager {
       await this.persistRecurringTasks()
     }
 
-    return { created }
+    return { created, skipped }
   }
 
   private async persistTasks(): Promise<void> {
@@ -281,6 +440,17 @@ class TaskManager {
 
     this.tasks.set(task.id, task)
     await this.persistTasks()
+    await this.recordTaskHistoryEvent(task.id, 'created', task.createdBy, {
+      status: task.status,
+      assignee: task.assignee ?? null,
+    })
+    if (task.assignee) {
+      await this.recordTaskHistoryEvent(task.id, 'assigned', task.createdBy, {
+        from: null,
+        to: task.assignee,
+      })
+    }
+
     this.notifySubscribers(task, 'created')
     
     // Emit events to event bus
@@ -357,6 +527,44 @@ class TaskManager {
     return this.tasks.get(id)
   }
 
+  getTaskHistory(id: string): TaskHistoryEvent[] {
+    const events = this.taskHistory.get(id) || []
+    return [...events].sort((a, b) => a.timestamp - b.timestamp)
+  }
+
+  getTaskComments(id: string): TaskComment[] {
+    const comments = this.taskComments.get(id) || []
+    return [...comments].sort((a, b) => a.timestamp - b.timestamp)
+  }
+
+  getTaskCommentCount(id: string): number {
+    return this.taskComments.get(id)?.length || 0
+  }
+
+  async addTaskComment(taskId: string, author: string, content: string): Promise<TaskComment> {
+    const task = this.tasks.get(taskId)
+    if (!task) {
+      throw new Error('Task not found')
+    }
+
+    const now = Date.now()
+    const comment: TaskComment = {
+      id: `tcomment-${now}-${Math.random().toString(36).substr(2, 9)}`,
+      taskId,
+      author,
+      content,
+      timestamp: now,
+    }
+
+    await this.appendTaskComment(comment)
+    await this.recordTaskHistoryEvent(taskId, 'commented', author, {
+      commentId: comment.id,
+      content,
+    })
+
+    return comment
+  }
+
   listTasks(options?: {
     status?: Task['status']
     assignee?: string
@@ -410,6 +618,23 @@ class TaskManager {
     }
 
     return tasks.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  private resolveHistoryActor(task: Task, updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>): string {
+    const metadataActor = (updates.metadata as any)?.actor
+    if (typeof metadataActor === 'string' && metadataActor.trim().length > 0) {
+      return metadataActor.trim()
+    }
+
+    if (typeof updates.assignee === 'string' && updates.assignee.trim().length > 0) {
+      return updates.assignee.trim()
+    }
+
+    if (task.assignee && task.assignee.trim().length > 0) {
+      return task.assignee.trim()
+    }
+
+    return task.createdBy
   }
 
   async updateTask(id: string, updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>): Promise<Task | undefined> {
@@ -467,6 +692,22 @@ class TaskManager {
 
     this.tasks.set(id, updated)
     await this.persistTasks()
+
+    const actor = this.resolveHistoryActor(task, updates)
+    if (updates.assignee !== undefined && updates.assignee !== task.assignee) {
+      await this.recordTaskHistoryEvent(id, 'assigned', actor, {
+        from: task.assignee ?? null,
+        to: updates.assignee ?? null,
+      })
+    }
+
+    if (updates.status !== undefined && updates.status !== task.status) {
+      await this.recordTaskHistoryEvent(id, 'status_changed', actor, {
+        from: task.status,
+        to: updates.status,
+      })
+    }
+
     this.notifySubscribers(updated, 'updated')
     
     // Emit events to event bus
@@ -605,6 +846,16 @@ class TaskManager {
     const active = tasks.filter(t => t.status !== 'todo' && t.status !== 'done')
     const missingReviewer = active.filter(t => !t.reviewer || t.reviewer.trim().length === 0)
     const missingDoneCriteria = active.filter(t => !t.done_criteria || t.done_criteria.length === 0)
+    const missingEtaOnDoing = active.filter(t => {
+      if (t.status !== 'doing') return false
+      const eta = (t.metadata as any)?.eta
+      return typeof eta !== 'string' || eta.trim().length === 0
+    })
+    const missingArtifactPathOnValidating = active.filter(t => {
+      if (t.status !== 'validating') return false
+      const artifactPath = (t.metadata as any)?.artifact_path
+      return typeof artifactPath !== 'string' || artifactPath.trim().length === 0
+    })
 
     return {
       activeCount: active.length,
@@ -612,9 +863,15 @@ class TaskManager {
         missingReviewer: missingReviewer.length,
         missingDoneCriteria: missingDoneCriteria.length,
       },
+      statusContractViolations: {
+        missingEtaOnDoing: missingEtaOnDoing.length,
+        missingArtifactPathOnValidating: missingArtifactPathOnValidating.length,
+      },
       violatingTaskIds: {
         missingReviewer: missingReviewer.map(t => t.id),
         missingDoneCriteria: missingDoneCriteria.map(t => t.id),
+        missingEtaOnDoing: missingEtaOnDoing.map(t => t.id),
+        missingArtifactPathOnValidating: missingArtifactPathOnValidating.map(t => t.id),
       },
     }
   }

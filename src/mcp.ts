@@ -115,7 +115,10 @@ tool(
     title: z.string().describe("Task title"),
     description: z.string().optional().describe("Detailed description"),
     status: z.enum(["todo", "doing", "blocked", "validating", "done"]).optional().describe("Task status (default: todo)"),
-    assignee: z.string().optional().describe("Agent assigned to this task"),
+    assignee: z.string().min(1).describe("Task owner/assignee"),
+    reviewer: z.string().min(1).describe("Task reviewer"),
+    done_criteria: z.array(z.string().min(1)).min(1).describe("Explicit done criteria"),
+    eta: z.string().min(1).describe("ETA for next deliverable or completion"),
     createdBy: z.string().describe("Agent creating this task"),
     priority: z.enum(["P0", "P1", "P2", "P3"]).optional().describe("Task priority (P0=critical, P1=high, P2=medium, P3=low)"),
     blocked_by: z.array(z.string()).optional().describe("Task IDs blocking this task"),
@@ -123,18 +126,23 @@ tool(
     tags: z.array(z.string()).optional().describe("Tags for categorization"),
     metadata: z.record(z.unknown()).optional().describe("Optional metadata"),
   },
-  async ({ title, description, status, assignee, createdBy, priority, blocked_by, epic_id, tags, metadata }: any) => {
+  async ({ title, description, status, assignee, reviewer, done_criteria, eta, createdBy, priority, blocked_by, epic_id, tags, metadata }: any) => {
     const task = await taskManager.createTask({
       title,
       description,
       status: status || "todo",
       assignee,
+      reviewer,
+      done_criteria,
       createdBy,
       priority,
       blocked_by,
       epic_id,
       tags,
-      metadata,
+      metadata: {
+        ...(metadata || {}),
+        eta,
+      },
     })
     return {
       content: [{

@@ -1,0 +1,34 @@
+{
+  "success": true,
+  "dryRun": false,
+  "nudged": [],
+  "decisions": [
+    {
+      "agent": "fixture-warn",
+      "taskId": "task-1771053606442-84hv7opoy",
+      "idleMinutes": 46,
+      "warnMin": 45,
+      "escalateMin": 60,
+      "cooldownMin": 30,
+      "recentSuppressMin": 10,
+      "at": 1771053606473,
+      "decision": "none",
+      "reason": "cooldown-active",
+      "renderedMessage": null
+    },
+    {
+      "agent": "fixture-escalate",
+      "taskId": "task-1771053606444-b1ded6fm8",
+      "idleMinutes": 61,
+      "warnMin": 45,
+      "escalateMin": 60,
+      "cooldownMin": 30,
+      "recentSuppressMin": 10,
+      "at": 1771053606473,
+      "decision": "none",
+      "reason": "cooldown-active",
+      "renderedMessage": null
+    }
+  ],
+  "timestamp": 1771053606473
+}
