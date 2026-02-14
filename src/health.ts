@@ -171,6 +171,7 @@ class TeamHealthMonitor {
   private readonly cadenceWatchdogEnabled = process.env.CADENCE_WATCHDOG_ENABLED !== 'false'
   private readonly cadenceSilenceMin = Number(process.env.CADENCE_SILENCE_MIN || 60)
   private readonly cadenceWorkingStaleMin = Number(process.env.CADENCE_WORKING_STALE_MIN || 45)
+  private readonly cadenceWorkingTaskMaxAgeMin = Number(process.env.CADENCE_WORKING_TASK_MAX_AGE_MIN || 240)
   private readonly cadenceAlertCooldownMin = Number(process.env.CADENCE_ALERT_COOLDOWN_MIN || 30)
   private cadenceAlertState = new Map<string, number>()
 
@@ -576,11 +577,19 @@ class TeamHealthMonitor {
       const content = rawContent.toLowerCase()
 
       // Skip known non-actionable watchdog/template/fallback chatter.
+      const looksLikeStatusTemplate =
+        /1\)\s*shipped:\s*</i.test(rawContent) ||
+        /2\)\s*blocker:\s*</i.test(rawContent) ||
+        /3\)\s*next:\s*</i.test(rawContent)
+
       if (content.includes('post shipped / blocker / next+eta now') ||
           content.includes('system watchdog') ||
           content.includes('system fallback') ||
           content.includes('idle nudge') ||
-          content.includes('required status now')) {
+          content.includes('required status now') ||
+          content.includes('system reminder: you appear idle') ||
+          content.includes('system escalation:') ||
+          looksLikeStatusTemplate) {
         continue
       }
 
@@ -729,8 +738,13 @@ class TeamHealthMonitor {
       const agent = (task.assignee || '').toLowerCase()
       if (!trioSet.has(agent as typeof this.trioAgents[number])) continue
 
-      const current = doingByAgent.get(agent)
       const taskTs = Number(task.updatedAt || task.createdAt || 0)
+      const taskAgeMin = taskTs > 0 ? Math.floor((now - taskTs) / 60_000) : Number.MAX_SAFE_INTEGER
+      if (taskAgeMin > this.cadenceWorkingTaskMaxAgeMin) {
+        continue
+      }
+
+      const current = doingByAgent.get(agent)
       const currentTs = current ? Number(current.updatedAt || current.createdAt || 0) : 0
       if (!current || taskTs >= currentTs) {
         doingByAgent.set(agent, task)
