@@ -8,6 +8,7 @@ on:
       - 'src/**'
       - 'tools/test-idle-nudge-lane-fixtures.ts'
       - 'tools/task-linkify-regression-harness.ts'
+      - 'tools/task-linkify-dryrun-transcript-validator.ts'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/idle-nudge-regression.yml'
@@ -16,6 +17,7 @@ on:
       - 'src/**'
       - 'tools/test-idle-nudge-lane-fixtures.ts'
       - 'tools/task-linkify-regression-harness.ts'
+      - 'tools/task-linkify-dryrun-transcript-validator.ts'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/idle-nudge-regression.yml'
@@ -76,4 +78,84 @@ jobs:
         with:
           name: task-linkify-regression-output
           path: artifacts/task-linkify/task-linkify-regression-harness-output.json
+          if-no-files-found: warn
+
+  task-linkify-dryrun-validator-report:
+    name: task-linkify-dryrun-validator-report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DRYRUN_TRANSCRIPT_PATH: artifacts/task-linkify/TASK-task-1771083966546-TOGGLE-DRYRUN-TRANSCRIPT-20260214T154746Z.txt
+      DRYRUN_VALIDATOR_LOG: artifacts/task-linkify/ci/task-linkify-dryrun-validator.log
+      DRYRUN_VALIDATOR_JSON: artifacts/task-linkify/ci/task-linkify-dryrun-validator-result.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Ensure validator artifact directory exists
+        run: mkdir -p artifacts/task-linkify/ci
+
+      - name: Run dry-run transcript validator (report-only)
+        run: |
+          set -o pipefail
+          npm run test:task-linkify:dryrun-validator -- "$DRYRUN_TRANSCRIPT_PATH" | tee "$DRYRUN_VALIDATOR_LOG"
+
+      - name: Extract validator JSON payload
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          log_path = Path(os.environ['DRYRUN_VALIDATOR_LOG'])
+          out_path = Path(os.environ['DRYRUN_VALIDATOR_JSON'])
+          marker = 'TASK_LINKIFY_DRYRUN_TRANSCRIPT_VALIDATION_RESULT'
+
+          payload = {
+              'status': 'ERROR',
+              'reason': 'validator marker not found',
+              'source_log': str(log_path),
+          }
+
+          if log_path.exists():
+              text = log_path.read_text(encoding='utf-8', errors='replace')
+              if marker in text:
+                  fragment = text.split(marker, 1)[1].strip()
+                  brace = fragment.find('{')
+                  if brace >= 0:
+                      try:
+                          payload = json.loads(fragment[brace:])
+                      except Exception as exc:
+                          payload = {
+                              'status': 'ERROR',
+                              'reason': f'json parse failed: {exc}',
+                              'source_log': str(log_path),
+                          }
+
+          out_path.parent.mkdir(parents=True, exist_ok=True)
+          out_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+          print(f'wrote {out_path}')
+          PY
+
+      - name: Upload dry-run validator report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-linkify-dryrun-validator-report
+          path: |
+            artifacts/task-linkify/ci/task-linkify-dryrun-validator.log
+            artifacts/task-linkify/ci/task-linkify-dryrun-validator-result.json
           if-no-files-found: warn
