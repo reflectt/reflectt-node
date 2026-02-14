@@ -35,3 +35,6 @@ Validator outputs JSON summary with:
 
 ## Outcome
 Dry-run no-mutation safety contract is now machine-enforced and reviewable.
+
+## Final QA Reference
+- ref: `msg-1771086165776-6qkw5gyuk` (PASS by pixel)
