@@ -15,16 +15,6 @@ on:
       - 'package-lock.json'
       - '.github/workflows/idle-nudge-regression.yml'
   pull_request:
-    paths:
-      - 'src/**'
-      - 'tools/test-idle-nudge-lane-fixtures.ts'
-      - 'tools/task-linkify-regression-harness.ts'
-      - 'tools/task-linkify-dryrun-transcript-validator.ts'
-      - 'tools/task-linkify-dryrun-validator-negative-harness.ts'
-      - 'artifacts/task-linkify/fixtures/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/idle-nudge-regression.yml'
   workflow_dispatch:
 
 jobs:
