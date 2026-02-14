@@ -1,10 +1,4 @@
-/**
- * Dashboard HTML — self-contained page served at /dashboard
- * v2: Pixel's redesign + chat input for Ryan
- */
-
-export function getDashboardHTML(): string {
-  return `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -568,7 +562,7 @@ let allTasks = [];
 let allEvents = [];
 let taskById = new Map();
 
-const TASK_ID_PATTERN = /\b(task-[a-z0-9-]+)\b/gi;
+const TASK_ID_PATTERN = /(task-[a-z0-9-]+)/gi;
 
 // Delta cursors for lower payload refreshes
 let lastTaskSync = 0;
@@ -602,15 +596,15 @@ function ago(ts) {
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
-function mentionsRyan(message) { return /@ryan\b/i.test(message || ''); }
+function mentionsRyan(message) { return /@ryan/i.test(message || ''); }
 
 function isTaskTokenInsideUrl(text, start, end) {
   let segStart = start;
-  while (segStart > 0 && !/\s/.test(text[segStart - 1])) segStart -= 1;
+  while (segStart > 0 && !/s/.test(text[segStart - 1])) segStart -= 1;
   let segEnd = end;
-  while (segEnd < text.length && !/\s/.test(text[segEnd])) segEnd += 1;
+  while (segEnd < text.length && !/s/.test(text[segEnd])) segEnd += 1;
   const tokenSegment = text.slice(segStart, segEnd);
-  return /^(https?:\/\/|www\.)/i.test(tokenSegment);
+  return /^(https?://|www.)/i.test(tokenSegment);
 }
 
 function isTaskTokenLinkable(text, start, end) {
@@ -708,7 +702,7 @@ function statusTemplateFor(agent, taskId) {
     '1) Shipped: <artifact/commit/file>',
     '2) Blocker: <none or explicit blocker>',
     '3) Next: <next deliverable + ETA>',
-  ].join('\\n');
+  ].join('\n');
 }
 
 async function copyStatusTemplate(agent, taskId) {
@@ -800,7 +794,7 @@ function deriveHealthSignal(agent) {
 function classifyProject(task) {
   const text = ((task.title || '') + ' ' + (task.description || '')).toLowerCase();
   if (/dashboard|reflectt-node|api|mcp|sse|persistence|event|server|cli|node/.test(text)) return 'reflectt-node';
-  if (/foragents|getting.?started|skills|directory|agents\\.dev/.test(text)) return 'forAgents.dev';
+  if (/foragents|getting.?started|skills|directory|agents\.dev/.test(text)) return 'forAgents.dev';
   if (/heartbeat|health|roles|team|ops|cleanup|agent.?roles|monitoring|deploy/.test(text)) return 'Team Ops';
   return 'Other';
 }
@@ -830,16 +824,16 @@ async function loadPresence() {
     const badgeClass = task ? 'working' : (isActive ? 'idle' : 'offline');
     const badgeText = task ? 'Working' : (isActive ? 'Idle' : 'Offline');
     const statusText = task ? truncate(task, 28) : (p && p.lastUpdate ? ago(p.lastUpdate) + ' ago' : '');
-    return \`<div class="agent-card \${statusClass}">
-      <img src="/avatars/\${a.name}.png" alt="\${a.emoji}" class="agent-avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
-      <span class="agent-emoji" style="display:none;">\${a.emoji}</span>
+    return `<div class="agent-card ${statusClass}">
+      <img src="/avatars/${a.name}.png" alt="${a.emoji}" class="agent-avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
+      <span class="agent-emoji" style="display:none;">${a.emoji}</span>
       <div class="agent-info">
-        <div class="agent-role">\${esc(a.role)}</div>
-        <div class="agent-name">\${esc(a.name)}</div>
-        <div class="agent-status-text">\${esc(statusText)}</div>
+        <div class="agent-role">${esc(a.role)}</div>
+        <div class="agent-name">${esc(a.name)}</div>
+        <div class="agent-status-text">${esc(statusText)}</div>
       </div>
-      <span class="agent-badge \${badgeClass}">\${badgeText}</span>
-    </div>\`;
+      <span class="agent-badge ${badgeClass}">${badgeText}</span>
+    </div>`;
   }).join('');
 }
 
@@ -889,7 +883,7 @@ function renderProjectTabs() {
   const tabs = document.getElementById('project-tabs');
   tabs.innerHTML = projects.map(p => {
     const key = p === 'All' ? 'all' : p;
-    return \`<button class="project-tab \${currentProject === key ? 'active' : ''}" onclick="switchProject('\${key}')">\${icons[p] || ''} \${p}</button>\`;
+    return `<button class="project-tab ${currentProject === key ? 'active' : ''}" onclick="switchProject('${key}')">${icons[p] || ''} ${p}</button>`;
   }).join('');
 }
 function switchProject(p) { currentProject = p; renderProjectTabs(); renderKanban(); }
@@ -912,23 +906,23 @@ function renderKanban() {
       : shown.map(t => {
         const assigneeAgent = t.assignee ? AGENTS.find(a => a.name === t.assignee) : null;
         const assigneeDisplay = t.assignee 
-          ? \`<span class="assignee-tag">👤 \${esc(t.assignee)}\${assigneeAgent ? ' <span class="role-small">' + esc(assigneeAgent.role) + '</span>' : ''}</span>\`
+          ? `<span class="assignee-tag">👤 ${esc(t.assignee)}${assigneeAgent ? ' <span class="role-small">' + esc(assigneeAgent.role) + '</span>' : ''}</span>`
           : '<span class="assignee-tag" style="color:var(--yellow)">unassigned</span>';
-        return \`
-        <div class="task-card" data-task-id="\${t.id}">
-          <div class="task-title">\${esc(truncate(t.title, 60))}</div>
+        return `
+        <div class="task-card" data-task-id="${t.id}">
+          <div class="task-title">${esc(truncate(t.title, 60))}</div>
           <div class="task-meta">
-            \${t.priority ? '<span class="priority-badge ' + t.priority + '">' + t.priority + '</span>' : ''}
-            \${assigneeDisplay}
+            ${t.priority ? '<span class="priority-badge ' + t.priority + '">' + t.priority + '</span>' : ''}
+            ${assigneeDisplay}
           </div>
-        </div>\`;
+        </div>`;
       }).join('');
     const extra = isDone && items.length > 3
-      ? \`<button class="done-toggle" onclick="this.parentElement.querySelectorAll('.task-card.hidden').forEach(c=>c.classList.remove('hidden'));this.remove()">+ \${items.length - 3} more</button>\` : '';
-    return \`<div class="kanban-col" data-status="\${col}">
-      <div class="kanban-col-header">\${col} <span class="cnt">\${items.length}</span></div>
-      \${cards}\${extra}
-    </div>\`;
+      ? `<button class="done-toggle" onclick="this.parentElement.querySelectorAll('.task-card.hidden').forEach(c=>c.classList.remove('hidden'));this.remove()">+ ${items.length - 3} more</button>` : '';
+    return `<div class="kanban-col" data-status="${col}">
+      <div class="kanban-col-header">${col} <span class="cnt">${items.length}</span></div>
+      ${cards}${extra}
+    </div>`;
   }).join('');
   
   // Add click/touch handlers for task cards (mobile-friendly)
@@ -994,9 +988,9 @@ async function loadChat(forceFull = false) {
       ? { total: allMessages.length, mentions: allMessages.filter(m => mentionsRyan(m.content)).length }
       : (channelStats.get(ch) || { total: 0, mentions: 0 });
     const label = ch === 'all' ? '🌐 all' : '#' + esc(ch);
-    const countMeta = \`<span class="meta">\${stats.total}</span>\`;
+    const countMeta = `<span class="meta">${stats.total}</span>`;
     const mentionDot = (stats.mentions > 0 && ch !== 'all') ? '<span class="mention-dot" title="mentions"></span>' : '';
-    return \`<button class="channel-tab \${ch === currentChannel ? 'active' : ''}" data-channel="\${esc(ch)}" onclick="switchChannel('\${ch}')">\${label}\${countMeta}\${mentionDot}</button>\`;
+    return `<button class="channel-tab ${ch === currentChannel ? 'active' : ''}" data-channel="${esc(ch)}" onclick="switchChannel('${ch}')">${label}${countMeta}${mentionDot}</button>`;
   }).join('');
   renderChat();
 }
@@ -1022,18 +1016,18 @@ function renderChat() {
   body.innerHTML = shown.map(m => {
     const long = m.content && m.content.length > 200;
     const agent = AGENTS.find(a => a.name === m.from);
-    const roleTag = agent ? \`<span class="msg-role">\${esc(agent.role)}</span>\` : '';
+    const roleTag = agent ? `<span class="msg-role">${esc(agent.role)}</span>` : '';
     const mentioned = mentionsRyan(m.content);
-    return \`
-    <div class="msg \${mentioned ? 'mentioned' : ''}">
+    return `
+    <div class="msg ${mentioned ? 'mentioned' : ''}">
       <div class="msg-header">
-        <span class="msg-from">\${esc(m.from)}</span>
-        \${roleTag}
-        \${m.channel ? '<span class="msg-channel">#' + esc(m.channel) + '</span>' : ''}
-        <span class="msg-time">\${ago(m.timestamp)}</span>
+        <span class="msg-from">${esc(m.from)}</span>
+        ${roleTag}
+        ${m.channel ? '<span class="msg-channel">#' + esc(m.channel) + '</span>' : ''}
+        <span class="msg-time">${ago(m.timestamp)}</span>
       </div>
-      <div class="msg-content \${long ? 'collapsed' : ''}" data-collapsible="\${long ? 'true' : 'false'}">\${renderMessageContentWithTaskLinks(m.content)}</div>
-    </div>\`;
+      <div class="msg-content ${long ? 'collapsed' : ''}" data-collapsible="${long ? 'true' : 'false'}">${renderMessageContentWithTaskLinks(m.content)}</div>
+    </div>`;
   }).join('');
 }
 
@@ -1109,13 +1103,13 @@ async function loadActivity(forceFull = false) {
     document.getElementById('activity-count').textContent = allEvents.length + ' events';
     const body = document.getElementById('activity-body');
     if (allEvents.length === 0) { body.innerHTML = '<div class="empty">No recent activity</div>'; return; }
-    body.innerHTML = allEvents.slice(0, 20).map(e => \`
+    body.innerHTML = allEvents.slice(0, 20).map(e => `
       <div class="event-row">
-        <span class="event-type">\${esc(e.type || 'event')}</span>
-        \${e.agent ? '<span class="event-agent">' + esc(e.agent) + '</span>' : ''}
-        <span class="event-desc">\${esc(truncate(e.summary || e.description || '', 60))}</span>
-        <span class="event-time">\${ago(e.timestamp)}</span>
-      </div>\`).join('');
+        <span class="event-type">${esc(e.type || 'event')}</span>
+        ${e.agent ? '<span class="event-agent">' + esc(e.agent) + '</span>' : ''}
+        <span class="event-desc">${esc(truncate(e.summary || e.description || '', 60))}</span>
+        <span class="event-time">${ago(e.timestamp)}</span>
+      </div>`).join('');
   } catch (e) {}
 }
 
@@ -1148,7 +1142,7 @@ async function loadHealth() {
       return { ...a, displayStatus, lowConfidence: derived.lowConfidence };
     });
 
-    const healthSummary = \`\${statusCounts.active} active • \${statusCounts.watch + statusCounts.silent} quiet • \${statusCounts.blocked} blocked\`;
+    const healthSummary = `${statusCounts.active} active • ${statusCounts.watch + statusCounts.silent} quiet • ${statusCounts.blocked} blocked`;
     document.getElementById('health-count').textContent = healthSummary;
 
     const body = document.getElementById('health-body');
@@ -1159,20 +1153,20 @@ async function loadHealth() {
       html += '<div class="health-section"><div class="health-section-title">Agent Status</div><div class="health-grid">';
       html += displayAgents.map(a => {
         const statusText = a.minutesSinceLastSeen < 1 ? 'just now' : ago(a.lastSeen) + ' ago';
-        const taskDisplay = a.currentTask ? \`<div class="health-task">📋 \${esc(truncate(a.currentTask, 35))}</div>\` : '';
+        const taskDisplay = a.currentTask ? `<div class="health-task">📋 ${esc(truncate(a.currentTask, 35))}</div>` : '';
         const statusLabel = a.displayStatus === 'blocked'
           ? ' • 🚫 blocked'
           : (a.displayStatus === 'silent' ? ' • ⚠️ quiet' : (a.displayStatus === 'watch' ? ' • 👀 watch' : ''));
         const confidenceLabel = a.lowConfidence ? ' • needs review' : '';
-        return \`
-        <div class="health-card \${a.lowConfidence ? 'needs-review' : ''}">
-          <div class="health-indicator \${a.displayStatus}"></div>
+        return `
+        <div class="health-card ${a.lowConfidence ? 'needs-review' : ''}">
+          <div class="health-indicator ${a.displayStatus}"></div>
           <div class="health-info">
-            <div class="health-name">\${esc(a.agent)}</div>
-            <div class="health-status">\${statusText}\${statusLabel}\${confidenceLabel}</div>
-            \${taskDisplay}
+            <div class="health-name">${esc(a.agent)}</div>
+            <div class="health-status">${statusText}${statusLabel}${confidenceLabel}</div>
+            ${taskDisplay}
           </div>
-        </div>\`;
+        </div>`;
       }).join('');
       html += '</div></div>';
     }
@@ -1180,23 +1174,23 @@ async function loadHealth() {
     // Blockers
     if (blockers.length > 0) {
       html += '<div class="health-section"><div class="health-section-title">🚫 Active Blockers</div>';
-      html += blockers.slice(0, 5).map(b => \`
+      html += blockers.slice(0, 5).map(b => `
         <div class="blocker-item">
-          <div class="blocker-agent">\${esc(b.agent)}</div>
-          <div class="blocker-text">\${esc(b.blocker)}</div>
-          <div class="blocker-meta">Mentioned \${b.mentionCount}x • Last: \${ago(b.lastMentioned)}</div>
-        </div>\`).join('');
+          <div class="blocker-agent">${esc(b.agent)}</div>
+          <div class="blocker-text">${esc(b.blocker)}</div>
+          <div class="blocker-meta">Mentioned ${b.mentionCount}x • Last: ${ago(b.lastMentioned)}</div>
+        </div>`).join('');
       html += '</div>';
     }
     
     // Overlaps
     if (overlaps.length > 0) {
       html += '<div class="health-section"><div class="health-section-title">⚠️ Overlapping Work</div>';
-      html += overlaps.slice(0, 3).map(o => \`
+      html += overlaps.slice(0, 3).map(o => `
         <div class="overlap-item">
-          <div class="overlap-agents">\${o.agents.join(', ')}</div>
-          <div class="overlap-topic">\${esc(o.topic)} (\${o.confidence} confidence)</div>
-        </div>\`).join('');
+          <div class="overlap-agents">${o.agents.join(', ')}</div>
+          <div class="overlap-topic">${esc(o.topic)} (${o.confidence} confidence)</div>
+        </div>`).join('');
       html += '</div>';
     }
     
@@ -1283,8 +1277,8 @@ function openTaskModal(taskId) {
   setTaskModalInteractivity(true);
   const creatorAgent = AGENTS.find(a => a.name === currentTask.createdBy);
   const createdText = creatorAgent 
-    ? \`\${currentTask.createdBy} (\${creatorAgent.role}) • \${ago(currentTask.createdAt)}\`
-    : \`\${currentTask.createdBy} • \${ago(currentTask.createdAt)}\`;
+    ? `${currentTask.createdBy} (${creatorAgent.role}) • ${ago(currentTask.createdAt)}`
+    : `${currentTask.createdBy} • ${ago(currentTask.createdAt)}`;
 
   document.getElementById('modal-task-title').textContent = currentTask.title;
   document.getElementById('modal-task-desc').textContent = currentTask.description || '(no description)';
@@ -1309,7 +1303,7 @@ function closeTaskModal() {
 async function updateTaskStatus(status) {
   if (!currentTask) return;
   try {
-    const r = await fetch(\`\${BASE}/tasks/\${currentTask.id}\`, {
+    const r = await fetch(`${BASE}/tasks/${currentTask.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
@@ -1327,7 +1321,7 @@ async function updateTaskAssignee() {
   if (!currentTask) return;
   const assignee = document.getElementById('modal-task-assignee').value.trim() || undefined;
   try {
-    const r = await fetch(\`\${BASE}/tasks/\${currentTask.id}\`, {
+    const r = await fetch(`${BASE}/tasks/${currentTask.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assignee })
@@ -1392,5 +1386,4 @@ startAdaptiveRefresh();
 </div>
 
 </body>
-</html>`;
-}
+</html>
