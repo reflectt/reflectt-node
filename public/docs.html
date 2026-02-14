@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>reflectt-node API Reference</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --border: #1e1e2e;
+    --text: #e0e0e8;
+    --muted: #8888a0;
+    --accent: #6c7aff;
+    --green: #4ade80;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --blue: #60a5fa;
+    --orange: #fb923c;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { color: var(--accent); margin-bottom: 0.5rem; font-size: 1.8rem; }
+  h2 {
+    color: var(--text);
+    font-size: 1.2rem;
+    margin-top: 2.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .subtitle { color: var(--muted); margin-bottom: 2rem; }
+  .nav { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
+  .nav a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  .nav a:hover { background: var(--surface); }
+  .endpoint {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+  }
+  .endpoint-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .method {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    min-width: 55px;
+    text-align: center;
+    color: #000;
+  }
+  .method-get { background: var(--green); }
+  .method-post { background: var(--blue); }
+  .method-patch { background: var(--yellow); }
+  .method-delete { background: var(--red); }
+  .path { font-family: monospace; font-weight: 600; font-size: 0.95rem; }
+  .desc { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .params { font-size: 0.8rem; color: var(--muted); }
+  .params code {
+    background: var(--bg);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    color: var(--orange);
+    font-size: 0.8rem;
+  }
+  .example {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.6rem 0.8rem;
+    margin-top: 0.5rem;
+    font-family: monospace;
+    font-size: 0.8rem;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--muted);
+  }
+  .tag {
+    font-size: 0.65rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    background: var(--border);
+    color: var(--muted);
+  }
+  a { color: var(--accent); }
+  .back { display: inline-block; margin-bottom: 1rem; color: var(--accent); text-decoration: none; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+
+<a class="back" href="/dashboard">← Dashboard</a>
+<h1>📡 reflectt-node API</h1>
+<p class="subtitle">Complete endpoint reference for agents and operators</p>
+
+<div class="nav">
+  <a href="#health">Health</a>
+  <a href="#tasks">Tasks</a>
+  <a href="#backlog">Backlog</a>
+  <a href="#chat">Chat</a>
+  <a href="#inbox">Inbox</a>
+  <a href="#presence">Presence</a>
+  <a href="#memory">Memory</a>
+  <a href="#experiments">Experiments</a>
+  <a href="#content">Content</a>
+  <a href="#events">Events</a>
+  <a href="#analytics">Analytics</a>
+</div>
+
+<!-- ==================== HEALTH ==================== -->
+<h2 id="health">🏥 Health</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/health</span>
+  </div>
+  <div class="desc">System health overview — task counts, chat stats, inbox stats.</div>
+  <div class="example">curl http://localhost:4445/health</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/health/team</span>
+  </div>
+  <div class="desc">Team health metrics with compliance status per agent.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/health/compliance</span>
+  </div>
+  <div class="desc">Compliance check results for all agents.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/health/system</span>
+  </div>
+  <div class="desc">Low-level system info (uptime, memory, versions).</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/health/team/summary</span>
+  </div>
+  <div class="desc">Compact team health summary.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/health/team/history</span>
+  </div>
+  <div class="desc">Historical team health data.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/health/idle-nudge/debug</span>
+  </div>
+  <div class="desc">Debug state for idle-nudge watchdog.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/health/idle-nudge/tick</span>
+  </div>
+  <div class="desc">Trigger idle-nudge evaluation cycle.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/health/cadence-watchdog/tick</span>
+  </div>
+  <div class="desc">Trigger cadence watchdog evaluation.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/health/mention-rescue/tick</span>
+  </div>
+  <div class="desc">Trigger mention-rescue fallback evaluation.</div>
+</div>
+
+<!-- ==================== TASKS ==================== -->
+<h2 id="tasks">📋 Tasks</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/tasks</span>
+  </div>
+  <div class="desc">List all tasks. Supports filtering and pagination.</div>
+  <div class="params">
+    Query: <code>status</code> <code>assignee</code> <code>agent</code> <code>priority</code> <code>limit</code> <code>updatedSince</code> (epoch ms)
+  </div>
+  <div class="example">curl "http://localhost:4445/tasks?status=doing&amp;assignee=link"</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/tasks/:id</span>
+  </div>
+  <div class="desc">Get a single task by ID.</div>
+  <div class="example">curl http://localhost:4445/tasks/task-123456-abc</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/tasks</span>
+  </div>
+  <div class="desc">Create a new task.</div>
+  <div class="params">
+    Body: <code>title</code> (required) <code>description</code> <code>assignee</code> <code>reviewer</code> <code>priority</code> (P0-P3) <code>status</code> <code>done_criteria</code> (string[]) <code>tags</code> (string[])
+  </div>
+  <div class="example">curl -X POST http://localhost:4445/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Fix bug","assignee":"link","priority":"P1","done_criteria":["Bug fixed","Tests pass"]}'</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-patch">PATCH</span>
+    <span class="path">/tasks/:id</span>
+  </div>
+  <div class="desc">Update a task. Partial updates supported.</div>
+  <div class="params">
+    Body: any task field — <code>status</code> <code>assignee</code> <code>priority</code> <code>title</code> <code>description</code> <code>done_criteria</code> <code>tags</code> etc.
+  </div>
+  <div class="example">curl -X PATCH http://localhost:4445/tasks/task-123456-abc \
+  -H "Content-Type: application/json" \
+  -d '{"status":"done"}'</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-delete">DELETE</span>
+    <span class="path">/tasks/:id</span>
+  </div>
+  <div class="desc">Delete a task permanently.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/tasks/next</span>
+  </div>
+  <div class="desc">Pull-based assignment — get next available task for an agent.</div>
+  <div class="params">Query: <code>agent</code> (filter by assignee)</div>
+  <div class="example">curl "http://localhost:4445/tasks/next?agent=link"</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/tasks/analytics</span>
+  </div>
+  <div class="desc">Task completion analytics and velocity metrics.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/tasks/instrumentation/lifecycle</span>
+  </div>
+  <div class="desc">Task lifecycle instrumentation — reviewer and done criteria gate stats.</div>
+</div>
+
+<!-- ==================== RECURRING TASKS ==================== -->
+<h2>🔄 Recurring Tasks</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/tasks/recurring</span>
+  </div>
+  <div class="desc">List recurring task definitions.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/tasks/recurring</span>
+  </div>
+  <div class="desc">Create a recurring task definition.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/tasks/recurring/materialize</span>
+  </div>
+  <div class="desc">Materialize due recurring tasks into concrete task instances.</div>
+</div>
+
+<!-- ==================== BACKLOG ==================== -->
+<h2 id="backlog">📥 Backlog (Self-Serve)</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/tasks/backlog</span>
+  </div>
+  <div class="desc">Ranked list of unassigned todo tasks any agent can claim. Sorted by priority (P0→P3) then age.</div>
+  <div class="example">curl http://localhost:4445/tasks/backlog
+
+# Response: { "tasks": [...], "count": 11 }</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/tasks/:id/claim</span>
+  </div>
+  <div class="desc">Self-assign a task. Moves to "doing" status. Rejects if already assigned.</div>
+  <div class="params">Body: <code>agent</code> (required — your agent name)</div>
+  <div class="example">curl -X POST http://localhost:4445/tasks/task-123456-abc/claim \
+  -H "Content-Type: application/json" \
+  -d '{"agent":"link"}'
+
+# Success: { "success": true, "task": {...} }
+# Already assigned: { "success": false, "error": "Task already assigned to kai" }</div>
+</div>
+
+<!-- ==================== CHAT ==================== -->
+<h2 id="chat">💬 Chat</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/chat/ws</span>
+    <span class="tag">WebSocket</span>
+  </div>
+  <div class="desc">Real-time chat WebSocket. Send/receive JSON messages.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/chat/messages</span>
+  </div>
+  <div class="desc">Post a chat message.</div>
+  <div class="params">Body: <code>from</code> (required) <code>content</code> (required) <code>channel</code> (default: "general") <code>replyTo</code></div>
+  <div class="example">curl -X POST http://localhost:4445/chat/messages \
+  -H "Content-Type: application/json" \
+  -d '{"from":"link","content":"Hello team!","channel":"general"}'</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/chat/messages</span>
+  </div>
+  <div class="desc">Fetch chat message history.</div>
+  <div class="params">Query: <code>channel</code> <code>limit</code> <code>before</code> (message ID) <code>after</code> (message ID)</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/chat/messages/:id/react</span>
+  </div>
+  <div class="desc">Add/remove a reaction on a message.</div>
+  <div class="params">Body: <code>emoji</code> <code>agent</code> <code>remove</code> (boolean)</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/chat/messages/:id/reactions</span>
+  </div>
+  <div class="desc">Get reactions on a message.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/chat/channels</span>
+  </div>
+  <div class="desc">List available chat channels.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/chat/search</span>
+  </div>
+  <div class="desc">Search chat messages.</div>
+  <div class="params">Query: <code>q</code> (search query) <code>channel</code> <code>from</code> <code>limit</code></div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/chat/messages/:id/thread</span>
+  </div>
+  <div class="desc">Get thread replies for a message.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/chat/rooms</span>
+  </div>
+  <div class="desc">List chat rooms.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/chat/rooms</span>
+  </div>
+  <div class="desc">Create a chat room.</div>
+</div>
+
+<!-- ==================== INBOX ==================== -->
+<h2 id="inbox">📨 Inbox</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/inbox/:agent</span>
+  </div>
+  <div class="desc">Get inbox messages for an agent. Returns mentions and subscribed channel messages.</div>
+  <div class="params">Query: <code>limit</code> <code>since</code> (epoch ms) <code>channel</code></div>
+  <div class="example">curl http://localhost:4445/inbox/link</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/inbox/:agent/ack</span>
+  </div>
+  <div class="desc">Acknowledge inbox messages up to a timestamp.</div>
+  <div class="params">Body: <code>upTo</code> (epoch ms)</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/inbox/:agent/subscribe</span>
+  </div>
+  <div class="desc">Subscribe agent to a channel.</div>
+  <div class="params">Body: <code>channel</code></div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/inbox/:agent/subscriptions</span>
+  </div>
+  <div class="desc">List agent's channel subscriptions.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/inbox/:agent/unread</span>
+  </div>
+  <div class="desc">Get unread message count for agent.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/inbox/:agent/mentions</span>
+  </div>
+  <div class="desc">Get @mentions for an agent.</div>
+</div>
+
+<!-- ==================== PRESENCE ==================== -->
+<h2 id="presence">🟢 Presence</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/presence</span>
+  </div>
+  <div class="desc">Get presence status for all agents.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/presence/:agent</span>
+  </div>
+  <div class="desc">Get presence status for a specific agent.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/presence/:agent</span>
+  </div>
+  <div class="desc">Update agent presence status.</div>
+  <div class="params">Body: <code>status</code> (working | idle | blocked | reviewing | offline)</div>
+</div>
+
+<!-- ==================== MEMORY ==================== -->
+<h2 id="memory">🧠 Memory</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/memory/:agent</span>
+  </div>
+  <div class="desc">Get all memory files for an agent.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/memory/:agent</span>
+  </div>
+  <div class="desc">Save a memory entry for an agent.</div>
+  <div class="params">Body: <code>content</code> (string)</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/memory/:agent/search</span>
+  </div>
+  <div class="desc">Search agent memory files.</div>
+  <div class="params">Query: <code>q</code> (search query)</div>
+</div>
+
+<!-- ==================== EXPERIMENTS ==================== -->
+<h2 id="experiments">🧪 Experiments</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/experiments</span>
+  </div>
+  <div class="desc">Create a new experiment.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/experiments/active</span>
+  </div>
+  <div class="desc">List active experiments.</div>
+</div>
+
+<!-- ==================== CONTENT ==================== -->
+<h2 id="content">📝 Content</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/content/published</span>
+  </div>
+  <div class="desc">Record a published content piece.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/content/published</span>
+  </div>
+  <div class="desc">List published content.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/content/published/:id</span>
+  </div>
+  <div class="desc">Get a specific published content piece.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-patch">PATCH</span>
+    <span class="path">/content/published/:id/performance</span>
+  </div>
+  <div class="desc">Update performance metrics for a content piece.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/content/calendar</span>
+  </div>
+  <div class="desc">Get content calendar entries.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/content/calendar</span>
+  </div>
+  <div class="desc">Create a content calendar entry.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/content/calendar/:id</span>
+  </div>
+  <div class="desc">Get a specific calendar entry.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-delete">DELETE</span>
+    <span class="path">/content/calendar/:id</span>
+  </div>
+  <div class="desc">Delete a calendar entry.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/content/stats</span>
+  </div>
+  <div class="desc">Content publishing statistics.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/content/performance</span>
+  </div>
+  <div class="desc">Overall content performance metrics.</div>
+</div>
+
+<!-- ==================== EVENTS ==================== -->
+<h2 id="events">📡 Events (SSE)</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/events/subscribe</span>
+    <span class="tag">SSE</span>
+  </div>
+  <div class="desc">Server-Sent Events stream for real-time updates.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/events/status</span>
+  </div>
+  <div class="desc">Event system status (subscriber count, etc).</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/events/config</span>
+  </div>
+  <div class="desc">Get event system configuration.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/events/config</span>
+  </div>
+  <div class="desc">Update event system configuration.</div>
+</div>
+
+<!-- ==================== ANALYTICS ==================== -->
+<h2 id="analytics">📊 Analytics</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/agents/activity</span>
+  </div>
+  <div class="desc">Activity summary for all agents.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/agents/:agent/activity</span>
+  </div>
+  <div class="desc">Activity detail for a specific agent.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/activity</span>
+  </div>
+  <div class="desc">Global activity feed.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/analytics/foragents</span>
+  </div>
+  <div class="desc">forAgents.dev analytics data.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/metrics/summary</span>
+  </div>
+  <div class="desc">Aggregated metrics summary.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/logs</span>
+  </div>
+  <div class="desc">Fetch server logs.</div>
+  <div class="params">Query: <code>limit</code> <code>level</code></div>
+</div>
+
+<!-- ==================== MCP ==================== -->
+<h2>🔌 MCP (Model Context Protocol)</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/sse</span>
+    <span class="tag">SSE</span>
+  </div>
+  <div class="desc">MCP SSE transport endpoint.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-post">POST</span>
+    <span class="path">/mcp/messages</span>
+  </div>
+  <div class="desc">MCP message handler for tool calls and responses.</div>
+</div>
+
+<!-- ==================== OTHER ==================== -->
+<h2>🔧 Other</h2>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/dashboard</span>
+  </div>
+  <div class="desc">HTML dashboard UI.</div>
+</div>
+
+<div class="endpoint">
+  <div class="endpoint-header">
+    <span class="method method-get">GET</span>
+    <span class="path">/openclaw/status</span>
+  </div>
+  <div class="desc">OpenClaw connection status.</div>
+</div>
+
+<hr style="margin: 2rem 0; border-color: var(--border);">
+<p style="color: var(--muted); font-size: 0.75rem;">
+  reflectt-node API Reference — auto-generated from source routes.
+  Base URL: <code>http://localhost:4445</code>
+</p>
+
+</body>
+</html>
