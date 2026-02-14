@@ -372,6 +372,22 @@ export async function createServer(): Promise<FastifyInstance> {
     reply.type('text/html').send(getDashboardHTML())
   })
 
+  // API docs page (markdown — token-efficient for agents)
+  app.get('/docs', async (_request, reply) => {
+    try {
+      const { promises: fs } = await import('fs')
+      const { join } = await import('path')
+      const { fileURLToPath } = await import('url')
+      const { dirname } = await import('path')
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const md = await fs.readFile(join(__dirname, '..', 'public', 'docs.md'), 'utf-8')
+      reply.type('text/plain; charset=utf-8').send(md)
+    } catch (err) {
+      reply.code(500).send({ error: 'Failed to load docs' })
+    }
+  })
+
   // Serve avatar images
   app.get<{ Params: { filename: string } }>('/avatars/:filename', async (request, reply) => {
     const { filename } = request.params
