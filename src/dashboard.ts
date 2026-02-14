@@ -234,6 +234,19 @@ export function getDashboardHTML(): string {
   .event-desc { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .event-time { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
   .empty { color: var(--text-muted); font-style: italic; font-size: 13px; padding: 24px 0; text-align: center; }
+  .ssot-list { display: grid; gap: 8px; }
+  .ssot-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+  }
+  .ssot-item-label { font-size: 12px; color: var(--text); }
+  .ssot-link {
+    color: var(--accent); text-decoration: none; font-size: 12px; font-weight: 600;
+  }
+  .ssot-link:hover { text-decoration: underline; }
+  .ssot-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  .ssot-missing { font-size: 11px; color: var(--yellow); border: 1px solid var(--yellow); border-radius: 10px; padding: 2px 6px; }
   /* Chat input */
   .chat-input-bar {
     display: flex; gap: 8px; padding: 12px 18px;
@@ -536,6 +549,11 @@ export function getDashboardHTML(): string {
     <div class="panel-body" id="compliance-body"></div>
   </div>
 
+  <div class="panel">
+    <div class="panel-header">🧭 Promotion SSOT <span class="count" id="ssot-count"></span></div>
+    <div class="panel-body" id="ssot-body"></div>
+  </div>
+
   <div class="two-col">
     <div class="panel">
       <div class="panel-header">💬 Chat <span class="count" id="chat-count"></span></div>
@@ -593,6 +611,16 @@ const AGENTS = [
   { name: 'spark', emoji: '🚀', role: 'Growth' },
 ];
 
+const SSOT_LINKS = [
+  { label: 'Promotion Evidence Index', url: 'https://github.com/reflectt/reflectt-node/blob/main/docs/TASK_LINKIFY_PROMOTION_EVIDENCE_INDEX.md' },
+  { label: 'Promotion Day Quickstart', url: 'https://github.com/reflectt/reflectt-node/blob/main/docs/TASK_LINKIFY_PROMOTION_DAY_QUICKSTART.md' },
+  { label: 'Live Promotion Checklist', url: 'https://github.com/reflectt/reflectt-node/blob/main/docs/TASK_LINKIFY_LIVE_PROMOTION_CHECKLIST_FINAL.md' },
+  { label: 'Required-Check Runbook', url: 'https://github.com/reflectt/reflectt-node/blob/main/docs/TASK_LINKIFY_REQUIRED_CHECK_RUNBOOK.md' },
+  { label: 'Promotion Run-Window + Comms', url: 'https://github.com/reflectt/reflectt-node/blob/main/docs/TASK_LINKIFY_PROMOTION_RUN_WINDOW_AND_COMMS.md' },
+  { label: 'Promotion-Day Smoke Script', url: 'https://github.com/reflectt/reflectt-node/blob/main/tools/task-linkify-promotion-smoke.sh' },
+  { label: 'Rollback Drill Notes (pending)', url: null },
+];
+
 function ago(ts) {
   const s = Math.floor((Date.now() - ts) / 1000);
   if (s < 60) return s + 's';
@@ -604,13 +632,30 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s || 
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
 function mentionsRyan(message) { return /@ryan\b/i.test(message || ''); }
 
+function renderPromotionSSOT() {
+  const body = document.getElementById('ssot-body');
+  const count = document.getElementById('ssot-count');
+  if (!body || !count) return;
+
+  const available = SSOT_LINKS.filter(item => Boolean(item.url));
+  count.textContent = available.length + '/' + SSOT_LINKS.length + ' links';
+
+  body.innerHTML = '<div class="ssot-list">' + SSOT_LINKS.map(item => {
+    const missing = !item.url;
+    const action = missing
+      ? '<span class="ssot-missing" aria-label="missing target">missing</span>'
+      : '<a class="ssot-link" href="' + esc(item.url) + '" target="_blank" rel="noreferrer noopener" aria-label="Open ' + esc(item.label) + '">Open</a>';
+    return '<div class="ssot-item"><span class="ssot-item-label">' + esc(item.label) + '</span>' + action + '</div>';
+  }).join('') + '</div>';
+}
+
 function isTaskTokenInsideUrl(text, start, end) {
   let segStart = start;
   while (segStart > 0 && !/\s/.test(text[segStart - 1])) segStart -= 1;
   let segEnd = end;
   while (segEnd < text.length && !/\s/.test(text[segEnd])) segEnd += 1;
   const tokenSegment = text.slice(segStart, segEnd);
-  return /^(https?:\/\/|www\.)/i.test(tokenSegment);
+  return /^(https?:\\/\\/|www\\.)/i.test(tokenSegment);
 }
 
 function isTaskTokenLinkable(text, start, end) {
@@ -1222,6 +1267,7 @@ async function refresh() {
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
   await loadTasks(forceFull);
   await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadHealth()]);
+  renderPromotionSSOT();
 }
 
 let refreshTimer = null;
