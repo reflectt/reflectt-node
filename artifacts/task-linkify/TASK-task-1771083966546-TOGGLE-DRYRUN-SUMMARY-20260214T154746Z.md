@@ -23,4 +23,4 @@
 - operator: link
 - reviewer: pixel
 - timestamp_utc: 20260214T154746Z
-- ref: pending QA
+- ref: msg-1771084579186-9qcnryn3s (PASS accepted by kai)
