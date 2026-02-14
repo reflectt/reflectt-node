@@ -10,7 +10,7 @@ type Check = {
   actual: string
 }
 
-const dashboardPath = resolve(process.cwd(), 'src/dashboard.ts')
+const dashboardPath = resolve(process.cwd(), 'public/dashboard.js')
 const src = readFileSync(dashboardPath, 'utf8')
 
 function between(start: string, end: string): string {
@@ -27,14 +27,10 @@ function line(re: RegExp): string {
   return m[0]
 }
 
-function normalizeTemplateEscapes(s: string): string {
-  return s.replace(/\\\\/g, '\\')
-}
-
-const agoFn = normalizeTemplateEscapes(between('function ago(ts)', 'function esc(s)'))
-const resolveFn = normalizeTemplateEscapes(between('function resolveSSOTState(lastVerifiedUtc)', 'async function fetchSSOTMeta()'))
-const fetchFn = normalizeTemplateEscapes(between('async function fetchSSOTMeta()', 'async function renderPromotionSSOT()'))
-const isUrlFn = normalizeTemplateEscapes(between('function isTaskTokenInsideUrl(text, start, end)', 'function isTaskTokenLinkable(text, start, end)'))
+const agoFn = between('function ago(ts)', 'function esc(s)')
+const resolveFn = between('function resolveSSOTState(lastVerifiedUtc)', 'async function fetchSSOTMeta()')
+const fetchFn = between('async function fetchSSOTMeta()', 'async function renderPromotionSSOT()')
+const isUrlFn = between('function isTaskTokenInsideUrl(text, start, end)', 'function isTaskTokenLinkable(text, start, end)')
 
 const ssotIndexLine = line(/const SSOT_INDEX_RAW_URL = .+;/)
 const cacheLine = line(/let ssotMetaCache = .+;/)
