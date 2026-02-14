@@ -1,0 +1,9 @@
+timestamp_utc=2026-02-14T13:13:46Z
+pr_number=3
+command=tools/task-linkify-branch-protection-playbook.sh read
+[read] repo=reflectt/reflectt-node branch=main required_context=task-linkify-regression-gate
+strict=False
+contexts=
+has_required_context=False
+[read] merged_context_set_preview=
+  - task-linkify-regression-gate
