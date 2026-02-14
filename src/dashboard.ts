@@ -234,6 +234,20 @@ export function getDashboardHTML(): string {
   .event-desc { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .event-time { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
   .empty { color: var(--text-muted); font-style: italic; font-size: 13px; padding: 24px 0; text-align: center; }
+  .ssot-meta {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm); background: var(--surface-raised); font-size: 12px;
+  }
+  .ssot-meta-text { color: var(--text-muted); }
+  .ssot-state-badge {
+    font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px;
+    border: 1px solid transparent; text-transform: uppercase; letter-spacing: 0.2px;
+  }
+  .ssot-state-badge.fresh { color: var(--green); border-color: var(--green); background: var(--green-dim); }
+  .ssot-state-badge.warn { color: var(--yellow); border-color: var(--yellow); background: var(--yellow-dim); }
+  .ssot-state-badge.stale { color: var(--red); border-color: var(--red); background: var(--red-dim); }
+  .ssot-state-badge.unknown { color: var(--text-muted); border-color: var(--text-muted); background: var(--border); }
   .ssot-list { display: grid; gap: 8px; }
   .ssot-item {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -621,6 +635,11 @@ const SSOT_LINKS = [
   { label: 'Rollback Drill Notes (pending)', url: null },
 ];
 
+const SSOT_INDEX_RAW_URL = 'https://raw.githubusercontent.com/reflectt/reflectt-node/main/docs/TASK_LINKIFY_PROMOTION_EVIDENCE_INDEX.md';
+const SSOT_LAST_VERIFIED_FALLBACK_UTC = '2026-02-14T13:28:32Z';
+let ssotMetaCache = { fetchedAt: 0, lastVerifiedUtc: null };
+const SSOT_META_CACHE_MS = 5 * 60 * 1000;
+
 function ago(ts) {
   const s = Math.floor((Date.now() - ts) / 1000);
   if (s < 60) return s + 's';
@@ -632,7 +651,42 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s || 
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
 function mentionsRyan(message) { return /@ryan\b/i.test(message || ''); }
 
-function renderPromotionSSOT() {
+function resolveSSOTState(lastVerifiedUtc) {
+  if (!lastVerifiedUtc) return { state: 'unknown', label: 'unknown', text: 'verification timestamp unavailable' };
+  const ts = Date.parse(lastVerifiedUtc);
+  if (!Number.isFinite(ts)) return { state: 'unknown', label: 'unknown', text: 'verification timestamp unavailable' };
+
+  const ageMs = Date.now() - ts;
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (ageMs <= dayMs) return { state: 'fresh', label: 'fresh', text: 'last verified ' + ago(ts) + ' ago' };
+  if (ageMs <= 3 * dayMs) return { state: 'warn', label: 'review soon', text: 'last verified ' + ago(ts) + ' ago' };
+  return { state: 'stale', label: 'stale evidence', text: 'last verified ' + ago(ts) + ' ago' };
+}
+
+async function fetchSSOTMeta() {
+  const now = Date.now();
+  if (now - ssotMetaCache.fetchedAt < SSOT_META_CACHE_MS) return ssotMetaCache;
+
+  try {
+    const response = await fetch(SSOT_INDEX_RAW_URL, { cache: 'no-store' });
+    if (!response.ok) throw new Error('status ' + response.status);
+    const text = await response.text();
+    const match = text.match(/^-\s*last_verified_utc:\s*(.+)$/m);
+    ssotMetaCache = {
+      fetchedAt: now,
+      lastVerifiedUtc: match ? match[1].trim() : SSOT_LAST_VERIFIED_FALLBACK_UTC,
+    };
+  } catch {
+    ssotMetaCache = {
+      fetchedAt: now,
+      lastVerifiedUtc: SSOT_LAST_VERIFIED_FALLBACK_UTC,
+    };
+  }
+
+  return ssotMetaCache;
+}
+
+async function renderPromotionSSOT() {
   const body = document.getElementById('ssot-body');
   const count = document.getElementById('ssot-count');
   if (!body || !count) return;
@@ -640,7 +694,15 @@ function renderPromotionSSOT() {
   const available = SSOT_LINKS.filter(item => Boolean(item.url));
   count.textContent = available.length + '/' + SSOT_LINKS.length + ' links';
 
-  body.innerHTML = '<div class="ssot-list">' + SSOT_LINKS.map(item => {
+  const meta = await fetchSSOTMeta();
+  const state = resolveSSOTState(meta.lastVerifiedUtc);
+
+  const metaHtml = '<div class="ssot-meta">'
+    + '<span class="ssot-meta-text">' + esc(state.text) + '</span>'
+    + '<span class="ssot-state-badge ' + state.state + '" aria-label="verification state ' + esc(state.label) + '">' + esc(state.label) + '</span>'
+    + '</div>';
+
+  body.innerHTML = metaHtml + '<div class="ssot-list">' + SSOT_LINKS.map(item => {
     const missing = !item.url;
     const action = missing
       ? '<span class="ssot-missing" aria-label="missing target">missing</span>'
@@ -1267,7 +1329,7 @@ async function refresh() {
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
   await loadTasks(forceFull);
   await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadHealth()]);
-  renderPromotionSSOT();
+  await renderPromotionSSOT();
 }
 
 let refreshTimer = null;
