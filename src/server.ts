@@ -398,6 +398,26 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Serve dashboard JS (extracted from inline template)
+  app.get('/dashboard.js', async (_request, reply) => {
+    try {
+      const { promises: fs } = await import('fs')
+      const { join } = await import('path')
+      const { fileURLToPath } = await import('url')
+      const { dirname } = await import('path')
+
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const publicDir = join(__dirname, '..', 'public')
+      const filePath = join(publicDir, 'dashboard.js')
+
+      const data = await fs.readFile(filePath, 'utf-8')
+      reply.type('application/javascript').send(data)
+    } catch (err) {
+      reply.code(404).send({ error: 'Dashboard JS not found' })
+    }
+  })
+
   // Serve dashboard animations CSS
   app.get('/dashboard-animations.css', async (_request, reply) => {
     try {
