@@ -210,6 +210,15 @@ export function getDashboardHTML(): string {
     cursor: pointer;
   }
   .task-id-link:hover { opacity: 0.9; }
+  .task-id-link .task-preview-tooltip {
+    display: none; position: absolute; z-index: 200; bottom: 120%; left: 50%; transform: translateX(-50%);
+    background: var(--surface-raised); border: 1px solid var(--border-subtle); border-radius: 6px;
+    padding: 8px 10px; font-size: 11px; line-height: 1.4; white-space: nowrap; pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,.3); color: var(--text);
+  }
+  .task-id-link:hover .task-preview-tooltip, .task-id-link:focus .task-preview-tooltip { display: block; }
+  .task-preview-tooltip .tp-title { font-weight: 600; color: var(--text); }
+  .task-preview-tooltip .tp-meta { color: var(--text-muted); font-size: 10px; margin-top: 2px; }
   .task-id-link:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
@@ -600,7 +609,7 @@ let allTasks = [];
 let allEvents = [];
 let taskById = new Map();
 
-const TASK_ID_PATTERN = /\b(task-[a-z0-9-]+)\b/gi;
+const TASK_ID_PATTERN = /\\b(task-[a-z0-9-]+)\\b/gi;
 
 // Delta cursors for lower payload refreshes
 let lastTaskSync = 0;
@@ -746,8 +755,10 @@ function renderMessageContentWithTaskLinks(content) {
     if (isTaskTokenLinkable(text, start, end)) {
       const task = taskById.get(taskId);
       const linkText = task ? (task.title + ' (' + taskId + ')') : taskId;
-      const title = task ? (task.title + ' • ' + taskId) : (taskId + ' (task not found)');
-      html += '<a href="#" class="task-id-link" data-task-id="' + esc(taskId) + '" title="' + esc(title) + '">' + esc(linkText) + '</a>';
+      const tooltip = task
+        ? '<span class="task-preview-tooltip"><span class="tp-title">' + esc(task.title) + '</span><span class="tp-meta">' + esc(task.status || '?') + ' · ' + esc(task.assignee || '?') + '</span></span>'
+        : '<span class="task-preview-tooltip"><span class="tp-title">' + esc(taskId) + '</span><span class="tp-meta">task not found</span></span>';
+      html += '<a href="#" class="task-id-link" data-task-id="' + esc(taskId) + '" style="position:relative">' + esc(linkText) + tooltip + '</a>';
     } else {
       html += esc(taskId);
     }
@@ -763,6 +774,30 @@ function toggleMessageContent(el) {
   if (!el || el.dataset.collapsible !== 'true') return;
   el.classList.toggle('collapsed');
   el.classList.toggle('expanded');
+}
+
+function bindTaskLinkHandlers(el) {
+  if (!el || el.dataset.taskLinkBound === 'true') return;
+
+  el.addEventListener('click', (event) => {
+    const link = event.target && event.target.closest ? event.target.closest('.task-id-link') : null;
+    if (link) {
+      event.preventDefault();
+      event.stopPropagation();
+      openTaskModal(link.dataset.taskId || '');
+    }
+  });
+
+  el.addEventListener('keydown', (event) => {
+    const link = event.target && event.target.closest ? event.target.closest('.task-id-link') : null;
+    if (!link) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      openTaskModal(link.dataset.taskId || '');
+    }
+  });
+
+  el.dataset.taskLinkBound = 'true';
 }
 
 function initChatInteractions() {
@@ -792,6 +827,10 @@ function initChatInteractions() {
   });
 
   body.dataset.taskLinkBound = 'true';
+}
+
+function initComplianceInteractions() {
+  bindTaskLinkHandlers(document.getElementById('compliance-body'));
 }
 
 function complianceState(value, threshold) {
@@ -860,9 +899,10 @@ function renderCompliance(compliance) {
 
   const rows = agents.map(a => {
     const taskValue = a.taskId || '';
+    const taskCell = taskValue ? renderMessageContentWithTaskLinks(taskValue) : '—';
     return '<tr>' +
       '<td>' + esc(a.agent) + '</td>' +
-      '<td>' + esc(a.taskId || '—') + '</td>' +
+      '<td>' + taskCell + '</td>' +
       '<td>' + a.lastValidStatusAgeMin + 'm</td>' +
       '<td>' + a.expectedCadenceMin + 'm</td>' +
       '<td><span class="state-pill ' + a.state + ' compliance-state-' + a.state + '">' + esc(a.state) + '</span></td>' +
@@ -1312,6 +1352,7 @@ async function loadHealth() {
     
     body.innerHTML = html;
     renderCompliance(compliance);
+    initComplianceInteractions();
   } catch (e) {
     console.error('Health load error:', e);
     document.getElementById('health-body').innerHTML = '<div class="empty">Failed to load health data</div>';
