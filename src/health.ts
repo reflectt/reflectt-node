@@ -13,6 +13,7 @@ import { dirname, resolve } from 'node:path'
 import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
+import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
 
 export interface TeamHealthMetrics {
   timestamp: number
@@ -102,15 +103,7 @@ type IdleNudgeState = {
   lastTier: 1 | 2
 }
 
-type IdleNudgeLaneState = {
-  presenceTaskId: string | null
-  doingTaskIds: string[]
-  freshDoingTaskIds: string[]
-  staleDoingTaskIds: string[]
-  selectedTaskId: string | null
-  selectedTaskAgeMin: number | null
-  laneReason: 'no-active-lane' | 'stale-lane' | 'ambiguous-lane' | 'presence-task-mismatch' | 'ok'
-}
+// IdleNudgeLaneState moved to ./watchdog/idleNudgeLane.ts
 
 export type IdleNudgeDecision = {
   agent: string
@@ -710,103 +703,14 @@ class TeamHealthMonitor {
     await appendFile(path, `${JSON.stringify(entry)}\n`, 'utf8')
   }
 
-  private normalizeTaskId(value: unknown): string | null {
-    const taskId = typeof value === 'string' ? value.trim() : ''
-    if (!taskId) return null
-    return /^task-[a-z0-9-]+$/i.test(taskId) ? taskId : null
-  }
-
   private resolveIdleNudgeLane(agent: string, presenceTaskRaw: unknown, tasks: ReturnType<typeof taskManager.listTasks>, now: number): IdleNudgeLaneState {
-    const presenceTaskId = this.normalizeTaskId(presenceTaskRaw)
-    const doingTasks = tasks
-      .filter((t) => (t.assignee || '').toLowerCase() === agent && t.status === 'doing')
-      .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
-
-    const doingTaskIds = doingTasks
-      .map(t => this.normalizeTaskId(t.id))
-      .filter((id): id is string => Boolean(id))
-
-    const staleDoingTaskIds: string[] = []
-    const freshDoingTaskIds: string[] = []
-
-    for (const task of doingTasks) {
-      const taskId = this.normalizeTaskId(task.id)
-      if (!taskId) continue
-      const taskUpdatedAt = Number(task.updatedAt || task.createdAt || 0)
-      const taskAgeMin = taskUpdatedAt > 0 ? Math.floor((now - taskUpdatedAt) / 60_000) : Number.MAX_SAFE_INTEGER
-      if (taskAgeMin > this.idleNudgeActiveTaskMaxAgeMin) {
-        staleDoingTaskIds.push(taskId)
-      } else {
-        freshDoingTaskIds.push(taskId)
-      }
-    }
-
-    const selectedTaskId = freshDoingTaskIds[0] || null
-    const selectedTask = selectedTaskId
-      ? doingTasks.find((task) => task.id === selectedTaskId)
-      : null
-    const selectedTaskUpdatedAt = Number(selectedTask?.updatedAt || selectedTask?.createdAt || 0)
-    const selectedTaskAgeMin = selectedTaskUpdatedAt > 0
-      ? Math.floor((now - selectedTaskUpdatedAt) / 60_000)
-      : null
-
-    if (freshDoingTaskIds.length === 0) {
-      if (doingTaskIds.length === 0) {
-        return {
-          presenceTaskId,
-          doingTaskIds,
-          freshDoingTaskIds,
-          staleDoingTaskIds,
-          selectedTaskId: null,
-          selectedTaskAgeMin: null,
-          laneReason: 'no-active-lane',
-        }
-      }
-
-      return {
-        presenceTaskId,
-        doingTaskIds,
-        freshDoingTaskIds,
-        staleDoingTaskIds,
-        selectedTaskId: null,
-        selectedTaskAgeMin: null,
-        laneReason: 'stale-lane',
-      }
-    }
-
-    if (freshDoingTaskIds.length > 1) {
-      return {
-        presenceTaskId,
-        doingTaskIds,
-        freshDoingTaskIds,
-        staleDoingTaskIds,
-        selectedTaskId,
-        selectedTaskAgeMin,
-        laneReason: 'ambiguous-lane',
-      }
-    }
-
-    if (presenceTaskId && selectedTaskId && presenceTaskId !== selectedTaskId) {
-      return {
-        presenceTaskId,
-        doingTaskIds,
-        freshDoingTaskIds,
-        staleDoingTaskIds,
-        selectedTaskId,
-        selectedTaskAgeMin,
-        laneReason: 'presence-task-mismatch',
-      }
-    }
-
-    return {
-      presenceTaskId,
-      doingTaskIds,
-      freshDoingTaskIds,
-      staleDoingTaskIds,
-      selectedTaskId,
-      selectedTaskAgeMin,
-      laneReason: 'ok',
-    }
+    return resolveIdleNudgeLane(
+      agent,
+      presenceTaskRaw,
+      tasks,
+      now,
+      this.idleNudgeActiveTaskMaxAgeMin,
+    )
   }
 
   async runCadenceWatchdogTick(now = Date.now(), options?: { dryRun?: boolean }): Promise<{ alerts: string[] }> {

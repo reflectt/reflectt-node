@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { healthMonitor } from '../src/health.js'
+import { resolveIdleNudgeLane } from '../src/watchdog/idleNudgeLane.js'
 
 type Fixture = {
   name: string
@@ -13,7 +13,7 @@ type Fixture = {
 }
 
 const now = Date.now()
-const maxAgeMin = Number((healthMonitor as any).idleNudgeActiveTaskMaxAgeMin || 180)
+const maxAgeMin = Number(process.env.IDLE_NUDGE_ACTIVE_TASK_MAX_AGE_MIN || 180)
 const staleMs = (maxAgeMin + 5) * 60_000
 const freshMs = Math.max(1, maxAgeMin - 5) * 60_000
 
@@ -97,11 +97,12 @@ const fixtures: Fixture[] = [
 const rows: Array<Record<string, unknown>> = []
 
 for (const fx of fixtures) {
-  const lane = (healthMonitor as any).resolveIdleNudgeLane(
+  const lane = resolveIdleNudgeLane(
     fx.agent,
     fx.presenceTaskRaw,
     fx.tasks,
     now,
+    maxAgeMin,
   )
 
   assert.equal(
@@ -127,12 +128,12 @@ for (const fx of fixtures) {
   })
 }
 
+const activeHandles = ((process as any)._getActiveHandles?.() || [])
+
 console.log('IDLE_NUDGE_LANE_FIXTURES_PASS')
 console.log(JSON.stringify({
   maxAgeMin,
   fixtureCount: fixtures.length,
+  activeHandleCount: activeHandles.length,
   results: rows,
 }, null, 2))
-
-// healthMonitor spins intervals; force clean exit for CI/local one-shot runs.
-process.exit(0)
