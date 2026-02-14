@@ -1471,6 +1471,15 @@ export async function createServer(): Promise<FastifyInstance> {
     // The reply is handled by the event bus
   })
 
+  // Alias: /events → /events/subscribe (reflectt-channel plugin connects to /events)
+  app.get('/events', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const agent = query.agent
+    const topics = query.topics ? query.topics.split(',').map(t => t.trim()) : undefined
+
+    eventBus.subscribe(reply, agent, topics)
+  })
+
   // Get event bus status
   app.get('/events/status', async () => {
     return eventBus.getStatus()
