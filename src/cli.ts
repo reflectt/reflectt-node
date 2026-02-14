@@ -383,18 +383,24 @@ tasks
   .description('Create a new task')
   .requiredOption('--title <text>', 'Task title')
   .requiredOption('--created-by <agent>', 'Agent creating the task')
+  .requiredOption('--assignee <agent>', 'Task owner/assignee')
+  .requiredOption('--reviewer <agent>', 'Task reviewer')
+  .requiredOption('--done-criteria <items...>', 'Done criteria (space-separated; quote each item)')
+  .requiredOption('--eta <text>', 'ETA (e.g., "30m" or "2026-02-15T18:00Z")')
   .option('--description <text>', 'Task description')
   .option('--status <status>', 'Initial status', 'todo')
-  .option('--assignee <agent>', 'Assign to agent')
   .option('--priority <p>', 'Priority (P0, P1, P2, P3)')
   .action(async (options) => {
     const body: any = {
       title: options.title,
       createdBy: options.createdBy,
       status: options.status,
+      assignee: options.assignee,
+      reviewer: options.reviewer,
+      done_criteria: options.doneCriteria,
+      eta: options.eta,
     }
     if (options.description) body.description = options.description
-    if (options.assignee) body.assignee = options.assignee
     if (options.priority) body.priority = options.priority
     
     const result = await apiRequest('/tasks', {

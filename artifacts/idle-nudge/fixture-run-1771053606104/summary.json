@@ -1,0 +1,141 @@
+{
+  "runId": "fixture-run-1771053606104",
+  "base": "http://127.0.0.1:4460",
+  "timestamp": 1771053606474,
+  "fixtureAgents": [
+    "fixture-warn",
+    "fixture-escalate"
+  ],
+  "debugBefore": {
+    "config": {
+      "enabled": true,
+      "warnMin": 45,
+      "escalateMin": 60,
+      "cooldownMin": 30,
+      "recentSuppressMin": 10,
+      "activeTaskMaxAgeMin": 180,
+      "excluded": [
+        "diag",
+        "ryan",
+        "system"
+      ]
+    },
+    "state": [],
+    "lastDecisions": [],
+    "timestamp": 1771053606462
+  },
+  "dryRun": {
+    "success": true,
+    "dryRun": true,
+    "nudged": [],
+    "decisions": [
+      {
+        "agent": "fixture-warn",
+        "taskId": "task-1771053606442-84hv7opoy",
+        "idleMinutes": 46,
+        "warnMin": 45,
+        "escalateMin": 60,
+        "cooldownMin": 30,
+        "recentSuppressMin": 10,
+        "at": 1771053606469,
+        "decision": "warn",
+        "reason": "eligible",
+        "renderedMessage": "@fixture-warn system reminder: you appear idle for 46m. Post a quick status update now.\nTask: task-1771053606442-84hv7opoy\n1) Shipped: <artifact/commit/file>\n2) Blocker: <none or explicit blocker>\n3) Next: <next deliverable + ETA>"
+      },
+      {
+        "agent": "fixture-escalate",
+        "taskId": "task-1771053606444-b1ded6fm8",
+        "idleMinutes": 61,
+        "warnMin": 45,
+        "escalateMin": 60,
+        "cooldownMin": 30,
+        "recentSuppressMin": 10,
+        "at": 1771053606469,
+        "decision": "escalate",
+        "reason": "eligible",
+        "renderedMessage": "@fixture-escalate @kai system escalation: 61m idle. Post required status format now.\nTask: task-1771053606444-b1ded6fm8\n1) Shipped: <artifact/commit/file>\n2) Blocker: <none or explicit blocker>\n3) Next: <next deliverable + ETA>"
+      }
+    ],
+    "timestamp": 1771053606470
+  },
+  "realRun": {
+    "success": true,
+    "dryRun": false,
+    "nudged": [
+      "fixture-warn",
+      "fixture-escalate"
+    ],
+    "decisions": [
+      {
+        "agent": "fixture-warn",
+        "taskId": "task-1771053606442-84hv7opoy",
+        "idleMinutes": 46,
+        "warnMin": 45,
+        "escalateMin": 60,
+        "cooldownMin": 30,
+        "recentSuppressMin": 10,
+        "at": 1771053606470,
+        "decision": "warn",
+        "reason": "eligible",
+        "renderedMessage": "@fixture-warn system reminder: you appear idle for 46m. Post a quick status update now.\nTask: task-1771053606442-84hv7opoy\n1) Shipped: <artifact/commit/file>\n2) Blocker: <none or explicit blocker>\n3) Next: <next deliverable + ETA>"
+      },
+      {
+        "agent": "fixture-escalate",
+        "taskId": "task-1771053606444-b1ded6fm8",
+        "idleMinutes": 61,
+        "warnMin": 45,
+        "escalateMin": 60,
+        "cooldownMin": 30,
+        "recentSuppressMin": 10,
+        "at": 1771053606470,
+        "decision": "escalate",
+        "reason": "eligible",
+        "renderedMessage": "@fixture-escalate @kai system escalation: 61m idle. Post required status format now.\nTask: task-1771053606444-b1ded6fm8\n1) Shipped: <artifact/commit/file>\n2) Blocker: <none or explicit blocker>\n3) Next: <next deliverable + ETA>"
+      }
+    ],
+    "timestamp": 1771053606472
+  },
+  "secondTick": {
+    "success": true,
+    "dryRun": false,
+    "nudged": [],
+    "decisions": [
+      {
+        "agent": "fixture-warn",
+        "taskId": "task-1771053606442-84hv7opoy",
+        "idleMinutes": 46,
+        "warnMin": 45,
+        "escalateMin": 60,
+        "cooldownMin": 30,
+        "recentSuppressMin": 10,
+        "at": 1771053606473,
+        "decision": "none",
+        "reason": "cooldown-active",
+        "renderedMessage": null
+      },
+      {
+        "agent": "fixture-escalate",
+        "taskId": "task-1771053606444-b1ded6fm8",
+        "idleMinutes": 61,
+        "warnMin": 45,
+        "escalateMin": 60,
+        "cooldownMin": 30,
+        "recentSuppressMin": 10,
+        "at": 1771053606473,
+        "decision": "none",
+        "reason": "cooldown-active",
+        "renderedMessage": null
+      }
+    ],
+    "timestamp": 1771053606473
+  },
+  "messageIds": {
+    "warnMessageId": "msg-1771053606470-s6ggl5j7m",
+    "escalateMessageId": "msg-1771053606471-eig453msp"
+  },
+  "expectations": {
+    "warn": "fixture-warn decision=warn and warning message id present",
+    "escalate": "fixture-escalate decision=escalate and escalation message id present",
+    "cooldown": "second tick decision reason=cooldown-active with no new message id"
+  }
+}

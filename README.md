@@ -230,6 +230,27 @@ launchctl load ~/Library/LaunchAgents/com.reflectt.node.plist
 launchctl kickstart -k gui/$(id -u)/com.reflectt.node
 ```
 
+## Deploy Coordination (Code ↔ Server Sync)
+
+When the repo changes but the running process has not been restarted, dashboard/API behavior can drift from source code.
+
+Use these endpoints to make deploy state explicit:
+
+```bash
+# Compare startup snapshot vs current repo state
+curl -s http://127.0.0.1:4445/release/status
+
+# Generate release notes from completed tasks (since last deploy marker by default)
+curl -s http://127.0.0.1:4445/release/notes
+
+# Mark a deploy event after restart/verification
+curl -s -X POST http://127.0.0.1:4445/release/deploy \
+  -H 'Content-Type: application/json' \
+  -d '{"deployedBy":"ryan","note":"restart after task-comments ship"}'
+```
+
+Dashboard header shows a deploy badge (`in sync` vs `stale`) backed by `/release/status`.
+
 ## Running Tests
 
 ```bash

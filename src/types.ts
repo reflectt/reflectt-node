@@ -33,6 +33,25 @@ export interface Task {
   metadata?: Record<string, unknown>
 }
 
+export type TaskHistoryEventType = 'created' | 'assigned' | 'status_changed' | 'commented'
+
+export interface TaskComment {
+  id: string
+  taskId: string
+  author: string
+  content: string
+  timestamp: number
+}
+
+export interface TaskHistoryEvent {
+  id: string
+  taskId: string
+  type: TaskHistoryEventType
+  actor: string
+  timestamp: number
+  data?: Record<string, unknown>
+}
+
 export type RecurringTaskSchedule =
   | {
       kind: 'weekly'
@@ -63,6 +82,8 @@ export interface RecurringTask {
   enabled: boolean
   status?: 'todo' | 'doing' | 'blocked' | 'validating' | 'done' // default generated status: todo
   lastRunAt?: number
+  lastSkipAt?: number
+  lastSkipReason?: string
   nextRunAt: number
   createdAt: number
   updatedAt: number

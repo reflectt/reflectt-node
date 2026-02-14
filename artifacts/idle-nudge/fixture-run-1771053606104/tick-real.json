@@ -1,0 +1,37 @@
+{
+  "success": true,
+  "dryRun": false,
+  "nudged": [
+    "fixture-warn",
+    "fixture-escalate"
+  ],
+  "decisions": [
+    {
+      "agent": "fixture-warn",
+      "taskId": "task-1771053606442-84hv7opoy",
+      "idleMinutes": 46,
+      "warnMin": 45,
+      "escalateMin": 60,
+      "cooldownMin": 30,
+      "recentSuppressMin": 10,
+      "at": 1771053606470,
+      "decision": "warn",
+      "reason": "eligible",
+      "renderedMessage": "@fixture-warn system reminder: you appear idle for 46m. Post a quick status update now.\nTask: task-1771053606442-84hv7opoy\n1) Shipped: <artifact/commit/file>\n2) Blocker: <none or explicit blocker>\n3) Next: <next deliverable + ETA>"
+    },
+    {
+      "agent": "fixture-escalate",
+      "taskId": "task-1771053606444-b1ded6fm8",
+      "idleMinutes": 61,
+      "warnMin": 45,
+      "escalateMin": 60,
+      "cooldownMin": 30,
+      "recentSuppressMin": 10,
+      "at": 1771053606470,
+      "decision": "escalate",
+      "reason": "eligible",
+      "renderedMessage": "@fixture-escalate @kai system escalation: 61m idle. Post required status format now.\nTask: task-1771053606444-b1ded6fm8\n1) Shipped: <artifact/commit/file>\n2) Blocker: <none or explicit blocker>\n3) Next: <next deliverable + ETA>"
+    }
+  ],
+  "timestamp": 1771053606472
+}

@@ -23,6 +23,8 @@ import { getDashboardHTML } from './dashboard.js'
 import { healthMonitor } from './health.js'
 import { contentManager } from './content.js'
 import { experimentsManager } from './experiments.js'
+import { releaseManager } from './release.js'
+import { researchManager } from './research.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -38,9 +40,10 @@ const CreateTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).default('todo'),
-  assignee: z.string().optional(),
-  reviewer: z.string().optional(),
-  done_criteria: z.array(z.string().min(1)).optional(),
+  assignee: z.string().trim().min(1),
+  reviewer: z.string().trim().min(1),
+  done_criteria: z.array(z.string().trim().min(1)).min(1),
+  eta: z.string().trim().min(1),
   createdBy: z.string().min(1),
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
   blocked_by: z.array(z.string()).optional(),
@@ -61,6 +64,12 @@ const UpdateTaskSchema = z.object({
   epic_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
+  actor: z.string().trim().min(1).optional(),
+})
+
+const CreateTaskCommentSchema = z.object({
+  author: z.string().trim().min(1),
+  content: z.string().trim().min(1),
 })
 
 const RecurringTaskScheduleSchema = z.discriminatedUnion('kind', [
@@ -80,9 +89,10 @@ const RecurringTaskScheduleSchema = z.discriminatedUnion('kind', [
 const CreateRecurringTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
-  assignee: z.string().optional(),
-  reviewer: z.string().optional(),
-  done_criteria: z.array(z.string().min(1)).optional(),
+  assignee: z.string().trim().min(1),
+  reviewer: z.string().trim().min(1),
+  done_criteria: z.array(z.string().trim().min(1)).min(1),
+  eta: z.string().trim().min(1),
   createdBy: z.string().min(1),
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
   blocked_by: z.array(z.string()).optional(),
@@ -106,6 +116,36 @@ const CreateExperimentSchema = z.object({
   metricGuardrail: z.string().trim().min(1).optional(),
   channel: z.string().trim().min(1).optional(),
   notes: z.string().trim().optional(),
+})
+
+const MarkDeploySchema = z.object({
+  deployedBy: z.string().trim().min(1).optional(),
+  note: z.string().trim().min(1).optional(),
+})
+
+const CreateResearchRequestSchema = z.object({
+  title: z.string().trim().min(1),
+  question: z.string().trim().min(1),
+  requestedBy: z.string().trim().min(1),
+  owner: z.string().trim().min(1).optional(),
+  category: z.enum(['market', 'competitor', 'customer', 'other']).optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  status: z.enum(['open', 'in_progress', 'answered', 'archived']).optional(),
+  taskId: z.string().trim().min(1).optional(),
+  dueAt: z.number().int().positive().optional(),
+  slaHours: z.number().int().positive().max(24 * 30).optional(),
+  metadata: z.record(z.unknown()).optional(),
+})
+
+const CreateResearchFindingSchema = z.object({
+  requestId: z.string().trim().min(1),
+  title: z.string().trim().min(1),
+  summary: z.string().trim().min(1),
+  author: z.string().trim().min(1),
+  confidence: z.enum(['low', 'medium', 'high']).optional(),
+  artifactUrl: z.string().trim().url().optional(),
+  highlights: z.array(z.string().trim().min(1)).optional(),
+  metadata: z.record(z.unknown()).optional(),
 })
 
 const DEFAULT_LIMITS = {
@@ -272,6 +312,15 @@ export async function createServer(): Promise<FastifyInstance> {
     return health
   })
 
+  // Per-agent structured health summary (dashboard v2)
+  app.get('/health/agents', async (request, reply) => {
+    const payload = await healthMonitor.getAgentHealthSummary()
+    if (applyConditionalCaching(request, reply, payload, payload.timestamp)) {
+      return
+    }
+    return payload
+  })
+
   // Team health compliance payload (dashboard panel)
   app.get('/health/compliance', async (request, reply) => {
     const compliance = await healthMonitor.getCollaborationCompliance()
@@ -363,6 +412,30 @@ export async function createServer(): Promise<FastifyInstance> {
       message: 'Log storage not implemented yet. Use system logs or monitoring service.',
       level,
       since,
+    }
+  })
+
+  // ============ RELEASE / DEPLOY ENDPOINTS ============
+
+  app.get('/release/status', async () => {
+    return releaseManager.getDeployStatus()
+  })
+
+  app.get('/release/notes', async (request) => {
+    const query = request.query as Record<string, string>
+    const since = parseEpochMs(query.since)
+    const limit = boundedLimit(query.limit, 25, 200)
+    const notes = await releaseManager.getReleaseNotes({ since, limit })
+    return notes
+  })
+
+  app.post('/release/deploy', async (request) => {
+    try {
+      const data = MarkDeploySchema.parse(request.body || {})
+      const marker = await releaseManager.markDeploy(data.deployedBy, data.note)
+      return { success: true, marker }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to mark deploy' }
     }
   })
 
@@ -675,18 +748,27 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ============ TASK ENDPOINTS ============
 
+  const enrichTaskWithComments = (task: Task) => ({
+    ...task,
+    commentCount: taskManager.getTaskCommentCount(task.id),
+  })
+
   // List tasks
   app.get('/tasks', async (request, reply) => {
     const query = request.query as Record<string, string>
     const updatedSince = parseEpochMs(query.updatedSince || query.since)
     const limit = boundedLimit(query.limit, DEFAULT_LIMITS.tasks, MAX_LIMITS.tasks)
 
+    const tagFilter = query.tag
+      ? [query.tag]
+      : (query.tags ? query.tags.split(',') : undefined)
+
     let tasks = taskManager.listTasks({
       status: query.status as Task['status'] | undefined,
       assignee: query.assignee || query.assignedTo, // Support both for backward compatibility
       createdBy: query.createdBy,
       priority: query.priority as Task['priority'] | undefined,
-      tags: query.tags ? query.tags.split(',') : undefined,
+      tags: tagFilter,
     })
 
     if (updatedSince) {
@@ -695,7 +777,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     tasks = tasks.slice(0, limit)
 
-    const payload = { tasks }
+    const payload = { tasks: tasks.map(enrichTaskWithComments) }
     const lastModified = tasks.length > 0 ? Math.max(...tasks.map(t => t.updatedAt || 0)) : undefined
     if (applyConditionalCaching(request, reply, payload, lastModified)) {
       return
@@ -719,7 +801,14 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/tasks/recurring', async (request) => {
     try {
       const data = CreateRecurringTaskSchema.parse(request.body)
-      const recurring = await taskManager.createRecurringTask(data)
+      const { eta, ...rest } = data
+      const recurring = await taskManager.createRecurringTask({
+        ...rest,
+        metadata: {
+          ...(rest.metadata || {}),
+          eta,
+        },
+      })
       return { success: true, recurring }
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to create recurring task' }
@@ -727,9 +816,11 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Force recurring materialization pass
-  app.post('/tasks/recurring/materialize', async () => {
-    const result = await taskManager.materializeDueRecurringTasks()
-    return { success: true, ...result }
+  app.post('/tasks/recurring/materialize', async (request) => {
+    const query = request.query as Record<string, string>
+    const force = query.force === 'true'
+    const result = await taskManager.materializeDueRecurringTasks(Date.now(), { force })
+    return { success: true, force, ...result }
   })
 
   // Get task
@@ -738,51 +829,110 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!task) {
       return { error: 'Task not found' }
     }
-    return { task }
+    return { task: enrichTaskWithComments(task) }
+  })
+
+  // Task history
+  app.get<{ Params: { id: string } }>('/tasks/:id/history', async (request) => {
+    const task = taskManager.getTask(request.params.id)
+    if (!task) {
+      return { error: 'Task not found' }
+    }
+    const history = taskManager.getTaskHistory(request.params.id)
+    return { history, count: history.length }
+  })
+
+  // Task comments
+  app.get<{ Params: { id: string } }>('/tasks/:id/comments', async (request) => {
+    const task = taskManager.getTask(request.params.id)
+    if (!task) {
+      return { error: 'Task not found' }
+    }
+
+    const comments = taskManager.getTaskComments(request.params.id)
+    return { comments, count: comments.length }
+  })
+
+  // Add task comment
+  app.post<{ Params: { id: string } }>('/tasks/:id/comments', async (request) => {
+    const task = taskManager.getTask(request.params.id)
+    if (!task) {
+      return { success: false, error: 'Task not found' }
+    }
+
+    try {
+      const data = CreateTaskCommentSchema.parse(request.body)
+      const comment = await taskManager.addTaskComment(request.params.id, data.author, data.content)
+
+      presenceManager.recordActivity(data.author, 'message')
+      presenceManager.updatePresence(data.author, 'working')
+
+      return { success: true, comment }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to add comment' }
+    }
   })
 
   // Create task
-  app.post('/tasks', async (request) => {
+  app.post('/tasks', async (request, reply) => {
     try {
       const data = CreateTaskSchema.parse(request.body)
-      const task = await taskManager.createTask(data)
+      const { eta, ...rest } = data
+      const task = await taskManager.createTask({
+        ...rest,
+        metadata: {
+          ...(rest.metadata || {}),
+          eta,
+        },
+      })
       
       // Auto-update presence: creating tasks = working
       if (data.createdBy) {
         presenceManager.updatePresence(data.createdBy, 'working')
       }
       
-      return { success: true, task }
+      return { success: true, task: enrichTaskWithComments(task) }
     } catch (err: any) {
+      reply.code(400)
       return { success: false, error: err.message || 'Failed to create task' }
     }
   })
 
   // Update task
-  app.patch<{ Params: { id: string } }>('/tasks/:id', async (request) => {
+  app.patch<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
     try {
-      const updates = UpdateTaskSchema.parse(request.body)
+      const parsed = UpdateTaskSchema.parse(request.body)
+      const { actor, metadata, ...rest } = parsed
+      const updates = {
+        ...rest,
+        metadata: {
+          ...(metadata || {}),
+          ...(actor ? { actor } : {}),
+        },
+      }
       const task = await taskManager.updateTask(request.params.id, updates)
       if (!task) {
-        return { error: 'Task not found' }
+        reply.code(404)
+        return { success: false, error: 'Task not found' }
       }
       
       // Auto-update presence on task activity
       if (task.assignee) {
-        if (updates.status === 'done') {
+        if (parsed.status === 'done') {
           presenceManager.recordActivity(task.assignee, 'task_completed')
           presenceManager.updatePresence(task.assignee, 'working')
-        } else if (updates.status === 'doing') {
+        } else if (parsed.status === 'doing') {
           presenceManager.updatePresence(task.assignee, 'working')
-        } else if (updates.status === 'blocked') {
+        } else if (parsed.status === 'blocked') {
           presenceManager.updatePresence(task.assignee, 'blocked')
-        } else if (updates.status === 'validating') {
+        } else if (parsed.status === 'validating') {
           presenceManager.updatePresence(task.assignee, 'reviewing')
         }
       }
       
-      return { success: true, task }
+      return { success: true, task: enrichTaskWithComments(task) }
     } catch (err: any) {
+      reply.code(400)
       return { success: false, error: err.message || 'Failed to update task' }
     }
   })
@@ -804,7 +954,7 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!task) {
       return { task: null, message: 'No available tasks' }
     }
-    return { task }
+    return { task: enrichTaskWithComments(task) }
   })
 
   // Backlog: ranked list of unassigned tasks any agent can claim
@@ -818,7 +968,7 @@ export async function createServer(): Promise<FastifyInstance> {
         if (pa !== pb) return pa - pb
         return a.createdAt - b.createdAt
       })
-    return { tasks, count: tasks.length }
+    return { tasks: tasks.map(enrichTaskWithComments), count: tasks.length }
   })
 
   // Claim a task (self-assign)
@@ -835,8 +985,15 @@ export async function createServer(): Promise<FastifyInstance> {
     if (task.assignee) {
       return { success: false, error: `Task already assigned to ${task.assignee}` }
     }
-    const updated = taskManager.updateTask(id, { assignee: body.agent, status: 'doing' })
-    return { success: true, task: updated }
+    const updated = await taskManager.updateTask(id, {
+      assignee: body.agent,
+      status: 'doing',
+      metadata: {
+        ...(task.metadata || {}),
+        actor: body.agent,
+      },
+    })
+    return { success: true, task: updated ? enrichTaskWithComments(updated) : null }
   })
 
   // Task lifecycle instrumentation: reviewer + done criteria gates
@@ -862,6 +1019,61 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/experiments/active', async () => {
     const experiments = experimentsManager.getActiveExperiments()
     return { experiments, count: experiments.length }
+  })
+
+  // ============ RESEARCH ENDPOINTS ============
+
+  app.get('/research/requests', async (request) => {
+    const query = request.query as Record<string, string>
+    const requests = await researchManager.listRequests({
+      status: query.status as any,
+      owner: query.owner,
+      category: query.category as any,
+      limit: boundedLimit(query.limit, 50, 200),
+    })
+    return { requests, count: requests.length }
+  })
+
+  app.post('/research/requests', async (request) => {
+    try {
+      const data = CreateResearchRequestSchema.parse(request.body)
+      const dueAt = data.dueAt || (data.slaHours ? Date.now() + (data.slaHours * 60 * 60 * 1000) : undefined)
+      const item = await researchManager.createRequest({
+        title: data.title,
+        question: data.question,
+        requestedBy: data.requestedBy,
+        owner: data.owner,
+        category: data.category,
+        priority: data.priority,
+        status: data.status,
+        taskId: data.taskId,
+        dueAt,
+        metadata: data.metadata,
+      })
+      return { success: true, request: item }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to create research request' }
+    }
+  })
+
+  app.get('/research/findings', async (request) => {
+    const query = request.query as Record<string, string>
+    const findings = await researchManager.listFindings({
+      requestId: query.requestId,
+      author: query.author,
+      limit: boundedLimit(query.limit, 50, 200),
+    })
+    return { findings, count: findings.length }
+  })
+
+  app.post('/research/findings', async (request) => {
+    try {
+      const data = CreateResearchFindingSchema.parse(request.body)
+      const finding = await researchManager.createFinding(data)
+      return { success: true, finding }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to create research finding' }
+    }
   })
 
   // ============ MEMORY ENDPOINTS ============
