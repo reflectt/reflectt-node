@@ -372,7 +372,7 @@ export async function createServer(): Promise<FastifyInstance> {
     reply.type('text/html').send(getDashboardHTML())
   })
 
-  // API docs page
+  // API docs page (markdown — token-efficient for agents)
   app.get('/docs', async (_request, reply) => {
     try {
       const { promises: fs } = await import('fs')
@@ -381,8 +381,8 @@ export async function createServer(): Promise<FastifyInstance> {
       const { dirname } = await import('path')
       const __filename = fileURLToPath(import.meta.url)
       const __dirname = dirname(__filename)
-      const html = await fs.readFile(join(__dirname, '..', 'public', 'docs.html'), 'utf-8')
-      reply.type('text/html').send(html)
+      const md = await fs.readFile(join(__dirname, '..', 'public', 'docs.md'), 'utf-8')
+      reply.type('text/plain; charset=utf-8').send(md)
     } catch (err) {
       reply.code(500).send({ error: 'Failed to load docs' })
     }
