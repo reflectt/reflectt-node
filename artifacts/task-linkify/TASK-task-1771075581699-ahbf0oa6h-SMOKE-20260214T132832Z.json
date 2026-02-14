@@ -1,0 +1,63 @@
+{
+  "task_id": "task-1771075581699-ahbf0oa6h",
+  "timestamp_utc": "2026-02-14T13:28:32Z",
+  "mutation": false,
+  "required_check_contract": "task-linkify-regression-gate",
+  "repo": "reflectt/reflectt-node",
+  "workflow": "idle-nudge-regression.yml",
+  "run_id": "22017991689",
+  "schema": [
+    "step",
+    "expected",
+    "actual",
+    "status",
+    "note"
+  ],
+  "steps": [
+    {
+      "step": "auth",
+      "expected": "authenticated gh session",
+      "actual": "github.com\n  \u2713 Logged in to github.com account itskai-dev (keyring)\n  - Active account: true\n  - Git operations protocol: https\n  - Token: gho_************************************\n  - Token scopes: 'gist', 'project', 'read:org', 'repo', 'user', 'workflow'",
+      "status": "PASS",
+      "note": ""
+    },
+    {
+      "step": "repo_target",
+      "expected": "repo is reflectt/reflectt-node and default branch main",
+      "actual": "{\"defaultBranchRef\":{\"name\":\"main\"},\"nameWithOwner\":\"reflectt/reflectt-node\",\"url\":\"https://github.com/reflectt/reflectt-node\"}",
+      "status": "PASS",
+      "note": ""
+    },
+    {
+      "step": "branch_protection_read",
+      "expected": "read outputs strict/contexts/required-check presence",
+      "actual": "[read] repo=reflectt/reflectt-node branch=main required_context=task-linkify-regression-gate\nstrict=False\ncontexts=\nhas_required_context=False\n[read] merged_context_set_preview=\n  - task-linkify-regression-gate",
+      "status": "PASS",
+      "note": ""
+    },
+    {
+      "step": "latest_run_lookup",
+      "expected": "latest workflow run available",
+      "actual": "[{\"conclusion\":\"success\",\"createdAt\":\"2026-02-14T13:09:41Z\",\"databaseId\":22017991689,\"event\":\"pull_request\",\"status\":\"completed\",\"url\":\"https://github.com/reflectt/reflectt-node/actions/runs/22017991689\"}]",
+      "status": "PASS",
+      "note": ""
+    },
+    {
+      "step": "artifact_lookup",
+      "expected": "artifact task-linkify-regression-output exists and is valid",
+      "actual": "{\"total_count\":1,\"artifacts\":[{\"id\":5511026523,\"node_id\":\"MDg6QXJ0aWZhY3Q1NTExMDI2NTIz\",\"name\":\"task-linkify-regression-output\",\"size_in_bytes\":867,\"url\":\"https://api.github.com/repos/reflectt/reflectt-node/actions/artifacts/5511026523\",\"archive_download_url\":\"https://api.github.com/repos/reflectt/reflectt-node/actions/artifacts/5511026523/zip\",\"expired\":false,\"digest\":\"sha256:16c63dfa69dd8c0a94e9aed39af2b974f0c43463d96f00786d4e24fdafc8ae60\",\"created_at\":\"2026-02-14T13:09:56Z\",\"updated_at\":\"2026-02-14T13:09:56Z\",\"expires_at\":\"2026-05-15T13:09:42Z\",\"workflow_run\":{\"id\":22017991689,\"repository_id\":1154745875,\"head_repository_id\":1154745875,\"head_branch\":\"link/pr-event-validation-task-linkify-gate\",\"head_sha\":\"4da9e6fd31f1ce7b5cbb59d58e9c8e4958e0fdee\"}}]}",
+      "status": "PASS",
+      "note": ""
+    }
+  ],
+  "has_required_check_in_read": false,
+  "artifact": {
+    "name": "task-linkify-regression-output",
+    "non_expired": true,
+    "size_bytes": 867,
+    "run_id_match": true,
+    "ok": true
+  },
+  "blocking_failures": [],
+  "decision": "GO"
+}
