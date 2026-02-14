@@ -102,6 +102,16 @@ type IdleNudgeState = {
   lastTier: 1 | 2
 }
 
+type IdleNudgeLaneState = {
+  presenceTaskId: string | null
+  doingTaskIds: string[]
+  freshDoingTaskIds: string[]
+  staleDoingTaskIds: string[]
+  selectedTaskId: string | null
+  selectedTaskAgeMin: number | null
+  laneReason: 'no-active-lane' | 'stale-lane' | 'ambiguous-lane' | 'presence-task-mismatch' | 'ok'
+}
+
 export type IdleNudgeDecision = {
   agent: string
   taskId: string | null
@@ -121,7 +131,10 @@ export type IdleNudgeDecision = {
     | 'cooldown-active'
     | 'missing-active-task'
     | 'stale-active-task'
+    | 'ambiguous-active-task'
+    | 'presence-task-mismatch'
     | 'eligible'
+  lane: IdleNudgeLaneState
   renderedMessage: string | null
   at: number
 }
@@ -697,6 +710,105 @@ class TeamHealthMonitor {
     await appendFile(path, `${JSON.stringify(entry)}\n`, 'utf8')
   }
 
+  private normalizeTaskId(value: unknown): string | null {
+    const taskId = typeof value === 'string' ? value.trim() : ''
+    if (!taskId) return null
+    return /^task-[a-z0-9-]+$/i.test(taskId) ? taskId : null
+  }
+
+  private resolveIdleNudgeLane(agent: string, presenceTaskRaw: unknown, tasks: ReturnType<typeof taskManager.listTasks>, now: number): IdleNudgeLaneState {
+    const presenceTaskId = this.normalizeTaskId(presenceTaskRaw)
+    const doingTasks = tasks
+      .filter((t) => (t.assignee || '').toLowerCase() === agent && t.status === 'doing')
+      .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+
+    const doingTaskIds = doingTasks
+      .map(t => this.normalizeTaskId(t.id))
+      .filter((id): id is string => Boolean(id))
+
+    const staleDoingTaskIds: string[] = []
+    const freshDoingTaskIds: string[] = []
+
+    for (const task of doingTasks) {
+      const taskId = this.normalizeTaskId(task.id)
+      if (!taskId) continue
+      const taskUpdatedAt = Number(task.updatedAt || task.createdAt || 0)
+      const taskAgeMin = taskUpdatedAt > 0 ? Math.floor((now - taskUpdatedAt) / 60_000) : Number.MAX_SAFE_INTEGER
+      if (taskAgeMin > this.idleNudgeActiveTaskMaxAgeMin) {
+        staleDoingTaskIds.push(taskId)
+      } else {
+        freshDoingTaskIds.push(taskId)
+      }
+    }
+
+    const selectedTaskId = freshDoingTaskIds[0] || null
+    const selectedTask = selectedTaskId
+      ? doingTasks.find((task) => task.id === selectedTaskId)
+      : null
+    const selectedTaskUpdatedAt = Number(selectedTask?.updatedAt || selectedTask?.createdAt || 0)
+    const selectedTaskAgeMin = selectedTaskUpdatedAt > 0
+      ? Math.floor((now - selectedTaskUpdatedAt) / 60_000)
+      : null
+
+    if (freshDoingTaskIds.length === 0) {
+      if (doingTaskIds.length === 0) {
+        return {
+          presenceTaskId,
+          doingTaskIds,
+          freshDoingTaskIds,
+          staleDoingTaskIds,
+          selectedTaskId: null,
+          selectedTaskAgeMin: null,
+          laneReason: 'no-active-lane',
+        }
+      }
+
+      return {
+        presenceTaskId,
+        doingTaskIds,
+        freshDoingTaskIds,
+        staleDoingTaskIds,
+        selectedTaskId: null,
+        selectedTaskAgeMin: null,
+        laneReason: 'stale-lane',
+      }
+    }
+
+    if (freshDoingTaskIds.length > 1) {
+      return {
+        presenceTaskId,
+        doingTaskIds,
+        freshDoingTaskIds,
+        staleDoingTaskIds,
+        selectedTaskId,
+        selectedTaskAgeMin,
+        laneReason: 'ambiguous-lane',
+      }
+    }
+
+    if (presenceTaskId && selectedTaskId && presenceTaskId !== selectedTaskId) {
+      return {
+        presenceTaskId,
+        doingTaskIds,
+        freshDoingTaskIds,
+        staleDoingTaskIds,
+        selectedTaskId,
+        selectedTaskAgeMin,
+        laneReason: 'presence-task-mismatch',
+      }
+    }
+
+    return {
+      presenceTaskId,
+      doingTaskIds,
+      freshDoingTaskIds,
+      staleDoingTaskIds,
+      selectedTaskId,
+      selectedTaskAgeMin,
+      laneReason: 'ok',
+    }
+  }
+
   async runCadenceWatchdogTick(now = Date.now(), options?: { dryRun?: boolean }): Promise<{ alerts: string[] }> {
     const dryRun = options?.dryRun === true
     const alerts: string[] = []
@@ -855,12 +967,8 @@ class TeamHealthMonitor {
       const lastActiveAt = presence.last_active || presence.lastUpdate || 0
       const inactivityMin = lastActiveAt ? Math.floor((now - lastActiveAt) / 60_000) : 0
       const tier: 1 | 2 = inactivityMin >= this.idleNudgeEscalateMin ? 2 : 1
-      const activeTask = tasks
-        .filter((t) => t.assignee === agent && t.status === 'doing')
-        .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))[0]
-      const taskId = activeTask?.id || null
-      const activeTaskUpdatedAt = Number(activeTask?.updatedAt || activeTask?.createdAt || 0)
-      const activeTaskAgeMin = activeTaskUpdatedAt > 0 ? Math.floor((now - activeTaskUpdatedAt) / 60_000) : null
+      const lane = this.resolveIdleNudgeLane(agent, presence.task, tasks, now)
+      const taskId = lane.selectedTaskId
 
       const baseDecision: Omit<IdleNudgeDecision, 'reason' | 'decision' | 'renderedMessage'> = {
         agent,
@@ -870,6 +978,7 @@ class TeamHealthMonitor {
         escalateMin: this.idleNudgeEscalateMin,
         cooldownMin: this.idleNudgeCooldownMin,
         recentSuppressMin: this.idleNudgeSuppressRecentMin,
+        lane,
         at: now,
       }
 
@@ -898,7 +1007,9 @@ class TeamHealthMonitor {
         continue
       }
 
-      const lastAgentMessage = messages.find((m: any) => (m.from || '').toLowerCase() === agent)
+      const lastAgentMessage = [...messages]
+        .reverse()
+        .find((m: any) => (m.from || '').toLowerCase() === agent)
       if (lastAgentMessage?.timestamp) {
         const sinceLastMessageMin = Math.floor((now - lastAgentMessage.timestamp) / 60_000)
         if (sinceLastMessageMin < this.idleNudgeSuppressRecentMin) {
@@ -916,15 +1027,29 @@ class TeamHealthMonitor {
         }
       }
 
-      // Safety guard: never emit when an active task is missing/invalid.
-      if (!taskId || !/^task-[a-z0-9-]+$/i.test(taskId)) {
+      if (lane.laneReason === 'no-active-lane') {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'missing-active-task', renderedMessage: null })
         continue
       }
 
-      // Additional guard: suppress stale "doing" tasks that likely represent lane drift.
-      if (activeTaskAgeMin !== null && activeTaskAgeMin > this.idleNudgeActiveTaskMaxAgeMin) {
+      if (lane.laneReason === 'stale-lane') {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'stale-active-task', renderedMessage: null })
+        continue
+      }
+
+      if (lane.laneReason === 'ambiguous-lane') {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'ambiguous-active-task', renderedMessage: null })
+        continue
+      }
+
+      if (lane.laneReason === 'presence-task-mismatch') {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'presence-task-mismatch', renderedMessage: null })
+        continue
+      }
+
+      // Safety guard: never emit when an active task is missing/invalid.
+      if (!taskId || !/^task-[a-z0-9-]+$/i.test(taskId)) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'missing-active-task', renderedMessage: null })
         continue
       }
 
@@ -980,9 +1105,24 @@ class TeamHealthMonitor {
       excluded: string[]
     }
     state: Array<{ agent: string; lastNudgeAt: number; lastTier: 1 | 2 }>
+    summary: {
+      decisionCounts: Record<'none' | 'warn' | 'escalate', number>
+      reasonCounts: Record<string, number>
+      laneReasonCounts: Record<string, number>
+    }
     lastDecisions: IdleNudgeDecision[]
     timestamp: number
   } {
+    const decisionCounts: Record<'none' | 'warn' | 'escalate', number> = { none: 0, warn: 0, escalate: 0 }
+    const reasonCounts: Record<string, number> = {}
+    const laneReasonCounts: Record<string, number> = {}
+
+    for (const decision of this.idleNudgeLastDecisions) {
+      decisionCounts[decision.decision] += 1
+      reasonCounts[decision.reason] = (reasonCounts[decision.reason] || 0) + 1
+      laneReasonCounts[decision.lane.laneReason] = (laneReasonCounts[decision.lane.laneReason] || 0) + 1
+    }
+
     return {
       config: {
         enabled: this.idleNudgeEnabled,
@@ -998,6 +1138,11 @@ class TeamHealthMonitor {
         lastNudgeAt: s.lastNudgeAt,
         lastTier: s.lastTier,
       })),
+      summary: {
+        decisionCounts,
+        reasonCounts,
+        laneReasonCounts,
+      },
       lastDecisions: this.idleNudgeLastDecisions,
       timestamp: Date.now(),
     }
