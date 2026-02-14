@@ -651,9 +651,9 @@ function renderPromotionSSOT() {
 
 function isTaskTokenInsideUrl(text, start, end) {
   let segStart = start;
-  while (segStart > 0 && !/\s/.test(text[segStart - 1])) segStart -= 1;
+  while (segStart > 0 && !/\\s/.test(text[segStart - 1])) segStart -= 1;
   let segEnd = end;
-  while (segEnd < text.length && !/\s/.test(text[segEnd])) segEnd += 1;
+  while (segEnd < text.length && !/\\s/.test(text[segEnd])) segEnd += 1;
   const tokenSegment = text.slice(segStart, segEnd);
   return /^(https?:\\/\\/|www\\.)/i.test(tokenSegment);
 }
