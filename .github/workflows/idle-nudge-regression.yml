@@ -81,6 +81,7 @@ jobs:
           if-no-files-found: warn
 
   task-linkify-dryrun-validator-report:
+    # Report-only validator lane; must not invoke branch-protection mutation/toggle actions.
     name: task-linkify-dryrun-validator-report
     runs-on: ubuntu-latest
     timeout-minutes: 10
