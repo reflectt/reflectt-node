@@ -9,6 +9,8 @@ on:
       - 'tools/test-idle-nudge-lane-fixtures.ts'
       - 'tools/task-linkify-regression-harness.ts'
       - 'tools/task-linkify-dryrun-transcript-validator.ts'
+      - 'tools/task-linkify-dryrun-validator-negative-harness.ts'
+      - 'artifacts/task-linkify/fixtures/**'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/idle-nudge-regression.yml'
@@ -18,6 +20,8 @@ on:
       - 'tools/test-idle-nudge-lane-fixtures.ts'
       - 'tools/task-linkify-regression-harness.ts'
       - 'tools/task-linkify-dryrun-transcript-validator.ts'
+      - 'tools/task-linkify-dryrun-validator-negative-harness.ts'
+      - 'artifacts/task-linkify/fixtures/**'
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/idle-nudge-regression.yml'
@@ -159,4 +163,84 @@ jobs:
           path: |
             artifacts/task-linkify/ci/task-linkify-dryrun-validator.log
             artifacts/task-linkify/ci/task-linkify-dryrun-validator-result.json
+          if-no-files-found: warn
+
+  task-linkify-dryrun-negative-fixtures-report:
+    # Report-only validator lane; must not invoke branch-protection mutation/toggle actions.
+    name: task-linkify-dryrun-negative-fixtures-report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DRYRUN_NEGATIVE_LOG: artifacts/task-linkify/ci/task-linkify-dryrun-negative-harness.log
+      DRYRUN_NEGATIVE_JSON: artifacts/task-linkify/ci/task-linkify-dryrun-negative-harness-result.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Ensure negative harness artifact directory exists
+        run: mkdir -p artifacts/task-linkify/ci
+
+      - name: Run dry-run negative-fixture harness (report-only)
+        run: |
+          set -o pipefail
+          npm run test:task-linkify:dryrun-negative-fixtures | tee "$DRYRUN_NEGATIVE_LOG"
+
+      - name: Extract negative harness JSON payload
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          log_path = Path(os.environ['DRYRUN_NEGATIVE_LOG'])
+          out_path = Path(os.environ['DRYRUN_NEGATIVE_JSON'])
+          marker = 'TASK_LINKIFY_DRYRUN_NEGATIVE_HARNESS_RESULT'
+
+          payload = {
+              'status': 'ERROR',
+              'reason': 'negative harness marker not found',
+              'source_log': str(log_path),
+          }
+
+          if log_path.exists():
+              text = log_path.read_text(encoding='utf-8', errors='replace')
+              if marker in text:
+                  fragment = text.split(marker, 1)[1].strip()
+                  brace = fragment.find('{')
+                  if brace >= 0:
+                      try:
+                          payload = json.loads(fragment[brace:])
+                      except Exception as exc:
+                          payload = {
+                              'status': 'ERROR',
+                              'reason': f'json parse failed: {exc}',
+                              'source_log': str(log_path),
+                          }
+
+          out_path.parent.mkdir(parents=True, exist_ok=True)
+          out_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+          print(f'wrote {out_path}')
+          PY
+
+      - name: Upload dry-run negative-fixture report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-linkify-dryrun-negative-fixtures-report
+          path: |
+            artifacts/task-linkify/ci/task-linkify-dryrun-negative-harness.log
+            artifacts/task-linkify/ci/task-linkify-dryrun-negative-harness-result.json
           if-no-files-found: warn

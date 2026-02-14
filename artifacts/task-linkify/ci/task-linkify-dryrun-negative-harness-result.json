@@ -1,0 +1,68 @@
+{
+  "harness": "task-linkify-dryrun-validator-negative-harness",
+  "command": "npm run test:task-linkify:dryrun-negative-fixtures",
+  "summary": {
+    "caseCount": 4,
+    "passCount": 4,
+    "failCount": 0,
+    "status": "PASS"
+  },
+  "results": [
+    {
+      "id": "missing-mutation-line",
+      "fixture": "artifacts/task-linkify/fixtures/fixture-missing-mutation-line.txt",
+      "pass": true,
+      "expectedFailedChecks": [
+        "mutation-false"
+      ],
+      "actualFailedChecks": [
+        "mutation-false"
+      ],
+      "exitCode": 1,
+      "status": "FAIL",
+      "reason": "ok"
+    },
+    {
+      "id": "nonzero-mutation-endpoints",
+      "fixture": "artifacts/task-linkify/fixtures/fixture-nonzero-mutation-endpoints.txt",
+      "pass": true,
+      "expectedFailedChecks": [
+        "mutation-endpoint-calls-zero"
+      ],
+      "actualFailedChecks": [
+        "mutation-endpoint-calls-zero"
+      ],
+      "exitCode": 1,
+      "status": "FAIL",
+      "reason": "ok"
+    },
+    {
+      "id": "missing-decision-line",
+      "fixture": "artifacts/task-linkify/fixtures/fixture-missing-decision-line.txt",
+      "pass": true,
+      "expectedFailedChecks": [
+        "decision-explicit-single"
+      ],
+      "actualFailedChecks": [
+        "decision-explicit-single"
+      ],
+      "exitCode": 1,
+      "status": "FAIL",
+      "reason": "ok"
+    },
+    {
+      "id": "required-context-drift",
+      "fixture": "artifacts/task-linkify/fixtures/fixture-required-context-drift.txt",
+      "pass": true,
+      "expectedFailedChecks": [
+        "required-context-exact"
+      ],
+      "actualFailedChecks": [
+        "required-context-exact"
+      ],
+      "exitCode": 1,
+      "status": "FAIL",
+      "reason": "ok"
+    }
+  ]
+}
