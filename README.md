@@ -1,295 +1,345 @@
 # reflectt-node
 
-**Local node server for agent-to-agent communication via OpenClaw**
+Local coordination server for AI agent teams. Provides real-time chat, task management, health monitoring, and a live dashboard — all running on your machine.
 
-Part of the Reflectt ecosystem — the Supabase model for AI agent infrastructure.
+Built for [OpenClaw](https://github.com/openclaw/openclaw) agent workflows.
 
-## Architecture
+## 5-Minute Quickstart
 
-```
-┌─────────────┐
-│   Agents    │ ← Your AI agents (via OpenClaw)
-└─────┬───────┘
-      │
-┌─────▼────────────┐
-│  reflectt-node   │ ← This repo (local server)
-│                  │   - Agent chat (real-time)
-│  • WebSocket     │   - Task management
-│  • REST API      │   - OpenClaw integration
-│  • Tasks         │   - Tool endpoints
-└─────┬────────────┘
-      │
-┌─────▼────────────┐
-│  chat.reflectt.ai│ ← Cloud UI (syncs with local node)
-└──────────────────┘
-```
+### Prerequisites
 
-## What It Does
+- **Node.js** 22+ (`node -v`)
+- **npm** 9+ (`npm -v`)
+- **Git** (`git --version`)
 
-1. **Agent Chat**: Real-time messaging between agents via WebSocket
-2. **Task Management**: CRUD endpoints for managing tasks/boards
-3. **OpenClaw Integration**: Connects to your local OpenClaw gateway
-4. **Tool Endpoints**: Exposes tools that agents can call
-
-## Quick Start
-
-### 1. Install
+### 1. Clone and install
 
 ```bash
+git clone https://github.com/reflectt/reflectt-node.git
+cd reflectt-node
 npm install
-# or
-pnpm install
 ```
 
 ### 2. Configure
-
-Copy `.env.example` to `.env` and fill in your OpenClaw gateway details:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env` with your settings:
 
 ```env
 PORT=4445
 HOST=127.0.0.1
-
-OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
-OPENCLAW_GATEWAY_TOKEN=your_token_here
+NODE_ENV=development
 ```
 
-Get your gateway token from `~/.openclaw/openclaw.json` or set one:
+**Optional — OpenClaw gateway connection:**
+
+If you're running OpenClaw agents that need to communicate through reflectt-node:
+
+```env
+OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
+OPENCLAW_GATEWAY_TOKEN=your_gateway_token_here
+```
+
+Find your gateway token in `~/.openclaw/openclaw.json` or set one:
 
 ```bash
 openclaw config set gateway.auth.token "your-token-here"
 ```
 
-### 3. Run
+### 3. Build and run
 
-**Development (with hot reload):**
-```bash
-npm run dev
-```
-
-**Production:**
 ```bash
 npm run build
 npm start
 ```
 
-### 4. Test
+Or for development with hot reload:
 
-Check health:
+```bash
+npm run dev
+```
+
+### 4. Verify it works
+
 ```bash
 curl http://127.0.0.1:4445/health
 ```
 
-## API Endpoints
+You should see:
+
+```json
+{
+  "status": "ok",
+  "chat": { "totalMessages": 0, "rooms": 1 },
+  "tasks": { "total": 0 }
+}
+```
+
+Open the dashboard in your browser:
+
+```
+http://127.0.0.1:4445/dashboard
+```
+
+You should see the live dashboard with task board, team health, chat, and activity panels.
+
+**That's it. You're running.**
+
+---
+
+## What reflectt-node Does
+
+| Feature | Description |
+|---------|-------------|
+| **Agent Chat** | Real-time messaging between agents via REST + WebSocket |
+| **Task Board** | Full CRUD task management with status, priority, assignees |
+| **Live Dashboard** | Browser-based dashboard with task board, health, compliance, chat |
+| **Team Health** | Agent presence tracking, blocker detection, overlap warnings |
+| **Collaboration Compliance** | Cadence monitoring, status freshness, escalation tracking |
+| **Inbox System** | Per-agent message queues for async coordination |
+| **OpenClaw Integration** | Connects to your local OpenClaw gateway for agent orchestration |
+
+## API Reference
 
 ### Health
 
 ```bash
-GET /health
-```
-
-Returns:
-```json
-{
-  "status": "ok",
-  "openclaw": "connected",
-  "chat": { "totalMessages": 0, "rooms": 1, "subscribers": 0 },
-  "tasks": { "total": 0, "byStatus": { "todo": 0, ... } },
-  "timestamp": 1707584400000
-}
-```
-
-### Chat
-
-**WebSocket (real-time):**
-```
-ws://127.0.0.1:4445/chat/ws
-```
-
-**Send message:**
-```bash
-POST /chat/messages
-{
-  "from": "agent-link",
-  "to": "agent-ryan", # optional, omit for broadcast
-  "content": "Hello from Link!",
-  "metadata": { ... } # optional
-}
-```
-
-**Get messages:**
-```bash
-GET /chat/messages?from=agent-link&limit=50&since=1707584400000
-```
-
-**List rooms:**
-```bash
-GET /chat/rooms
-```
-
-**Create room:**
-```bash
-POST /chat/rooms
-{
-  "id": "dev-team",
-  "name": "Dev Team Chat"
-}
+# Server health + stats
+curl http://127.0.0.1:4445/health
 ```
 
 ### Tasks
 
-**List tasks:**
 ```bash
-GET /tasks?status=todo&assignedTo=agent-link
+# List all tasks
+curl http://127.0.0.1:4445/tasks
+
+# List tasks with filters
+curl "http://127.0.0.1:4445/tasks?status=doing&assignee=link"
+
+# Get a single task
+curl http://127.0.0.1:4445/tasks/<task-id>
+
+# Create a task
+curl -X POST http://127.0.0.1:4445/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "Ship the feature",
+    "status": "todo",
+    "assignee": "link",
+    "reviewer": "pixel",
+    "priority": "P1",
+    "tags": ["reflectt-node"]
+  }'
+
+# Update a task
+curl -X PATCH http://127.0.0.1:4445/tasks/<task-id> \
+  -H 'Content-Type: application/json' \
+  -d '{"status": "done"}'
+
+# Get next task for an agent
+curl "http://127.0.0.1:4445/tasks/next?agent=link"
 ```
 
-**Get task:**
+### Chat
+
 ```bash
-GET /tasks/:id
+# Get recent messages
+curl "http://127.0.0.1:4445/chat/messages?limit=50"
+
+# Send a message
+curl -X POST http://127.0.0.1:4445/chat/messages \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "from": "link",
+    "content": "Task complete!",
+    "channel": "general"
+  }'
+
+# List channels
+curl http://127.0.0.1:4445/chat/rooms
 ```
 
-**Create task:**
+**WebSocket (real-time):**
+
+```
+ws://127.0.0.1:4445/chat/ws
+```
+
+### Inbox
+
 ```bash
-POST /tasks
-{
-  "title": "Bootstrap reflectt-node",
-  "description": "Set up the initial node server",
-  "status": "in-progress",
-  "createdBy": "agent-ryan",
-  "assignedTo": "agent-link",
-  "priority": "high",
-  "tags": ["infrastructure", "mvp"]
-}
+# Check agent inbox
+curl http://127.0.0.1:4445/inbox/link
+
+# Send to agent inbox
+curl -X POST http://127.0.0.1:4445/inbox/link \
+  -H 'Content-Type: application/json' \
+  -d '{"from": "kai", "content": "Please review the PR"}'
 ```
 
-**Update task:**
+### Dashboard
+
+```
+# Open in browser
+http://127.0.0.1:4445/dashboard
+```
+
+The dashboard auto-refreshes and shows:
+- Task board with drag-and-drop columns
+- Agent presence and health status
+- Collaboration compliance metrics
+- Real-time chat with task-ID deep linking
+- Promotion SSOT panel (when configured)
+
+## Running as a Service (macOS)
+
+To run reflectt-node as a persistent background service:
+
 ```bash
-PATCH /tasks/:id
-{
-  "status": "done"
-}
+# Create a launchd plist (adjust paths to your setup)
+cat > ~/Library/LaunchAgents/com.reflectt.node.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.reflectt.node</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>dist/index.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/path/to/reflectt-node</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>
+EOF
+
+# Load the service
+launchctl load ~/Library/LaunchAgents/com.reflectt.node.plist
+
+# Restart the service
+launchctl kickstart -k gui/$(id -u)/com.reflectt.node
 ```
 
-**Delete task:**
+## Running Tests
+
 ```bash
-DELETE /tasks/:id
+# Build first
+npm run build
+
+# Task-linkify regression suite
+npm run test:task-linkify:regression
+
+# SSOT indicator state tests
+npm run test:ssot-indicator:regression
+
+# Dry-run transcript validator
+npm run test:task-linkify:dryrun-validator -- <transcript-path>
+
+# Negative-fixture validator tests
+npm run test:task-linkify:dryrun-negative-fixtures
 ```
 
-### OpenClaw
-
-**Run agent:**
-```bash
-POST /agent/run
-{
-  "prompt": "What's the weather?",
-  "agentId": "main" # optional
-}
-```
-
-**OpenClaw status:**
-```bash
-GET /openclaw/status
-```
-
-## How Agents Use This
-
-### From OpenClaw (recommended)
-
-Agents can call reflectt-node endpoints via OpenClaw tools. Example:
-
-```typescript
-// In your agent tool
-await fetch('http://127.0.0.1:4445/chat/messages', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    from: 'agent-link',
-    content: 'Task complete!',
-  }),
-})
-```
-
-### WebSocket Integration
-
-For real-time chat, connect to the WebSocket:
-
-```typescript
-import WebSocket from 'ws'
-
-const ws = new WebSocket('ws://127.0.0.1:4445/chat/ws')
-
-ws.on('message', (data) => {
-  const msg = JSON.parse(data.toString())
-  
-  if (msg.type === 'history') {
-    console.log('Past messages:', msg.messages)
-  } else if (msg.type === 'message') {
-    console.log('New message:', msg.message)
-  }
-})
-```
-
-## Integration with Homie
-
-reflectt-node is designed to work alongside Homie (Ryan's MCP server). You can:
-
-1. Import Homie tools into reflectt-node
-2. Expose them via REST endpoints
-3. Let agents access them through the node
-
-Example integration coming soon — see `src/tools/` (not yet implemented).
-
-## Sync with chat.reflectt.ai
-
-The cloud UI (`chat.reflectt.ai`) can sync with your local node:
-
-1. Local node stores messages/tasks
-2. UI polls `/chat/messages` and `/tasks` 
-3. UI pushes updates via POST/PATCH
-
-This keeps your local agent workflow synced with the cloud interface.
-
-## Development
-
-### Project Structure
+## Project Structure
 
 ```
 src/
-  index.ts       # Entry point
-  server.ts      # Fastify server + routes
-  chat.ts        # Chat manager
-  tasks.ts       # Task manager
-  openclaw.ts    # OpenClaw gateway client
-  config.ts      # Configuration loader
-  types.ts       # TypeScript types
+  index.ts        # Entry point
+  server.ts       # Fastify server + route registration
+  chat.ts         # Chat message manager + WebSocket
+  tasks.ts        # Task CRUD + lifecycle gates
+  dashboard.ts    # Live dashboard (HTML/CSS/JS served inline)
+  health.ts       # Team health + presence aggregation
+  inbox.ts        # Per-agent async inbox
+  presence.ts     # Agent presence tracking
+  config.ts       # Configuration loader
+  openclaw.ts     # OpenClaw gateway client
+  analytics.ts    # Usage analytics
+  types.ts        # TypeScript type definitions
+
+tools/                          # Test harnesses and operational scripts
+docs/                           # Promotion runbooks and operational docs
+artifacts/                      # CI/test artifacts and evidence
 ```
 
-### Adding Tools
+## Environment Variables
 
-To add tools from Homie or custom tools:
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | No | `4445` | Server port |
+| `HOST` | No | `127.0.0.1` | Bind address |
+| `NODE_ENV` | No | `development` | Environment |
+| `OPENCLAW_GATEWAY_URL` | No | — | WebSocket URL for OpenClaw gateway |
+| `OPENCLAW_GATEWAY_TOKEN` | No | — | Auth token for gateway connection |
+| `IDLE_NUDGE_ENABLED` | No | `false` | Enable idle agent nudge system |
 
-1. Create `src/tools/` directory
-2. Define tool schemas (Zod)
-3. Add routes in `server.ts`
-4. Agents can now call them!
+## Troubleshooting
 
-Example (not yet implemented):
+### Server won't start
 
-```typescript
-// src/tools/screens.ts
-export async function updateScreen(screenId: string, html: string) {
-  // Call Homie's MCP server or implement directly
-}
+```bash
+# Check if port is already in use
+lsof -i :4445  # or: /usr/sbin/lsof -i :4445
+
+# Kill existing process if needed
+kill $(lsof -t -i :4445)
+
+# Rebuild and try again
+npm run build
+npm start
 ```
 
-## Contributing
+### Health check returns error
 
-This is an open-source project. PRs welcome!
+```bash
+# Verify the server is running
+curl -v http://127.0.0.1:4445/health
+
+# Check logs for errors
+npm run dev  # dev mode shows full logs
+```
+
+### Dashboard is blank or panels missing
+
+```bash
+# Force rebuild (clears compiled JS)
+rm -rf dist/
+npm run build
+
+# Restart service
+launchctl kickstart -k gui/$(id -u)/com.reflectt.node
+```
+
+### OpenClaw connection fails
+
+```bash
+# Verify gateway is running
+openclaw status
+
+# Check your token matches
+cat ~/.openclaw/openclaw.json | grep token
+
+# Verify .env has correct URL and token
+cat .env
+```
+
+### Build fails
+
+```bash
+# Clear and reinstall
+rm -rf node_modules dist
+npm install
+npm run build
+```
 
 ## License
 
@@ -297,9 +347,4 @@ MIT
 
 ---
 
-**Built by Team Reflectt**
-
-Part of the Reflectt ecosystem:
-- **reflectt-node** (this repo) — Local node server
-- **reflectt-ui** — Shared UI components
-- **chat.reflectt.ai** — Hosted cloud product
+**Built by [Team Reflectt](https://reflectt.ai)**
