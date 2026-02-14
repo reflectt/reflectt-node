@@ -74,3 +74,5 @@ console.log('TASK_LINKIFY_REGRESSION_HARNESS_RESULT')
 console.log(JSON.stringify(result, null, 2))
 
 if (failCount > 0) process.exit(1)
+
+// pr-event validation touchpoint
