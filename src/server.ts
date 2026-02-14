@@ -791,6 +791,38 @@ export async function createServer(): Promise<FastifyInstance> {
     return { task }
   })
 
+  // Backlog: ranked list of unassigned tasks any agent can claim
+  app.get('/tasks/backlog', async () => {
+    const pOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
+    const tasks = taskManager.listTasks({ status: 'todo' })
+      .filter(t => !t.assignee)
+      .sort((a, b) => {
+        const pa = pOrder[a.priority || 'P3'] ?? 9
+        const pb = pOrder[b.priority || 'P3'] ?? 9
+        if (pa !== pb) return pa - pb
+        return a.createdAt - b.createdAt
+      })
+    return { tasks, count: tasks.length }
+  })
+
+  // Claim a task (self-assign)
+  app.post('/tasks/:id/claim', async (request) => {
+    const { id } = request.params as { id: string }
+    const body = request.body as { agent?: string }
+    if (!body?.agent) {
+      return { success: false, error: 'agent is required' }
+    }
+    const task = taskManager.getTask(id)
+    if (!task) {
+      return { success: false, error: 'Task not found' }
+    }
+    if (task.assignee) {
+      return { success: false, error: `Task already assigned to ${task.assignee}` }
+    }
+    const updated = taskManager.updateTask(id, { assignee: body.agent, status: 'doing' })
+    return { success: true, task: updated }
+  })
+
   // Task lifecycle instrumentation: reviewer + done criteria gates
   app.get('/tasks/instrumentation/lifecycle', async () => {
     const instrumentation = taskManager.getLifecycleInstrumentation()

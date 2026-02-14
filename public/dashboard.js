@@ -423,6 +423,7 @@ async function loadTasks(forceFull = false) {
 
   renderProjectTabs();
   renderKanban();
+  renderBacklog();
   document.getElementById('task-count').textContent = allTasks.length + ' tasks';
 }
 
@@ -487,6 +488,44 @@ function renderKanban() {
       }
     });
   }, 0);
+}
+
+// ---- Backlog (Available Work) ----
+function renderBacklog() {
+  const body = document.getElementById('backlog-body');
+  const count = document.getElementById('backlog-count');
+  if (!body) return;
+
+  const pOrder = { P0: 0, P1: 1, P2: 2, P3: 3 };
+  const backlog = allTasks
+    .filter(t => t.status === 'todo' && !t.assignee)
+    .sort((a, b) => {
+      const pa = pOrder[a.priority] ?? 9;
+      const pb = pOrder[b.priority] ?? 9;
+      if (pa !== pb) return pa - pb;
+      return a.createdAt - b.createdAt;
+    });
+
+  if (count) count.textContent = backlog.length + ' items';
+
+  if (backlog.length === 0) {
+    body.innerHTML = '<div style="color:var(--text-muted);padding:12px;font-size:13px">No unassigned tasks — all work is claimed ✅</div>';
+    return;
+  }
+
+  body.innerHTML = backlog.map(t => {
+    const criteria = (t.done_criteria || []).length;
+    return `<div class="backlog-item" style="padding:10px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="openTaskModal('${t.id}')">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        ${t.priority ? '<span class="priority-badge ' + t.priority + '">' + t.priority + '</span>' : ''}
+        <span style="color:var(--text-bright);font-size:13px;font-weight:500">${esc(truncate(t.title, 70))}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted)">
+        ${criteria > 0 ? criteria + ' done criteria' : ''}
+        ${t.reviewer ? ' · reviewer: ' + esc(t.reviewer) : ''}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // ---- Chat ----

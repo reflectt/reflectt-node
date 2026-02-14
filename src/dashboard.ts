@@ -563,6 +563,11 @@ export function getDashboardHTML(): string {
   </div>
 
   <div class="panel">
+    <div class="panel-header">📦 Available Work <span class="count" id="backlog-count"></span></div>
+    <div class="panel-body" id="backlog-body" style="max-height:300px;overflow-y:auto"></div>
+  </div>
+
+  <div class="panel">
     <div class="panel-header">🏥 Team Health <span class="count" id="health-count"></span></div>
     <div class="panel-body" id="health-body"></div>
   </div>
