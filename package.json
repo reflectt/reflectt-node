@@ -16,7 +16,8 @@
     "test:idle-nudge:fixtures": "tsx tools/test-idle-nudge-lane-fixtures.ts",
     "test:idle-nudge:coherence": "tsx tools/idle-nudge-coherence-harness.ts",
     "test:task-linkify:regression": "tsx tools/task-linkify-regression-harness.ts",
-    "test:ssot-indicator:regression": "tsx tools/ssot-indicator-regression-harness.ts"
+    "test:ssot-indicator:regression": "tsx tools/ssot-indicator-regression-harness.ts",
+    "test:task-linkify:dryrun-validator": "tsx tools/task-linkify-dryrun-transcript-validator.ts"
   },
   "keywords": [
     "reflectt",
