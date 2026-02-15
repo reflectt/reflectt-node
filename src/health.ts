@@ -13,6 +13,7 @@ import { dirname, resolve } from 'node:path'
 import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
+import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
 
 export interface StaleDoingTask {
@@ -68,6 +69,9 @@ export interface AgentHealthStatus {
   lastSeen: number
   minutesSinceLastSeen: number
   currentTask?: string
+  activeTaskId?: string
+  activeTaskTitle?: string
+  activeTaskPrLink?: string | null
   recentBlockers: string[]
   messageCount24h: number
   lastProductiveAt: number | null
@@ -276,6 +280,46 @@ class TeamHealthMonitor {
     const comments = taskManager.getTaskComments(taskId)
     const latestCommentAt = comments.reduce((max, c) => Math.max(max, this.parseTimestamp(c.timestamp)), 0)
     return Math.max(fallbackUpdatedAt, latestCommentAt)
+  }
+
+  private extractTaskPrLink(task?: Task): string | null {
+    if (!task?.metadata || typeof task.metadata !== 'object') return null
+
+    const metadata = task.metadata as Record<string, unknown>
+    const candidates: string[] = []
+
+    const directPrUrl = metadata.pr_url
+    const directPrLink = metadata.pr_link
+    if (typeof directPrUrl === 'string') candidates.push(directPrUrl)
+    if (typeof directPrLink === 'string') candidates.push(directPrLink)
+
+    const artifacts = metadata.artifacts
+    if (Array.isArray(artifacts)) {
+      for (const item of artifacts) {
+        if (typeof item === 'string') candidates.push(item)
+      }
+    }
+
+    const qaBundle = metadata.qa_bundle
+    if (qaBundle && typeof qaBundle === 'object') {
+      const artifactLinks = (qaBundle as Record<string, unknown>).artifact_links
+      if (Array.isArray(artifactLinks)) {
+        for (const item of artifactLinks) {
+          if (typeof item === 'string') candidates.push(item)
+        }
+      }
+    }
+
+    const pullUrlRegex = /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+(?:[^\s]*)?/i
+
+    for (const candidate of candidates) {
+      const trimmed = candidate.trim()
+      if (!trimmed) continue
+      const match = trimmed.match(pullUrlRegex)
+      if (match) return match[0]
+    }
+
+    return null
   }
 
   private getStaleDoingSnapshot(now = Date.now()): { thresholdMinutes: number; count: number; tasks: StaleDoingTask[] } {
@@ -761,6 +805,9 @@ class TeamHealthMonitor {
         lastSeen,
         minutesSinceLastSeen,
         currentTask: activeTask?.title,
+        activeTaskId: activeTask?.id,
+        activeTaskTitle: activeTask?.title,
+        activeTaskPrLink: this.extractTaskPrLink(activeTask),
         recentBlockers,
         messageCount24h,
         lastProductiveAt,
