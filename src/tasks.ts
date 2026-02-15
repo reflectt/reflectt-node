@@ -932,33 +932,44 @@ class TaskManager {
       })
     }
 
-    let tasks = Array.from(this.tasks.values())
-      .filter(t => t.status === 'todo') // Only todo tasks
-      .filter(t => !t.assignee) // Unassigned only
-      .filter(t => !isBlocked(t)) // Not blocked by incomplete tasks
+    const sortByPriority = (a: Task, b: Task): number => {
+      const aPriority = priorityOrder[a.priority || 'P3'] ?? 999
+      const bPriority = priorityOrder[b.priority || 'P3'] ?? 999
+      if (aPriority !== bPriority) return aPriority - bPriority
+      return a.createdAt - b.createdAt
+    }
 
-    // If agent specified, can also include tasks assigned to that agent
+    // If agent specified, first return their highest-priority doing task
+    // This ensures agents resume in-progress work before picking up new tasks
     if (agent) {
-      const agentTasks = Array.from(this.tasks.values())
+      const doingTasks = Array.from(this.tasks.values())
+        .filter(t => t.status === 'doing')
+        .filter(t => t.assignee === agent)
+        .filter(t => !isBlocked(t))
+        .sort(sortByPriority)
+
+      if (doingTasks.length > 0) {
+        return doingTasks[0]
+      }
+    }
+
+    // Then check todo tasks: unassigned or assigned to this agent
+    let tasks = Array.from(this.tasks.values())
+      .filter(t => t.status === 'todo')
+      .filter(t => !t.assignee)
+      .filter(t => !isBlocked(t))
+
+    if (agent) {
+      const agentTodoTasks = Array.from(this.tasks.values())
         .filter(t => t.status === 'todo')
         .filter(t => t.assignee === agent)
         .filter(t => !isBlocked(t))
-      tasks = [...tasks, ...agentTasks]
+      tasks = [...tasks, ...agentTodoTasks]
     }
 
     if (tasks.length === 0) return undefined
 
-    // Sort by priority (P0 first), then by creation date (oldest first)
-    tasks.sort((a, b) => {
-      const aPriority = priorityOrder[a.priority || 'P3'] ?? 999
-      const bPriority = priorityOrder[b.priority || 'P3'] ?? 999
-      
-      if (aPriority !== bPriority) {
-        return aPriority - bPriority
-      }
-      
-      return a.createdAt - b.createdAt
-    })
+    tasks.sort(sortByPriority)
 
     return tasks[0]
   }
