@@ -87,7 +87,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 |--------|------|-------------|
 | GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `updatedSince` |
 | GET | `/tasks/:id` | Get task by ID. Also accepts unambiguous ID prefixes. Ambiguous prefix returns `400` with full-ID suggestions. |
-| GET | `/tasks/:id/history` | Task event log (who did what when): create/assign/status changes with timestamps + actor |
+| GET | `/tasks/:id/history` | Status changelog for task lifecycle transitions. Returns `history[]` entries shaped as `{ status, changedBy, changedAt, metadata }` for each status transition. |
 | GET | `/tasks/:id/comments` | List task discussion comments. Returns `{ comments, count }` |
 | POST | `/tasks/:id/comments` | Add task comment. Body: `{ "author": "agent", "content": "text" }` |
 | POST | `/tasks/:id/outcome` | Capture 48h checkpoint verdict for completed tasks. Body: `verdict` (`PASS`\|`NO-CHANGE`\|`REGRESSION`), optional `author`, `notes` |
