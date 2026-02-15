@@ -116,6 +116,8 @@ type WatchdogIncidentLog = {
 type IdleNudgeState = {
   lastNudgeAt: number
   lastTier: 1 | 2
+  lastSignature: string | null
+  unchangedNudgeCount: number
 }
 
 // IdleNudgeLaneState moved to ./watchdog/idleNudgeLane.ts
@@ -137,6 +139,9 @@ export type IdleNudgeDecision = {
     | 'below-warn-threshold'
     | 'recent-activity-suppressed'
     | 'cooldown-active'
+    | 'blocked-task-suppressed'
+    | 'done-task-suppressed'
+    | 'max-repeat-reached'
     | 'validating-task-suppressed'
     | 'missing-active-task'
     | 'stale-active-task'
@@ -178,7 +183,7 @@ class TeamHealthMonitor {
   private readonly idleNudgeEnabled = process.env.IDLE_NUDGE_ENABLED !== 'false'
   private readonly idleNudgeWarnMin = Number(process.env.IDLE_NUDGE_WARN_MIN || 45)
   private readonly idleNudgeEscalateMin = Number(process.env.IDLE_NUDGE_ESCALATE_MIN || 60)
-  private readonly idleNudgeCooldownMin = Number(process.env.IDLE_NUDGE_COOLDOWN_MIN || 30)
+  private readonly idleNudgeCooldownMin = Number(process.env.IDLE_NUDGE_COOLDOWN_MIN || 20)
   private readonly idleNudgeSuppressRecentMin = Number(process.env.IDLE_NUDGE_SUPPRESS_RECENT_MIN || 20)
   private readonly idleNudgeActiveTaskMaxAgeMin = Number(process.env.IDLE_NUDGE_ACTIVE_TASK_MAX_AGE_MIN || 180)
   private readonly idleNudgeExcluded = new Set(
@@ -1010,6 +1015,7 @@ class TeamHealthMonitor {
 
     const presences = presenceManager.getAllPresence()
     const tasks = taskManager.listTasks({})
+    const taskById = new Map(tasks.map((t: any) => [t.id, t]))
     const messages = chatManager.getMessages({ limit: 300 })
 
     for (const presence of presences) {
@@ -1049,6 +1055,11 @@ class TeamHealthMonitor {
         continue
       }
 
+      if (presence.status === 'blocked') {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'blocked-task-suppressed', renderedMessage: null })
+        continue
+      }
+
       if (!lastActiveAt) {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'no-last-active', renderedMessage: null })
         continue
@@ -1071,7 +1082,7 @@ class TeamHealthMonitor {
       const state = this.idleNudgeState.get(agent)
       if (state) {
         const sinceNudgeMin = Math.floor((now - state.lastNudgeAt) / 60_000)
-        if (sinceNudgeMin < this.idleNudgeCooldownMin && state.lastTier >= tier) {
+        if (sinceNudgeMin < this.idleNudgeCooldownMin) {
           decisions.push({ ...baseDecision, decision: 'none', reason: 'cooldown-active', renderedMessage: null })
           continue
         }
@@ -1109,6 +1120,22 @@ class TeamHealthMonitor {
         continue
       }
 
+      const selectedTask = taskById.get(taskId)
+      if (selectedTask?.status === 'blocked') {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'blocked-task-suppressed', renderedMessage: null })
+        continue
+      }
+      if (selectedTask?.status === 'done') {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'done-task-suppressed', renderedMessage: null })
+        continue
+      }
+
+      const signature = `${taskId}:${selectedTask?.status || 'unknown'}:${selectedTask?.updatedAt || 0}`
+      if (state && state.lastSignature === signature && state.unchangedNudgeCount >= 2) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'max-repeat-reached', renderedMessage: null })
+        continue
+      }
+
       const intro = tier === 1
         ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
         : `@${agent} @kai system escalation: ${inactivityMin}m idle. Post required status format now.`
@@ -1139,9 +1166,15 @@ class TeamHealthMonitor {
         content: renderedMessage,
       })
 
+      const unchangedNudgeCount = state && state.lastSignature === signature
+        ? state.unchangedNudgeCount + 1
+        : 1
+
       this.idleNudgeState.set(agent, {
         lastNudgeAt: now,
         lastTier: tier,
+        lastSignature: signature,
+        unchangedNudgeCount,
       })
       nudged.push(agent)
     }
@@ -1160,7 +1193,7 @@ class TeamHealthMonitor {
       activeTaskMaxAgeMin: number
       excluded: string[]
     }
-    state: Array<{ agent: string; lastNudgeAt: number; lastTier: 1 | 2 }>
+    state: Array<{ agent: string; lastNudgeAt: number; lastTier: 1 | 2; lastSignature: string | null; unchangedNudgeCount: number }>
     summary: {
       decisionCounts: Record<'none' | 'warn' | 'escalate', number>
       reasonCounts: Record<string, number>
@@ -1193,6 +1226,8 @@ class TeamHealthMonitor {
         agent,
         lastNudgeAt: s.lastNudgeAt,
         lastTier: s.lastTier,
+        lastSignature: s.lastSignature,
+        unchangedNudgeCount: s.unchangedNudgeCount,
       })),
       summary: {
         decisionCounts,
