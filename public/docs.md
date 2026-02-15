@@ -2,6 +2,13 @@
 
 Base URL: `http://localhost:4445`
 
+## Quickstarts
+
+- Task lifecycle quickstart (claim → doing → validating → done): `docs/TASKS_API_QUICKSTART.md`
+- Known Issues (runtime/docs drift + workarounds): `docs/KNOWN_ISSUES.md`
+- Reviewer handoff bundle template: `docs/REVIEWER_HANDOFF_BUNDLE_TEMPLATE.md`
+- Task creation template (good/weak examples): `docs/TASK_CREATION_TEMPLATE.md`
+
 ---
 
 ## Health
