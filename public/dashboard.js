@@ -5,6 +5,7 @@ let allMessages = [];
 let allTasks = [];
 let allEvents = [];
 let taskById = new Map();
+let healthAgentMap = new Map();
 
 const TASK_ID_PATTERN = /\b(task-[a-z0-9-]+)\b/gi;
 
@@ -66,6 +67,27 @@ function renderTaskTags(tags) {
   const shown = tags.filter(Boolean).slice(0, 3);
   if (shown.length === 0) return '';
   return shown.map(tag => `<span class="assignee-tag" style="color:var(--purple)">#${esc(String(tag))}</span>`).join(' ');
+}
+
+function extractTaskPrLink(task) {
+  if (!task || !task.metadata || typeof task.metadata !== 'object') return null;
+  const metadata = task.metadata;
+  const candidates = [];
+  if (typeof metadata.pr_url === 'string') candidates.push(metadata.pr_url);
+  if (typeof metadata.pr_link === 'string') candidates.push(metadata.pr_link);
+  if (Array.isArray(metadata.artifacts)) {
+    metadata.artifacts.forEach(item => { if (typeof item === 'string') candidates.push(item); });
+  }
+  if (metadata.qa_bundle && typeof metadata.qa_bundle === 'object' && Array.isArray(metadata.qa_bundle.artifact_links)) {
+    metadata.qa_bundle.artifact_links.forEach(item => { if (typeof item === 'string') candidates.push(item); });
+  }
+
+  const regex = /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+(?:[^\s]*)?/i;
+  for (const c of candidates) {
+    const m = String(c || '').match(regex);
+    if (m) return m[0];
+  }
+  return null;
 }
 
 function renderBlockedByLinks(task, options = {}) {
@@ -466,19 +488,33 @@ async function loadPresence() {
   const strip = document.getElementById('agent-strip');
   strip.innerHTML = AGENTS.map(a => {
     const p = presenceMap[a.name];
-    const task = agentTasks[a.name];
+    const taskTitle = agentTasks[a.name];
+    const healthRow = healthAgentMap.get(a.name);
+    const activeTaskTitle = healthRow?.activeTaskTitle || healthRow?.currentTask || taskTitle || '';
+    const activeTaskId = healthRow?.activeTaskId || null;
+    const activeTaskPr = healthRow?.activeTaskPrLink || null;
+
     const isActive = p && p.status && p.status !== 'offline';
-    const statusClass = task ? 'active' : (isActive ? 'idle' : 'offline');
-    const badgeClass = task ? 'working' : (isActive ? 'idle' : 'offline');
-    const badgeText = task ? 'Working' : (isActive ? 'Idle' : 'Offline');
-    const statusText = task ? truncate(task, 28) : (p && p.lastUpdate ? ago(p.lastUpdate) + ' ago' : '');
+    const isWorking = Boolean(activeTaskTitle);
+    const statusClass = isWorking ? 'active' : (isActive ? 'idle' : 'offline');
+    const badgeClass = isWorking ? 'working' : (isActive ? 'idle' : 'offline');
+    const badgeText = isWorking ? 'Working' : (isActive ? 'Idle' : 'Offline');
+
+    const lastSeenText = (p && p.lastUpdate) ? ago(p.lastUpdate) + ' ago' : '';
+    const taskText = activeTaskTitle ? truncate(activeTaskTitle, 40) : lastSeenText;
+    const prHtml = activeTaskPr
+      ? `<a class="agent-pr-link" href="${esc(activeTaskPr)}" target="_blank" rel="noreferrer noopener" onclick="event.stopPropagation()">PR ↗</a>`
+      : '';
+    const taskIdHtml = activeTaskId ? `<span class="assignee-tag" style="margin-left:4px">${esc(activeTaskId.slice(0, 12))}</span>` : '';
+
     return `<div class="agent-card ${statusClass}">
       <img src="/avatars/${a.name}.png" alt="${a.emoji}" class="agent-avatar" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';">
       <span class="agent-emoji" style="display:none;">${a.emoji}</span>
       <div class="agent-info">
         <div class="agent-role">${esc(a.role)}</div>
         <div class="agent-name">${esc(a.name)}</div>
-        <div class="agent-status-text">${esc(statusText)}</div>
+        <div class="agent-status-text">${esc(taskText)} ${taskIdHtml}</div>
+        ${prHtml}
       </div>
       <span class="agent-badge ${badgeClass}">${badgeText}</span>
     </div>`;
@@ -1008,6 +1044,8 @@ async function loadHealth() {
     const team = health.team || { blockers: [], overlaps: [], compliance: null, agents: [] };
     const agentsSummary = health.agentsSummary || { agents: [] };
     const idleNudgeDebug = health.idleNudgeDebug || null;
+
+    healthAgentMap = new Map((team.agents || []).map(a => [String(a.agent || '').toLowerCase(), a]));
     const workflow = health.workflow || { agents: [] };
 
     const teamAgentsByName = new Map((team.agents || []).map(a => [a.agent, a]));
