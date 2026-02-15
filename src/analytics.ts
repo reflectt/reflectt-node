@@ -53,6 +53,31 @@ interface MetricsSummary {
   timestamp: number
 }
 
+interface DailyFunnelChannel {
+  channel: string
+  utmSource?: string
+  visits: number
+  signups: number
+  activations: number
+  signupRate: number
+  activationRate: number
+}
+
+interface DailyFunnelMetrics {
+  day: string
+  timezone: string
+  totals: {
+    visits: number
+    signups: number
+    activations: number
+    signupRate: number
+    activationRate: number
+  }
+  channels: DailyFunnelChannel[]
+  generatedAt: number
+  note: string
+}
+
 class AnalyticsManager {
   private vercelToken?: string
   private devtoApiKey?: string
@@ -251,6 +276,88 @@ class AnalyticsManager {
       blockerFrequency: filteredTasks.length > 0 ? blocked.length / filteredTasks.length : 0,
       byPriority,
       byAssignee,
+    }
+  }
+
+  private inferChannelFromPath(page: string): string {
+    const raw = (page || '').toLowerCase()
+    const query = raw.includes('?') ? raw.split('?')[1] : ''
+    const utmMatch = query.match(/(?:^|&)utm_source=([^&]+)/)
+    if (utmMatch?.[1]) {
+      return decodeURIComponent(utmMatch[1])
+    }
+
+    if (raw.includes('twitter') || raw.includes('x.com')) return 'twitter'
+    if (raw.includes('linkedin')) return 'linkedin'
+    if (raw.includes('discord')) return 'discord'
+    if (raw.includes('github')) return 'github'
+    if (raw.includes('google')) return 'google'
+    if (raw.includes('direct')) return 'direct'
+    return 'unknown'
+  }
+
+  async getDailyFunnelMetrics(timezone = 'America/Vancouver'): Promise<DailyFunnelMetrics> {
+    const analytics = await this.getForAgentsAnalytics('24h')
+    const topPages = analytics?.topPages || []
+
+    const channels = new Map<string, DailyFunnelChannel>()
+    for (const page of topPages) {
+      const channel = this.inferChannelFromPath(page.page)
+      const existing = channels.get(channel) || {
+        channel,
+        utmSource: channel === 'unknown' ? undefined : channel,
+        visits: 0,
+        signups: 0,
+        activations: 0,
+        signupRate: 0,
+        activationRate: 0,
+      }
+      existing.visits += page.views || 0
+      channels.set(channel, existing)
+    }
+
+    if (channels.size === 0) {
+      channels.set('unknown', {
+        channel: 'unknown',
+        visits: analytics?.pageviews || 0,
+        signups: 0,
+        activations: 0,
+        signupRate: 0,
+        activationRate: 0,
+      })
+    }
+
+    const rows = Array.from(channels.values()).map((row) => ({
+      ...row,
+      signupRate: row.visits > 0 ? row.signups / row.visits : 0,
+      activationRate: row.visits > 0 ? row.activations / row.visits : 0,
+    }))
+
+    const visits = rows.reduce((sum, row) => sum + row.visits, 0)
+    const signups = rows.reduce((sum, row) => sum + row.signups, 0)
+    const activations = rows.reduce((sum, row) => sum + row.activations, 0)
+
+    const now = Date.now()
+    const day = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(now))
+
+    return {
+      day,
+      timezone,
+      totals: {
+        visits,
+        signups,
+        activations,
+        signupRate: visits > 0 ? signups / visits : 0,
+        activationRate: visits > 0 ? activations / visits : 0,
+      },
+      channels: rows.sort((a, b) => b.visits - a.visits),
+      generatedAt: now,
+      note: 'Funnel structure is live; signups/activations are placeholders until instrumentation is wired.',
     }
   }
 
