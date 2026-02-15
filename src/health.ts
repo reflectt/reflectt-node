@@ -15,6 +15,14 @@ import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
 
+export interface StaleDoingTask {
+  task_id: string
+  assignee: string
+  title: string
+  stale_minutes: number
+  last_activity_at: number
+}
+
 export interface TeamHealthMetrics {
   timestamp: number
   agents: AgentHealthStatus[]
@@ -23,6 +31,11 @@ export interface TeamHealthMetrics {
   silentAgents: string[]
   activeAgents: string[]
   compliance: CollaborationCompliance
+  staleDoing: {
+    thresholdMinutes: number
+    count: number
+    tasks: StaleDoingTask[]
+  }
 }
 
 export interface AgentHealthSummaryRow {
@@ -201,6 +214,7 @@ class TeamHealthMonitor {
   private readonly cadenceWorkingTaskMaxAgeMin = Number(process.env.CADENCE_WORKING_TASK_MAX_AGE_MIN || 240)
   private readonly cadenceAlertCooldownMin = Number(process.env.CADENCE_ALERT_COOLDOWN_MIN || 30)
   private cadenceAlertState = new Map<string, number>()
+  private readonly staleDoingThresholdMin = Number(process.env.STALE_DOING_THRESHOLD_MIN || 240)
 
   // Mention rescue fallback: if Ryan pings trio and nobody replies quickly, emit a direct system ack.
   private readonly mentionRescueEnabled = process.env.MENTION_RESCUE_ENABLED !== 'false'
@@ -223,6 +237,7 @@ class TeamHealthMonitor {
     const blockers = await this.extractBlockers()
     const overlaps = await this.detectOverlaps()
     const compliance = await this.getCollaborationCompliance(now)
+    const staleDoing = this.getStaleDoingSnapshot(now)
 
     const silentAgents = agents
       .filter(a => a.status === 'silent')
@@ -240,6 +255,42 @@ class TeamHealthMonitor {
       silentAgents,
       activeAgents,
       compliance,
+      staleDoing,
+    }
+  }
+
+  private getTaskLastActivityAt(taskId: string, fallbackUpdatedAt: number): number {
+    const comments = taskManager.getTaskComments(taskId)
+    const latestCommentAt = comments.reduce((max, c) => Math.max(max, this.parseTimestamp(c.timestamp)), 0)
+    return Math.max(fallbackUpdatedAt, latestCommentAt)
+  }
+
+  private getStaleDoingSnapshot(now = Date.now()): { thresholdMinutes: number; count: number; tasks: StaleDoingTask[] } {
+    const doing = taskManager.listTasks({ status: 'doing' })
+
+    const staleTasks: StaleDoingTask[] = doing
+      .filter(task => Boolean(task.assignee))
+      .map((task) => {
+        const lastActivityAt = this.getTaskLastActivityAt(task.id, this.parseTimestamp(task.updatedAt))
+        const staleMinutes = lastActivityAt > 0
+          ? Math.max(0, Math.floor((now - lastActivityAt) / 60_000))
+          : 9999
+
+        return {
+          task_id: task.id,
+          assignee: task.assignee || 'unassigned',
+          title: task.title,
+          stale_minutes: staleMinutes,
+          last_activity_at: lastActivityAt,
+        }
+      })
+      .filter(task => task.stale_minutes >= this.staleDoingThresholdMin)
+      .sort((a, b) => b.stale_minutes - a.stale_minutes)
+
+    return {
+      thresholdMinutes: this.staleDoingThresholdMin,
+      count: staleTasks.length,
+      tasks: staleTasks,
     }
   }
 
