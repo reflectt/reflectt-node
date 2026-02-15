@@ -6,6 +6,7 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 import { eventBus } from './events.js'
 import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
+import { createTaskStateAdapterFromEnv, type TaskStateAdapter } from './taskStateSync.js'
 
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
 const LEGACY_TASKS_FILE = join(LEGACY_DATA_DIR, 'tasks.jsonl')
@@ -22,6 +23,7 @@ class TaskManager {
   private initialized = false
   private recurringInitialized = false
   private recurringTicker: NodeJS.Timeout
+  private taskStateAdapter: TaskStateAdapter | null = createTaskStateAdapterFromEnv()
 
   private isCanonicalArtifactPath(path: string): boolean {
     const normalized = path.trim()
@@ -139,6 +141,23 @@ class TaskManager {
           }
           // No legacy file either - starting fresh
           console.log('[Tasks] No existing tasks file, starting fresh')
+        }
+      }
+
+      if (this.tasks.size === 0 && this.taskStateAdapter) {
+        try {
+          const remoteTasks = await this.taskStateAdapter.pullTasks()
+          for (const task of remoteTasks) {
+            this.tasks.set(task.id, task)
+          }
+
+          if (remoteTasks.length > 0) {
+            const lines = remoteTasks.map(task => JSON.stringify(task))
+            await fs.writeFile(TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
+            console.log(`[Tasks] Hydrated ${remoteTasks.length} tasks from cloud state into local JSON store`)
+          }
+        } catch (err) {
+          console.error('[Tasks] Failed to hydrate tasks from cloud state:', err)
         }
       }
     } finally {
@@ -432,6 +451,26 @@ class TaskManager {
     }
   }
 
+  private async syncTaskToCloud(task: Task): Promise<void> {
+    if (!this.taskStateAdapter) return
+
+    try {
+      await this.taskStateAdapter.upsertTask(task)
+    } catch (err) {
+      console.error('[Tasks] Cloud sync upsert failed, continuing with local JSON fallback:', err)
+    }
+  }
+
+  private async syncTaskDeleteToCloud(taskId: string): Promise<void> {
+    if (!this.taskStateAdapter) return
+
+    try {
+      await this.taskStateAdapter.deleteTask(taskId)
+    } catch (err) {
+      console.error('[Tasks] Cloud sync delete failed, continuing with local JSON fallback:', err)
+    }
+  }
+
   async createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task> {
     this.validateLifecycleGates(data)
 
@@ -453,6 +492,7 @@ class TaskManager {
 
     this.tasks.set(task.id, task)
     await this.persistTasks()
+    await this.syncTaskToCloud(task)
     await this.recordTaskHistoryEvent(task.id, 'created', task.createdBy, {
       status: task.status,
       assignee: task.assignee ?? null,
@@ -868,6 +908,7 @@ class TaskManager {
 
     this.tasks.set(id, updated)
     await this.persistTasks()
+    await this.syncTaskToCloud(updated)
 
     if (updates.assignee !== undefined && updates.assignee !== task.assignee) {
       await this.recordTaskHistoryEvent(id, 'assigned', actor, {
@@ -911,6 +952,7 @@ class TaskManager {
 
     this.tasks.delete(id)
     await this.persistTasks()
+    await this.syncTaskDeleteToCloud(id)
     this.notifySubscribers(task, 'deleted')
     return true
   }
