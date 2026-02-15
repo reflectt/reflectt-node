@@ -13,6 +13,7 @@ Base URL: `http://localhost:4445`
 - [Task Comments API Quickstart](../docs/TASK_COMMENTS_API_QUICKSTART.md) — POST/GET task comments with QA checklist.
 - [Release Endpoints Guide](../docs/RELEASE_ENDPOINTS_GUIDE.md) — /release/status, /release/notes, /release/deploy workflow.
 - [Review Queue SOP](../docs/REVIEW_QUEUE_SOP.md) — validating queue workflow, SLA, and PASS/FAIL discipline.
+- [Task-Close Gate Playbook](../docs/TASK_CLOSE_GATE_PLAYBOOK.md) — required close metadata with pass/fail examples.
 
 ---
 
