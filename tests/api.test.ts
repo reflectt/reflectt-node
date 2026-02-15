@@ -91,6 +91,34 @@ describe('Quiet Hours Watchdog Suppression', () => {
   })
 })
 
+describe('Validation Error Shape', () => {
+  it('returns structured fields for malformed POST /tasks payload', async () => {
+    const { status, body } = await req('POST', '/tasks', {
+      title: 'bad task',
+      description: 'missing required fields',
+    })
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.error).toBe('Validation failed')
+    expect(Array.isArray(body.fields)).toBe(true)
+    expect(body.fields.length).toBeGreaterThan(0)
+    expect(body.fields[0]).toHaveProperty('path')
+    expect(body.fields[0]).toHaveProperty('message')
+  })
+
+  it('returns structured fields for malformed POST /tasks/recurring payload', async () => {
+    const { status, body } = await req('POST', '/tasks/recurring', {
+      title: 'recurring bad',
+      assignee: 'harmony',
+    })
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.error).toBe('Validation failed')
+    expect(Array.isArray(body.fields)).toBe(true)
+    expect(body.fields.length).toBeGreaterThan(0)
+  })
+})
+
 describe('Task CRUD', () => {
   let taskId: string
 

@@ -362,6 +362,41 @@ function applyConditionalCaching(
   return false
 }
 
+type ValidationField = { path: string; message: string }
+
+function parseValidationFieldsFromUnknown(input: unknown): ValidationField[] {
+  const list = Array.isArray(input)
+    ? input
+    : (input && typeof input === 'object' && Array.isArray((input as any).issues) ? (input as any).issues : [])
+
+  return list
+    .map((issue: any) => {
+      if (!issue || typeof issue !== 'object') return null
+      const pathRaw = issue.path
+      const path = Array.isArray(pathRaw)
+        ? pathRaw.map((p: unknown) => String(p)).join('.') || '(root)'
+        : (typeof pathRaw === 'string' && pathRaw.length > 0 ? pathRaw : '(root)')
+      const message = typeof issue.message === 'string' && issue.message.length > 0
+        ? issue.message
+        : 'Invalid value'
+      return { path, message }
+    })
+    .filter((row: ValidationField | null): row is ValidationField => Boolean(row))
+}
+
+function extractValidationFields(errorText: string): ValidationField[] {
+  // Zod parse() errors are often serialized as JSON arrays in err.message.
+  if (errorText.trim().startsWith('[')) {
+    try {
+      const parsed = JSON.parse(errorText)
+      return parseValidationFieldsFromUnknown(parsed)
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
 function inferErrorStatus(errorText: string): number {
   const text = errorText.toLowerCase()
   if (text.includes('not found')) return 404
@@ -459,14 +494,19 @@ export async function createServer(): Promise<FastifyInstance> {
       ? body.hint
       : defaultHintForStatus(status)
 
+    const parsedFields = extractValidationFields(String(body.error))
+
     const envelope: Record<string, unknown> = {
       success: false,
-      error: body.error,
+      error: parsedFields.length > 0 ? 'Validation failed' : body.error,
       code,
       status,
     }
 
     if (hint) envelope.hint = hint
+    if (parsedFields.length > 0) {
+      envelope.fields = parsedFields
+    }
     if (body.details !== undefined) envelope.details = body.details
     if (body.gate !== undefined) envelope.gate = body.gate
     if (alreadyEnvelope && body.data !== undefined) envelope.data = body.data
