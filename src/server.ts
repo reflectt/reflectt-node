@@ -17,7 +17,7 @@ import { inboxManager } from './inbox.js'
 import type { AgentMessage, Task } from './types.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 import { memoryManager } from './memory.js'
-import { eventBus } from './events.js'
+import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus } from './presence.js'
@@ -2749,8 +2749,9 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     const agent = query.agent
     const topics = query.topics ? query.topics.split(',').map(t => t.trim()) : undefined
+    const types = query.types ? query.types.split(',').map(t => t.trim()) : undefined
 
-    eventBus.subscribe(reply, agent, topics)
+    eventBus.subscribe(reply, agent, topics, types)
     
     // Keep the connection open - don't return anything
     // The reply is handled by the event bus
@@ -2761,8 +2762,9 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     const agent = query.agent
     const topics = query.topics ? query.topics.split(',').map(t => t.trim()) : undefined
+    const types = query.types ? query.types.split(',').map(t => t.trim()) : undefined
 
-    eventBus.subscribe(reply, agent, topics)
+    eventBus.subscribe(reply, agent, topics, types)
   })
 
   // Get event bus status
@@ -2786,6 +2788,14 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: true, config: eventBus.getBatchConfig() }
     } catch (err: any) {
       return { error: err.message }
+    }
+  })
+
+  // List valid event types for SSE filtering
+  app.get('/events/types', async () => {
+    return {
+      types: Array.from(VALID_EVENT_TYPES),
+      usage: 'GET /events/subscribe?types=task_created,task_updated to filter by exact event type',
     }
   })
 

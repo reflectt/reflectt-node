@@ -19,6 +19,15 @@ export type EventType =
   | 'memory_written'
   | 'presence_updated'
 
+export const VALID_EVENT_TYPES = new Set<EventType>([
+  'message_posted',
+  'task_created',
+  'task_assigned',
+  'task_updated',
+  'memory_written',
+  'presence_updated',
+])
+
 export interface Event {
   id: string
   type: EventType
@@ -31,6 +40,7 @@ interface Subscription {
   reply: FastifyReply
   agent?: string
   topics?: string[]
+  types?: EventType[]
   createdAt: number
 }
 
@@ -45,7 +55,7 @@ class EventBus {
   /**
    * Subscribe to events via SSE
    */
-  subscribe(reply: FastifyReply, agent?: string, topics?: string[]): string {
+  subscribe(reply: FastifyReply, agent?: string, topics?: string[], types?: string[]): string {
     const id = `sub-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
     
     // Set up SSE headers
@@ -55,11 +65,17 @@ class EventBus {
       'Connection': 'keep-alive',
     })
 
+    // Validate and filter event types — unknown types are silently ignored
+    const validTypes: EventType[] = (types || [])
+      .map(t => t.trim() as EventType)
+      .filter(t => VALID_EVENT_TYPES.has(t))
+
     const subscription: Subscription = {
       id,
       reply,
       agent,
       topics,
+      types: validTypes.length > 0 ? validTypes : undefined,
       createdAt: Date.now(),
     }
 
@@ -74,6 +90,7 @@ class EventBus {
         message: `Connected to event stream (subscription ${id})`,
         agent,
         topics,
+        types: validTypes.length > 0 ? validTypes : undefined,
       },
     })
 
@@ -83,7 +100,7 @@ class EventBus {
       console.log(`[Events] Subscription ${id} closed (${this.subscriptions.size} remaining)`)
     })
 
-    console.log(`[Events] New subscription ${id} (agent: ${agent || 'all'}, topics: ${topics?.join(',') || 'all'})`)
+    console.log(`[Events] New subscription ${id} (agent: ${agent || 'all'}, topics: ${topics?.join(',') || 'all'}, types: ${validTypes.length > 0 ? validTypes.join(',') : 'all'})`)
     
     return id
   }
@@ -189,7 +206,14 @@ class EventBus {
    * Check if a subscription should receive an event
    */
   private shouldReceive(subscription: Subscription, event: Event): boolean {
-    // Filter by topic (e.g., "chat", "tasks", "memory")
+    // Filter by exact event type (e.g., ?types=task_created,task_updated)
+    if (subscription.types && subscription.types.length > 0) {
+      if (!subscription.types.includes(event.type)) {
+        return false
+      }
+    }
+
+    // Filter by topic (e.g., "chat", "tasks", "memory") — loose match
     if (subscription.topics && subscription.topics.length > 0) {
       const eventTopic = event.type.split('_')[0] // "message_posted" -> "message"
       if (!subscription.topics.some(topic => 
@@ -253,6 +277,7 @@ class EventBus {
         id: sub.id,
         agent: sub.agent,
         topics: sub.topics,
+        types: sub.types,
         connectedMs: Date.now() - sub.createdAt,
       })),
     }

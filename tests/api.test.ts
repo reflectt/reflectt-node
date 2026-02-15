@@ -948,6 +948,27 @@ describe('Idle Nudge shipped cooldown', () => {
   })
 })
 
+describe('SSE Event Filtering', () => {
+  it('GET /events/types returns valid event types', async () => {
+    const { status, body } = await req('GET', '/events/types')
+    expect(status).toBe(200)
+    expect(body.types).toBeInstanceOf(Array)
+    expect(body.types).toContain('message_posted')
+    expect(body.types).toContain('task_created')
+    expect(body.types).toContain('task_updated')
+    expect(body.types).toContain('task_assigned')
+    expect(body.types).toContain('presence_updated')
+    expect(body.usage).toBeDefined()
+  })
+
+  it('GET /events/status returns subscription info', async () => {
+    const { status, body } = await req('GET', '/events/status')
+    expect(status).toBe(200)
+    expect(body.connected).toBeTypeOf('number')
+    expect(body.eventLog).toBeTypeOf('number')
+  })
+})
+
 describe('Inbox', () => {
   it('GET /inbox/:agent returns inbox', async () => {
     const { status, body } = await req('GET', '/inbox/test-agent')
