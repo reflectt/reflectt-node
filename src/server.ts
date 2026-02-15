@@ -394,6 +394,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     if (hint) envelope.hint = hint
     if (body.details !== undefined) envelope.details = body.details
+    if (body.gate !== undefined) envelope.gate = body.gate
     if (alreadyEnvelope && body.data !== undefined) envelope.data = body.data
 
     return envelope
