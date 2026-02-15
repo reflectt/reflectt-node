@@ -27,6 +27,7 @@ import { experimentsManager } from './experiments.js'
 import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
+import { getBuildInfo } from './buildInfo.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -601,6 +602,11 @@ export async function createServer(): Promise<FastifyInstance> {
   // System health (uptime, performance, errors)
   app.get('/health/system', async () => {
     return healthMonitor.getSystemHealth()
+  })
+
+  // Build info — git SHA, branch, PID, uptime
+  app.get('/health/build', async () => {
+    return getBuildInfo()
   })
 
   // Error logs (for debugging)

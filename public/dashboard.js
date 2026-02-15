@@ -1084,6 +1084,31 @@ async function loadReleaseStatus(force = false) {
   }
 }
 
+async function loadBuildInfo() {
+  const badge = document.getElementById('build-badge');
+  if (!badge) return;
+
+  try {
+    const r = await fetch(BASE + '/health/build');
+    const info = await r.json();
+
+    const sha = info.gitShortSha || 'unknown';
+    const branch = info.gitBranch || 'unknown';
+    const uptime = info.uptime || 0;
+    const uptimeStr = uptime < 60 ? `${uptime}s` :
+      uptime < 3600 ? `${Math.floor(uptime / 60)}m` :
+      `${Math.floor(uptime / 3600)}h${Math.floor((uptime % 3600) / 60)}m`;
+
+    badge.classList.toggle('fresh', branch === 'main');
+    badge.classList.toggle('stale', branch !== 'main');
+    badge.textContent = `${sha} • ${uptimeStr}`;
+    badge.title = `SHA: ${info.gitSha}\nBranch: ${branch}\nCommit: ${info.gitMessage}\nAuthor: ${info.gitAuthor}\nPID: ${info.pid}\nNode: ${info.nodeVersion}\nStarted: ${info.startedAt}`;
+  } catch (err) {
+    badge.textContent = 'build: error';
+    badge.title = 'Failed to load build info';
+  }
+}
+
 function updateClock() {
   document.getElementById('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -1221,7 +1246,7 @@ async function refresh() {
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull)]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo()]);
   await renderPromotionSSOT();
 }
 
