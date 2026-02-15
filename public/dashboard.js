@@ -908,23 +908,26 @@ async function loadHealth() {
     const shouldRefreshDetail = !cachedHealth || (now - lastHealthDetailSync) > 120000;
 
     if (shouldRefreshDetail) {
-      const [teamRes, agentsRes, idleNudgeRes] = await Promise.all([
+      const [teamRes, agentsRes, idleNudgeRes, workflowRes] = await Promise.all([
         fetch(BASE + '/health/team'),
         fetch(BASE + '/health/agents'),
         fetch(BASE + '/health/idle-nudge/debug'),
+        fetch(BASE + '/health/workflow'),
       ]);
       const team = await teamRes.json();
       const agentsSummary = await agentsRes.json();
       const idleNudgeDebug = await idleNudgeRes.json();
-      cachedHealth = { team, agentsSummary, idleNudgeDebug };
+      const workflow = await workflowRes.json();
+      cachedHealth = { team, agentsSummary, idleNudgeDebug, workflow };
       lastHealthDetailSync = now;
     }
 
-    const health = cachedHealth || { team: { blockers: [], overlaps: [], compliance: null }, agentsSummary: { agents: [] }, idleNudgeDebug: null };
+    const health = cachedHealth || { team: { blockers: [], overlaps: [], compliance: null }, agentsSummary: { agents: [] }, idleNudgeDebug: null, workflow: { agents: [] } };
 
     const team = health.team || { blockers: [], overlaps: [], compliance: null, agents: [] };
     const agentsSummary = health.agentsSummary || { agents: [] };
     const idleNudgeDebug = health.idleNudgeDebug || null;
+    const workflow = health.workflow || { agents: [] };
 
     const teamAgentsByName = new Map((team.agents || []).map(a => [a.agent, a]));
     const summaryRows = (agentsSummary.agents && agentsSummary.agents.length > 0)
@@ -1034,6 +1037,25 @@ async function loadHealth() {
           <div class="overlap-agents">${o.agents.join(', ')}</div>
           <div class="overlap-topic">${esc(o.topic)} (${o.confidence} confidence)</div>
         </div>`).join('');
+      html += '</div>';
+    }
+
+    // Unified workflow state (task + shipped + blocker + PR)
+    if (Array.isArray(workflow.agents) && workflow.agents.length > 0) {
+      html += '<div class="health-section"><div class="health-section-title">🧭 Workflow State</div>';
+      html += workflow.agents.slice(0, 8).map(w => {
+        const taskText = w.doingTaskId ? esc(truncate(w.doingTaskId, 28)) : 'no active task';
+        const taskAge = w.doingTaskAgeMs == null ? 'n/a' : `${Math.floor(Number(w.doingTaskAgeMs) / 60000)}m`;
+        const shipped = w.lastShippedAt ? ago(Number(w.lastShippedAt)) + ' ago' : 'none';
+        const prState = w.prState || 'none';
+        const prText = w.pr ? `<a href="${esc(w.pr)}" target="_blank" rel="noopener">PR</a>` : 'no PR';
+        const blocker = w.blockerActive ? '🚫 blocker' : '✅ clear';
+        return `<div class="blocker-item">
+          <div class="blocker-agent">${esc(w.agent)}</div>
+          <div class="blocker-meta">task: ${taskText} (${taskAge}) • shipped: ${esc(shipped)} • ${blocker}</div>
+          <div class="blocker-meta">pr: ${prText} (${esc(prState)})${w.artifactPath ? ` • artifact: ${esc(truncate(w.artifactPath, 40))}` : ''}</div>
+        </div>`;
+      }).join('');
       html += '</div>';
     }
 
