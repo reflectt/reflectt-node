@@ -96,6 +96,21 @@ export function getDashboardHTML(): string {
   .agent-name { font-size: 13px; font-weight: 600; color: var(--text-bright); }
   .agent-role { font-size: 10px; color: var(--purple); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
   .agent-status-text { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agent-pr-link {
+    display: inline-flex;
+    margin-top: 3px;
+    font-size: 10px;
+    color: var(--accent);
+    text-decoration: none;
+    font-weight: 600;
+    width: fit-content;
+  }
+  .agent-pr-link:hover { text-decoration: underline; }
+  .agent-pr-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
   .agent-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.3px; }
   .agent-badge.working { background: var(--green-dim); color: var(--green); }
   .agent-badge.idle { background: var(--border); color: var(--text-muted); }
