@@ -257,6 +257,12 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/sse` | MCP SSE transport |
 | POST | `/mcp/messages` | MCP message handler |
 
+## Cloud
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/cloud/status` | Cloud connection state (registered, heartbeat age, sync status). Only active when `REFLECTT_HOST_TOKEN` is set. |
+
 ## Other
 
 | Method | Path | Description |
