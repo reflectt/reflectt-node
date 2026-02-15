@@ -74,6 +74,12 @@ const CreateTaskCommentSchema = z.object({
   content: z.string().trim().min(1),
 })
 
+const TaskOutcomeBodySchema = z.object({
+  verdict: z.enum(['PASS', 'NO-CHANGE', 'REGRESSION']),
+  author: z.string().trim().min(1).optional(),
+  notes: z.string().trim().min(1).optional(),
+})
+
 const RecurringTaskScheduleSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('weekly'),
@@ -264,6 +270,8 @@ const MAX_LIMITS = {
   inboxScanMessages: 150,
   unreadScanMessages: 300,
 } as const
+
+const OUTCOME_CHECK_DELAY_MS = 48 * 60 * 60 * 1000
 
 function parsePositiveInt(value: string | undefined): number | undefined {
   if (!value) return undefined
@@ -1186,6 +1194,43 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Capture outcome verdict for a completed task
+  app.post<{ Params: { id: string } }>('/tasks/:id/outcome', async (request, reply) => {
+    const task = taskManager.getTask(request.params.id)
+    if (!task) {
+      reply.code(404)
+      return { success: false, error: 'Task not found' }
+    }
+
+    if (task.status !== 'done') {
+      reply.code(400)
+      return { success: false, error: 'Outcome verdicts are only accepted for done tasks' }
+    }
+
+    try {
+      const body = TaskOutcomeBodySchema.parse(request.body || {})
+      const capturedAt = Date.now()
+      const updated = await taskManager.updateTask(task.id, {
+        metadata: {
+          ...(task.metadata || {}),
+          outcome_checkpoint: {
+            ...(((task.metadata as any)?.outcome_checkpoint || {}) as Record<string, unknown>),
+            verdict: body.verdict,
+            notes: body.notes,
+            capturedAt,
+            capturedBy: body.author || 'unknown',
+            status: 'captured',
+          },
+        },
+      })
+
+      return { success: true, task: updated ? enrichTaskWithComments(updated) : null }
+    } catch (err: any) {
+      reply.code(400)
+      return { success: false, error: err.message || 'Failed to capture outcome verdict' }
+    }
+  })
+
   // Create task
   app.post('/tasks', async (request, reply) => {
     try {
@@ -1269,12 +1314,26 @@ export async function createServer(): Promise<FastifyInstance> {
       // ── End task-close gate ──
 
       const { actor, ...rest } = parsed
+
+      const nextMetadata: Record<string, unknown> = {
+        ...mergedMeta,
+        ...(actor ? { actor } : {}),
+      }
+
+      if (parsed.status === 'done' && existing.status !== 'done') {
+        const completedAt = Date.now()
+        const outcomeMeta = ((nextMetadata.outcome_checkpoint as Record<string, unknown>) || {})
+        nextMetadata.completed_at = completedAt
+        nextMetadata.outcome_checkpoint = {
+          ...outcomeMeta,
+          dueAt: completedAt + OUTCOME_CHECK_DELAY_MS,
+          status: 'scheduled',
+        }
+      }
+
       const updates = {
         ...rest,
-        metadata: {
-          ...mergedMeta,
-          ...(actor ? { actor } : {}),
-        },
+        metadata: nextMetadata,
       }
       const task = await taskManager.updateTask(request.params.id, updates)
       if (!task) {
@@ -1709,6 +1768,47 @@ export async function createServer(): Promise<FastifyInstance> {
     
     const analytics = analyticsManager.getTaskAnalytics(since)
     return { analytics }
+  })
+
+  // Operational metrics endpoint (lightweight dashboard contract)
+  app.get('/metrics', async () => {
+    const startedAt = Date.now()
+    const now = Date.now()
+    const oneHourAgo = now - (60 * 60 * 1000)
+
+    const tasks = taskManager.getStats()
+    const presence = presenceManager.getStats()
+    const activity = presenceManager.getAllActivity()
+    const messages = chatManager.getMessages({ limit: 500 })
+    const recentMessagesLastHour = messages.filter(m => m.timestamp >= oneHourAgo).length
+
+    const agentActivityRates = activity.map(item => {
+      const anchor = item.first_seen_today || item.last_active || now
+      const elapsedHours = Math.max((now - anchor) / (60 * 60 * 1000), 1 / 60)
+      return {
+        agent: item.agent,
+        messagesPerHour: Number((item.messages_today / elapsedHours).toFixed(2)),
+        tasksCompletedPerHour: Number((item.tasks_completed_today / elapsedHours).toFixed(2)),
+        heartbeatsPerHour: Number((item.heartbeats_today / elapsedHours).toFixed(2)),
+      }
+    })
+
+    return {
+      tasks,
+      chat: {
+        totalMessages: messages.length,
+        recentMessagesLastHour,
+        messagesPerHour: Number((recentMessagesLastHour / 1).toFixed(2)),
+      },
+      presence: {
+        totalAgents: presence.total,
+        byStatus: presence.statusCounts,
+      },
+      agentActivityRates,
+      uptimeMs: process.uptime() * 1000,
+      responseTimeMs: Date.now() - startedAt,
+      timestamp: now,
+    }
   })
 
   // Get summary metrics dashboard

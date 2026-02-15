@@ -429,6 +429,66 @@ describe('Mention Ack', () => {
   })
 })
 
+describe('Metrics', () => {
+  it('GET /metrics returns structured operational stats', async () => {
+    const { status, body } = await req('GET', '/metrics')
+    expect(status).toBe(200)
+    expect(body.tasks).toBeDefined()
+    expect(body.tasks.byStatus).toBeDefined()
+    expect(body.chat).toBeDefined()
+    expect(typeof body.chat.recentMessagesLastHour).toBe('number')
+    expect(body.presence).toBeDefined()
+    expect(body.agentActivityRates).toBeInstanceOf(Array)
+    expect(typeof body.uptimeMs).toBe('number')
+    expect(typeof body.responseTimeMs).toBe('number')
+    expect(body.responseTimeMs).toBeLessThan(100)
+  })
+})
+
+describe('Task outcome checkpoint', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: outcome checkpoint task',
+      description: 'Outcome endpoint test',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Outcome captured'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['integration-test-evidence'],
+        reviewer_approved: true,
+      },
+    })
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('POST /tasks/:id/outcome captures verdict metadata', async () => {
+    const { status, body } = await req('POST', `/tasks/${taskId}/outcome`, {
+      verdict: 'PASS',
+      author: 'test-reviewer',
+      notes: 'Looks healthy after 48h checkpoint',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.metadata.outcome_checkpoint).toBeDefined()
+    expect(body.task.metadata.outcome_checkpoint.verdict).toBe('PASS')
+    expect(body.task.metadata.outcome_checkpoint.capturedBy).toBe('test-reviewer')
+  })
+})
+
 describe('Docs', () => {
   it('GET /docs returns markdown', async () => {
     const res = await app.inject({ method: 'GET', url: '/docs' })
