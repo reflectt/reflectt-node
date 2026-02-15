@@ -1746,7 +1746,21 @@ export async function createServer(): Promise<FastifyInstance> {
       return { error: 'Task not found', details: { input: request.params.id, suggestions: match.suggestions } }
     }
 
-    const history = taskManager.getTaskHistory(resolved.resolvedId)
+    const events = taskManager.getTaskHistory(resolved.resolvedId)
+    const history = events
+      .filter(event => event.type === 'status_changed')
+      .map(event => ({
+        status: String(event.data?.to ?? 'unknown'),
+        changedBy: event.actor,
+        changedAt: event.timestamp,
+        metadata: {
+          from: event.data?.from ?? null,
+          to: event.data?.to ?? null,
+          eventType: event.type,
+          eventId: event.id,
+        },
+      }))
+
     return { history, count: history.length, resolvedId: resolved.resolvedId }
   })
 

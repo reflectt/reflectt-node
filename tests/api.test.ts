@@ -330,6 +330,74 @@ describe('Task CRUD', () => {
   })
 })
 
+describe('Task History Changelog', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: history changelog task',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['History visible'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      actor: 'test-agent',
+      metadata: {
+        eta: '1h',
+      },
+    })
+
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      actor: 'test-agent',
+      metadata: {
+        artifact_path: 'process/TASK-history-proof.md',
+        qa_bundle: {
+          summary: 'history test',
+          artifact_links: ['process/TASK-history-proof.md'],
+          checks: ['npm test'],
+        },
+      },
+    })
+
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      actor: 'test-reviewer',
+      metadata: {
+        artifacts: ['process/TASK-history-proof.md'],
+        reviewer_approved: true,
+      },
+    })
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('GET /tasks/:id/history returns normalized lifecycle changelog entries', async () => {
+    const { status, body } = await req('GET', `/tasks/${taskId}/history`)
+    expect(status).toBe(200)
+    expect(body.history).toBeInstanceOf(Array)
+
+    const statuses = body.history.map((entry: any) => entry.status)
+    expect(statuses).toContain('doing')
+    expect(statuses).toContain('validating')
+    expect(statuses).toContain('done')
+
+    const first = body.history[0]
+    expect(first).toHaveProperty('status')
+    expect(first).toHaveProperty('changedBy')
+    expect(first).toHaveProperty('changedAt')
+    expect(first).toHaveProperty('metadata')
+  })
+})
+
 describe('Artifact Path Canonicalization', () => {
   let taskId: string
 
