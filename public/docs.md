@@ -15,6 +15,12 @@ Base URL: `http://localhost:4445`
 - [Review Queue SOP](../docs/REVIEW_QUEUE_SOP.md) — validating queue workflow, SLA, and PASS/FAIL discipline.
 - [Task-Close Gate Playbook](../docs/TASK_CLOSE_GATE_PLAYBOOK.md) — required close metadata with pass/fail examples.
 - [Backlog Claim Troubleshooting](../docs/BACKLOG_CLAIM_TROUBLESHOOTING.md) — claim flow, metadata requirements, and common errors.
+- [Research Intake Handbook](../docs/RESEARCH_INTAKE_HANDBOOK.md) — requests/findings flow and handoff protocol.
+- [Dashboard Panel Reference](../docs/DASHBOARD_PANEL_REFERENCE.md) — panel-to-endpoint mapping and refresh behavior.
+- [API Docs Quality Checklist](../docs/API_DOCS_QUALITY_CHECKLIST.md) — pre-merge checks for endpoint-doc consistency.
+- [Weekly Ship Log Template](../docs/WEEKLY_SHIP_LOG_TEMPLATE.md) — compact weekly status template.
+- [Incident Writeup Template](../docs/INCIDENT_WRITEUP_TEMPLATE.md) — timeline/root-cause/fix/prevention structure.
+- [Contributor Onboarding Script](../docs/CONTRIBUTOR_ONBOARDING_SCRIPT.md) — first-day workflow from clone to validated task.
 
 ---
 
