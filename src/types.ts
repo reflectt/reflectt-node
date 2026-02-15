@@ -33,7 +33,7 @@ export interface Task {
   metadata?: Record<string, unknown>
 }
 
-export type TaskHistoryEventType = 'created' | 'assigned' | 'status_changed' | 'commented'
+export type TaskHistoryEventType = 'created' | 'assigned' | 'status_changed' | 'commented' | 'lane_transition'
 
 export interface TaskComment {
   id: string
