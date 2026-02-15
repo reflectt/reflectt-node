@@ -249,6 +249,10 @@ const ReleaseNotesQuerySchema = z.object({
   limit: z.string().regex(/^\d+$/).optional(),
 })
 
+const MetricsDailyQuerySchema = z.object({
+  timezone: z.string().optional(),
+})
+
 function enforceQaBundleGateForValidating(
   status: Task['status'] | undefined,
   metadata: unknown,
@@ -2116,6 +2120,23 @@ export async function createServer(): Promise<FastifyInstance> {
       responseTimeMs: Date.now() - startedAt,
       timestamp: now,
     }
+  })
+
+  // Daily funnel metrics by channel (visits -> signups -> activations)
+  app.get('/metrics/daily', async (request, reply) => {
+    const parsedQuery = MetricsDailyQuerySchema.safeParse(request.query)
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        success: false,
+        error: 'Invalid metrics daily query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const timezone = parsedQuery.data.timezone || 'America/Vancouver'
+    const funnel = await analyticsManager.getDailyFunnelMetrics(timezone)
+    return { funnel }
   })
 
   // Get summary metrics dashboard
