@@ -31,6 +31,7 @@ const AGENTS = [
   { name: 'harmony', emoji: '🫶', role: 'Health' },
   { name: 'spark', emoji: '🚀', role: 'Growth' },
 ];
+const AGENT_INDEX = new Map(AGENTS.map(a => [a.name, a]));
 
 const SSOT_LINKS = [
   { label: 'Promotion Evidence Index', url: 'https://github.com/reflectt/reflectt-node/blob/main/docs/TASK_LINKIFY_PROMOTION_EVIDENCE_INDEX.md' },
@@ -432,6 +433,12 @@ function deriveHealthSignal(agent) {
   return { status: 'blocked', lowConfidence: false };
 }
 
+function healthPriorityRank(agent) {
+  if (agent.idleWithActiveTask || agent.displayStatus === 'blocked') return 0;
+  if (agent.displayStatus === 'silent' || agent.displayStatus === 'watch' || agent.lowConfidence) return 1;
+  return 2;
+}
+
 function classifyProject(task) {
   const text = ((task.title || '') + ' ' + (task.description || '')).toLowerCase();
   if (/dashboard|reflectt-node|api|mcp|sse|persistence|event|server|cli|node/.test(text)) return 'reflectt-node';
@@ -814,17 +821,19 @@ function renderChat() {
   if (shown.length === 0) { body.innerHTML = '<div class="empty">No messages</div>'; return; }
   body.innerHTML = shown.map(m => {
     const long = m.content && m.content.length > 200;
-    const agent = AGENTS.find(a => a.name === m.from);
+    const agent = AGENT_INDEX.get(m.from);
     const roleTag = agent ? `<span class="msg-role">${esc(agent.role)}</span>` : '';
     const mentioned = mentionsRyan(m.content);
+    const channelTag = m.channel ? '<span class="msg-channel">#' + esc(m.channel) + '</span>' : '';
+    const editedTag = m.metadata && m.metadata.editedAt ? '<span class="msg-edited">(edited)</span>' : '';
     return `
     <div class="msg ${mentioned ? 'mentioned' : ''}">
       <div class="msg-header">
         <span class="msg-from">${esc(m.from)}</span>
         ${roleTag}
-        ${m.channel ? '<span class="msg-channel">#' + esc(m.channel) + '</span>' : ''}
+        ${channelTag}
         <span class="msg-time">${ago(m.timestamp)}</span>
-        ${m.metadata && m.metadata.editedAt ? '<span class="msg-edited">(edited)</span>' : ''}
+        ${editedTag}
       </div>
       <div class="msg-content ${long ? 'collapsed' : ''}" data-collapsible="${long ? 'true' : 'false'}">${renderMessageContentWithTaskLinks(m.content)}</div>
     </div>`;
@@ -1049,6 +1058,14 @@ async function loadHealth() {
       statusCounts[displayStatus] = (statusCounts[displayStatus] || 0) + 1;
       if (a.idleWithActiveTask) stuckActiveCount += 1;
       return { ...a, displayStatus, lowConfidence: derived.lowConfidence };
+    }).sort((a, b) => {
+      const pa = healthPriorityRank(a);
+      const pb = healthPriorityRank(b);
+      if (pa !== pb) return pa - pb;
+      if ((b.minutesSinceLastSeen || 0) !== (a.minutesSinceLastSeen || 0)) {
+        return (b.minutesSinceLastSeen || 0) - (a.minutesSinceLastSeen || 0);
+      }
+      return a.agent.localeCompare(b.agent);
     });
 
     const healthSummary = `${statusCounts.active} active • ${statusCounts.watch + statusCounts.silent} quiet • ${statusCounts.blocked} blocked • ${stuckActiveCount} stuck`;
@@ -1070,8 +1087,10 @@ async function loadHealth() {
         const confidenceLabel = a.lowConfidence ? ' • needs review' : '';
         const stuckLabel = a.idleWithActiveTask ? ' • ⛔ active-task idle>60m' : '';
         const staleReasonLabel = a.staleReason ? ' • ' + a.staleReason : '';
+        const hierarchyClass = healthPriorityRank(a) === 0 ? 'health-critical' : (healthPriorityRank(a) === 1 ? 'health-warning' : 'health-info');
         const cardClasses = [
           'health-card',
+          hierarchyClass,
           a.lowConfidence ? 'needs-review' : '',
           a.idleWithActiveTask ? 'stuck-active-task' : '',
         ].filter(Boolean).join(' ');
