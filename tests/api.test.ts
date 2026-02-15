@@ -162,6 +162,64 @@ describe('Task CRUD', () => {
   })
 })
 
+describe('Artifact Path Canonicalization', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: artifact path canonicalization',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Path canonicalized'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('rejects validating status when artifact_path is not repo-relative under process/', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        eta: '1h',
+        artifact_path: '/tmp/TASK-proof.md',
+        qa_bundle: {
+          summary: 'test bundle',
+          artifact_links: ['process/TASK-test-proof.md'],
+          checks: ['npm test'],
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toContain('artifact_path')
+    expect(body.error).toContain('process/')
+  })
+
+  it('accepts validating status when artifact_path is canonical', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        eta: '1h',
+        artifact_path: 'process/TASK-test-proof.md',
+        qa_bundle: {
+          summary: 'test bundle',
+          artifact_links: ['process/TASK-test-proof.md'],
+          checks: ['npm test'],
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.task.status).toBe('validating')
+  })
+})
+
 describe('Backlog', () => {
   let taskId: string
 
