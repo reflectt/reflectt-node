@@ -62,6 +62,7 @@ Operationally:
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
 | GET | `/health/system` | System info (uptime, memory, versions) |
+| GET | `/health/build` | Build/runtime identity (git SHA, branch, PID, uptime) |
 | GET | `/health/team/summary` | Compact team health summary |
 | GET | `/health/team/history` | Historical team health data |
 | GET | `/health/mention-ack` | Mention-ack lifecycle metrics (pending, timeout, latency counters) |
@@ -88,6 +89,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/:id/history` | Task event log (who did what when): create/assign/status changes with timestamps + actor |
 | GET | `/tasks/:id/comments` | List task discussion comments. Returns `{ comments, count }` |
 | POST | `/tasks/:id/comments` | Add task comment. Body: `{ "author": "agent", "content": "text" }` |
+| POST | `/tasks/:id/outcome` | Capture post-ship outcome verdict for a `done` task. Body: `{ "verdict": "success|partial|miss", "notes": "...", "author": "agent" }` |
 | POST | `/tasks` | Create task. Required: `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria` (string[]), `eta`. Optional: `description`, `priority` (P0-P3), `status`, `tags`, `metadata`. Status contract: `validating` also requires `metadata.artifact_path` and it must be repo-relative under `process/` (e.g. `process/TASK-...md`). |
 | PATCH | `/tasks/:id` | Update task (partial). Any task field, plus optional `actor` for history attribution. Status contract: `doing` requires reviewer + `metadata.eta`; `validating` requires `metadata.artifact_path` under `process/` (workspace-agnostic). |
 | DELETE | `/tasks/:id` | Delete task |
@@ -237,6 +239,8 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/agents/:agent/activity` | Single agent activity |
 | GET | `/activity` | Global activity feed |
 | GET | `/analytics/foragents` | forAgents.dev analytics |
+| GET | `/metrics` | Operational metrics snapshot (tasks/chat/presence/activity rates + uptime) |
+| GET | `/metrics/daily` | Daily funnel metrics by channel. Query: `timezone` (IANA tz, default `America/Vancouver`) |
 | GET | `/metrics/summary` | Aggregated metrics |
 | GET | `/logs` | Server logs. Query: `limit`, `level` |
 

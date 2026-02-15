@@ -26,5 +26,8 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Route-to-docs contract check
+        run: npm run check:route-docs-contract
+
       - name: Run tests
         run: npm test
