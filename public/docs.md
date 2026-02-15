@@ -136,7 +136,8 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 |--------|------|-------------|
 | GET | `/release/status` | Compare startup code snapshot vs current repo state. Returns `stale` + reasons for code/server mismatch detection. |
 | GET | `/release/notes` | Generate deploy changelog from completed tasks. Query: `since` (epoch ms), `limit`. Returns markdown + structured task list. |
-| POST | `/release/deploy` | Mark deploy timestamp. Body (optional): `{ "deployedBy": "agent", "note": "text" }` |
+| GET | `/release/diff` | Compare live SHA vs previous deploy SHA. Returns changed files, inferred endpoint changes, changed tests, commits, and PR links. Query: `from`, `to`, `commitLimit`. |
+| POST | `/release/deploy` | Mark deploy timestamp + tracked commit SHA. Body (optional): `{ "deployedBy": "agent", "note": "text" }` |
 
 ## Chat
 

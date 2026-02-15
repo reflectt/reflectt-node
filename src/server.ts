@@ -249,6 +249,12 @@ const ReleaseNotesQuerySchema = z.object({
   limit: z.string().regex(/^\d+$/).optional(),
 })
 
+const ReleaseDiffQuerySchema = z.object({
+  from: z.string().regex(/^[a-fA-F0-9]{7,40}$/).optional(),
+  to: z.string().regex(/^[a-fA-F0-9]{7,40}$/).optional(),
+  commitLimit: z.string().regex(/^\d+$/).optional(),
+})
+
 const MetricsDailyQuerySchema = z.object({
   timezone: z.string().optional(),
 })
@@ -826,6 +832,24 @@ export async function createServer(): Promise<FastifyInstance> {
     const limit = boundedLimit(query.limit, 25, 200)
     const notes = await releaseManager.getReleaseNotes({ since, limit })
     return notes
+  })
+
+  app.get('/release/diff', async (request, reply) => {
+    const parsedQuery = ReleaseDiffQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const query = parsedQuery.data
+    return releaseManager.getReleaseDiff({
+      from: query.from,
+      to: query.to,
+      commitLimit: boundedLimit(query.commitLimit, 100, 500),
+    })
   })
 
   app.post('/release/deploy', async (request) => {
