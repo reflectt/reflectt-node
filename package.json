@@ -17,6 +17,7 @@
     "test:idle-nudge:coherence": "tsx tools/idle-nudge-coherence-harness.ts",
     "test:task-linkify:regression": "tsx tools/task-linkify-regression-harness.ts",
     "test:ssot-indicator:regression": "tsx tools/ssot-indicator-regression-harness.ts",
+    "check:route-docs-contract": "node tools/check-route-docs-contract.mjs",
     "test:task-linkify:dryrun-validator": "tsx tools/task-linkify-dryrun-transcript-validator.ts",
     "test:task-linkify:dryrun-negative-fixtures": "tsx tools/task-linkify-dryrun-validator-negative-harness.ts",
     "tasks:backfill-intake-fields": "tsx tools/backfill-task-intake-fields.ts",
