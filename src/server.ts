@@ -360,6 +360,34 @@ function defaultHintForStatus(status: number): string | undefined {
   return undefined
 }
 
+const QUIET_HOURS_ENABLED = process.env.WATCHDOG_QUIET_HOURS_ENABLED !== 'false'
+const QUIET_HOURS_START_HOUR = Number(process.env.WATCHDOG_QUIET_HOURS_START_HOUR || 23)
+const QUIET_HOURS_END_HOUR = Number(process.env.WATCHDOG_QUIET_HOURS_END_HOUR || 8)
+const QUIET_HOURS_TZ = process.env.WATCHDOG_QUIET_HOURS_TZ || 'America/Vancouver'
+
+function getHourInTimezone(nowMs: number, timeZone: string): number {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    hour12: false,
+  })
+  const part = formatter.formatToParts(new Date(nowMs)).find(p => p.type === 'hour')
+  const hour = Number(part?.value ?? '0')
+  return Number.isFinite(hour) ? hour : 0
+}
+
+function isQuietHours(nowMs: number): boolean {
+  if (!QUIET_HOURS_ENABLED) return false
+
+  const start = Math.max(0, Math.min(23, QUIET_HOURS_START_HOUR))
+  const end = Math.max(0, Math.min(23, QUIET_HOURS_END_HOUR))
+  const hour = getHourInTimezone(nowMs, QUIET_HOURS_TZ)
+
+  if (start === end) return false
+  if (start < end) return hour >= start && hour < end
+  return hour >= start || hour < end
+}
+
 export async function createServer(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: isDev ? {
@@ -439,18 +467,21 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // System idle nudge watchdog (process-in-code guardrail)
   const idleNudgeTimer = setInterval(() => {
+    if (isQuietHours(Date.now())) return
     healthMonitor.runIdleNudgeTick().catch(() => {})
   }, 60 * 1000)
   idleNudgeTimer.unref()
 
   // Collaboration cadence watchdog (trio silence + stale working alerts)
   const cadenceWatchdogTimer = setInterval(() => {
+    if (isQuietHours(Date.now())) return
     healthMonitor.runCadenceWatchdogTick().catch(() => {})
   }, 60 * 1000)
   cadenceWatchdogTimer.unref()
 
   // Mention rescue fallback (if Ryan mentions trio and no response arrives)
   const mentionRescueTimer = setInterval(() => {
+    if (isQuietHours(Date.now())) return
     healthMonitor.runMentionRescueTick().catch(() => {})
   }, 30 * 1000)
   mentionRescueTimer.unref()
@@ -545,12 +576,36 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/health/idle-nudge/tick', async (request) => {
     const query = request.query as Record<string, string>
     const dryRun = query.dryRun === 'true'
-    const result = await healthMonitor.runIdleNudgeTick(Date.now(), { dryRun })
+    const force = query.force === 'true'
+    const now = parseEpochMs(query.nowMs) || Date.now()
+
+    if (!force && isQuietHours(now)) {
+      return {
+        success: true,
+        dryRun,
+        force,
+        suppressed: true,
+        reason: 'quiet-hours',
+        quietHours: {
+          enabled: QUIET_HOURS_ENABLED,
+          startHour: QUIET_HOURS_START_HOUR,
+          endHour: QUIET_HOURS_END_HOUR,
+          tz: QUIET_HOURS_TZ,
+        },
+        nudged: [],
+        decisions: [],
+        timestamp: now,
+      }
+    }
+
+    const result = await healthMonitor.runIdleNudgeTick(now, { dryRun })
     return {
       success: true,
       dryRun,
+      force,
+      suppressed: false,
       ...result,
-      timestamp: Date.now(),
+      timestamp: now,
     }
   })
 
@@ -558,12 +613,35 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/health/cadence-watchdog/tick', async (request) => {
     const query = request.query as Record<string, string>
     const dryRun = query.dryRun === 'true'
-    const result = await healthMonitor.runCadenceWatchdogTick(Date.now(), { dryRun })
+    const force = query.force === 'true'
+    const now = parseEpochMs(query.nowMs) || Date.now()
+
+    if (!force && isQuietHours(now)) {
+      return {
+        success: true,
+        dryRun,
+        force,
+        suppressed: true,
+        reason: 'quiet-hours',
+        quietHours: {
+          enabled: QUIET_HOURS_ENABLED,
+          startHour: QUIET_HOURS_START_HOUR,
+          endHour: QUIET_HOURS_END_HOUR,
+          tz: QUIET_HOURS_TZ,
+        },
+        alerts: [],
+        timestamp: now,
+      }
+    }
+
+    const result = await healthMonitor.runCadenceWatchdogTick(now, { dryRun })
     return {
       success: true,
       dryRun,
+      force,
+      suppressed: false,
       ...result,
-      timestamp: Date.now(),
+      timestamp: now,
     }
   })
 
@@ -571,12 +649,35 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/health/mention-rescue/tick', async (request) => {
     const query = request.query as Record<string, string>
     const dryRun = query.dryRun === 'true'
-    const result = await healthMonitor.runMentionRescueTick(Date.now(), { dryRun })
+    const force = query.force === 'true'
+    const now = parseEpochMs(query.nowMs) || Date.now()
+
+    if (!force && isQuietHours(now)) {
+      return {
+        success: true,
+        dryRun,
+        force,
+        suppressed: true,
+        reason: 'quiet-hours',
+        quietHours: {
+          enabled: QUIET_HOURS_ENABLED,
+          startHour: QUIET_HOURS_START_HOUR,
+          endHour: QUIET_HOURS_END_HOUR,
+          tz: QUIET_HOURS_TZ,
+        },
+        rescued: [],
+        timestamp: now,
+      }
+    }
+
+    const result = await healthMonitor.runMentionRescueTick(now, { dryRun })
     return {
       success: true,
       dryRun,
+      force,
+      suppressed: false,
       ...result,
-      timestamp: Date.now(),
+      timestamp: now,
     }
   })
 

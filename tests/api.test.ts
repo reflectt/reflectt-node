@@ -55,6 +55,42 @@ describe('Health', () => {
   })
 })
 
+describe('Quiet Hours Watchdog Suppression', () => {
+  const quietNowMs = Date.parse('2026-02-15T02:00:00-08:00')
+
+  it('suppresses idle-nudge tick during quiet hours', async () => {
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&nowMs=${quietNowMs}`)
+    expect(status).toBe(200)
+    expect(body.suppressed).toBe(true)
+    expect(body.reason).toBe('quiet-hours')
+    expect(Array.isArray(body.nudged)).toBe(true)
+    expect(Array.isArray(body.decisions)).toBe(true)
+  })
+
+  it('suppresses cadence-watchdog tick during quiet hours', async () => {
+    const { status, body } = await req('POST', `/health/cadence-watchdog/tick?dryRun=true&nowMs=${quietNowMs}`)
+    expect(status).toBe(200)
+    expect(body.suppressed).toBe(true)
+    expect(body.reason).toBe('quiet-hours')
+    expect(Array.isArray(body.alerts)).toBe(true)
+  })
+
+  it('suppresses mention-rescue tick during quiet hours', async () => {
+    const { status, body } = await req('POST', `/health/mention-rescue/tick?dryRun=true&nowMs=${quietNowMs}`)
+    expect(status).toBe(200)
+    expect(body.suppressed).toBe(true)
+    expect(body.reason).toBe('quiet-hours')
+    expect(Array.isArray(body.rescued)).toBe(true)
+  })
+
+  it('allows forced idle-nudge tick during quiet hours', async () => {
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true&nowMs=${quietNowMs}`)
+    expect(status).toBe(200)
+    expect(body.suppressed).toBe(false)
+    expect(body.force).toBe(true)
+  })
+})
+
 describe('Task CRUD', () => {
   let taskId: string
 
