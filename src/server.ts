@@ -6,6 +6,8 @@ import fastifyWebsocket from '@fastify/websocket'
 import fastifyCors from '@fastify/cors'
 import { z } from 'zod'
 import { createHash } from 'crypto'
+import { promises as fs } from 'fs'
+import { resolve, sep } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { serverConfig, isDev } from './config.js'
@@ -79,6 +81,11 @@ const TaskOutcomeBodySchema = z.object({
   verdict: z.enum(['PASS', 'NO-CHANGE', 'REGRESSION']),
   author: z.string().trim().min(1).optional(),
   notes: z.string().trim().min(1).optional(),
+})
+
+const ReviewBundleBodySchema = z.object({
+  author: z.string().trim().min(1).optional(),
+  strict: z.boolean().optional(),
 })
 
 const RecurringTaskScheduleSchema = z.discriminatedUnion('kind', [
@@ -401,6 +408,203 @@ function extractValidationFields(errorText: string): ValidationField[] {
     }
   }
   return []
+}
+
+function extractPrUrlFromTask(task: Task): string | undefined {
+  const links = new Set<string>()
+  const metadata = (task.metadata || {}) as Record<string, unknown>
+
+  const artifactPath = metadata.artifact_path
+  if (typeof artifactPath === 'string') links.add(artifactPath)
+
+  const artifacts = metadata.artifacts
+  if (Array.isArray(artifacts)) {
+    for (const item of artifacts) {
+      if (typeof item === 'string') links.add(item)
+    }
+  }
+
+  const qaBundle = metadata.qa_bundle as Record<string, unknown> | undefined
+  const qaLinks = qaBundle?.artifact_links
+  if (Array.isArray(qaLinks)) {
+    for (const item of qaLinks) {
+      if (typeof item === 'string') links.add(item)
+    }
+  }
+
+  for (const link of links) {
+    if (/https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/i.test(link)) {
+      return link
+    }
+  }
+
+  return undefined
+}
+
+function extractArtifactPathsFromTask(task: Task): string[] {
+  const metadata = (task.metadata || {}) as Record<string, unknown>
+  const out = new Set<string>()
+
+  const addIfPath = (value: unknown) => {
+    if (typeof value !== 'string') return
+    const trimmed = value.trim()
+    if (trimmed.startsWith('process/')) out.add(trimmed)
+  }
+
+  addIfPath(metadata.artifact_path)
+
+  const artifacts = metadata.artifacts
+  if (Array.isArray(artifacts)) {
+    for (const item of artifacts) addIfPath(item)
+  }
+
+  const qaBundle = metadata.qa_bundle as Record<string, unknown> | undefined
+  const qaLinks = qaBundle?.artifact_links
+  if (Array.isArray(qaLinks)) {
+    for (const item of qaLinks) addIfPath(item)
+  }
+
+  return Array.from(out)
+}
+
+function parseGitHubPrUrl(prUrl: string): { owner: string; repo: string; pullNumber: number } | null {
+  const match = prUrl.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:$|[/?#])/i)
+  if (!match) return null
+  return {
+    owner: match[1],
+    repo: match[2],
+    pullNumber: Number.parseInt(match[3], 10),
+  }
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function resolveArtifactEvidence(paths: string[]): Promise<Array<{ path: string; absolutePath: string; exists: boolean }>> {
+  const processRoot = resolve(process.cwd(), 'process')
+  const results: Array<{ path: string; absolutePath: string; exists: boolean }> = []
+
+  for (const relPath of paths) {
+    const absolutePath = resolve(process.cwd(), relPath)
+    const inProcessDir = absolutePath === processRoot || absolutePath.startsWith(processRoot + sep)
+    const exists = inProcessDir ? await fileExists(absolutePath) : false
+    results.push({ path: relPath, absolutePath, exists })
+  }
+
+  return results
+}
+
+async function resolvePrAndCi(prUrl: string): Promise<{
+  pr: {
+    url: string
+    owner: string
+    repo: string
+    pullNumber: number
+    state?: string
+    merged?: boolean
+    headSha?: string
+  } | null
+  ci: {
+    state: 'success' | 'failure' | 'pending' | 'error' | 'unknown'
+    source: 'github-status' | 'unavailable'
+    details?: string
+  }
+}> {
+  const parsed = parseGitHubPrUrl(prUrl)
+  if (!parsed) {
+    return {
+      pr: null,
+      ci: {
+        state: 'unknown',
+        source: 'unavailable',
+        details: 'Invalid PR URL format',
+      },
+    }
+  }
+
+  try {
+    const prRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.pullNumber}`, {
+      headers: { Accept: 'application/vnd.github+json' },
+    })
+
+    if (!prRes.ok) {
+      return {
+        pr: {
+          url: prUrl,
+          owner: parsed.owner,
+          repo: parsed.repo,
+          pullNumber: parsed.pullNumber,
+        },
+        ci: {
+          state: 'unknown',
+          source: 'unavailable',
+          details: `GitHub PR lookup failed (${prRes.status})`,
+        },
+      }
+    }
+
+    const prJson = await prRes.json() as any
+    const headSha = typeof prJson?.head?.sha === 'string' ? prJson.head.sha : undefined
+
+    let ci: { state: 'success' | 'failure' | 'pending' | 'error' | 'unknown'; source: 'github-status' | 'unavailable'; details?: string } = {
+      state: 'unknown',
+      source: 'unavailable',
+      details: 'No commit SHA resolved',
+    }
+
+    if (headSha) {
+      const statusRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits/${headSha}/status`, {
+        headers: { Accept: 'application/vnd.github+json' },
+      })
+      if (statusRes.ok) {
+        const statusJson = await statusRes.json() as any
+        const state = (statusJson?.state || 'unknown') as 'success' | 'failure' | 'pending' | 'error' | 'unknown'
+        ci = {
+          state,
+          source: 'github-status',
+        }
+      } else {
+        ci = {
+          state: 'unknown',
+          source: 'unavailable',
+          details: `GitHub status lookup failed (${statusRes.status})`,
+        }
+      }
+    }
+
+    return {
+      pr: {
+        url: prUrl,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        pullNumber: parsed.pullNumber,
+        state: prJson?.state,
+        merged: Boolean(prJson?.merged_at),
+        headSha,
+      },
+      ci,
+    }
+  } catch (err: any) {
+    return {
+      pr: {
+        url: prUrl,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        pullNumber: parsed.pullNumber,
+      },
+      ci: {
+        state: 'unknown',
+        source: 'unavailable',
+        details: err?.message || 'PR/CI lookup failed',
+      },
+    }
+  }
 }
 
 function inferErrorStatus(errorText: string): number {
@@ -1635,6 +1839,74 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.code(400)
       return { success: false, error: err.message || 'Failed to capture outcome verdict' }
     }
+  })
+
+  // Build normalized reviewer packet (PR + CI + artifacts)
+  app.post<{ Params: { id: string } }>('/tasks/:id/review-bundle', async (request, reply) => {
+    const task = taskManager.getTask(request.params.id)
+    if (!task) {
+      reply.code(404)
+      return { success: false, error: 'Task not found' }
+    }
+
+    let body: { author?: string; strict?: boolean }
+    try {
+      body = ReviewBundleBodySchema.parse(request.body || {})
+    } catch (err: any) {
+      reply.code(400)
+      return { success: false, error: err.message || 'Invalid review bundle body' }
+    }
+
+    const strict = body.strict ?? true
+    const author = body.author || 'review-bundle-bot'
+
+    const prUrl = extractPrUrlFromTask(task)
+    const artifactPaths = extractArtifactPathsFromTask(task)
+    const artifactEvidence = await resolveArtifactEvidence(artifactPaths)
+
+    const prCi = prUrl
+      ? await resolvePrAndCi(prUrl)
+      : {
+          pr: null,
+          ci: {
+            state: 'unknown' as const,
+            source: 'unavailable' as const,
+            details: 'No PR link found in task metadata',
+          },
+        }
+
+    const reasons: string[] = []
+    if (!prUrl) reasons.push('no_pr_url_resolved')
+    if (strict && prCi.ci.state !== 'success') reasons.push(`ci_not_success:${prCi.ci.state}`)
+    if (artifactEvidence.length === 0) reasons.push('no_artifact_paths_resolved')
+    if (artifactEvidence.length > 0 && !artifactEvidence.some(item => item.exists)) {
+      reasons.push('artifact_paths_missing')
+    }
+
+    const verdict = reasons.length === 0 ? 'pass' : 'fail'
+
+    const bundle = {
+      taskId: task.id,
+      generatedAt: Date.now(),
+      strict,
+      verdict,
+      reasons,
+      pr: prCi.pr,
+      ci: prCi.ci,
+      artifacts: artifactEvidence,
+      evidence: {
+        taskStatus: task.status,
+        reviewer: task.reviewer,
+      },
+    }
+
+    await taskManager.addTaskComment(
+      task.id,
+      author,
+      `[review-bundle] verdict=${verdict}; ci=${prCi.ci.state}; artifacts=${artifactEvidence.filter(a => a.exists).length}/${artifactEvidence.length}; reasons=${reasons.join(',') || 'none'}`,
+    )
+
+    return { success: true, bundle }
   })
 
   // Create task

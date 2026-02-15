@@ -5,6 +5,8 @@
  * Spins up the actual Fastify server for each test suite.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { promises as fs } from 'fs'
+import { join } from 'path'
 import { createServer } from '../src/server.js'
 import type { FastifyInstance } from 'fastify'
 
@@ -900,6 +902,65 @@ describe('Task outcome checkpoint', () => {
     expect(body.task.metadata.outcome_checkpoint).toBeDefined()
     expect(body.task.metadata.outcome_checkpoint.verdict).toBe('PASS')
     expect(body.task.metadata.outcome_checkpoint.capturedBy).toBe('test-reviewer')
+  })
+})
+
+describe('Task review bundle', () => {
+  const artifactRelPath = 'process/TASK-test-review-bundle.md'
+  const artifactAbsPath = join(process.cwd(), artifactRelPath)
+  let taskId: string
+
+  beforeAll(async () => {
+    await fs.mkdir(join(process.cwd(), 'process'), { recursive: true })
+    await fs.writeFile(artifactAbsPath, '# test bundle\n', 'utf-8')
+
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: review bundle task',
+      description: 'Review bundle endpoint test',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Review packet generated'],
+      eta: '1h',
+    })
+
+    taskId = body.task.id
+
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: artifactRelPath,
+        qa_bundle: {
+          summary: 'test summary',
+          artifact_links: [artifactRelPath],
+          checks: ['npm test'],
+        },
+        artifacts: [artifactRelPath],
+      },
+    })
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+    await fs.rm(artifactAbsPath, { force: true })
+  })
+
+  it('POST /tasks/:id/review-bundle resolves artifacts and returns normalized verdict', async () => {
+    const { status, body } = await req('POST', `/tasks/${taskId}/review-bundle`, {
+      author: 'test-reviewer',
+      strict: false,
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.bundle.taskId).toBe(taskId)
+    expect(body.bundle.verdict).toBe('fail')
+    expect(body.bundle.reasons).toContain('no_pr_url_resolved')
+    expect(body.bundle.artifacts).toBeInstanceOf(Array)
+    expect(body.bundle.artifacts.length).toBeGreaterThan(0)
+    expect(body.bundle.artifacts[0].path).toBe(artifactRelPath)
+    expect(body.bundle.artifacts[0].exists).toBe(true)
   })
 })
 
