@@ -733,40 +733,84 @@ class TeamHealthMonitor {
     return blockers
   }
 
+  private hasScopeSplitSignal(taskId: string): boolean {
+    const comments = taskManager.getTaskComments(taskId)
+    const splitSignals = [
+      'deconflict',
+      'scope split',
+      'owner map',
+      'no overlap',
+      'non-overlap',
+      'boundary',
+      'aligned',
+      'split ownership',
+      'avoid duplicate',
+    ]
+
+    return comments.some(comment => {
+      const content = comment.content.toLowerCase()
+      return splitSignals.some(signal => content.includes(signal))
+    })
+  }
+
   /**
    * Detect overlapping work (agents working on similar things)
    */
   private async detectOverlaps(): Promise<OverlapAlert[]> {
-    const tasks = taskManager.listTasks({ status: 'doing' })
-    const overlaps: OverlapAlert[] = []
+    const tasks = taskManager
+      .listTasks({ status: 'doing' })
+      .filter(task => Boolean(task.assignee))
 
-    // Group tasks by keyword similarity
-    const tasksByKeywords = new Map<string, string[]>()
+    if (tasks.length < 2) return []
 
+    const taskKeywords = new Map<string, Set<string>>()
     for (const task of tasks) {
-      if (!task.assignee) continue
+      const keywords = this.extractKeywords(`${task.title} ${task.description || ''}`)
+      taskKeywords.set(task.id, new Set(keywords))
+    }
 
-      const keywords = this.extractKeywords(task.title + ' ' + (task.description || ''))
+    const overlapTopics = new Map<string, Set<string>>()
 
-      for (const keyword of keywords) {
-        if (!tasksByKeywords.has(keyword)) {
-          tasksByKeywords.set(keyword, [])
+    for (let i = 0; i < tasks.length; i += 1) {
+      for (let j = i + 1; j < tasks.length; j += 1) {
+        const a = tasks[i]
+        const b = tasks[j]
+
+        if (!a.assignee || !b.assignee) continue
+        if (a.assignee === b.assignee) continue
+
+        // If either task explicitly carries deconfliction/scope-split notes,
+        // treat this pair as resolved and suppress recurring overlap alerts.
+        if (this.hasScopeSplitSignal(a.id) || this.hasScopeSplitSignal(b.id)) {
+          continue
         }
-        tasksByKeywords.get(keyword)!.push(task.assignee)
+
+        const aKeywords = taskKeywords.get(a.id) || new Set<string>()
+        const bKeywords = taskKeywords.get(b.id) || new Set<string>()
+        const shared = Array.from(aKeywords).filter(k => bKeywords.has(k))
+
+        // Require 2+ shared keywords to avoid generic single-word collisions.
+        if (shared.length < 2) continue
+
+        const topic = shared.slice(0, 2).join('+')
+        if (!overlapTopics.has(topic)) {
+          overlapTopics.set(topic, new Set())
+        }
+        overlapTopics.get(topic)!.add(a.assignee)
+        overlapTopics.get(topic)!.add(b.assignee)
       }
     }
 
-    // Find overlaps
-    for (const [topic, agents] of tasksByKeywords) {
-      const uniqueAgents = Array.from(new Set(agents))
+    const overlaps: OverlapAlert[] = []
+    for (const [topic, agentsSet] of overlapTopics.entries()) {
+      const agents = Array.from(agentsSet)
+      if (agents.length < 2) continue
 
-      if (uniqueAgents.length >= 2) {
-        overlaps.push({
-          agents: uniqueAgents,
-          topic,
-          confidence: uniqueAgents.length >= 3 ? 'high' : 'medium',
-        })
-      }
+      overlaps.push({
+        agents,
+        topic,
+        confidence: agents.length >= 3 ? 'high' : 'medium',
+      })
     }
 
     return overlaps
@@ -776,13 +820,17 @@ class TeamHealthMonitor {
    * Extract keywords from text
    */
   private extractKeywords(text: string): string[] {
-    const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'])
+    const stopWords = new Set([
+      'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+      // Domain-generic terms that cause overlap false positives.
+      'task', 'tasks', 'reflectt', 'node', 'agent', 'agents', 'lane', 'lanes', 'work', 'status',
+    ])
 
     return text
       .toLowerCase()
       .split(/\W+/)
       .filter(word => word.length > 3 && !stopWords.has(word))
-      .slice(0, 5) // Top 5 keywords
+      .slice(0, 8)
   }
 
   private shouldEmitCadenceAlert(key: string, now: number): boolean {
