@@ -13,4 +13,4 @@ Created `BUSINESS.md` defining Reflectt's open-core boundary for `reflectt-node`
 - `BUSINESS.md`
 
 ## PR
-- (to be added)
+- https://github.com/reflectt/reflectt-node/pull/73
