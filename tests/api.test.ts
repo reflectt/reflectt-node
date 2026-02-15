@@ -358,12 +358,58 @@ describe('Chat Messages', () => {
     expect(body.error).toContain('Only original author')
   })
 
+  it('PATCH /chat/messages/:id rejects empty/whitespace content', async () => {
+    const { status, body } = await req('PATCH', `/chat/messages/${authorMessageId}`, {
+      from: 'test-runner',
+      content: '   ',
+    })
+    expect(status).toBe(400)
+    expect(body.error).toContain('Invalid body')
+  })
+
+  it('PATCH /chat/messages/:id returns 404 when message does not exist', async () => {
+    const { status, body } = await req('PATCH', '/chat/messages/msg-does-not-exist', {
+      from: 'test-runner',
+      content: 'no-op',
+    })
+    expect(status).toBe(404)
+    expect(body.error).toContain('not found')
+  })
+
+  it('PATCH /chat/messages/:id applies last-write-wins for same author', async () => {
+    const { body: first } = await req('PATCH', `/chat/messages/${authorMessageId}`, {
+      from: 'test-runner',
+      content: 'TEST: first edit',
+    })
+    const { status, body: second } = await req('PATCH', `/chat/messages/${authorMessageId}`, {
+      from: 'test-runner',
+      content: 'TEST: second edit',
+    })
+
+    expect(status).toBe(200)
+    expect(first.message.content).toBe('TEST: first edit')
+    expect(second.message.content).toBe('TEST: second edit')
+
+    const { body: listBody } = await req('GET', '/chat/messages?channel=general&limit=200')
+    const found = (listBody.messages || []).find((m: any) => m.id === authorMessageId)
+    expect(found).toBeDefined()
+    expect(found.content).toBe('TEST: second edit')
+  })
+
   it('DELETE /chat/messages/:id rejects non-author delete', async () => {
     const { status, body } = await req('DELETE', `/chat/messages/${authorMessageId}`, {
       from: 'someone-else',
     })
     expect(status).toBe(403)
     expect(body.error).toContain('Only original author')
+  })
+
+  it('DELETE /chat/messages/:id returns 404 when message does not exist', async () => {
+    const { status, body } = await req('DELETE', '/chat/messages/msg-does-not-exist', {
+      from: 'test-runner',
+    })
+    expect(status).toBe(404)
+    expect(body.error).toContain('not found')
   })
 
   it('DELETE /chat/messages/:id deletes for original author', async () => {
@@ -379,6 +425,15 @@ describe('Chat Messages', () => {
     expect(found).toBeUndefined()
   })
 
+  it('PATCH /chat/messages/:id after delete returns 404', async () => {
+    const { status, body } = await req('PATCH', `/chat/messages/${authorMessageId}`, {
+      from: 'test-runner',
+      content: 'should fail',
+    })
+    expect(status).toBe(404)
+    expect(body.error).toContain('not found')
+  })
+
   it('GET /chat/messages returns messages', async () => {
     const { status, body } = await req('GET', '/chat/messages?channel=general&limit=5')
     expect(status).toBe(200)
@@ -389,6 +444,93 @@ describe('Chat Messages', () => {
     const { status, body } = await req('GET', '/chat/channels')
     expect(status).toBe(200)
     expect(body.channels).toBeInstanceOf(Array)
+  })
+})
+
+describe('Idle Nudge lane-state transitions', () => {
+  async function createDoingTask(agent: string, title: string): Promise<string> {
+    const { status, body } = await req('POST', '/tasks', {
+      title,
+      description: 'Lane-state test task',
+      createdBy: 'test-runner',
+      assignee: agent,
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      status: 'doing',
+      done_criteria: ['lane test'],
+      eta: '1h',
+    })
+    expect(status).toBe(200)
+    return body.task.id as string
+  }
+
+  async function getDecision(agent: string): Promise<any> {
+    const { status, body } = await req('POST', '/health/idle-nudge/tick?dryRun=true')
+    expect(status).toBe(200)
+    const decision = (body.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    return decision
+  }
+
+  it('shows no-active-lane when agent has no doing task', async () => {
+    const agent = 'lane-no-active'
+    await req('POST', `/presence/${agent}`, { status: 'working' })
+
+    const decision = await getDecision(agent)
+    expect(decision.lane.laneReason).toBe('no-active-lane')
+    expect(decision.lane.selectedTaskId).toBeNull()
+  })
+
+  it('shows ambiguous-lane when agent has multiple fresh doing tasks', async () => {
+    const agent = 'lane-ambiguous'
+    const taskA = await createDoingTask(agent, 'TEST: lane ambiguous A')
+    const taskB = await createDoingTask(agent, 'TEST: lane ambiguous B')
+    await req('POST', `/presence/${agent}`, { status: 'working' })
+
+    const decision = await getDecision(agent)
+    expect(decision.lane.laneReason).toBe('ambiguous-lane')
+    expect(decision.lane.freshDoingTaskIds).toEqual(expect.arrayContaining([taskA, taskB]))
+
+    await req('DELETE', `/tasks/${taskA}`)
+    await req('DELETE', `/tasks/${taskB}`)
+  })
+
+  it('shows presence-task-mismatch when presence.task differs from selected doing task', async () => {
+    const agent = 'lane-mismatch'
+    const activeTask = await createDoingTask(agent, 'TEST: lane mismatch active')
+    const { body: todoBody } = await req('POST', '/tasks', {
+      title: 'TEST: lane mismatch presence task',
+      createdBy: 'test-runner',
+      assignee: agent,
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      status: 'todo',
+      done_criteria: ['lane mismatch'],
+      eta: '1h',
+    })
+    const presenceTask = todoBody.task.id as string
+
+    await req('POST', `/presence/${agent}`, { status: 'working', task: presenceTask })
+
+    const decision = await getDecision(agent)
+    expect(decision.lane.laneReason).toBe('presence-task-mismatch')
+    expect(decision.lane.selectedTaskId).toBe(activeTask)
+    expect(decision.lane.presenceTaskId).toBe(presenceTask)
+
+    await req('DELETE', `/tasks/${activeTask}`)
+    await req('DELETE', `/tasks/${presenceTask}`)
+  })
+
+  it('shows ok when presence.task matches single doing task', async () => {
+    const agent = 'lane-ok'
+    const taskId = await createDoingTask(agent, 'TEST: lane ok task')
+    await req('POST', `/presence/${agent}`, { status: 'working', task: taskId })
+
+    const decision = await getDecision(agent)
+    expect(decision.lane.laneReason).toBe('ok')
+    expect(decision.lane.selectedTaskId).toBe(taskId)
+
+    await req('DELETE', `/tasks/${taskId}`)
   })
 })
 
