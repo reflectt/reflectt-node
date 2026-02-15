@@ -77,20 +77,52 @@ fi
 # The service itself handles PID lockfile + port conflict cleanup on startup.
 # We just need to start the new instance — it will kill the old one.
 log "post-merge: starting new service (PID lockfile manager will handle old instance)..."
-nohup node dist/index.js >> "$SERVICE_LOG" 2>&1 &
-NEW_PID=$!
 
-# Wait and verify
-sleep 3
-if curl -sf http://127.0.0.1:4445/health > /dev/null 2>&1; then
-  log "post-merge: service restarted successfully (pid $NEW_PID)"
-  # Quick health summary
-  HEALTH=$(curl -s http://127.0.0.1:4445/health | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'status={d[\"status\"]} tasks={d[\"tasks\"][\"total\"]}')" 2>/dev/null || echo "")
-  log "post-merge: health: $HEALTH"
-else
-  log "post-merge: WARNING — service may not have started correctly (pid $NEW_PID)"
-  log "post-merge: check $SERVICE_LOG for details"
-fi
+MAX_ATTEMPTS=3
+ATTEMPT=0
+NEW_PID=""
+
+while [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; do
+  ATTEMPT=$((ATTEMPT + 1))
+  log "post-merge: start attempt $ATTEMPT/$MAX_ATTEMPTS..."
+
+  nohup node dist/index.js >> "$SERVICE_LOG" 2>&1 &
+  NEW_PID=$!
+
+  # Wait with progressive backoff: 4s, 6s, 8s
+  # PID lockfile manager needs time to kill old process + release port
+  WAIT_SECS=$((2 + ATTEMPT * 2))
+  sleep "$WAIT_SECS"
+
+  # Verify: process must be alive AND health endpoint must respond
+  if ! kill -0 "$NEW_PID" 2>/dev/null; then
+    log "post-merge: process $NEW_PID died on attempt $ATTEMPT"
+    continue
+  fi
+
+  if curl -sf http://127.0.0.1:4445/health > /dev/null 2>&1; then
+    HEALTH=$(curl -s http://127.0.0.1:4445/health | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'status={d[\"status\"]} tasks={d[\"tasks\"][\"total\"]}')" 2>/dev/null || echo "")
+    log "post-merge: service restarted successfully (pid $NEW_PID, attempt $ATTEMPT)"
+    log "post-merge: health: $HEALTH"
+    break
+  fi
+
+  log "post-merge: health check failed on attempt $ATTEMPT (pid $NEW_PID)"
+
+  # Kill the failed attempt before retrying
+  kill "$NEW_PID" 2>/dev/null || true
+  sleep 1
+
+  if [ "$ATTEMPT" -eq "$MAX_ATTEMPTS" ]; then
+    log "post-merge: FAILED after $MAX_ATTEMPTS attempts — service may be down"
+    log "post-merge: manual restart required: cd $REPO_DIR && node dist/index.js"
+    log "post-merge: check $SERVICE_LOG for errors"
+    # Last resort: try to start one more time and leave it
+    nohup node dist/index.js >> "$SERVICE_LOG" 2>&1 &
+    NEW_PID=$!
+    log "post-merge: last-resort spawn (pid $NEW_PID)"
+  fi
+done
 
 # Nudge OpenClaw gateway to reconnect SSE
 # The reflectt channel plugin's SSE stream breaks when the service restarts.
