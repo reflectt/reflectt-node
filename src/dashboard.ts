@@ -414,6 +414,65 @@ export function getDashboardHTML(): string {
   .sla-badge.breach { color: var(--red); background: var(--red-dim); border: 1px solid rgba(248,81,73,.3); animation: sla-pulse 2s ease-in-out infinite; }
   @keyframes sla-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
   .review-empty { text-align: center; padding: 24px; color: var(--text-muted); font-size: 13px; }
+
+  /* Outcome Feed */
+  .outcome-rollup {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .outcome-rollup-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    padding: 8px 10px;
+  }
+  .outcome-rollup-card .label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .outcome-rollup-card .value {
+    margin-top: 2px;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-bright);
+  }
+  .outcome-rollup-card.high { border-color: rgba(248,81,73,.45); background: rgba(248,81,73,.08); }
+  .outcome-rollup-card.medium { border-color: rgba(212,160,23,.45); background: rgba(212,160,23,.10); }
+  .outcome-rollup-card.low { border-color: rgba(63,185,80,.40); background: rgba(63,185,80,.10); }
+  .outcome-item {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 9px 0;
+  }
+  .outcome-item:last-child { border-bottom: none; }
+  .outcome-item-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+  .outcome-item-meta {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .outcome-impact-pill {
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 10px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .outcome-impact-pill.high { color: var(--red); background: var(--red-dim); }
+  .outcome-impact-pill.medium { color: var(--yellow); background: var(--yellow-dim); }
+  .outcome-impact-pill.low { color: var(--green); background: var(--green-dim); }
+
   .incident-item {
     border-left: 3px solid var(--orange); background: var(--orange-dim); border-radius: var(--radius-sm);
     padding: 8px 10px; margin-bottom: 6px; font-size: 12px;
@@ -477,6 +536,7 @@ export function getDashboardHTML(): string {
     .chat-input-bar input { min-width: 0; width: 100%; }
     .chat-input-bar button { width: 100%; min-height: 44px; }
     .health-grid { grid-template-columns: 1fr; gap: 8px; }
+    .outcome-rollup { grid-template-columns: 1fr; }
   }
 
   @media (min-width: 768px) and (max-width: 1023px) {
@@ -697,6 +757,11 @@ export function getDashboardHTML(): string {
   <div class="panel">
     <div class="panel-header">🔍 Research Intake <span class="count" id="research-count"></span></div>
     <div class="panel-body" id="research-body" style="max-height:260px;overflow-y:auto"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">🏁 Outcome Feed <span class="count" id="outcome-count"></span></div>
+    <div class="panel-body" id="outcome-body" style="max-height:320px;overflow-y:auto"></div>
   </div>
 
   <div class="panel">

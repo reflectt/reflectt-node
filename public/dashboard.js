@@ -516,6 +516,7 @@ async function loadTasks(forceFull = false) {
   renderProjectTabs();
   renderKanban();
   renderBacklog();
+  renderOutcomeFeed();
   document.getElementById('task-count').textContent = allTasks.length + ' tasks';
 }
 
@@ -665,6 +666,77 @@ async function claimBacklogTask(taskId, event) {
     console.error('Claim failed:', err);
     alert('Failed to claim task');
   }
+}
+
+function resolveOutcomeImpact(task) {
+  const priority = String(task?.priority || 'P3').toUpperCase();
+  const outcome = task?.metadata?.outcome_checkpoint || {};
+  const verdict = String(outcome.verdict || '').toUpperCase();
+
+  if (verdict === 'FAIL' || verdict === 'BLOCKED' || priority === 'P0') return 'high';
+  if (priority === 'P1' || priority === 'P2') return 'medium';
+  return 'low';
+}
+
+function taskHasShippedProof(task) {
+  const metadata = task?.metadata || {};
+  const artifacts = Array.isArray(metadata.artifacts) ? metadata.artifacts : [];
+  const qaBundle = metadata.qa_bundle;
+  return artifacts.length > 0 || Boolean(metadata.artifact_path) || Boolean(qaBundle);
+}
+
+function renderOutcomeFeed() {
+  const body = document.getElementById('outcome-body');
+  const count = document.getElementById('outcome-count');
+  if (!body || !count) return;
+
+  const shippedDone = allTasks
+    .filter(task => task.status === 'done' && taskHasShippedProof(task))
+    .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+
+  count.textContent = shippedDone.length + ' shipped';
+
+  if (shippedDone.length === 0) {
+    body.innerHTML = '<div class="empty">No shipped outcomes yet</div>';
+    return;
+  }
+
+  const rollup = { high: 0, medium: 0, low: 0 };
+  shippedDone.forEach(task => {
+    const impact = resolveOutcomeImpact(task);
+    rollup[impact] += 1;
+  });
+
+  const itemsHtml = shippedDone.slice(0, 8).map(task => {
+    const impact = resolveOutcomeImpact(task);
+    const outcome = task?.metadata?.outcome_checkpoint || {};
+    const verdict = outcome.verdict ? String(outcome.verdict).toUpperCase() : 'N/A';
+    const artifactPath = task?.metadata?.artifact_path;
+    const artifactLink = typeof artifactPath === 'string' && artifactPath.startsWith('http')
+      ? `<a class="ssot-link" href="${esc(artifactPath)}" target="_blank" rel="noreferrer noopener">artifact</a>`
+      : (artifactPath ? `<span>${esc(truncate(String(artifactPath), 42))}</span>` : '<span>no artifact link</span>');
+
+    return `<div class="outcome-item">
+      <div class="outcome-item-title">${esc(truncate(task.title || task.id, 78))}</div>
+      <div class="outcome-item-meta">
+        <span class="outcome-impact-pill ${impact}">${impact}</span>
+        <span>${esc(task.priority || 'P3')}</span>
+        <span>verdict: ${esc(verdict)}</span>
+        <span>by @${esc(task.assignee || 'unknown')}</span>
+        <span>${ago(task.updatedAt || task.createdAt || Date.now())} ago</span>
+      </div>
+      <div class="outcome-item-meta">${artifactLink}</div>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div class="outcome-rollup">
+      <div class="outcome-rollup-card high"><div class="label">high impact</div><div class="value">${rollup.high}</div></div>
+      <div class="outcome-rollup-card medium"><div class="label">medium impact</div><div class="value">${rollup.medium}</div></div>
+      <div class="outcome-rollup-card low"><div class="label">low impact</div><div class="value">${rollup.low}</div></div>
+    </div>
+    ${itemsHtml}
+  `;
 }
 
 // ---- Chat ----
