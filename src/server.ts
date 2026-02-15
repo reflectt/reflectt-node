@@ -225,6 +225,30 @@ const InboxSubscribeBodySchema = z.object({
   channels: z.array(z.string().trim().min(1)).min(1),
 })
 
+const MentionAckRecentQuerySchema = z.object({
+  limit: z.string().regex(/^\d+$/).optional(),
+})
+
+const HealthTickQuerySchema = z.object({
+  dryRun: z.enum(['true', 'false']).optional(),
+  force: z.enum(['true', 'false']).optional(),
+  nowMs: z.string().regex(/^\d+$/).optional(),
+})
+
+const HealthHistoryQuerySchema = z.object({
+  days: z.string().regex(/^\d+$/).optional(),
+})
+
+const LogsQuerySchema = z.object({
+  level: z.string().optional(),
+  since: z.string().regex(/^\d+$/).optional(),
+})
+
+const ReleaseNotesQuerySchema = z.object({
+  since: z.string().regex(/^\d+$/).optional(),
+  limit: z.string().regex(/^\d+$/).optional(),
+})
+
 function enforceQaBundleGateForValidating(
   status: Task['status'] | undefined,
   metadata: unknown,
@@ -540,9 +564,17 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Mention ack recent entries (debug)
-  app.get('/health/mention-ack/recent', async (request) => {
-    const query = request.query as Record<string, string>
-    const limit = Math.min(parseInt(query.limit || '20', 10), 100)
+  app.get('/health/mention-ack/recent', async (request, reply) => {
+    const parsedQuery = MentionAckRecentQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const limit = Math.min(parseInt(parsedQuery.data.limit || '20', 10), 100)
     return { entries: mentionAckTracker.getRecent(limit) }
   })
 
@@ -573,8 +605,17 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // One-shot idle-nudge tick (dry-run and real modes)
-  app.post('/health/idle-nudge/tick', async (request) => {
-    const query = request.query as Record<string, string>
+  app.post('/health/idle-nudge/tick', async (request, reply) => {
+    const parsedQuery = HealthTickQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const query = parsedQuery.data
     const dryRun = query.dryRun === 'true'
     const force = query.force === 'true'
     const now = parseEpochMs(query.nowMs) || Date.now()
@@ -610,8 +651,17 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // One-shot cadence-watchdog tick (dry-run and real modes)
-  app.post('/health/cadence-watchdog/tick', async (request) => {
-    const query = request.query as Record<string, string>
+  app.post('/health/cadence-watchdog/tick', async (request, reply) => {
+    const parsedQuery = HealthTickQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const query = parsedQuery.data
     const dryRun = query.dryRun === 'true'
     const force = query.force === 'true'
     const now = parseEpochMs(query.nowMs) || Date.now()
@@ -646,8 +696,17 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // One-shot mention-rescue tick (dry-run and real modes)
-  app.post('/health/mention-rescue/tick', async (request) => {
-    const query = request.query as Record<string, string>
+  app.post('/health/mention-rescue/tick', async (request, reply) => {
+    const parsedQuery = HealthTickQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const query = parsedQuery.data
     const dryRun = query.dryRun === 'true'
     const force = query.force === 'true'
     const now = parseEpochMs(query.nowMs) || Date.now()
@@ -693,9 +752,17 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Team health history (trends over time)
-  app.get('/health/team/history', async (request) => {
-    const query = request.query as Record<string, string>
-    const days = query.days ? parseInt(query.days, 10) : 7
+  app.get('/health/team/history', async (request, reply) => {
+    const parsedQuery = HealthHistoryQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const days = parsedQuery.data.days ? parseInt(parsedQuery.data.days, 10) : 7
     const history = healthMonitor.getHealthHistory(days)
     return { history, count: history.length, days }
   })
@@ -711,11 +778,19 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Error logs (for debugging)
-  app.get('/logs', async (request) => {
-    const query = request.query as Record<string, string>
-    const level = query.level || 'error'
-    const since = query.since ? parseInt(query.since, 10) : Date.now() - (24 * 60 * 60 * 1000)
-    
+  app.get('/logs', async (request, reply) => {
+    const parsedQuery = LogsQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const level = parsedQuery.data.level || 'error'
+    const since = parsedQuery.data.since ? parseInt(parsedQuery.data.since, 10) : Date.now() - (24 * 60 * 60 * 1000)
+
     // For now, return empty array with note
     // In production, this would read from actual log files
     return {
@@ -732,8 +807,17 @@ export async function createServer(): Promise<FastifyInstance> {
     return releaseManager.getDeployStatus()
   })
 
-  app.get('/release/notes', async (request) => {
-    const query = request.query as Record<string, string>
+  app.get('/release/notes', async (request, reply) => {
+    const parsedQuery = ReleaseNotesQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const query = parsedQuery.data
     const since = parseEpochMs(query.since)
     const limit = boundedLimit(query.limit, 25, 200)
     const notes = await releaseManager.getReleaseNotes({ since, limit })
