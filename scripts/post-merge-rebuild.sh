@@ -115,4 +115,20 @@ else
   log "post-merge: check $SERVICE_LOG for details"
 fi
 
+# Nudge OpenClaw gateway to reconnect SSE
+# The reflectt channel plugin's SSE stream breaks when the service restarts.
+# Sending SIGUSR1 triggers a graceful gateway restart which re-establishes the connection.
+OPENCLAW_PID=$(pgrep -f "openclaw.*gateway" 2>/dev/null | head -1 || echo "")
+if [ -z "$OPENCLAW_PID" ]; then
+  # Try launchctl
+  OPENCLAW_PID=$(launchctl list 2>/dev/null | grep openclaw | awk '{print $1}' | head -1 || echo "")
+fi
+if [ -n "$OPENCLAW_PID" ] && [ "$OPENCLAW_PID" != "-" ] && kill -0 "$OPENCLAW_PID" 2>/dev/null; then
+  log "post-merge: nudging OpenClaw gateway (pid $OPENCLAW_PID) to reconnect..."
+  kill -USR1 "$OPENCLAW_PID" 2>/dev/null || true
+  log "post-merge: gateway restart signal sent"
+else
+  log "post-merge: OpenClaw gateway PID not found — manual restart may be needed for mention delivery"
+fi
+
 log "post-merge: done"
