@@ -876,6 +876,78 @@ describe('Idle Nudge lane-state transitions', () => {
   })
 })
 
+describe('Idle Nudge shipped cooldown', () => {
+  async function createDoingTask(agent: string, title: string): Promise<string> {
+    const { status, body } = await req('POST', '/tasks', {
+      title,
+      description: 'Ship cooldown test task',
+      createdBy: 'test-runner',
+      assignee: agent,
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      status: 'doing',
+      done_criteria: ['ship cooldown test'],
+      eta: '1h',
+    })
+    expect(status).toBe(200)
+    return body.task.id as string
+  }
+
+  async function postShippedUpdate(agent: string) {
+    const { status } = await req('POST', '/chat/messages', {
+      from: agent,
+      channel: 'general',
+      content: `1) Shipped: PR #999 + artifact proof\n2) Blocker: none\n3) Next: follow-up + ETA 20m\nTask: task-demo`,
+    })
+    expect(status).toBe(200)
+  }
+
+  it('suppresses nudges after recent shipped signal', async () => {
+    const agent = 'lane-ship-cooldown'
+    const taskId = await createDoingTask(agent, 'TEST: ship cooldown suppression')
+
+    await req('POST', `/presence/${agent}`, {
+      status: 'working',
+      task: taskId,
+      since: Date.now() - (50 * 60_000),
+    })
+    await postShippedUpdate(agent)
+
+    const tickNowMs = Date.now() + (10 * 60_000)
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&nowMs=${tickNowMs}`)
+    expect(status).toBe(200)
+
+    const decision = (body.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    expect(decision.reason).toBe('recent-shipped-cooldown')
+    expect(decision.decision).toBe('none')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('does not apply shipped cooldown when doing lane is stale', async () => {
+    const agent = 'lane-ship-stale'
+    const taskId = await createDoingTask(agent, 'TEST: ship cooldown stale exemption')
+
+    await req('POST', `/presence/${agent}`, {
+      status: 'working',
+      task: taskId,
+      since: Date.now() - (50 * 60_000),
+    })
+    await postShippedUpdate(agent)
+
+    const staleNowMs = Date.now() + (4 * 60 * 60_000)
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&nowMs=${staleNowMs}`)
+    expect(status).toBe(200)
+
+    const decision = (body.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    expect(decision.reason).not.toBe('recent-shipped-cooldown')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+})
+
 describe('Inbox', () => {
   it('GET /inbox/:agent returns inbox', async () => {
     const { status, body } = await req('GET', '/inbox/test-agent')

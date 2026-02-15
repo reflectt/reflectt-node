@@ -168,6 +168,7 @@ export type IdleNudgeDecision = {
     | 'no-last-active'
     | 'below-warn-threshold'
     | 'recent-activity-suppressed'
+    | 'recent-shipped-cooldown'
     | 'cooldown-active'
     | 'blocked-task-suppressed'
     | 'done-task-suppressed'
@@ -215,6 +216,7 @@ class TeamHealthMonitor {
   private readonly idleNudgeEscalateMin = Number(process.env.IDLE_NUDGE_ESCALATE_MIN || 60)
   private readonly idleNudgeCooldownMin = Number(process.env.IDLE_NUDGE_COOLDOWN_MIN || 20)
   private readonly idleNudgeSuppressRecentMin = Number(process.env.IDLE_NUDGE_SUPPRESS_RECENT_MIN || 20)
+  private readonly idleNudgeShipCooldownMin = Number(process.env.IDLE_NUDGE_SHIP_COOLDOWN_MIN || 30)
   private readonly idleNudgeActiveTaskMaxAgeMin = Number(process.env.IDLE_NUDGE_ACTIVE_TASK_MAX_AGE_MIN || 180)
   private readonly idleNudgeExcluded = new Set(
     (process.env.IDLE_NUDGE_EXCLUDE || 'ryan,system,diag')
@@ -554,6 +556,21 @@ class TeamHealthMonitor {
     }
 
     return lastAt
+  }
+
+  private hasStaleDoingTask(agent: string, tasks: ReturnType<typeof taskManager.listTasks>, now: number): boolean {
+    const thresholdMs = this.idleNudgeActiveTaskMaxAgeMin * 60_000
+
+    return tasks.some((task) => {
+      if ((task.assignee || '').toLowerCase() !== agent) return false
+      if (task.status !== 'doing') return false
+
+      const updatedAt = this.parseTimestamp((task as any).updatedAt) || this.parseTimestamp((task as any).createdAt)
+      const lastActivityAt = this.getTaskLastActivityAt(task.id, updatedAt)
+      if (!lastActivityAt) return false
+
+      return now - lastActivityAt > thresholdMs
+    })
   }
 
   private async getComplianceIncidents(now: number, messages: any[]): Promise<ComplianceIncident[]> {
@@ -1248,6 +1265,16 @@ class TeamHealthMonitor {
         continue
       }
 
+      const hasStaleDoingTask = this.hasStaleDoingTask(agent, tasks, now)
+      const lastProductiveActionAt = this.findLastProductiveActionAt(messages, agent)
+      if (!hasStaleDoingTask && lastProductiveActionAt) {
+        const sinceShipMin = Math.floor((now - lastProductiveActionAt) / 60_000)
+        if (sinceShipMin < this.idleNudgeShipCooldownMin) {
+          decisions.push({ ...baseDecision, decision: 'none', reason: 'recent-shipped-cooldown', renderedMessage: null })
+          continue
+        }
+      }
+
       if (inactivityMin < this.idleNudgeWarnMin) {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'below-warn-threshold', renderedMessage: null })
         continue
@@ -1373,6 +1400,7 @@ class TeamHealthMonitor {
       escalateMin: number
       cooldownMin: number
       recentSuppressMin: number
+      shipCooldownMin: number
       activeTaskMaxAgeMin: number
       excluded: string[]
     }
@@ -1402,6 +1430,7 @@ class TeamHealthMonitor {
         escalateMin: this.idleNudgeEscalateMin,
         cooldownMin: this.idleNudgeCooldownMin,
         recentSuppressMin: this.idleNudgeSuppressRecentMin,
+        shipCooldownMin: this.idleNudgeShipCooldownMin,
         activeTaskMaxAgeMin: this.idleNudgeActiveTaskMaxAgeMin,
         excluded: Array.from(this.idleNudgeExcluded.values()).sort(),
       },
