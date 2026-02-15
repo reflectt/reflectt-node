@@ -26,6 +26,7 @@ import { contentManager } from './content.js'
 import { experimentsManager } from './experiments.js'
 import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
+import { wsHeartbeat } from './ws-heartbeat.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -439,6 +440,7 @@ export async function createServer(): Promise<FastifyInstance> {
     clearInterval(idleNudgeTimer)
     clearInterval(cadenceWatchdogTimer)
     clearInterval(mentionRescueTimer)
+    wsHeartbeat.stop()
   })
 
   // Health check
@@ -713,9 +715,24 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ============ CHAT ENDPOINTS ============
 
-  // WebSocket for real-time chat
+  // WebSocket for real-time chat (with ping/pong heartbeat)
   app.get('/chat/ws', { websocket: true }, (socket: WebSocket) => {
-    console.log('[Server] New WebSocket connection')
+    // Subscribe to new messages
+    const unsubscribe = chatManager.subscribe((message: AgentMessage) => {
+      if (socket.readyState === socket.OPEN) {
+        try {
+          socket.send(JSON.stringify({
+            type: 'message',
+            message,
+          }))
+        } catch (err) {
+          console.error('[Server] WS send error:', err)
+        }
+      }
+    })
+
+    // Track connection with heartbeat manager (handles ping/pong + cleanup)
+    const connId = wsHeartbeat.track(socket, unsubscribe)
 
     // Send existing messages
     const messages = chatManager.getMessages({ limit: 50 })
@@ -724,24 +741,12 @@ export async function createServer(): Promise<FastifyInstance> {
       messages,
     }))
 
-    // Subscribe to new messages
-    const unsubscribe = chatManager.subscribe((message: AgentMessage) => {
-      if (socket.readyState === socket.OPEN) {
-        socket.send(JSON.stringify({
-          type: 'message',
-          message,
-        }))
-      }
-    })
+    console.log(`[Server] New WebSocket connection ${connId}`)
+  })
 
-    socket.on('close', () => {
-      console.log('[Server] WebSocket closed')
-      unsubscribe()
-    })
-
-    socket.on('error', (err) => {
-      console.error('[Server] WebSocket error:', err)
-    })
+  // WebSocket heartbeat stats
+  app.get('/ws/stats', async () => {
+    return wsHeartbeat.getStats()
   })
 
   // Send message
