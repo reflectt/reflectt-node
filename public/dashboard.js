@@ -735,6 +735,7 @@ function renderChat() {
         ${roleTag}
         ${m.channel ? '<span class="msg-channel">#' + esc(m.channel) + '</span>' : ''}
         <span class="msg-time">${ago(m.timestamp)}</span>
+        ${m.metadata && m.metadata.editedAt ? '<span class="msg-edited">(edited)</span>' : ''}
       </div>
       <div class="msg-content ${long ? 'collapsed' : ''}" data-collapsible="${long ? 'true' : 'false'}">${renderMessageContentWithTaskLinks(m.content)}</div>
     </div>`;

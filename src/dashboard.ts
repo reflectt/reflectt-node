@@ -222,6 +222,7 @@ export function getDashboardHTML(): string {
   .msg-role { font-size: 10px; color: var(--purple); background: rgba(180, 142, 255, 0.08); padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; }
   .msg-channel { font-size: 11px; color: var(--purple); background: rgba(180, 142, 255, 0.08); padding: 1px 6px; border-radius: 3px; }
   .msg-time { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .msg-edited { font-size: 10px; color: var(--text-muted); opacity: 0.8; }
   .msg-content { color: var(--text); font-size: 13px; line-height: 1.5; word-break: break-word; white-space: pre-wrap; }
   .task-id-link {
     color: var(--accent);

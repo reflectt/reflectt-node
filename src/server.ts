@@ -193,6 +193,15 @@ const MessageReactionBodySchema = z.object({
   from: z.string().trim().min(1),
 })
 
+const EditMessageBodySchema = z.object({
+  from: z.string().trim().min(1),
+  content: z.string().trim().min(1),
+})
+
+const DeleteMessageBodySchema = z.object({
+  from: z.string().trim().min(1),
+})
+
 const InboxQuerySchema = z.object({
   priority: z.enum(['high', 'medium', 'low']).optional(),
   limit: z.string().optional(),
@@ -801,6 +810,61 @@ export async function createServer(): Promise<FastifyInstance> {
       return
     }
     return payload
+  })
+
+  // Edit message (author only)
+  app.patch<{ Params: { id: string } }>('/chat/messages/:id', async (request, reply) => {
+    const parsedBody = EditMessageBodySchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid body: from and content are required',
+        details: parsedBody.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const body = parsedBody.data
+    const result = await chatManager.editMessage(request.params.id, body.from, body.content)
+
+    if (!result.ok) {
+      if (result.error === 'not_found') {
+        reply.code(404)
+        return { error: 'Message not found' }
+      }
+      if (result.error === 'forbidden') {
+        reply.code(403)
+        return { error: 'Only original author can edit this message' }
+      }
+      reply.code(400)
+      return { error: 'Message content cannot be empty' }
+    }
+
+    return { success: true, message: result.message }
+  })
+
+  // Delete message (author only)
+  app.delete<{ Params: { id: string } }>('/chat/messages/:id', async (request, reply) => {
+    const parsedBody = DeleteMessageBodySchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid body: from is required',
+        details: parsedBody.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const body = parsedBody.data
+    const result = await chatManager.deleteMessage(request.params.id, body.from)
+    if (!result.ok) {
+      if (result.error === 'not_found') {
+        reply.code(404)
+        return { error: 'Message not found' }
+      }
+      reply.code(403)
+      return { error: 'Only original author can delete this message' }
+    }
+
+    return { success: true }
   })
 
   // Add reaction to message
