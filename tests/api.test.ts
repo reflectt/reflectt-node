@@ -264,6 +264,63 @@ describe('Task Close Gate', () => {
   })
 })
 
+describe('Lane-state transition lock', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: lane-state lock task',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Transition lock tested'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+
+    const moveToDoing = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: { actor: 'test-agent' },
+    })
+    expect(moveToDoing.status).toBe(200)
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('rejects ambiguous doing->blocked transition without metadata.transition', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'blocked',
+      metadata: { actor: 'test-agent' },
+    })
+
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.error).toContain('doing->blocked transition requires metadata.transition')
+  })
+
+  it('accepts doing->blocked transition with explicit pause metadata', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'blocked',
+      metadata: {
+        actor: 'test-agent',
+        transition: {
+          type: 'pause',
+          reason: 'Waiting on API dependency',
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('blocked')
+    expect(body.task.metadata?.last_transition?.type).toBe('pause')
+    expect(body.task.metadata?.last_transition?.reason).toBe('Waiting on API dependency')
+  })
+})
+
 describe('Chat Messages', () => {
   it('POST /chat/messages sends a message', async () => {
     const { status, body } = await req('POST', '/chat/messages', {
