@@ -20,7 +20,9 @@
     "test:task-linkify:dryrun-validator": "tsx tools/task-linkify-dryrun-transcript-validator.ts",
     "test:task-linkify:dryrun-negative-fixtures": "tsx tools/task-linkify-dryrun-validator-negative-harness.ts",
     "tasks:backfill-intake-fields": "tsx tools/backfill-task-intake-fields.ts",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "deploy": "bash scripts/post-merge-rebuild.sh",
+    "hooks:install": "bash scripts/install-hooks.sh"
   },
   "keywords": [
     "reflectt",

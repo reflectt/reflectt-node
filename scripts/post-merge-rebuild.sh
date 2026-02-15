@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# post-merge-rebuild.sh — Auto-rebuild and restart reflectt-node after git pull
+# Installed as .git/hooks/post-merge
+#
+# What it does:
+#   1. Checks if any .ts files changed in the merge
+#   2. If yes: npm run build → restart the service
+#   3. If only docs/config changed: skip rebuild
+#
+# The service is managed via PID file at /tmp/reflectt-node.pid
+# Logs go to /tmp/reflectt-node-rebuild.log
+
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+PID_FILE="/tmp/reflectt-node.pid"
+LOG_FILE="/tmp/reflectt-node-rebuild.log"
+SERVICE_LOG="/tmp/reflectt-node.log"
+
+# Ensure PATH includes node/npm
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+log() {
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+cd "$REPO_DIR"
+
+# Check what changed in the merge
+CHANGED_FILES=$(git diff-tree -r --name-only --no-commit-id ORIG_HEAD HEAD 2>/dev/null || echo "")
+
+if [ -z "$CHANGED_FILES" ]; then
+  log "post-merge: no file changes detected, skipping"
+  exit 0
+fi
+
+# Check if any TypeScript source or package files changed
+NEEDS_REBUILD=false
+if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$|package\.json|package-lock\.json|tsconfig\.json'; then
+  NEEDS_REBUILD=true
+fi
+
+if [ "$NEEDS_REBUILD" = false ]; then
+  log "post-merge: only non-source files changed (docs/config), skipping rebuild"
+  log "  Changed: $(echo "$CHANGED_FILES" | tr '\n' ' ')"
+  exit 0
+fi
+
+log "post-merge: source files changed, rebuilding..."
+log "  Changed: $(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$|package' | tr '\n' ' ')"
+
+# Check if package.json changed (need npm install)
+if echo "$CHANGED_FILES" | grep -q 'package\.json\|package-lock\.json'; then
+  log "post-merge: package.json changed, running npm install..."
+  npm install --silent 2>&1 | tail -5 | tee -a "$LOG_FILE"
+fi
+
+# Build
+log "post-merge: running npm run build..."
+if npm run build 2>&1 | tee -a "$LOG_FILE"; then
+  log "post-merge: build succeeded"
+else
+  log "post-merge: BUILD FAILED — not restarting service"
+  exit 1
+fi
+
+# Run tests
+log "post-merge: running tests..."
+if npm test 2>&1 | tail -10 | tee -a "$LOG_FILE"; then
+  log "post-merge: tests passed"
+else
+  log "post-merge: TESTS FAILED — not restarting service"
+  exit 1
+fi
+
+# Restart service
+log "post-merge: restarting service..."
+
+# Find and kill existing service
+EXISTING_PID=""
+if [ -f "$PID_FILE" ]; then
+  EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+fi
+
+# Also check lsof as fallback
+if [ -z "$EXISTING_PID" ] || ! kill -0 "$EXISTING_PID" 2>/dev/null; then
+  EXISTING_PID=$(lsof -i :4445 -t 2>/dev/null | head -1 || echo "")
+fi
+
+if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+  log "post-merge: stopping existing service (pid $EXISTING_PID)..."
+  kill "$EXISTING_PID" 2>/dev/null || true
+  sleep 2
+  # Force kill if still running
+  if kill -0 "$EXISTING_PID" 2>/dev/null; then
+    kill -9 "$EXISTING_PID" 2>/dev/null || true
+    sleep 1
+  fi
+fi
+
+# Start new service
+nohup node dist/index.js >> "$SERVICE_LOG" 2>&1 &
+NEW_PID=$!
+echo "$NEW_PID" > "$PID_FILE"
+
+# Wait and verify
+sleep 3
+if curl -sf http://127.0.0.1:4445/health > /dev/null 2>&1; then
+  log "post-merge: service restarted successfully (pid $NEW_PID)"
+  # Quick health summary
+  HEALTH=$(curl -s http://127.0.0.1:4445/health | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'status={d[\"status\"]} tasks={d[\"tasks\"][\"total\"]}')" 2>/dev/null || echo "")
+  log "post-merge: health: $HEALTH"
+else
+  log "post-merge: WARNING — service may not have started correctly (pid $NEW_PID)"
+  log "post-merge: check $SERVICE_LOG for details"
+fi
+
+log "post-merge: done"
