@@ -15,6 +15,7 @@ Base URL: `http://localhost:4445`
 - [Review Queue SOP](../docs/REVIEW_QUEUE_SOP.md) — validating queue workflow, SLA, and PASS/FAIL discipline.
 - [Task-Close Gate Playbook](../docs/TASK_CLOSE_GATE_PLAYBOOK.md) — required close metadata with pass/fail examples.
 - [Backlog Claim Troubleshooting](../docs/BACKLOG_CLAIM_TROUBLESHOOTING.md) — claim flow, metadata requirements, and common errors.
+- [Health Endpoints Operator Cheat Sheet](../docs/HEALTH_ENDPOINTS_OPERATOR_CHEAT_SHEET.md) — compact endpoint-by-endpoint triage reference.
 - [Health Endpoints Map](../docs/HEALTH_ENDPOINTS_MAP.md) — endpoint selector for /health, /health/team, /health/agents, and debug paths.
 - [Watchdog Behavior Explainer](../docs/WATCHDOG_BEHAVIOR_EXPLAINER.md) — idle/cadence/mention rescue behavior with cooldown + debug flow.
 - [OpenClaw 2026.2.13 Memory Search Rollout Note](../docs/OPENCLAW_2026_2_13_MEMORY_SEARCH_ROLLOUT_NOTE.md) — what changed, impact, caveats, and safe usage pattern.
@@ -106,6 +107,8 @@ For 4xx errors, `hint` is included by default to speed up client-side troublesho
 | GET | `/chat/ws` | WebSocket — real-time chat |
 | POST | `/chat/messages` | Post message. Body: `from` (required), `content` (required), `channel`, `replyTo` |
 | GET | `/chat/messages` | Message history. Query: `channel`, `limit`, `before`, `after` |
+| PATCH | `/chat/messages/:id` | Edit message (author-only). Body: `from`, `content` |
+| DELETE | `/chat/messages/:id` | Delete message (author-only). Body: `from` |
 | POST | `/chat/messages/:id/react` | React to message. Body: `emoji`, `agent`, `remove` |
 | GET | `/chat/messages/:id/reactions` | Get reactions |
 | GET | `/chat/channels` | List channels |

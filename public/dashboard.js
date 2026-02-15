@@ -107,6 +107,24 @@ function renderStatusContractWarning(task) {
   return `<div style="margin-top:6px;font-size:11px;color:var(--yellow)">⚠ ${esc(warnings.join(' · '))}</div>`;
 }
 
+function renderLaneTransitionMeta(task) {
+  const laneState = task?.metadata?.lane_state;
+  const last = task?.metadata?.last_transition;
+  const actor = typeof last?.actor === 'string' ? last.actor : null;
+  const ts = typeof last?.timestamp === 'number' ? last.timestamp : null;
+  const type = typeof last?.type === 'string' ? last.type : null;
+
+  if (!laneState && !actor && !ts && !type) return '';
+
+  const parts = [];
+  if (laneState) parts.push(`lane:${laneState}`);
+  if (type) parts.push(type);
+  if (actor) parts.push(`by ${actor}`);
+  if (ts) parts.push(ago(ts) + ' ago');
+
+  return `<div style="margin-top:6px;font-size:11px;color:var(--text-muted)">🧭 ${esc(parts.join(' · '))}</div>`;
+}
+
 function mentionsRyan(message) { return /@ryan\b/i.test(message || ''); }
 
 function resolveSSOTState(lastVerifiedUtc) {
@@ -543,6 +561,7 @@ function renderKanban() {
           </div>
           ${renderBlockedByLinks(t, { compact: true })}
           ${renderStatusContractWarning(t)}
+          ${renderLaneTransitionMeta(t)}
         </div>`;
       }).join('');
     const extra = isDone && items.length > 3
@@ -733,6 +752,7 @@ function renderChat() {
         ${roleTag}
         ${m.channel ? '<span class="msg-channel">#' + esc(m.channel) + '</span>' : ''}
         <span class="msg-time">${ago(m.timestamp)}</span>
+        ${m.metadata && m.metadata.editedAt ? '<span class="msg-edited">(edited)</span>' : ''}
       </div>
       <div class="msg-content ${long ? 'collapsed' : ''}" data-collapsible="${long ? 'true' : 'false'}">${renderMessageContentWithTaskLinks(m.content)}</div>
     </div>`;

@@ -264,7 +264,66 @@ describe('Task Close Gate', () => {
   })
 })
 
+describe('Lane-state transition lock', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: lane-state lock task',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Transition lock tested'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+
+    const moveToDoing = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: { actor: 'test-agent' },
+    })
+    expect(moveToDoing.status).toBe(200)
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('rejects ambiguous doing->blocked transition without metadata.transition', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'blocked',
+      metadata: { actor: 'test-agent' },
+    })
+
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.error).toContain('doing->blocked transition requires metadata.transition')
+  })
+
+  it('accepts doing->blocked transition with explicit pause metadata', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'blocked',
+      metadata: {
+        actor: 'test-agent',
+        transition: {
+          type: 'pause',
+          reason: 'Waiting on API dependency',
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('blocked')
+    expect(body.task.metadata?.last_transition?.type).toBe('pause')
+    expect(body.task.metadata?.last_transition?.reason).toBe('Waiting on API dependency')
+  })
+})
+
 describe('Chat Messages', () => {
+  let authorMessageId: string
+
   it('POST /chat/messages sends a message', async () => {
     const { status, body } = await req('POST', '/chat/messages', {
       from: 'test-runner',
@@ -275,6 +334,49 @@ describe('Chat Messages', () => {
     expect(body.success).toBe(true)
     expect(body.message).toBeDefined()
     expect(body.message.id).toBeDefined()
+    authorMessageId = body.message.id
+  })
+
+  it('PATCH /chat/messages/:id edits content for original author', async () => {
+    const { status, body } = await req('PATCH', `/chat/messages/${authorMessageId}`, {
+      from: 'test-runner',
+      content: 'TEST: edited content',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.message.content).toBe('TEST: edited content')
+    expect(body.message.metadata).toBeDefined()
+    expect(body.message.metadata.editedAt).toBeDefined()
+  })
+
+  it('PATCH /chat/messages/:id rejects non-author edits', async () => {
+    const { status, body } = await req('PATCH', `/chat/messages/${authorMessageId}`, {
+      from: 'someone-else',
+      content: 'hijack',
+    })
+    expect(status).toBe(403)
+    expect(body.error).toContain('Only original author')
+  })
+
+  it('DELETE /chat/messages/:id rejects non-author delete', async () => {
+    const { status, body } = await req('DELETE', `/chat/messages/${authorMessageId}`, {
+      from: 'someone-else',
+    })
+    expect(status).toBe(403)
+    expect(body.error).toContain('Only original author')
+  })
+
+  it('DELETE /chat/messages/:id deletes for original author', async () => {
+    const { status, body } = await req('DELETE', `/chat/messages/${authorMessageId}`, {
+      from: 'test-runner',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+
+    const { status: getStatus, body: getBody } = await req('GET', '/chat/messages?channel=general&limit=200')
+    expect(getStatus).toBe(200)
+    const found = (getBody.messages || []).find((m: any) => m.id === authorMessageId)
+    expect(found).toBeUndefined()
   })
 
   it('GET /chat/messages returns messages', async () => {
