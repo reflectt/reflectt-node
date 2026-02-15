@@ -149,6 +149,11 @@ class ResearchManager {
     return updated
   }
 
+  async getRequest(id: string): Promise<ResearchRequest | undefined> {
+    await this.ensureReady()
+    return this.requests.get(id)
+  }
+
   async createFinding(data: {
     requestId: string
     title: string
