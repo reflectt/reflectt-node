@@ -24,6 +24,22 @@ Base URL: `http://localhost:4445`
 
 ---
 
+## Error Envelope (all endpoints)
+
+All API errors normalize to:
+
+```json
+{
+  "success": false,
+  "error": "human-readable message",
+  "code": "BAD_REQUEST|NOT_FOUND|CONFLICT|...",
+  "status": 400,
+  "hint": "optional fix guidance"
+}
+```
+
+For 4xx errors, `hint` is included by default to speed up client-side troubleshooting.
+
 ## Health
 
 | Method | Path | Description |
