@@ -149,22 +149,6 @@ const CreateResearchFindingSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 })
 
-const CreateResearchHandoffSchema = z.object({
-  requestId: z.string().trim().min(1),
-  findingIds: z.array(z.string().trim().min(1)).min(1),
-  title: z.string().trim().min(1),
-  summary: z.string().trim().min(1),
-  assignee: z.string().trim().min(1),
-  reviewer: z.string().trim().min(1),
-  eta: z.string().trim().min(1),
-  createdBy: z.string().trim().min(1).optional(),
-  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
-  done_criteria: z.array(z.string().trim().min(1)).optional(),
-  tags: z.array(z.string().trim().min(1)).optional(),
-  artifactUrl: z.string().trim().url().optional(),
-  metadata: z.record(z.unknown()).optional(),
-})
-
 const DEFAULT_LIMITS = {
   chatMessages: 50,
   chatSearch: 25,
@@ -1185,74 +1169,6 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: true, finding }
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to create research finding' }
-    }
-  })
-
-  // Structured research → execution handoff (auto-creates a task)
-  app.post('/research/handoff', async (request) => {
-    try {
-      const data = CreateResearchHandoffSchema.parse(request.body)
-
-      const sourceRequest = await researchManager.getRequest(data.requestId)
-      if (!sourceRequest) {
-        return { success: false, error: 'requestId not found' }
-      }
-
-      const findings = await researchManager.listFindings({ requestId: data.requestId, limit: 500 })
-      const findingIdSet = new Set(findings.map(f => f.id))
-      const missingFindings = data.findingIds.filter(id => !findingIdSet.has(id))
-      if (missingFindings.length > 0) {
-        return { success: false, error: `findingIds not found for request: ${missingFindings.join(', ')}` }
-      }
-
-      const doneCriteria = (data.done_criteria && data.done_criteria.length > 0)
-        ? data.done_criteria
-        : [
-            'Review linked research source and summarize decision',
-            'Translate findings into implementation plan with acceptance checks',
-          ]
-
-      const sourceLink = data.artifactUrl || `research://request/${data.requestId}`
-      const tags = Array.from(new Set([...(data.tags || []), 'research-handoff']))
-
-      const createdTask = await taskManager.createTask({
-        title: data.title,
-        description: `${data.summary}\n\nSource request: ${data.requestId}\nLinked findings: ${data.findingIds.join(', ')}\nSource link: ${sourceLink}`,
-        status: 'todo',
-        assignee: data.assignee,
-        reviewer: data.reviewer,
-        done_criteria: doneCriteria,
-        createdBy: data.createdBy || 'scout',
-        priority: data.priority,
-        tags,
-        metadata: {
-          ...(data.metadata || {}),
-          eta: data.eta,
-          source: {
-            kind: 'research-handoff',
-            requestId: data.requestId,
-            findingIds: data.findingIds,
-            sourceLink,
-          },
-        },
-      })
-
-      await researchManager.updateRequest(data.requestId, {
-        taskId: createdTask.id,
-        status: sourceRequest.status === 'archived' ? sourceRequest.status : 'in_progress',
-      })
-
-      return {
-        success: true,
-        task: createdTask,
-        source: {
-          requestId: data.requestId,
-          findingIds: data.findingIds,
-          sourceLink,
-        },
-      }
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Failed to create research handoff' }
     }
   })
 
