@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) Reflectt AI
+
 /**
  * Experiment tracking manager
  * Stores experiment records in JSONL and provides active experiment queries.

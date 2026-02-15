@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) Reflectt AI
+
 /**
  * MCP HTTP Server for reflectt-node
  * 

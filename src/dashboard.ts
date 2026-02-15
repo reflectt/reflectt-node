@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) Reflectt AI
+
 /**
  * Dashboard HTML — self-contained page served at /dashboard
  * v2: Pixel's redesign + chat input for Ryan
