@@ -302,6 +302,11 @@ artifacts/                      # CI/test artifacts and evidence
 | `OPENCLAW_GATEWAY_URL` | No | — | WebSocket URL for OpenClaw gateway |
 | `OPENCLAW_GATEWAY_TOKEN` | No | — | Auth token for gateway connection |
 | `IDLE_NUDGE_ENABLED` | No | `false` | Enable idle agent nudge system |
+| `SUPABASE_URL` | No | — | Enables cloud task state sync when set with service role key |
+| `SUPABASE_SERVICE_ROLE_KEY` | No | — | Supabase service role for task state sync writes |
+| `REFLECTT_TASKS_TABLE` | No | `tasks` | Supabase table name for persisted task state |
+
+Task-state migration + cloud sync guide: `docs/TASK_STATE_SUPABASE_MIGRATION.md`
 
 ## Troubleshooting
 

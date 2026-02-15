@@ -21,6 +21,7 @@
     "test:task-linkify:dryrun-validator": "tsx tools/task-linkify-dryrun-transcript-validator.ts",
     "test:task-linkify:dryrun-negative-fixtures": "tsx tools/task-linkify-dryrun-validator-negative-harness.ts",
     "tasks:backfill-intake-fields": "tsx tools/backfill-task-intake-fields.ts",
+    "tasks:migrate:supabase": "tsx tools/migrate-tasks-to-supabase.ts",
     "test:watch": "vitest",
     "deploy": "bash scripts/post-merge-rebuild.sh",
     "hooks:install": "bash scripts/install-hooks.sh"
@@ -38,6 +39,7 @@
     "@fastify/cors": "^10.0.1",
     "@fastify/websocket": "^11.0.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@supabase/supabase-js": "^2.57.4",
     "commander": "^14.0.3",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.2",
