@@ -55,6 +55,10 @@ For 4xx errors, `hint` is included by default to speed up client-side troublesho
 | GET | `/health/system` | System info (uptime, memory, versions) |
 | GET | `/health/team/summary` | Compact team health summary |
 | GET | `/health/team/history` | Historical team health data |
+| GET | `/health/mention-ack` | Mention-ack lifecycle metrics (pending, timeout, latency counters) |
+| GET | `/health/mention-ack/recent` | Recent mention-ack entries for debugging. Query: `limit` (max 100) |
+| GET | `/health/mention-ack/:agent` | Pending mention-ack entries for one agent |
+| POST | `/health/mention-ack/check-timeouts` | Run timeout sweep and return timed-out mention entries |
 | GET | `/health/idle-nudge/debug` | Idle-nudge watchdog debug state |
 | POST | `/health/idle-nudge/tick` | Trigger idle-nudge evaluation |
 | POST | `/health/cadence-watchdog/tick` | Trigger cadence watchdog |
@@ -105,6 +109,7 @@ For 4xx errors, `hint` is included by default to speed up client-side troublesho
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/chat/ws` | WebSocket — real-time chat |
+| GET | `/ws/stats` | WebSocket heartbeat stats (connections, ping/pong health, cleanup stats) |
 | POST | `/chat/messages` | Post message. Body: `from` (required), `content` (required), `channel`, `replyTo` |
 | GET | `/chat/messages` | Message history. Query: `channel`, `limit`, `before`, `after` |
 | PATCH | `/chat/messages/:id` | Edit message (author-only). Body: `from`, `content` |
@@ -180,10 +185,11 @@ For 4xx errors, `hint` is included by default to speed up client-side troublesho
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/events/subscribe` | SSE stream for real-time updates |
+| GET | `/events/subscribe` | SSE stream for real-time updates. Query: `agent`, `topics` (comma-separated) |
+| GET | `/events` | SSE alias of `/events/subscribe` (used by reflectt-channel plugin) |
 | GET | `/events/status` | Event system status |
 | GET | `/events/config` | Get event config |
-| POST | `/events/config` | Update event config |
+| POST | `/events/config` | Update event config (`batchWindowMs`) |
 
 ## Analytics
 
