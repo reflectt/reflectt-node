@@ -44,6 +44,15 @@ All API errors normalize to:
 
 For 4xx errors, `hint` is included by default to speed up client-side troubleshooting.
 
+## Rate limiting (`429` / `Retry-After`)
+
+Core `reflectt-node` routes do not currently apply built-in per-route throttling in-process.
+
+Operationally:
+- If you see `429 Too Many Requests`, it is typically from an upstream gateway/proxy layer.
+- If `Retry-After` is present, follow that value before retrying.
+- Retry strategy recommendation: exponential backoff + jitter for idempotent reads.
+
 ## Health
 
 | Method | Path | Description |
@@ -64,6 +73,12 @@ For 4xx errors, `hint` is included by default to speed up client-side troublesho
 | POST | `/health/cadence-watchdog/tick` | Trigger cadence watchdog |
 | POST | `/health/mention-rescue/tick` | Trigger mention-rescue fallback |
 
+### Quiet hours behavior (watchdogs)
+
+Watchdog endpoints currently execute whenever called (manual or scheduled). Quiet-hours suppression is not enforced by these endpoints at the API layer yet.
+
+If your deployment needs quiet-hours behavior today, enforce it in scheduler/gateway policy (for example: only trigger watchdog ticks during allowed windows).
+
 ## Tasks
 
 | Method | Path | Description |
@@ -80,6 +95,23 @@ For 4xx errors, `hint` is included by default to speed up client-side troublesho
 | GET | `/tasks/search` | Keyword search across task `title` + `description` (case-insensitive). Query: `q`, optional `limit` |
 | GET | `/tasks/analytics` | Task completion analytics and velocity |
 | GET | `/tasks/instrumentation/lifecycle` | Reviewer/done-criteria gates + status-contract violations (`doing` missing ETA, `validating` missing artifact path) |
+
+### Lane-state transition metadata (required on guarded transitions)
+
+`PATCH /tasks/:id` enforces transition metadata for lane-locked transitions:
+
+- `doing -> blocked` requires:
+  - `metadata.transition.type = "pause"`
+  - `metadata.transition.reason`
+- `blocked -> doing` requires:
+  - `metadata.transition.type = "resume"`
+  - `metadata.transition.reason`
+- `doing -> doing` with assignee change (handoff) requires:
+  - `metadata.transition.type = "handoff"`
+  - `metadata.transition.reason`
+  - `metadata.transition.handoff_to` (must match new `assignee`)
+
+If missing/invalid, API returns `400` with `Lane-state lock: ...` validation errors.
 
 ## Recurring Tasks
 
@@ -121,6 +153,12 @@ For 4xx errors, `hint` is included by default to speed up client-side troublesho
 | GET | `/chat/messages/:id/thread` | Get thread replies |
 | GET | `/chat/rooms` | List rooms |
 | POST | `/chat/rooms` | Create room |
+
+### Chat edit/delete contract
+
+- `PATCH /chat/messages/:id` and `DELETE /chat/messages/:id` are author-only.
+- Request body must include `from` matching the original message author.
+- Non-author attempts return an error envelope (`403`), and unknown message IDs return `404`.
 
 ## Inbox
 
