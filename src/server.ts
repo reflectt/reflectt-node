@@ -165,6 +165,36 @@ const CreateResearchHandoffSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 })
 
+const QaBundleSchema = z.object({
+  summary: z.string().trim().min(1),
+  artifact_links: z.array(z.string().trim().min(1)).min(1),
+  checks: z.array(z.string().trim().min(1)).min(1),
+  reviewer_notes: z.string().trim().min(1).optional(),
+})
+
+function enforceQaBundleGateForValidating(
+  status: Task['status'] | undefined,
+  metadata: unknown,
+): { ok: true } | { ok: false; error: string; hint: string } {
+  if (status !== 'validating') return { ok: true }
+
+  const parsed = z
+    .object({
+      qa_bundle: QaBundleSchema,
+    })
+    .safeParse(metadata ?? {})
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: 'QA bundle required: PATCH to status=validating must include metadata.qa_bundle { summary, artifact_links[], checks[] }',
+      hint: 'Example: { "status":"validating", "metadata": { "artifact_path":"...", "qa_bundle": { "summary":"what changed", "artifact_links": ["PR/link"], "checks": ["npm run build"] } } }',
+    }
+  }
+
+  return { ok: true }
+}
+
 const DEFAULT_LIMITS = {
   chatMessages: 50,
   chatSearch: 25,
@@ -974,17 +1004,30 @@ export async function createServer(): Promise<FastifyInstance> {
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
     try {
       const parsed = UpdateTaskSchema.parse(request.body)
+      const existing = taskManager.getTask(request.params.id)
+      if (!existing) {
+        reply.code(404)
+        return { success: false, error: 'Task not found' }
+      }
+
+      // Merge incoming metadata with existing for gate checks + persistence
+      const mergedMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
+
+      // QA bundle gate: validating requires structured review evidence.
+      const effectiveStatus = parsed.status ?? existing.status
+      const qaGate = enforceQaBundleGateForValidating(effectiveStatus, mergedMeta)
+      if (!qaGate.ok) {
+        reply.code(400)
+        return {
+          success: false,
+          error: qaGate.error,
+          gate: 'qa_bundle',
+          hint: qaGate.hint,
+        }
+      }
 
       // ── Task-close gate: enforce proof + reviewer sign-off before done ──
       if (parsed.status === 'done') {
-        const existing = taskManager.getTask(request.params.id)
-        if (!existing) {
-          reply.code(404)
-          return { success: false, error: 'Task not found' }
-        }
-
-        // Merge incoming metadata with existing for gate checks
-        const mergedMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
         const artifacts = mergedMeta.artifacts as string[] | undefined
 
         // Gate 1: require artifacts (links, PR URLs, evidence)
@@ -1014,11 +1057,11 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       // ── End task-close gate ──
 
-      const { actor, metadata, ...rest } = parsed
+      const { actor, ...rest } = parsed
       const updates = {
         ...rest,
         metadata: {
-          ...(metadata || {}),
+          ...mergedMeta,
           ...(actor ? { actor } : {}),
         },
       }
