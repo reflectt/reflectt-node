@@ -172,6 +172,42 @@ const QaBundleSchema = z.object({
   reviewer_notes: z.string().trim().min(1).optional(),
 })
 
+const ChatMessagesQuerySchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+  channel: z.string().optional(),
+  limit: z.string().optional(),
+  since: z.string().optional(),
+  before: z.string().optional(),
+  after: z.string().optional(),
+})
+
+const ChatSearchQuerySchema = z.object({
+  q: z.string().trim().min(1),
+  limit: z.string().optional(),
+})
+
+const MessageReactionBodySchema = z.object({
+  emoji: z.string().trim().min(1),
+  from: z.string().trim().min(1),
+})
+
+const InboxQuerySchema = z.object({
+  priority: z.enum(['high', 'medium', 'low']).optional(),
+  limit: z.string().optional(),
+  since: z.string().optional(),
+})
+
+const InboxAckBodySchema = z.object({
+  messageIds: z.array(z.string().trim().min(1)).optional(),
+  all: z.boolean().optional(),
+  timestamp: z.number().int().optional(),
+})
+
+const InboxSubscribeBodySchema = z.object({
+  channels: z.array(z.string().trim().min(1)).min(1),
+})
+
 function enforceQaBundleGateForValidating(
   status: Task['status'] | undefined,
   metadata: unknown,
@@ -279,6 +315,32 @@ function applyConditionalCaching(
   return false
 }
 
+function inferErrorStatus(errorText: string): number {
+  const text = errorText.toLowerCase()
+  if (text.includes('not found')) return 404
+  if (text.includes('forbidden') || text.includes('not allowed')) return 403
+  if (text.includes('unauthorized')) return 401
+  if (text.includes('conflict') || text.includes('already')) return 409
+  if (text.includes('invalid') || text.includes('required') || text.includes('must') || text.includes('failed to parse')) return 400
+  return 500
+}
+
+function inferErrorCode(status: number): string {
+  if (status >= 500) return 'INTERNAL_ERROR'
+  if (status === 404) return 'NOT_FOUND'
+  if (status === 403) return 'FORBIDDEN'
+  if (status === 401) return 'UNAUTHORIZED'
+  if (status === 409) return 'CONFLICT'
+  return 'BAD_REQUEST'
+}
+
+function defaultHintForStatus(status: number): string | undefined {
+  if (status >= 400 && status < 500) {
+    return 'Check required fields and request format in /docs.'
+  }
+  return undefined
+}
+
 export async function createServer(): Promise<FastifyInstance> {
   const app = Fastify({
     logger: isDev ? {
@@ -294,6 +356,47 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   await app.register(fastifyWebsocket)
+
+  // Normalize error responses to a consistent envelope
+  app.addHook('preSerialization', async (_request, reply, payload) => {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return payload
+    }
+
+    const body = payload as Record<string, unknown>
+    const hasError = typeof body.error === 'string'
+    const alreadyEnvelope = typeof body.success === 'boolean' && hasError
+    if (!hasError) return payload
+
+    let status = Number(body.status)
+    if (!Number.isFinite(status) || status <= 0) {
+      status = reply.statusCode >= 400 ? reply.statusCode : inferErrorStatus(String(body.error))
+    }
+
+    if (reply.statusCode < 400) {
+      reply.code(status)
+    }
+
+    const code = typeof body.code === 'string' && body.code.trim().length > 0
+      ? body.code
+      : inferErrorCode(status)
+    const hint = typeof body.hint === 'string' && body.hint.trim().length > 0
+      ? body.hint
+      : defaultHintForStatus(status)
+
+    const envelope: Record<string, unknown> = {
+      success: false,
+      error: body.error,
+      code,
+      status,
+    }
+
+    if (hint) envelope.hint = hint
+    if (body.details !== undefined) envelope.details = body.details
+    if (alreadyEnvelope && body.data !== undefined) envelope.data = body.data
+
+    return envelope
+  })
 
   // Request tracking middleware for system health monitoring
   app.addHook('onRequest', async (request) => {
@@ -668,7 +771,15 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Get messages
   app.get('/chat/messages', async (request, reply) => {
-    const query = request.query as Record<string, string>
+    const parsedQuery = ChatMessagesQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+    const query = parsedQuery.data
     const messages = chatManager.getMessages({
       from: query.from,
       to: query.to,
@@ -687,11 +798,16 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Add reaction to message
-  app.post<{ Params: { id: string } }>('/chat/messages/:id/react', async (request) => {
-    const body = request.body as { emoji: string; from: string }
-    if (!body.emoji || !body.from) {
-      return { error: 'emoji and from are required' }
+  app.post<{ Params: { id: string } }>('/chat/messages/:id/react', async (request, reply) => {
+    const parsedBody = MessageReactionBodySchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid body: emoji and from are required',
+        details: parsedBody.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
     }
+    const body = parsedBody.data
     const message = await chatManager.addReaction(request.params.id, body.emoji, body.from)
     if (!message) {
       return { error: 'Message not found' }
@@ -715,11 +831,16 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Search messages
-  app.get('/chat/search', async (request) => {
-    const query = request.query as Record<string, string>
-    if (!query.q) {
-      return { error: 'query parameter "q" is required' }
+  app.get('/chat/search', async (request, reply) => {
+    const parsedQuery = ChatSearchQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
     }
+    const query = parsedQuery.data
     const messages = chatManager.search(query.q, {
       limit: boundedLimit(query.limit, DEFAULT_LIMITS.chatSearch, MAX_LIMITS.chatSearch),
     })
@@ -738,8 +859,16 @@ export async function createServer(): Promise<FastifyInstance> {
   // ============ INBOX ENDPOINTS ============
 
   // Get inbox for an agent
-  app.get<{ Params: { agent: string } }>('/inbox/:agent', async (request) => {
-    const query = request.query as Record<string, string>
+  app.get<{ Params: { agent: string } }>('/inbox/:agent', async (request, reply) => {
+    const parsedQuery = InboxQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+    const query = parsedQuery.data
     
     // For inbox, get more messages than default to scan for @mentions etc.
     // But still cap it to avoid blowing through context windows
@@ -750,7 +879,7 @@ export async function createServer(): Promise<FastifyInstance> {
     })
     
     const inbox = inboxManager.getInbox(request.params.agent, allMessages, {
-      priority: query.priority as 'high' | 'medium' | 'low' | undefined,
+      priority: query.priority,
       limit: boundedLimit(query.limit, DEFAULT_LIMITS.inbox, MAX_LIMITS.inbox),
       since: parseEpochMs(query.since),
     })
@@ -762,8 +891,16 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Acknowledge messages
-  app.post<{ Params: { agent: string } }>('/inbox/:agent/ack', async (request) => {
-    const body = request.body as { messageIds?: string[]; all?: boolean; timestamp?: number }
+  app.post<{ Params: { agent: string } }>('/inbox/:agent/ack', async (request, reply) => {
+    const parsedBody = InboxAckBodySchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid body',
+        details: parsedBody.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+    const body = parsedBody.data
     
     if (body.all) {
       const allMessages = chatManager.getMessages()
@@ -786,12 +923,16 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Update subscriptions
-  app.post<{ Params: { agent: string } }>('/inbox/:agent/subscribe', async (request) => {
-    const body = request.body as { channels: string[] }
-    
-    if (!body.channels || !Array.isArray(body.channels)) {
-      return { error: 'channels array is required' }
+  app.post<{ Params: { agent: string } }>('/inbox/:agent/subscribe', async (request, reply) => {
+    const parsedBody = InboxSubscribeBodySchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid body: channels array is required',
+        details: parsedBody.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
     }
+    const body = parsedBody.data
     
     const subscriptions = await inboxManager.updateSubscriptions(request.params.agent, body.channels)
     return { success: true, subscriptions }
