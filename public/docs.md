@@ -123,6 +123,8 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 |--------|------|-------------|
 | GET | `/tasks/recurring` | List recurring task definitions |
 | POST | `/tasks/recurring` | Create recurring task definition |
+| PATCH | `/tasks/recurring/:id` | Update recurring task definition (supports `enabled` toggle and schedule updates) |
+| DELETE | `/tasks/recurring/:id` | Delete recurring task definition |
 | POST | `/tasks/recurring/materialize` | Materialize due recurring tasks; skips creation when previous instance is still open. Query: `force=true` to override skip guard |
 
 ## Backlog (Self-Serve)

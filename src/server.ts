@@ -120,6 +120,14 @@ const CreateRecurringTaskSchema = z.object({
   status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).optional(),
 })
 
+const UpdateRecurringTaskSchema = z.object({
+  enabled: z.boolean().optional(),
+  schedule: RecurringTaskScheduleSchema.optional(),
+}).refine((value) => value.enabled !== undefined || value.schedule !== undefined, {
+  message: 'At least one of enabled or schedule is required',
+  path: [],
+})
+
 const CreateExperimentSchema = z.object({
   name: z.string().trim().min(1),
   hypothesis: z.string().trim().min(1),
@@ -1670,6 +1678,34 @@ export async function createServer(): Promise<FastifyInstance> {
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to create recurring task' }
     }
+  })
+
+  // Update recurring task definition
+  app.patch<{ Params: { id: string } }>('/tasks/recurring/:id', async (request, reply) => {
+    try {
+      const updates = UpdateRecurringTaskSchema.parse(request.body)
+      const recurring = await taskManager.updateRecurringTask(request.params.id, updates)
+
+      if (!recurring) {
+        reply.code(404)
+        return { success: false, error: 'Recurring task not found' }
+      }
+
+      return { success: true, recurring }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to update recurring task' }
+    }
+  })
+
+  // Delete recurring task definition
+  app.delete<{ Params: { id: string } }>('/tasks/recurring/:id', async (request, reply) => {
+    const deleted = await taskManager.deleteRecurringTask(request.params.id)
+    if (!deleted) {
+      reply.code(404)
+      return { success: false, error: 'Recurring task not found' }
+    }
+
+    return { success: true, id: request.params.id }
   })
 
   // Force recurring materialization pass

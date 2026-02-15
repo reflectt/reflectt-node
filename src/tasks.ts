@@ -146,6 +146,13 @@ class TaskManager {
     }
   }
 
+  private normalizeRecurringTask(recurring: RecurringTask): RecurringTask {
+    return {
+      ...recurring,
+      enabled: typeof recurring.enabled === 'boolean' ? recurring.enabled : true,
+    }
+  }
+
   private async loadRecurringTasks(): Promise<void> {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
@@ -156,7 +163,7 @@ class TaskManager {
 
         for (const line of lines) {
           try {
-            const recurring = JSON.parse(line) as RecurringTask
+            const recurring = this.normalizeRecurringTask(JSON.parse(line) as RecurringTask)
             this.recurringTasks.set(recurring.id, recurring)
           } catch (err) {
             console.error('[Tasks] Failed to parse recurring task line:', err)
@@ -298,7 +305,10 @@ class TaskManager {
   private async persistRecurringTasks(): Promise<void> {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
-      const lines = Array.from(this.recurringTasks.values()).map(task => JSON.stringify(task))
+      const lines = Array.from(this.recurringTasks.values()).map(task => JSON.stringify({
+        ...task,
+        enabled: Boolean(task.enabled),
+      }))
       await fs.writeFile(RECURRING_TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
     } catch (err) {
       console.error('[Tasks] Failed to persist recurring tasks:', err)
@@ -534,6 +544,39 @@ class TaskManager {
       tasks = tasks.filter(task => task.enabled === options.enabled)
     }
     return tasks.sort((a, b) => a.nextRunAt - b.nextRunAt)
+  }
+
+  async updateRecurringTask(
+    id: string,
+    updates: Partial<Pick<RecurringTask, 'enabled' | 'schedule'>>,
+  ): Promise<RecurringTask | undefined> {
+    const recurring = this.recurringTasks.get(id)
+    if (!recurring) return undefined
+
+    const next: RecurringTask = {
+      ...recurring,
+      ...updates,
+      updatedAt: Date.now(),
+    }
+
+    if (typeof updates.enabled === 'boolean') {
+      next.enabled = updates.enabled
+    }
+
+    if (updates.schedule) {
+      next.nextRunAt = this.computeNextRunAt(updates.schedule, Date.now(), recurring.createdAt)
+    }
+
+    this.recurringTasks.set(id, next)
+    await this.persistRecurringTasks()
+    return next
+  }
+
+  async deleteRecurringTask(id: string): Promise<boolean> {
+    const existed = this.recurringTasks.delete(id)
+    if (!existed) return false
+    await this.persistRecurringTasks()
+    return true
   }
 
   getTask(id: string): Task | undefined {
