@@ -925,42 +925,54 @@ class TaskManager {
     // Helper: check if a task is blocked by incomplete dependencies
     const isBlocked = (task: Task): boolean => {
       if (!task.blocked_by || task.blocked_by.length === 0) return false
-      
+
       return task.blocked_by.some(blockerId => {
         const blocker = this.tasks.get(blockerId)
         return blocker && blocker.status !== 'done'
       })
     }
 
-    let tasks = Array.from(this.tasks.values())
-      .filter(t => t.status === 'todo') // Only todo tasks
-      .filter(t => !t.assignee) // Unassigned only
-      .filter(t => !isBlocked(t)) // Not blocked by incomplete tasks
+    const sortByPriorityThenAge = (tasks: Task[]) =>
+      tasks.sort((a, b) => {
+        const aPriority = priorityOrder[a.priority || 'P3'] ?? 999
+        const bPriority = priorityOrder[b.priority || 'P3'] ?? 999
 
-    // If agent specified, can also include tasks assigned to that agent
+        if (aPriority !== bPriority) {
+          return aPriority - bPriority
+        }
+
+        return a.createdAt - b.createdAt
+      })
+
     if (agent) {
-      const agentTasks = Array.from(this.tasks.values())
-        .filter(t => t.status === 'todo')
-        .filter(t => t.assignee === agent)
-        .filter(t => !isBlocked(t))
-      tasks = [...tasks, ...agentTasks]
+      // 1) Return agent's active doing work first to prevent idle heartbeats.
+      const doingTasks = sortByPriorityThenAge(
+        Array.from(this.tasks.values())
+          .filter(t => t.status === 'doing')
+          .filter(t => t.assignee === agent)
+          .filter(t => !isBlocked(t))
+      )
+      if (doingTasks.length > 0) return doingTasks[0]
+
+      // 2) Then return agent-assigned todo work.
+      const assignedTodoTasks = sortByPriorityThenAge(
+        Array.from(this.tasks.values())
+          .filter(t => t.status === 'todo')
+          .filter(t => t.assignee === agent)
+          .filter(t => !isBlocked(t))
+      )
+      if (assignedTodoTasks.length > 0) return assignedTodoTasks[0]
     }
 
-    if (tasks.length === 0) return undefined
+    // 3) Fallback to global unassigned todo queue.
+    const unassignedTodoTasks = sortByPriorityThenAge(
+      Array.from(this.tasks.values())
+        .filter(t => t.status === 'todo')
+        .filter(t => !t.assignee)
+        .filter(t => !isBlocked(t))
+    )
 
-    // Sort by priority (P0 first), then by creation date (oldest first)
-    tasks.sort((a, b) => {
-      const aPriority = priorityOrder[a.priority || 'P3'] ?? 999
-      const bPriority = priorityOrder[b.priority || 'P3'] ?? 999
-      
-      if (aPriority !== bPriority) {
-        return aPriority - bPriority
-      }
-      
-      return a.createdAt - b.createdAt
-    })
-
-    return tasks[0]
+    return unassignedTodoTasks[0]
   }
 
   getLifecycleInstrumentation() {

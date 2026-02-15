@@ -212,6 +212,71 @@ describe('Task Claim', () => {
   })
 })
 
+describe('Task Next selection', () => {
+  let doingTaskId: string
+  let assignedTodoTaskId: string
+  const testAgent = `test-next-agent-${Date.now()}`
+
+  beforeAll(async () => {
+    const doingRes = await req('POST', '/tasks', {
+      title: 'TEST: next task doing priority',
+      createdBy: 'test-runner',
+      assignee: testAgent,
+      reviewer: 'test-reviewer',
+      status: 'doing',
+      priority: 'P2',
+      done_criteria: ['Next task returns doing first'],
+      eta: '1h',
+    })
+    doingTaskId = doingRes.body.task.id
+
+    const assignedTodoRes = await req('POST', '/tasks', {
+      title: 'TEST: next task assigned todo fallback',
+      createdBy: 'test-runner',
+      assignee: testAgent,
+      reviewer: 'test-reviewer',
+      priority: 'P3',
+      done_criteria: ['Assigned todo fallback'],
+      eta: '1h',
+    })
+    assignedTodoTaskId = assignedTodoRes.body.task.id
+
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${doingTaskId}`)
+    await req('DELETE', `/tasks/${assignedTodoTaskId}`)
+  })
+
+  it('returns doing task first for an agent', async () => {
+    const { status, body } = await req('GET', `/tasks/next?agent=${encodeURIComponent(testAgent)}`)
+    expect(status).toBe(200)
+    expect(body.task).toBeDefined()
+    expect(body.task.id).toBe(doingTaskId)
+    expect(body.task.status).toBe('doing')
+  })
+
+  it('falls back to assigned todo when no doing task exists', async () => {
+    const pauseDoing = await req('PATCH', `/tasks/${doingTaskId}`, {
+      status: 'blocked',
+      metadata: {
+        actor: testAgent,
+        transition: {
+          type: 'pause',
+          reason: 'Testing next-task fallback ordering',
+        },
+      },
+    })
+    expect(pauseDoing.status).toBe(200)
+
+    const { status, body } = await req('GET', `/tasks/next?agent=${encodeURIComponent(testAgent)}`)
+    expect(status).toBe(200)
+    expect(body.task).toBeDefined()
+    expect(body.task.id).toBe(assignedTodoTaskId)
+    expect(body.task.status).toBe('todo')
+  })
+})
+
 describe('Task Close Gate', () => {
   let taskId: string
 
