@@ -17,6 +17,7 @@ import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp
 import { memoryManager } from './memory.js'
 import { eventBus } from './events.js'
 import { presenceManager } from './presence.js'
+import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus } from './presence.js'
 import { analyticsManager } from './analytics.js'
 import { getDashboardHTML } from './dashboard.js'
@@ -324,11 +325,45 @@ export async function createServer(): Promise<FastifyInstance> {
   // Team health compliance payload (dashboard panel)
   app.get('/health/compliance', async (request, reply) => {
     const compliance = await healthMonitor.getCollaborationCompliance()
-    const payload = { compliance, timestamp: Date.now() }
+    const mentionAck = mentionAckTracker.getMetrics()
+    const payload = { compliance, mentionAck, timestamp: Date.now() }
     if (applyConditionalCaching(request, reply, payload, payload.timestamp)) {
       return
     }
     return payload
+  })
+
+  // Mention ack metrics
+  app.get('/health/mention-ack', async () => {
+    return mentionAckTracker.getMetrics()
+  })
+
+  // Mention ack recent entries (debug)
+  app.get('/health/mention-ack/recent', async (request) => {
+    const query = request.query as Record<string, string>
+    const limit = Math.min(parseInt(query.limit || '20', 10), 100)
+    return { entries: mentionAckTracker.getRecent(limit) }
+  })
+
+  // Mention ack pending for specific agent
+  app.get<{ Params: { agent: string } }>('/health/mention-ack/:agent', async (request) => {
+    const pending = mentionAckTracker.getPending(request.params.agent)
+    return { agent: request.params.agent, pending, count: pending.length }
+  })
+
+  // Mention ack timeout check (trigger manually or via cron)
+  app.post('/health/mention-ack/check-timeouts', async () => {
+    const timedOut = mentionAckTracker.checkTimeouts()
+    return {
+      timedOut: timedOut.map(t => ({
+        agent: t.agent,
+        mentionedBy: t.entry.mentionedBy,
+        messageId: t.entry.messageId,
+        channel: t.entry.channel,
+        waitedMs: Date.now() - t.entry.createdAt,
+      })),
+      count: timedOut.length,
+    }
   })
 
   // Idle-nudge debug surface (deterministic proof support)
@@ -569,6 +604,17 @@ export async function createServer(): Promise<FastifyInstance> {
     if (data.from) {
       presenceManager.recordActivity(data.from, 'message')
       presenceManager.updatePresence(data.from, 'working')
+    }
+
+    // Track mention ack lifecycle
+    if (message.id && data.from && data.content) {
+      mentionAckTracker.recordMessage({
+        id: message.id,
+        from: data.from,
+        content: data.content,
+        channel: data.channel || 'general',
+        timestamp: message.timestamp,
+      })
     }
     
     return { success: true, message }
