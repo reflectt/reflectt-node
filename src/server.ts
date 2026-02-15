@@ -607,6 +607,52 @@ async function resolvePrAndCi(prUrl: string): Promise<{
   }
 }
 
+type MentionWarning = {
+  mention: string
+  reason: 'unknown_agent' | 'offline_agent'
+  message: string
+}
+
+function extractMentions(content: string): string[] {
+  const matches = content.match(/@(\w+)/g) || []
+  return Array.from(new Set(matches.map(token => token.slice(1).toLowerCase()).filter(Boolean)))
+}
+
+function buildMentionWarnings(content: string): MentionWarning[] {
+  const mentions = extractMentions(content)
+  if (mentions.length === 0) return []
+
+  const presenceByAgent = new Map(
+    presenceManager
+      .getAllPresence()
+      .map((row) => [String(row.agent || '').toLowerCase(), row.status] as const)
+      .filter(([agent]) => Boolean(agent)),
+  )
+
+  const warnings: MentionWarning[] = []
+  for (const mention of mentions) {
+    const status = presenceByAgent.get(mention)
+    if (!status) {
+      warnings.push({
+        mention,
+        reason: 'unknown_agent',
+        message: `@${mention} is not in the presence roster`,
+      })
+      continue
+    }
+
+    if (status === 'offline') {
+      warnings.push({
+        mention,
+        reason: 'offline_agent',
+        message: `@${mention} is currently offline`,
+      })
+    }
+  }
+
+  return warnings
+}
+
 function inferErrorStatus(errorText: string): number {
   const text = errorText.toLowerCase()
   if (text.includes('not found')) return 404
@@ -1307,7 +1353,8 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/chat/messages', async (request) => {
     const data = SendMessageSchema.parse(request.body)
     const message = await chatManager.sendMessage(data)
-    
+    const warnings = buildMentionWarnings(data.content)
+
     // Auto-update presence: if you're posting, you're active
     if (data.from) {
       presenceManager.recordActivity(data.from, 'message')
@@ -1324,8 +1371,12 @@ export async function createServer(): Promise<FastifyInstance> {
         timestamp: message.timestamp,
       })
     }
-    
-    return { success: true, message }
+
+    return {
+      success: true,
+      message,
+      ...(warnings.length > 0 ? { warnings } : {}),
+    }
   })
 
   // Get messages
