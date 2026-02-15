@@ -26,6 +26,68 @@ curl -s http://127.0.0.1:4445/health/compliance
 curl -s http://127.0.0.1:4445/health/idle-nudge/debug
 ```
 
+## Expected response snippets
+
+`GET /health` example (trimmed):
+
+```json
+{
+  "status": "ok",
+  "openclaw": "not configured",
+  "chat": {
+    "totalMessages": 1234,
+    "rooms": 1,
+    "subscribers": 0
+  },
+  "tasks": {
+    "total": 42,
+    "byStatus": {
+      "todo": 3,
+      "doing": 5,
+      "blocked": 1,
+      "validating": 2,
+      "done": 31
+    }
+  },
+  "inbox": {
+    "agents": 7,
+    "defaultSubscriptions": ["general", "decisions", "problems", "shipping"]
+  },
+  "timestamp": 1771158611630
+}
+```
+
+`GET /health/agents` example (trimmed):
+
+```json
+{
+  "agents": [
+    {
+      "agent": "kai",
+      "last_seen": 1771158603451,
+      "active_task": null,
+      "heartbeat_age_ms": 0,
+      "last_shipped_at": 1771158600504,
+      "shipped_age_ms": 0,
+      "stale_reason": null,
+      "idle_with_active_task": false,
+      "state": "healthy"
+    },
+    {
+      "agent": "spark",
+      "last_seen": 1771158551248,
+      "active_task": "watchdog noise suppression hardening pass",
+      "heartbeat_age_ms": 60000,
+      "last_shipped_at": 1771158551248,
+      "shipped_age_ms": 60000,
+      "stale_reason": null,
+      "idle_with_active_task": false,
+      "state": "healthy"
+    }
+  ]
+}
+```
+
 ## Dry-run watchdog checks
 
 ```bash
