@@ -50,6 +50,18 @@ export interface AgentHealthSummaryRow {
   state: 'healthy' | 'idle' | 'stuck' | 'offline'
 }
 
+export interface ActionableReasonBlock {
+  task_id: string | null
+  last_task_comment_age_min: number | null
+  last_transition: {
+    type: string | null
+    actor: string | null
+    age_min: number | null
+  }
+  last_mention_age_min: number | null
+  suggested_action: string
+}
+
 export interface AgentHealthStatus {
   agent: string
   status: 'active' | 'idle' | 'silent' | 'blocked' | 'offline'
@@ -61,6 +73,7 @@ export interface AgentHealthStatus {
   lastProductiveAt: number | null
   minutesSinceProductive: number | null
   idleWithActiveTask: boolean
+  actionable_reason: ActionableReasonBlock | null
 }
 
 export interface BlockerAlert {
@@ -610,6 +623,53 @@ class TeamHealthMonitor {
     return null
   }
 
+  private getLatestTaskCommentAgeMin(taskId: string | undefined, now: number): number | null {
+    if (!taskId) return null
+    const comments = taskManager.getTaskComments(taskId)
+    if (!comments.length) return null
+    const latestTs = comments.reduce((max, c) => Math.max(max, this.parseTimestamp(c.timestamp)), 0)
+    if (!latestTs) return null
+    return Math.max(0, Math.floor((now - latestTs) / 60_000))
+  }
+
+  private getLatestMentionAgeMin(messages: any[], agent: string, now: number): number | null {
+    const needle = `@${agent.toLowerCase()}`
+    let latest = 0
+
+    for (const m of messages) {
+      const from = (m?.from || '').toLowerCase()
+      if (!from || from === agent.toLowerCase()) continue
+      const content = typeof m?.content === 'string' ? m.content.toLowerCase() : ''
+      if (!content.includes(needle)) continue
+      const ts = this.parseTimestamp(m.timestamp)
+      if (ts > latest) latest = ts
+    }
+
+    if (!latest) return null
+    return Math.max(0, Math.floor((now - latest) / 60_000))
+  }
+
+  private buildSuggestedAction(args: {
+    status: AgentHealthStatus['status']
+    idleWithActiveTask: boolean
+    hasRecentBlocker: boolean
+    hasTask: boolean
+  }): string {
+    if (args.hasRecentBlocker || args.status === 'blocked') {
+      return 'Post blocker owner + unblock ETA in #general and request reviewer help if blocked >20m.'
+    }
+    if (args.idleWithActiveTask) {
+      return 'Post shipped/blocker/next+ETA now and either move task to validating with artifact or set blocked reason.'
+    }
+    if (args.status === 'silent' || args.status === 'offline') {
+      return 'Acknowledge in #general and confirm active lane status or set task to blocked/todo if paused.'
+    }
+    if (!args.hasTask && (args.status === 'idle' || args.status === 'active')) {
+      return 'Claim next backlog task or post explicit no-work state; avoid idle-without-lane drift.'
+    }
+    return 'Post a concrete next artifact ETA and keep task status aligned with actual execution state.'
+  }
+
   /**
    * Get health status for all agents
    */
@@ -668,20 +728,45 @@ class TeamHealthMonitor {
         status = 'blocked'
       }
 
-      const hasActiveTask = Boolean(agentTasks[0])
+      const activeTask = agentTasks[0]
+      const hasActiveTask = Boolean(activeTask)
       const idleWithActiveTask = hasActiveTask && minutesSinceLastSeen > 60
+      const mentionAgeMin = this.getLatestMentionAgeMin(messages, agent, now)
+      const lastTransition = (activeTask?.metadata as any)?.last_transition
+      const lastTransitionTs = this.parseTimestamp(lastTransition?.timestamp)
+      const isFlagged = status === 'blocked' || status === 'silent' || status === 'offline' || idleWithActiveTask
+
+      const actionable_reason: ActionableReasonBlock | null = isFlagged
+        ? {
+            task_id: activeTask?.id || null,
+            last_task_comment_age_min: this.getLatestTaskCommentAgeMin(activeTask?.id, now),
+            last_transition: {
+              type: typeof lastTransition?.type === 'string' ? lastTransition.type : null,
+              actor: typeof lastTransition?.actor === 'string' ? lastTransition.actor : null,
+              age_min: lastTransitionTs ? Math.max(0, Math.floor((now - lastTransitionTs) / 60_000)) : null,
+            },
+            last_mention_age_min: mentionAgeMin,
+            suggested_action: this.buildSuggestedAction({
+              status,
+              idleWithActiveTask,
+              hasRecentBlocker: recentBlockers.length > 0,
+              hasTask: hasActiveTask,
+            }),
+          }
+        : null
 
       agentStatuses.push({
         agent,
         status,
         lastSeen,
         minutesSinceLastSeen,
-        currentTask: agentTasks[0]?.title,
+        currentTask: activeTask?.title,
         recentBlockers,
         messageCount24h,
         lastProductiveAt,
         minutesSinceProductive,
         idleWithActiveTask,
+        actionable_reason,
       })
     }
 
