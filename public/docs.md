@@ -8,6 +8,7 @@ Base URL: `http://localhost:4445`
 - [Known Issues](../docs/KNOWN_ISSUES.md) — verified runtime/docs drift with repro, workaround, and owner.
 - [Reviewer Handoff Bundle Template](../docs/REVIEWER_HANDOFF_BUNDLE_TEMPLATE.md) — reviewer-ready QA bundle format.
 - [Task Creation Template](../docs/TASK_CREATION_TEMPLATE.md) — high-signal task spec + anti-patterns.
+- [Reviewer-Ready Tasks Guide](../docs/REVIEWER_READY_TASKS_GUIDE.md) — short operational guide to reduce QA churn.
 
 ---
 
