@@ -58,7 +58,7 @@ Operationally:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | System health — task counts, chat stats, inbox stats |
-| GET | `/health/team` | Team health metrics with compliance + `staleDoing` snapshot. Flagged agents also include `actionable_reason` (last comment age, last transition, last mention age, suggested action). |
+| GET | `/health/team` | Team health metrics with compliance + `staleDoing` snapshot. Per-agent rows include `activeTaskTitle` and `activeTaskPrLink` when an agent has a doing task with PR evidence. Flagged agents also include `actionable_reason` (last comment age, last transition, last mention age, suggested action). |
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
 | GET | `/health/system` | System info (uptime, memory, versions) |

@@ -53,6 +53,42 @@ describe('Health', () => {
     expect(body.startedAt).toBeDefined()
     expect(body.uptime).toBeTypeOf('number')
   })
+
+  it('GET /health/team includes active task title + PR link for each agent when available', async () => {
+    const prLink = 'https://github.com/reflectt/reflectt-node/pull/59'
+    const agentName = `health-agent-${Date.now()}`
+
+    const created = await req('POST', '/tasks', {
+      title: 'TEST: health team active task enrichment',
+      description: 'Used to verify /health/team active task title and PR link',
+      status: 'doing',
+      createdBy: 'test-runner',
+      assignee: agentName,
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Verify /health/team payload'],
+      eta: '1h',
+      metadata: {
+        eta: '1h',
+        artifacts: [prLink],
+      },
+    })
+
+    expect(created.status).toBe(200)
+    const taskId = created.body.task.id as string
+
+    const { status, body } = await req('GET', '/health/team')
+    expect(status).toBe(200)
+    expect(Array.isArray(body.agents)).toBe(true)
+
+    const agent = body.agents.find((row: any) => row.agent === agentName)
+    expect(agent).toBeDefined()
+    expect(agent.activeTaskId).toBe(taskId)
+    expect(agent.activeTaskTitle).toBe('TEST: health team active task enrichment')
+    expect(agent.activeTaskPrLink).toBe(prLink)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
 })
 
 describe('Release', () => {
