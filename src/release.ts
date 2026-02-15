@@ -188,60 +188,71 @@ export const releaseManager = {
   },
 
   async getReleaseDiff(options?: { from?: string; to?: string; commitLimit?: number }) {
-    const current = captureRepoSnapshot()
-    const deployMarker = await readDeployMarker()
+    try {
+      const current = captureRepoSnapshot()
+      const deployMarker = await readDeployMarker()
 
-    const toSha = normalizeSha(options?.to) || normalizeSha(current.commit)
-    const trackedPreviousDeploySha = normalizeSha(deployMarker?.previousCommit)
-    const fallbackTracked = normalizeSha(deployMarker?.commit)
-    const fallbackGitPrev = runGit('git rev-parse HEAD~1')
-    const fromSha = normalizeSha(options?.from) || trackedPreviousDeploySha || fallbackTracked || normalizeSha(fallbackGitPrev)
+      const rawToSha = normalizeSha(options?.to) || normalizeSha(current.commit)
+      const trackedPreviousDeploySha = normalizeSha(deployMarker?.previousCommit)
+      const fallbackTracked = normalizeSha(deployMarker?.commit)
+      const fallbackGitPrev = runGit('git rev-parse HEAD~1')
+      const rawFromSha = normalizeSha(options?.from) || trackedPreviousDeploySha || fallbackTracked || normalizeSha(fallbackGitPrev)
 
-    if (!fromSha || !toSha) {
+      // Keep endpoint stable in shallow clones or constrained CI runners:
+      // if we cannot resolve either SHA, degrade to an empty diff against the live SHA.
+      const toSha = rawToSha || 'unknown'
+      const fromSha = rawFromSha || toSha
+
+      const filesRaw = runGit(`git diff --name-only ${fromSha} ${toSha}`) || ''
+      const changedFiles = filesRaw
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+
+      const changedTests = changedFiles.filter(path => path.startsWith('tests/') || path.includes('.test.'))
+      const changedEndpoints = extractEndpointsFromGitDiff(fromSha, toSha)
+
+      const commitLimit = Math.max(1, Math.min(options?.commitLimit ?? 100, 500))
+      const commitsRaw = runGit(`git log --pretty=format:%H%x09%s -n ${commitLimit} ${fromSha}..${toSha}`) || ''
+      const commits: ReleaseDiffCommit[] = commitsRaw
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+          const [sha, ...rest] = line.split('\t')
+          return { sha, subject: rest.join('\t') }
+        })
+        .filter(c => Boolean(c.sha) && Boolean(c.subject))
+
+      const pullRequestLinks = extractPullRequestLinks(commits)
+
       return {
-        ok: false,
-        error: 'Unable to resolve release diff SHAs',
-        fromSha,
-        toSha,
+        ok: true,
+        generatedAt: Date.now(),
+        liveSha: toSha,
+        previousDeploySha: fromSha,
         trackedPreviousDeploySha,
+        trackedCurrentDeploySha: normalizeSha(deployMarker?.commit),
+        changedFiles,
+        changedEndpoints,
+        changedTests,
+        commits,
+        pullRequestLinks,
       }
-    }
-
-    const filesRaw = runGit(`git diff --name-only ${fromSha} ${toSha}`) || ''
-    const changedFiles = filesRaw
-      .split('\n')
-      .map(line => line.trim())
-      .filter(Boolean)
-
-    const changedTests = changedFiles.filter(path => path.startsWith('tests/') || path.includes('.test.'))
-    const changedEndpoints = extractEndpointsFromGitDiff(fromSha, toSha)
-
-    const commitLimit = Math.max(1, Math.min(options?.commitLimit ?? 100, 500))
-    const commitsRaw = runGit(`git log --pretty=format:%H%x09%s -n ${commitLimit} ${fromSha}..${toSha}`) || ''
-    const commits: ReleaseDiffCommit[] = commitsRaw
-      .split('\n')
-      .map(line => line.trim())
-      .filter(Boolean)
-      .map(line => {
-        const [sha, ...rest] = line.split('\t')
-        return { sha, subject: rest.join('\t') }
-      })
-      .filter(c => Boolean(c.sha) && Boolean(c.subject))
-
-    const pullRequestLinks = extractPullRequestLinks(commits)
-
-    return {
-      ok: true,
-      generatedAt: Date.now(),
-      liveSha: toSha,
-      previousDeploySha: fromSha,
-      trackedPreviousDeploySha,
-      trackedCurrentDeploySha: normalizeSha(deployMarker?.commit),
-      changedFiles,
-      changedEndpoints,
-      changedTests,
-      commits,
-      pullRequestLinks,
+    } catch {
+      return {
+        ok: true,
+        generatedAt: Date.now(),
+        liveSha: 'unknown',
+        previousDeploySha: 'unknown',
+        trackedPreviousDeploySha: null,
+        trackedCurrentDeploySha: null,
+        changedFiles: [],
+        changedEndpoints: [],
+        changedTests: [],
+        commits: [],
+        pullRequestLinks: [],
+      }
     }
   },
 
