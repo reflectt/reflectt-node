@@ -221,15 +221,15 @@ export function getDashboardHTML(): string {
     display: inline-block; width: 7px; height: 7px; border-radius: 50%;
     background: var(--accent); margin-left: 6px; box-shadow: 0 0 8px rgba(77, 166, 255, 0.6);
   }
-  .msg { padding: 8px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
+  .msg { padding: 7px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px; }
   .msg:last-child { border-bottom: none; }
-  .msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-  .msg-from { font-weight: 600; color: var(--accent); font-size: 13px; }
+  .msg-header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 3px; }
+  .msg-from { font-weight: 600; color: var(--accent); font-size: 13px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
   .msg-role { font-size: 10px; color: var(--purple); background: rgba(180, 142, 255, 0.08); padding: 2px 6px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.3px; }
   .msg-channel { font-size: 11px; color: var(--purple); background: rgba(180, 142, 255, 0.08); padding: 1px 6px; border-radius: 3px; }
-  .msg-time { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .msg-time { font-size: 11px; color: var(--text-muted); margin-left: auto; white-space: nowrap; }
   .msg-edited { font-size: 10px; color: var(--text-muted); opacity: 0.8; }
-  .msg-content { color: var(--text); font-size: 13px; line-height: 1.5; word-break: break-word; white-space: pre-wrap; }
+  .msg-content { color: var(--text); font-size: 12.5px; line-height: 1.4; word-break: break-word; white-space: pre-wrap; }
   .task-id-link {
     color: var(--accent);
     text-decoration: underline;
@@ -331,6 +331,18 @@ export function getDashboardHTML(): string {
     padding: 12px 14px; display: flex; align-items: center; gap: 10px; transition: all 0.2s;
   }
   .health-card:hover { border-color: var(--accent); }
+  .health-card.health-critical {
+    border-color: rgba(248, 81, 73, 0.55);
+    background: linear-gradient(90deg, rgba(248, 81, 73, 0.12), transparent 72%);
+  }
+  .health-card.health-warning {
+    border-color: rgba(212, 160, 23, 0.45);
+    background: linear-gradient(90deg, rgba(212, 160, 23, 0.09), transparent 72%);
+  }
+  .health-card.health-info {
+    border-color: rgba(63, 185, 80, 0.35);
+    background: linear-gradient(90deg, rgba(63, 185, 80, 0.07), transparent 75%);
+  }
   .health-indicator {
     width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
     box-shadow: 0 0 8px currentColor;
@@ -537,6 +549,21 @@ export function getDashboardHTML(): string {
     .chat-input-bar button { width: 100%; min-height: 44px; }
     .health-grid { grid-template-columns: 1fr; gap: 8px; }
     .outcome-rollup { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 420px) {
+    .header, .agent-strip, .main { padding-left: 12px; padding-right: 12px; }
+    .panel-header { padding: 10px 12px; }
+    .panel-body { padding: 10px 12px; max-height: 320px; }
+    .kanban { padding: 10px 12px; }
+    .task-card { padding: 9px 10px; }
+    .task-title { font-size: 12px; }
+    .msg { padding: 5px 0; }
+    .msg-header { gap: 4px; }
+    .msg-from { max-width: none; }
+    .msg-time { margin-left: 0; }
+    .chat-input-bar { padding: 8px 10px; }
+    .chat-input-bar select { min-width: 0; width: 100%; }
   }
 
   @media (min-width: 768px) and (max-width: 1023px) {
