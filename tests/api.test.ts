@@ -679,6 +679,41 @@ describe('Chat Messages', () => {
     authorMessageId = body.message.id
   })
 
+  it('POST /chat/messages returns no warnings for valid known @mentions', async () => {
+    await req('POST', '/presence/harmony', { status: 'working' })
+
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'ping @harmony for review',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.warnings).toBeUndefined()
+  })
+
+  it('POST /chat/messages includes warnings for unknown/offline @mentions', async () => {
+    await req('POST', '/presence/rhythm', { status: 'offline' })
+
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'ping @notarealagent and @rhythm',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.warnings)).toBe(true)
+    expect(body.warnings.length).toBe(2)
+    expect(body.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ mention: 'notarealagent', reason: 'unknown_agent' }),
+        expect.objectContaining({ mention: 'rhythm', reason: 'offline_agent' }),
+      ]),
+    )
+  })
+
   it('PATCH /chat/messages/:id edits content for original author', async () => {
     const { status, body } = await req('PATCH', `/chat/messages/${authorMessageId}`, {
       from: 'test-runner',
