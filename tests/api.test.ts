@@ -1228,6 +1228,18 @@ describe('Task review bundle', () => {
   })
 })
 
+describe('Cloud Integration', () => {
+  it('GET /cloud/status returns cloud state', async () => {
+    const { status, body } = await req('GET', '/cloud/status')
+    expect(status).toBe(200)
+    expect(typeof body.configured).toBe('boolean')
+    expect(typeof body.registered).toBe('boolean')
+    expect(typeof body.running).toBe('boolean')
+    expect(typeof body.heartbeatCount).toBe('number')
+    expect(typeof body.errors).toBe('number')
+  })
+})
+
 describe('Docs', () => {
   it('GET /docs returns markdown', async () => {
     const res = await app.inject({ method: 'GET', url: '/docs' })
