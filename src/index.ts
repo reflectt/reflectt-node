@@ -5,11 +5,21 @@
  */
 import { createServer } from './server.js'
 import { serverConfig } from './config.js'
+import { acquirePidLock, releasePidLock } from './pidlock.js'
 // OpenClaw connection is optional — server works for chat/tasks without it
 
 async function main() {
   console.log('🚀 Starting reflectt-node...')
   
+  // Acquire PID lock — kills any previous instance and resolves port conflicts
+  const lockResult = acquirePidLock(serverConfig.port)
+  if (lockResult.killedPrevious) {
+    console.log(`   Replaced previous instance (pid ${lockResult.previousPid})`)
+  }
+  if (lockResult.portConflictPids.length > 0) {
+    console.log(`   Resolved ${lockResult.portConflictPids.length} port conflict(s)`)
+  }
+
   try {
     const app = await createServer()
     
@@ -22,11 +32,12 @@ async function main() {
     console.log(`   - REST API: http://${serverConfig.host}:${serverConfig.port}`)
     console.log(`   - WebSocket: ws://${serverConfig.host}:${serverConfig.port}/chat/ws`)
     console.log(`   - Health: http://${serverConfig.host}:${serverConfig.port}/health`)
+    console.log(`   - PID: ${process.pid}`)
     
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       console.log(`\n${signal} received, shutting down...`)
-      // openclawClient.close()
+      releasePidLock()
       await app.close()
       process.exit(0)
     }
@@ -35,6 +46,7 @@ async function main() {
     process.on('SIGINT', () => shutdown('SIGINT'))
     
   } catch (err) {
+    releasePidLock()
     console.error('Failed to start server:', err)
     process.exit(1)
   }

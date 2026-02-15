@@ -74,34 +74,11 @@ else
 fi
 
 # Restart service
-log "post-merge: restarting service..."
-
-# Find and kill existing service
-EXISTING_PID=""
-if [ -f "$PID_FILE" ]; then
-  EXISTING_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
-fi
-
-# Also check lsof as fallback
-if [ -z "$EXISTING_PID" ] || ! kill -0 "$EXISTING_PID" 2>/dev/null; then
-  EXISTING_PID=$(lsof -i :4445 -t 2>/dev/null | head -1 || echo "")
-fi
-
-if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
-  log "post-merge: stopping existing service (pid $EXISTING_PID)..."
-  kill "$EXISTING_PID" 2>/dev/null || true
-  sleep 2
-  # Force kill if still running
-  if kill -0 "$EXISTING_PID" 2>/dev/null; then
-    kill -9 "$EXISTING_PID" 2>/dev/null || true
-    sleep 1
-  fi
-fi
-
-# Start new service
+# The service itself handles PID lockfile + port conflict cleanup on startup.
+# We just need to start the new instance — it will kill the old one.
+log "post-merge: starting new service (PID lockfile manager will handle old instance)..."
 nohup node dist/index.js >> "$SERVICE_LOG" 2>&1 &
 NEW_PID=$!
-echo "$NEW_PID" > "$PID_FILE"
 
 # Wait and verify
 sleep 3
