@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) Reflectt AI
+
 /**
  * Content tracking: publication log + content calendar
  * Enables data-driven content decisions and coordination

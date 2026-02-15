@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) Reflectt AI
+
 /**
  * reflectt-node - Local node server for agent communication via OpenClaw
  * 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) Reflectt AI
+
 /**
  * Build Info — captures git SHA, branch, and build metadata at startup.
  * Exposed via GET /health/build so the team knows what code is live.

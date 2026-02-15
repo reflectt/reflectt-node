@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) Reflectt AI
+
 import { execSync } from 'child_process'
 import { promises as fs } from 'fs'
 import { join } from 'path'
