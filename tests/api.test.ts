@@ -41,6 +41,18 @@ describe('Health', () => {
     expect(body.tasks).toBeDefined()
     expect(body.chat).toBeDefined()
   })
+
+  it('GET /health/build returns build info with SHA and PID', async () => {
+    const { status, body } = await req('GET', '/health/build')
+    expect(status).toBe(200)
+    expect(body.gitSha).toBeDefined()
+    expect(body.gitShortSha).toBeDefined()
+    expect(body.gitBranch).toBeDefined()
+    expect(body.pid).toBeTypeOf('number')
+    expect(body.nodeVersion).toBeDefined()
+    expect(body.startedAt).toBeDefined()
+    expect(body.uptime).toBeTypeOf('number')
+  })
 })
 
 describe('Task CRUD', () => {

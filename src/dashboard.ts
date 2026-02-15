@@ -598,6 +598,7 @@ export function getDashboardHTML(): string {
   <div class="header-right">
     <span><span class="status-dot"></span>Running</span>
     <span id="release-badge" class="release-badge" title="Deploy status">deploy: checking…</span>
+    <span id="build-badge" class="release-badge" title="Build info">build: loading…</span>
     <span id="clock"></span>
   </div>
 </div>
