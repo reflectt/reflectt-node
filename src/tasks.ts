@@ -620,6 +620,19 @@ class TaskManager {
     return tasks.sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
+  searchTasks(query: string): Task[] {
+    const normalized = query.trim().toLowerCase()
+    if (!normalized) return []
+
+    return Array.from(this.tasks.values())
+      .filter(task => {
+        const title = task.title.toLowerCase()
+        const description = (task.description || '').toLowerCase()
+        return title.includes(normalized) || description.includes(normalized)
+      })
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
   private resolveHistoryActor(task: Task, updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>): string {
     const metadataActor = (updates.metadata as any)?.actor
     if (typeof metadataActor === 'string' && metadataActor.trim().length > 0) {

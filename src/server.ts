@@ -786,6 +786,16 @@ export async function createServer(): Promise<FastifyInstance> {
     return payload
   })
 
+  // Search tasks by keyword in title + description
+  app.get('/tasks/search', async (request) => {
+    const query = request.query as Record<string, string>
+    const q = query.q || ''
+    const limit = boundedLimit(query.limit, DEFAULT_LIMITS.tasks, MAX_LIMITS.tasks)
+
+    const tasks = taskManager.searchTasks(q).slice(0, limit)
+    return { tasks: tasks.map(enrichTaskWithComments), count: tasks.length }
+  })
+
   // List recurring task definitions
   app.get('/tasks/recurring', async (request) => {
     const query = request.query as Record<string, string>
