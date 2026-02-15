@@ -1273,6 +1273,7 @@ function openTaskModal(taskId) {
     setTaskModalInteractivity(false);
     document.getElementById('modal-task-title').textContent = 'Task not found: ' + (taskId || '(missing id)');
     document.getElementById('modal-task-desc').textContent = 'This task ID was referenced in chat but is not present in the current task set. It may be archived, deleted, or not yet synced.';
+    document.getElementById('modal-task-id').textContent = taskId || '(missing id)';
     document.getElementById('modal-task-assignee').value = '';
     document.getElementById('modal-task-priority').textContent = '—';
     document.getElementById('modal-task-created').textContent = 'Not available';
@@ -1291,6 +1292,7 @@ function openTaskModal(taskId) {
 
   document.getElementById('modal-task-title').textContent = currentTask.title;
   document.getElementById('modal-task-desc').textContent = currentTask.description || '(no description)';
+  document.getElementById('modal-task-id').textContent = currentTask.id || '(missing id)';
   document.getElementById('modal-task-assignee').value = currentTask.assignee || '';
   document.getElementById('modal-task-priority').textContent = currentTask.priority || 'P3';
   document.getElementById('modal-task-created').textContent = createdText;
@@ -1307,6 +1309,25 @@ function openTaskModal(taskId) {
   });
 
   document.getElementById('task-modal').classList.add('show');
+}
+
+async function copyTaskId() {
+  const taskId = currentTask && currentTask.id ? currentTask.id : document.getElementById('modal-task-id').textContent;
+  if (!taskId) return;
+  try {
+    await navigator.clipboard.writeText(taskId);
+  } catch (_e) {
+    // Fallback for older browser contexts
+    const ta = document.createElement('textarea');
+    ta.value = taskId;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }
 }
 
 function closeTaskModal() {

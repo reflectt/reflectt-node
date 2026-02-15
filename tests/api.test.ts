@@ -72,6 +72,23 @@ describe('Task CRUD', () => {
     expect(body.task.assignee).toBe('test-agent')
   })
 
+  it('GET /tasks/:id accepts unique prefix match', async () => {
+    const prefix = taskId.slice(0, -4)
+    const { status, body } = await req('GET', `/tasks/${prefix}`)
+    expect(status).toBe(200)
+    expect(body.task.id).toBe(taskId)
+    expect(body.matchType).toBe('prefix')
+  })
+
+  it('GET /tasks/:id returns guided error for ambiguous prefix', async () => {
+    const { status, body } = await req('GET', '/tasks/task')
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.error).toContain('Ambiguous task ID prefix')
+    expect(Array.isArray(body.details?.suggestions)).toBe(true)
+    expect(body.details.suggestions.length).toBeGreaterThan(0)
+  })
+
   it('PATCH /tasks/:id updates the task', async () => {
     const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
       description: 'Updated by test',

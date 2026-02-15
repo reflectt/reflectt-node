@@ -1136,46 +1136,120 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, force, ...result }
   })
 
-  // Get task
-  app.get<{ Params: { id: string } }>('/tasks/:id', async (request) => {
-    const task = taskManager.getTask(request.params.id)
-    if (!task) {
-      return { error: 'Task not found' }
+  function resolveTaskFromParam(idParam: string, reply?: any): { task: Task; resolvedId: string } | null {
+    const resolved = taskManager.resolveTaskId(idParam)
+
+    if (resolved.matchType === 'ambiguous') {
+      if (reply) reply.code(400)
+      return null
     }
-    return { task: enrichTaskWithComments(task) }
+
+    if (!resolved.task || !resolved.resolvedId) {
+      if (reply) reply.code(404)
+      return null
+    }
+
+    return { task: resolved.task, resolvedId: resolved.resolvedId }
+  }
+
+  // Get task
+  app.get<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
+    const resolved = taskManager.resolveTaskId(request.params.id)
+
+    if (resolved.matchType === 'ambiguous') {
+      reply.code(400)
+      return {
+        error: 'Ambiguous task ID prefix',
+        details: {
+          input: request.params.id,
+          suggestions: resolved.suggestions,
+        },
+        hint: 'Use a longer prefix or the full task ID',
+      }
+    }
+
+    if (!resolved.task || !resolved.resolvedId) {
+      reply.code(404)
+      return {
+        error: 'Task not found',
+        input: request.params.id,
+        suggestions: resolved.suggestions,
+      }
+    }
+
+    return {
+      task: enrichTaskWithComments(resolved.task),
+      resolvedId: resolved.resolvedId,
+      matchType: resolved.matchType,
+    }
   })
 
   // Task history
-  app.get<{ Params: { id: string } }>('/tasks/:id/history', async (request) => {
-    const task = taskManager.getTask(request.params.id)
-    if (!task) {
-      return { error: 'Task not found' }
+  app.get<{ Params: { id: string } }>('/tasks/:id/history', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) {
+      const match = taskManager.resolveTaskId(request.params.id)
+      if (match.matchType === 'ambiguous') {
+        return {
+          error: 'Ambiguous task ID prefix',
+          details: {
+            input: request.params.id,
+            suggestions: match.suggestions,
+          },
+          hint: 'Use a longer prefix or the full task ID',
+        }
+      }
+      return { error: 'Task not found', details: { input: request.params.id, suggestions: match.suggestions } }
     }
-    const history = taskManager.getTaskHistory(request.params.id)
-    return { history, count: history.length }
+
+    const history = taskManager.getTaskHistory(resolved.resolvedId)
+    return { history, count: history.length, resolvedId: resolved.resolvedId }
   })
 
   // Task comments
-  app.get<{ Params: { id: string } }>('/tasks/:id/comments', async (request) => {
-    const task = taskManager.getTask(request.params.id)
-    if (!task) {
-      return { error: 'Task not found' }
+  app.get<{ Params: { id: string } }>('/tasks/:id/comments', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) {
+      const match = taskManager.resolveTaskId(request.params.id)
+      if (match.matchType === 'ambiguous') {
+        return {
+          error: 'Ambiguous task ID prefix',
+          details: {
+            input: request.params.id,
+            suggestions: match.suggestions,
+          },
+          hint: 'Use a longer prefix or the full task ID',
+        }
+      }
+      return { error: 'Task not found', details: { input: request.params.id, suggestions: match.suggestions } }
     }
 
-    const comments = taskManager.getTaskComments(request.params.id)
-    return { comments, count: comments.length }
+    const comments = taskManager.getTaskComments(resolved.resolvedId)
+    return { comments, count: comments.length, resolvedId: resolved.resolvedId }
   })
 
   // Add task comment
-  app.post<{ Params: { id: string } }>('/tasks/:id/comments', async (request) => {
-    const task = taskManager.getTask(request.params.id)
-    if (!task) {
-      return { success: false, error: 'Task not found' }
+  app.post<{ Params: { id: string } }>('/tasks/:id/comments', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) {
+      const match = taskManager.resolveTaskId(request.params.id)
+      if (match.matchType === 'ambiguous') {
+        return {
+          success: false,
+          error: 'Ambiguous task ID prefix',
+          details: {
+            input: request.params.id,
+            suggestions: match.suggestions,
+          },
+          hint: 'Use a longer prefix or the full task ID',
+        }
+      }
+      return { success: false, error: 'Task not found', details: { input: request.params.id, suggestions: match.suggestions } }
     }
 
     try {
       const data = CreateTaskCommentSchema.parse(request.body)
-      const comment = await taskManager.addTaskComment(request.params.id, data.author, data.content)
+      const comment = await taskManager.addTaskComment(resolved.resolvedId, data.author, data.content)
 
       presenceManager.recordActivity(data.author, 'message')
       presenceManager.updatePresence(data.author, 'working')
@@ -1215,10 +1289,21 @@ export async function createServer(): Promise<FastifyInstance> {
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
     try {
       const parsed = UpdateTaskSchema.parse(request.body)
-      const existing = taskManager.getTask(request.params.id)
-      if (!existing) {
+      const lookup = taskManager.resolveTaskId(request.params.id)
+      if (lookup.matchType === 'ambiguous') {
+        reply.code(400)
+        return {
+          success: false,
+          error: 'Ambiguous task ID prefix',
+          input: request.params.id,
+          suggestions: lookup.suggestions,
+          hint: 'Use a longer prefix or the full task ID',
+        }
+      }
+      const existing = lookup.task
+      if (!existing || !lookup.resolvedId) {
         reply.code(404)
-        return { success: false, error: 'Task not found' }
+        return { success: false, error: 'Task not found', input: request.params.id, suggestions: lookup.suggestions }
       }
 
       // Merge incoming metadata with existing for gate checks + persistence
@@ -1276,7 +1361,7 @@ export async function createServer(): Promise<FastifyInstance> {
           ...(actor ? { actor } : {}),
         },
       }
-      const task = await taskManager.updateTask(request.params.id, updates)
+      const task = await taskManager.updateTask(lookup.resolvedId, updates)
       if (!task) {
         reply.code(404)
         return { success: false, error: 'Task not found' }
@@ -1304,12 +1389,29 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Delete task
-  app.delete<{ Params: { id: string } }>('/tasks/:id', async (request) => {
-    const deleted = await taskManager.deleteTask(request.params.id)
+  app.delete<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
+    const lookup = taskManager.resolveTaskId(request.params.id)
+    if (lookup.matchType === 'ambiguous') {
+      reply.code(400)
+      return {
+        error: 'Ambiguous task ID prefix',
+        input: request.params.id,
+        suggestions: lookup.suggestions,
+        hint: 'Use a longer prefix or the full task ID',
+      }
+    }
+
+    if (!lookup.task || !lookup.resolvedId) {
+      reply.code(404)
+      return { error: 'Task not found', input: request.params.id, suggestions: lookup.suggestions }
+    }
+
+    const deleted = await taskManager.deleteTask(lookup.resolvedId)
     if (!deleted) {
+      reply.code(404)
       return { error: 'Task not found' }
     }
-    return { success: true }
+    return { success: true, resolvedId: lookup.resolvedId }
   })
 
   // Get next task (pull-based assignment)
@@ -1338,20 +1440,34 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Claim a task (self-assign)
-  app.post('/tasks/:id/claim', async (request) => {
+  app.post('/tasks/:id/claim', async (request, reply) => {
     const { id } = request.params as { id: string }
     const body = request.body as { agent?: string }
     if (!body?.agent) {
       return { success: false, error: 'agent is required' }
     }
-    const task = taskManager.getTask(id)
-    if (!task) {
-      return { success: false, error: 'Task not found' }
+
+    const lookup = taskManager.resolveTaskId(id)
+    if (lookup.matchType === 'ambiguous') {
+      reply.code(400)
+      return {
+        success: false,
+        error: 'Ambiguous task ID prefix',
+        input: id,
+        suggestions: lookup.suggestions,
+        hint: 'Use a longer prefix or the full task ID',
+      }
+    }
+
+    const task = lookup.task
+    if (!task || !lookup.resolvedId) {
+      reply.code(404)
+      return { success: false, error: 'Task not found', input: id, suggestions: lookup.suggestions }
     }
     if (task.assignee) {
       return { success: false, error: `Task already assigned to ${task.assignee}` }
     }
-    const updated = await taskManager.updateTask(id, {
+    const updated = await taskManager.updateTask(lookup.resolvedId, {
       assignee: body.agent,
       status: 'doing',
       metadata: {
@@ -1359,7 +1475,7 @@ export async function createServer(): Promise<FastifyInstance> {
         actor: body.agent,
       },
     })
-    return { success: true, task: updated ? enrichTaskWithComments(updated) : null }
+    return { success: true, task: updated ? enrichTaskWithComments(updated) : null, resolvedId: lookup.resolvedId }
   })
 
   // Task lifecycle instrumentation: reviewer + done criteria gates
