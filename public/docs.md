@@ -2,6 +2,10 @@
 
 Base URL: `http://localhost:4445`
 
+## Quickstarts
+
+- [Tasks API Quickstart](../docs/TASKS_API_QUICKSTART.md) — create → doing → validating → done with current status contract and curl examples.
+
 ---
 
 ## Health
