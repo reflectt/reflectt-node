@@ -23,6 +23,15 @@ class TaskManager {
   private recurringInitialized = false
   private recurringTicker: NodeJS.Timeout
 
+  private isCanonicalArtifactPath(path: string): boolean {
+    const normalized = path.trim()
+    if (normalized.length === 0) return false
+    if (normalized.startsWith('/') || normalized.startsWith('~')) return false
+    if (normalized.includes('\\')) return false
+    if (normalized.includes('..')) return false
+    return normalized.startsWith('process/')
+  }
+
   private validateLifecycleGates(task: Pick<Task, 'status' | 'reviewer' | 'done_criteria' | 'metadata'>): void {
     if (task.status === 'todo') return
 
@@ -47,6 +56,10 @@ class TaskManager {
 
     if (task.status === 'validating' && !hasArtifactPath) {
       throw new Error('Status contract: validating requires metadata.artifact_path')
+    }
+
+    if (task.status === 'validating' && hasArtifactPath && !this.isCanonicalArtifactPath(artifactPath)) {
+      throw new Error('Status contract: validating requires metadata.artifact_path under process/ (repo-relative, workspace-agnostic)')
     }
   }
 
