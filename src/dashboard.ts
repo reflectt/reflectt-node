@@ -163,6 +163,12 @@ export function getDashboardHTML(): string {
     color: var(--text-muted); font-weight: 600; margin-bottom: 8px;
   }
   .modal-value { font-size: 14px; color: var(--text); line-height: 1.5; }
+  .modal-inline-row { display: flex; align-items: center; gap: 10px; }
+  .modal-copy-btn {
+    border: 1px solid var(--border-subtle); background: transparent; color: var(--text-muted);
+    border-radius: 6px; font-size: 11px; padding: 4px 8px; cursor: pointer;
+  }
+  .modal-copy-btn:hover { border-color: var(--accent); color: var(--accent); }
   .modal-select, .modal-input {
     width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 8px 12px; font-size: 14px; outline: none;
@@ -678,6 +684,14 @@ export function getDashboardHTML(): string {
       <div class="modal-section">
         <div class="modal-label">Description</div>
         <div class="modal-value" id="modal-task-desc"></div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-label">Task ID</div>
+        <div class="modal-inline-row">
+          <div class="modal-value" id="modal-task-id"></div>
+          <button class="modal-copy-btn" onclick="copyTaskId()">Copy full ID</button>
+        </div>
       </div>
       
       <div class="modal-section">

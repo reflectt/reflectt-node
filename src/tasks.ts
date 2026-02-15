@@ -527,6 +527,50 @@ class TaskManager {
     return this.tasks.get(id)
   }
 
+  resolveTaskId(inputId: string): {
+    task?: Task
+    resolvedId?: string
+    matchType: 'exact' | 'prefix' | 'ambiguous' | 'not_found'
+    suggestions: string[]
+  } {
+    const raw = String(inputId || '').trim()
+    if (!raw) {
+      return { matchType: 'not_found', suggestions: [] }
+    }
+
+    const exact = this.tasks.get(raw)
+    if (exact) {
+      return { task: exact, resolvedId: raw, matchType: 'exact', suggestions: [] }
+    }
+
+    const lowerRaw = raw.toLowerCase()
+    const ids = Array.from(this.tasks.keys())
+    const prefixMatches = ids.filter(id => id.toLowerCase().startsWith(lowerRaw))
+
+    if (prefixMatches.length === 1) {
+      const resolvedId = prefixMatches[0]
+      return {
+        task: this.tasks.get(resolvedId),
+        resolvedId,
+        matchType: 'prefix',
+        suggestions: [],
+      }
+    }
+
+    if (prefixMatches.length > 1) {
+      return {
+        matchType: 'ambiguous',
+        suggestions: prefixMatches.slice(0, 8),
+      }
+    }
+
+    const containsMatches = ids.filter(id => id.toLowerCase().includes(lowerRaw)).slice(0, 8)
+    return {
+      matchType: 'not_found',
+      suggestions: containsMatches,
+    }
+  }
+
   getTaskHistory(id: string): TaskHistoryEvent[] {
     const events = this.taskHistory.get(id) || []
     return [...events].sort((a, b) => a.timestamp - b.timestamp)

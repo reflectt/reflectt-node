@@ -120,6 +120,44 @@ describe('Task CRUD', () => {
     expect(body.task.assignee).toBe('test-agent')
   })
 
+  it('GET /tasks/:id accepts unique prefix match', async () => {
+    const prefix = taskId.slice(0, -4)
+    const { status, body } = await req('GET', `/tasks/${prefix}`)
+    expect(status).toBe(200)
+    expect(body.task.id).toBe(taskId)
+    expect(body.matchType).toBe('prefix')
+  })
+
+  it('GET /tasks/:id returns guided error for ambiguous prefix', async () => {
+    const { status: status2, body: body2 } = await req('POST', '/tasks', {
+      title: 'TEST: integration test task 2',
+      description: 'Created for ambiguous prefix check',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Test passes'],
+      eta: '1h',
+    })
+    expect(status2).toBe(200)
+    const taskId2 = body2.task.id as string
+
+    const commonPrefix = (() => {
+      let i = 0
+      while (i < taskId.length && i < taskId2.length && taskId[i] === taskId2[i]) i++
+      return taskId.slice(0, Math.max(1, i))
+    })()
+
+    const { status, body } = await req('GET', `/tasks/${commonPrefix}`)
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.error).toContain('Ambiguous task ID prefix')
+    expect(Array.isArray(body.details?.suggestions)).toBe(true)
+    expect(body.details.suggestions.length).toBeGreaterThan(0)
+
+    await req('DELETE', `/tasks/${taskId2}`)
+  })
+
   it('PATCH /tasks/:id updates the task', async () => {
     const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
       description: 'Updated by test',
