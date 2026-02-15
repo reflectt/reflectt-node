@@ -9,6 +9,7 @@ Base URL: `http://localhost:4445`
 - [Reviewer Handoff Bundle Template](../docs/REVIEWER_HANDOFF_BUNDLE_TEMPLATE.md) — reviewer-ready QA bundle format.
 - [Task Creation Template](../docs/TASK_CREATION_TEMPLATE.md) — high-signal task spec + anti-patterns.
 - [Reviewer-Ready Tasks Guide](../docs/REVIEWER_READY_TASKS_GUIDE.md) — short operational guide to reduce QA churn.
+- [Dashboard Task Field Reference](../docs/DASHBOARD_TASK_FIELD_REFERENCE.md) — task-card field mapping, null semantics, and UI edge cases.
 
 ---
 
