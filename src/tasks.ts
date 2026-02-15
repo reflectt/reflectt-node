@@ -650,6 +650,109 @@ class TaskManager {
     return task.createdBy
   }
 
+  private parseLaneTransition(updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>): Record<string, unknown> | undefined {
+    const transition = (updates.metadata as any)?.transition
+    if (!transition || typeof transition !== 'object' || Array.isArray(transition)) return undefined
+    return transition as Record<string, unknown>
+  }
+
+  private applyLaneStateLock(
+    task: Task,
+    updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>,
+    actor: string,
+  ): { transitionEvent?: Record<string, unknown> } {
+    const transition = this.parseLaneTransition(updates)
+    const nextStatus = updates.status ?? task.status
+    const nextAssignee = updates.assignee ?? task.assignee
+    const statusChanged = nextStatus !== task.status
+    const assigneeChanged = updates.assignee !== undefined && updates.assignee !== task.assignee
+
+    const requireTransition = (
+      expectedType: 'pause' | 'resume' | 'handoff',
+      requiredFields: string[],
+      contextLabel: string,
+    ): Record<string, unknown> => {
+      if (!transition) {
+        throw new Error(`Lane-state lock: ${contextLabel} requires metadata.transition`)
+      }
+      const type = transition.type
+      if (type !== expectedType) {
+        throw new Error(`Lane-state lock: ${contextLabel} requires metadata.transition.type="${expectedType}"`)
+      }
+      for (const field of requiredFields) {
+        const value = transition[field]
+        if (typeof value !== 'string' || value.trim().length === 0) {
+          throw new Error(`Lane-state lock: ${contextLabel} requires metadata.transition.${field}`)
+        }
+      }
+      return transition
+    }
+
+    let transitionEvent: Record<string, unknown> | undefined
+
+    if (task.status === 'doing' && nextStatus === 'blocked') {
+      const parsed = requireTransition('pause', ['reason'], 'doing->blocked transition')
+      transitionEvent = {
+        type: 'pause',
+        reason: parsed.reason,
+      }
+    } else if (task.status === 'blocked' && nextStatus === 'doing') {
+      const parsed = requireTransition('resume', ['reason'], 'blocked->doing transition')
+      transitionEvent = {
+        type: 'resume',
+        reason: parsed.reason,
+      }
+    } else if (task.status === 'doing' && nextStatus === 'doing' && assigneeChanged) {
+      const parsed = requireTransition('handoff', ['handoff_to', 'reason'], 'doing handoff transition')
+      if (typeof nextAssignee !== 'string' || nextAssignee.trim().length === 0) {
+        throw new Error('Lane-state lock: handoff requires assignee to be set')
+      }
+      if (String(parsed.handoff_to).trim() !== nextAssignee.trim()) {
+        throw new Error('Lane-state lock: metadata.transition.handoff_to must match new assignee')
+      }
+      transitionEvent = {
+        type: 'handoff',
+        reason: parsed.reason,
+        handoff_to: parsed.handoff_to,
+      }
+    }
+
+    if (!transitionEvent) {
+      return {}
+    }
+
+    const timestamp = Date.now()
+    const metadata = {
+      ...((updates.metadata || {}) as Record<string, unknown>),
+      lane_state: nextStatus === 'blocked' ? 'paused' : 'active',
+      last_transition: {
+        type: transitionEvent.type,
+        actor,
+        timestamp,
+        from_status: task.status,
+        to_status: nextStatus,
+        from_assignee: task.assignee ?? null,
+        to_assignee: nextAssignee ?? null,
+        reason: transitionEvent.reason ?? null,
+        handoff_to: transitionEvent.handoff_to ?? null,
+      },
+    }
+
+    updates.metadata = metadata
+
+    return {
+      transitionEvent: {
+        ...transitionEvent,
+        actor,
+        timestamp,
+        from_status: task.status,
+        to_status: nextStatus,
+        from_assignee: task.assignee ?? null,
+        to_assignee: nextAssignee ?? null,
+      },
+    }
+  }
+
   async updateTask(id: string, updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>): Promise<Task | undefined> {
     const task = this.tasks.get(id)
     if (!task) return undefined
@@ -695,6 +798,9 @@ class TaskManager {
       }
     }
 
+    const actor = this.resolveHistoryActor(task, updates)
+    const { transitionEvent } = this.applyLaneStateLock(task, updates, actor)
+
     const updated: Task = {
       ...task,
       ...updates,
@@ -706,7 +812,6 @@ class TaskManager {
     this.tasks.set(id, updated)
     await this.persistTasks()
 
-    const actor = this.resolveHistoryActor(task, updates)
     if (updates.assignee !== undefined && updates.assignee !== task.assignee) {
       await this.recordTaskHistoryEvent(id, 'assigned', actor, {
         from: task.assignee ?? null,
@@ -719,6 +824,10 @@ class TaskManager {
         from: task.status,
         to: updates.status,
       })
+    }
+
+    if (transitionEvent) {
+      await this.recordTaskHistoryEvent(id, 'lane_transition', actor, transitionEvent)
     }
 
     this.notifySubscribers(updated, 'updated')
