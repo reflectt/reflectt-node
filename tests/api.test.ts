@@ -679,6 +679,18 @@ describe('Chat Messages', () => {
     authorMessageId = body.message.id
   })
 
+  it('POST /chat/messages returns no warnings when content has no @mentions', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'no mentions in this message',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.warnings).toBeUndefined()
+  })
+
   it('POST /chat/messages returns no warnings for valid known @mentions', async () => {
     await req('POST', '/presence/harmony', { status: 'working' })
 
