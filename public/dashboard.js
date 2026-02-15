@@ -1347,6 +1347,14 @@ async function refresh() {
 let refreshTimer = null;
 let refreshInFlight = false;
 
+// SSE live updates
+let eventSource = null;
+let sseReconnectTimer = null;
+let sseRefreshTimer = null;
+let sseBackoffMs = 1500;
+const SSE_MAX_BACKOFF_MS = 20000;
+const SSE_TOPICS = 'task,message,presence,memory';
+
 function getRefreshIntervalMs() {
   if (document.hidden) return 60000; // background tabs poll lightly
   const recentActivityMs = Date.now() - Math.max(lastChatSync || 0, lastActivitySync || 0, lastTaskSync || 0);
@@ -1370,8 +1378,94 @@ function startAdaptiveRefresh() {
   refreshTimer = setTimeout(scheduleNextRefresh, getRefreshIntervalMs());
 }
 
+function queueSseRefresh() {
+  if (sseRefreshTimer) return;
+  sseRefreshTimer = setTimeout(async () => {
+    sseRefreshTimer = null;
+    try {
+      await refresh();
+      startAdaptiveRefresh();
+    } catch (err) {
+      console.error('SSE refresh failed:', err);
+    }
+  }, 250);
+}
+
+function handleSsePayload(eventType, payload) {
+  if (eventType === 'batch' && Array.isArray(payload)) {
+    queueSseRefresh();
+    return;
+  }
+
+  switch (eventType) {
+    case 'message_posted':
+    case 'task_created':
+    case 'task_assigned':
+    case 'task_updated':
+    case 'presence_updated':
+    case 'memory_written':
+      queueSseRefresh();
+      break;
+    default:
+      // ignore unknown event types
+      break;
+  }
+}
+
+function connectEventStream() {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
+  if (eventSource) return;
+
+  const url = `${BASE}/events?topics=${encodeURIComponent(SSE_TOPICS)}`;
+  const es = new EventSource(url);
+  eventSource = es;
+
+  const onAnyEvent = (event) => {
+    try {
+      const payload = event && event.data ? JSON.parse(event.data) : null;
+      handleSsePayload(event.type || 'message', payload);
+    } catch {
+      queueSseRefresh();
+    }
+  };
+
+  es.onopen = () => {
+    sseBackoffMs = 1500;
+  };
+
+  es.onerror = () => {
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+    }
+    if (sseReconnectTimer) return;
+
+    sseReconnectTimer = setTimeout(() => {
+      sseReconnectTimer = null;
+      connectEventStream();
+    }, sseBackoffMs);
+
+    sseBackoffMs = Math.min(SSE_MAX_BACKOFF_MS, Math.floor(sseBackoffMs * 1.8));
+  };
+
+  ['message_posted', 'task_created', 'task_assigned', 'task_updated', 'presence_updated', 'memory_written', 'batch']
+    .forEach(type => es.addEventListener(type, onAnyEvent));
+}
+
 document.addEventListener('visibilitychange', () => {
   startAdaptiveRefresh();
+  if (!document.hidden && !eventSource) connectEventStream();
+});
+
+window.addEventListener('beforeunload', () => {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+  if (sseReconnectTimer) {
+    clearTimeout(sseReconnectTimer);
+    sseReconnectTimer = null;
+  }
 });
 
 // ---- Task Modal ----
@@ -1493,4 +1587,5 @@ async function updateTaskAssignee() {
 updateClock();
 setInterval(updateClock, 30000);
 refresh();
+connectEventStream();
 startAdaptiveRefresh();
