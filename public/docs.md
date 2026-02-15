@@ -228,8 +228,9 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/events/subscribe` | SSE stream for real-time updates. Query: `agent`, `topics` (comma-separated) |
+| GET | `/events/subscribe` | SSE stream for real-time updates. Query: `agent`, `topics` (comma-separated), `types` (exact event type filter, comma-separated) |
 | GET | `/events` | SSE alias of `/events/subscribe` (used by reflectt-channel plugin) |
+| GET | `/events/types` | List valid event types for SSE `?types=` filtering |
 | GET | `/events/status` | Event system status |
 | GET | `/events/config` | Get event config |
 | POST | `/events/config` | Update event config (`batchWindowMs`) |
