@@ -424,21 +424,87 @@ export function getDashboardHTML(): string {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; font-size: 11px; color: var(--text-muted);
   }
 
-  @media (max-width: 768px) {
-    .header { padding: 12px 14px; }
-    .header-right { gap: 10px; font-size: 12px; }
-    .agent-strip { padding: 12px 14px; gap: 8px; }
-    .agent-card { min-width: 170px; padding: 8px 10px; }
-    .main { padding: 14px; gap: 14px; }
-    .panel-header { padding: 12px 14px; font-size: 14px; }
-    .panel-body { padding: 12px 14px; max-height: 360px; }
-    .project-tabs, .channel-tabs { padding-left: 12px; padding-right: 12px; }
-    .kanban { padding: 12px; }
+  @media (max-width: 767px) {
+    .header, .agent-strip, .main {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+    .header {
+      padding-top: 12px;
+      padding-bottom: 12px;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .header-right {
+      width: 100%;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+      flex-wrap: wrap;
+    }
+    .agent-strip { gap: 8px; }
+    .agent-card { min-width: 170px; padding: 8px 10px; border-radius: 12px; }
+    .main { padding-top: 20px; padding-bottom: 20px; gap: 20px; }
+    .panel { border-radius: 12px; }
+    .panel-header { padding: 12px 16px; font-size: 14px; }
+    .panel-body { padding: 12px 16px; max-height: 360px; }
+    .project-tabs, .channel-tabs {
+      padding-left: 16px;
+      padding-right: 16px;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .kanban {
+      display: block;
+      padding: 12px 16px;
+      overflow-x: visible;
+      min-height: 0;
+    }
+    .kanban-col { min-width: 0; margin-bottom: 14px; }
+    .kanban-col:last-child { margin-bottom: 0; }
+    .task-card { margin-bottom: 12px; border-radius: 8px; }
+    .project-tab, .channel-tab, .done-toggle {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+    }
+    .project-tab { padding: 10px 14px; }
+    .channel-tab { padding: 8px 12px; }
+    .done-toggle { padding: 8px 0; }
     .chat-input-bar { padding: 10px 12px; flex-wrap: wrap; }
     .chat-input-bar select { min-width: 105px; flex: 0 0 auto; }
     .chat-input-bar input { min-width: 0; width: 100%; }
-    .chat-input-bar button { width: 100%; }
+    .chat-input-bar button { width: 100%; min-height: 44px; }
     .health-grid { grid-template-columns: 1fr; gap: 8px; }
+  }
+
+  @media (min-width: 768px) and (max-width: 1023px) {
+    .header, .agent-strip, .main {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+    .main {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    .header { gap: 10px; flex-wrap: wrap; }
+    .header-right { margin-left: auto; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .two-col { gap: 16px; }
+    .kanban { padding: 14px 16px; gap: 10px; }
+    .kanban-col { min-width: 180px; }
+  }
+
+  @media (min-width: 1024px) {
+    .header, .agent-strip, .main {
+      max-width: 1200px;
+      margin-left: auto;
+      margin-right: auto;
+      width: 100%;
+    }
+    .header, .agent-strip { padding-left: 24px; padding-right: 24px; }
+    .main { padding-left: 24px; padding-right: 24px; }
+    .header-right { gap: 12px; }
   }
 
   /* ============================================
