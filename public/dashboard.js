@@ -67,6 +67,22 @@ function renderTaskTags(tags) {
   return shown.map(tag => `<span class="assignee-tag" style="color:var(--purple)">#${esc(String(tag))}</span>`).join(' ');
 }
 
+function renderBlockedByLinks(task, options = {}) {
+  const ids = Array.isArray(task?.blocked_by) ? task.blocked_by.filter(Boolean) : [];
+  if (ids.length === 0) return '';
+
+  const compact = Boolean(options.compact);
+  const blockerLinks = ids.slice(0, compact ? 2 : 6).map(blockerId => {
+    const blocker = taskById.get(blockerId);
+    const label = blocker?.title ? truncate(blocker.title, compact ? 28 : 60) : blockerId;
+    return `<button class="assignee-tag" style="cursor:pointer" onclick="event.stopPropagation(); openTaskModal('${esc(blockerId)}')">↳ ${esc(label)}</button>`;
+  }).join(' ');
+
+  const extraCount = ids.length - (compact ? 2 : 6);
+  const extraText = extraCount > 0 ? ` <span class="assignee-tag">+${extraCount} more</span>` : '';
+  return `<div class="task-meta" style="margin-top:6px">⛔ blocker${ids.length > 1 ? 's' : ''}: ${blockerLinks}${extraText}</div>`;
+}
+
 function getStatusContractWarnings(task) {
   if (!task || !task.status) return [];
   const warnings = [];
@@ -525,6 +541,7 @@ function renderKanban() {
             ${(t.commentCount || 0) > 0 ? '<span class="assignee-tag">💬 ' + t.commentCount + '</span>' : ''}
             ${renderTaskTags(t.tags)}
           </div>
+          ${renderBlockedByLinks(t, { compact: true })}
           ${renderStatusContractWarning(t)}
         </div>`;
       }).join('');
@@ -1239,6 +1256,8 @@ function openTaskModal(taskId) {
     document.getElementById('modal-task-assignee').value = '';
     document.getElementById('modal-task-priority').textContent = '—';
     document.getElementById('modal-task-created').textContent = 'Not available';
+    const blockerEl = document.getElementById('modal-task-blockers');
+    if (blockerEl) blockerEl.textContent = 'Not available';
     document.querySelectorAll('.status-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById('task-modal').classList.add('show');
     return;
@@ -1255,6 +1274,12 @@ function openTaskModal(taskId) {
   document.getElementById('modal-task-assignee').value = currentTask.assignee || '';
   document.getElementById('modal-task-priority').textContent = currentTask.priority || 'P3';
   document.getElementById('modal-task-created').textContent = createdText;
+
+  const blockerEl = document.getElementById('modal-task-blockers');
+  if (blockerEl) {
+    const blockedHtml = renderBlockedByLinks(currentTask) || '<span style="color:var(--text-dim)">None</span>';
+    blockerEl.innerHTML = blockedHtml;
+  }
 
   // Set active status button
   document.querySelectorAll('.status-btn').forEach(btn => {

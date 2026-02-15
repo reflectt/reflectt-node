@@ -705,6 +705,11 @@ export function getDashboardHTML(): string {
         <div class="modal-label">Created</div>
         <div class="modal-value" id="modal-task-created"></div>
       </div>
+
+      <div class="modal-section">
+        <div class="modal-label">Blocked by</div>
+        <div class="modal-value" id="modal-task-blockers"></div>
+      </div>
     </div>
   </div>
 </div>
