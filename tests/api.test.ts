@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { createServer } from '../src/server.js'
+import { DATA_DIR } from '../src/config.js'
 import type { FastifyInstance } from 'fastify'
 
 let app: FastifyInstance
@@ -218,6 +219,61 @@ describe('Validation Error Shape', () => {
     expect(body.error).toBe('Validation failed')
     expect(Array.isArray(body.fields)).toBe(true)
     expect(body.fields.length).toBeGreaterThan(0)
+  })
+})
+
+describe('Recurring task management', () => {
+  it('PATCH/DELETE /tasks/recurring/:id can disable and remove recurring definitions', async () => {
+    const create = await req('POST', '/tasks/recurring', {
+      title: `TEST recurring ${Date.now()}`,
+      description: 'recurring endpoint management test',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['test recurring management'],
+      eta: '10m',
+      createdBy: 'test-runner',
+      schedule: {
+        kind: 'interval',
+        everyMs: 60_000,
+      },
+    })
+
+    expect(create.status).toBe(200)
+    expect(create.body.success).toBe(true)
+    const recurringId = create.body.recurring.id as string
+
+    const disable = await req('PATCH', `/tasks/recurring/${recurringId}`, {
+      enabled: false,
+    })
+    expect(disable.status).toBe(200)
+    expect(disable.body.success).toBe(true)
+    expect(disable.body.recurring.enabled).toBe(false)
+
+    const listDisabled = await req('GET', '/tasks/recurring?enabled=false')
+    expect(listDisabled.status).toBe(200)
+    expect(Array.isArray(listDisabled.body.recurring)).toBe(true)
+    expect(listDisabled.body.recurring.some((item: any) => item.id === recurringId)).toBe(true)
+
+    const recurringPath = join(DATA_DIR, 'tasks.recurring.jsonl')
+    const fileContent = await fs.readFile(recurringPath, 'utf-8')
+    const persisted = fileContent
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .find((item: any) => item.id === recurringId)
+
+    expect(persisted).toBeDefined()
+    expect(persisted.enabled).toBe(false)
+
+    const remove = await req('DELETE', `/tasks/recurring/${recurringId}`)
+    expect(remove.status).toBe(200)
+    expect(remove.body.success).toBe(true)
+    expect(remove.body.id).toBe(recurringId)
+
+    const afterDelete = await req('GET', '/tasks/recurring')
+    expect(afterDelete.status).toBe(200)
+    expect(afterDelete.body.recurring.some((item: any) => item.id === recurringId)).toBe(false)
   })
 })
 
