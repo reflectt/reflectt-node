@@ -28,7 +28,7 @@ curl -s http://127.0.0.1:4445/health/idle-nudge/debug
 
 ## Expected response snippets
 
-`GET /health` example (trimmed):
+### `/health` (trimmed)
 
 ```json
 {
@@ -57,7 +57,7 @@ curl -s http://127.0.0.1:4445/health/idle-nudge/debug
 }
 ```
 
-`GET /health/agents` example (trimmed):
+### `/health/agents` (trimmed)
 
 ```json
 {
