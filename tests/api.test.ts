@@ -55,6 +55,38 @@ describe('Health', () => {
   })
 })
 
+describe('Release', () => {
+  it('GET /release/diff returns changed files/endpoints/tests with PR links', async () => {
+    const { status, body } = await req('GET', '/release/diff')
+    expect(status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(typeof body.liveSha).toBe('string')
+    expect(typeof body.previousDeploySha).toBe('string')
+    expect(Array.isArray(body.changedFiles)).toBe(true)
+    expect(Array.isArray(body.changedEndpoints)).toBe(true)
+    expect(Array.isArray(body.changedTests)).toBe(true)
+    expect(Array.isArray(body.pullRequestLinks)).toBe(true)
+  })
+
+  it('POST /release/deploy tracks commit and previousCommit', async () => {
+    const first = await req('POST', '/release/deploy', {
+      deployedBy: 'test-runner',
+      note: 'first marker',
+    })
+    expect(first.status).toBe(200)
+    expect(first.body.success).toBe(true)
+    expect(typeof first.body.marker.commit).toBe('string')
+
+    const second = await req('POST', '/release/deploy', {
+      deployedBy: 'test-runner',
+      note: 'second marker',
+    })
+    expect(second.status).toBe(200)
+    expect(second.body.success).toBe(true)
+    expect(second.body.marker.previousCommit).toBe(first.body.marker.commit)
+  })
+})
+
 describe('Quiet Hours Watchdog Suppression', () => {
   const quietNowMs = Date.parse('2026-02-15T02:00:00-08:00')
 

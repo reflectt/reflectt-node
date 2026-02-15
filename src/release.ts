@@ -16,9 +16,17 @@ type DeployMarker = {
   deployedAt: number
   deployedBy?: string
   note?: string
+  commit?: string | null
+  previousCommit?: string | null
+}
+
+type ReleaseDiffCommit = {
+  sha: string
+  subject: string
 }
 
 const DEPLOY_MARKER_FILE = join(DATA_DIR, 'release.deploy.json')
+const SHA_RE = /^[a-fA-F0-9]{7,40}$/
 
 function runGit(command: string): string | null {
   try {
@@ -26,6 +34,12 @@ function runGit(command: string): string | null {
   } catch {
     return null
   }
+}
+
+function normalizeSha(input?: string | null): string | null {
+  const raw = String(input || '').trim()
+  if (!raw) return null
+  return SHA_RE.test(raw) ? raw : null
 }
 
 function captureRepoSnapshot(): RepoSnapshot {
@@ -55,6 +69,58 @@ function extractEndpointMentions(task: Task): string[] {
   }
 
   return Array.from(found)
+}
+
+function extractEndpointsFromGitDiff(fromSha: string, toSha: string): string[] {
+  const diff = runGit(`git diff --unified=0 ${fromSha} ${toSha} -- src`)
+  if (!diff) return []
+
+  const found = new Set<string>()
+  const routeRegex = /^\+\s*app\.(get|post|patch|put|delete)\s*(?:<[^>]+>)?\(\s*['"`]([^'"`]+)['"`]/i
+
+  for (const line of diff.split('\n')) {
+    const match = line.match(routeRegex)
+    if (!match) continue
+    found.add(`${match[1].toUpperCase()} ${match[2]}`)
+  }
+
+  return Array.from(found).sort()
+}
+
+function githubRepoBase(): string | null {
+  const remote = runGit('git remote get-url origin')
+  if (!remote) return null
+
+  const trimmed = remote.trim().replace(/\.git$/i, '')
+
+  if (trimmed.startsWith('https://github.com/')) {
+    return trimmed
+  }
+
+  const sshMatch = trimmed.match(/^git@github\.com:(.+)$/i)
+  if (sshMatch) {
+    return `https://github.com/${sshMatch[1]}`
+  }
+
+  return null
+}
+
+function extractPullRequestLinks(commits: ReleaseDiffCommit[]): string[] {
+  const repoBase = githubRepoBase()
+  if (!repoBase) return []
+
+  const prs = new Set<number>()
+  for (const commit of commits) {
+    const matches = commit.subject.match(/#(\d+)/g) || []
+    for (const token of matches) {
+      const num = parseInt(token.slice(1), 10)
+      if (Number.isFinite(num) && num > 0) prs.add(num)
+    }
+  }
+
+  return Array.from(prs)
+    .sort((a, b) => a - b)
+    .map(num => `${repoBase}/pull/${num}`)
 }
 
 async function readDeployMarker(): Promise<DeployMarker | null> {
@@ -106,14 +172,88 @@ export const releaseManager = {
   },
 
   async markDeploy(deployedBy?: string, note?: string) {
+    const current = captureRepoSnapshot()
+    const previousMarker = await readDeployMarker()
+
     const marker: DeployMarker = {
       deployedAt: Date.now(),
       deployedBy,
       note,
+      commit: current.commit,
+      previousCommit: previousMarker?.commit ?? previousMarker?.previousCommit ?? null,
     }
 
     await writeDeployMarker(marker)
     return marker
+  },
+
+  async getReleaseDiff(options?: { from?: string; to?: string; commitLimit?: number }) {
+    try {
+      const current = captureRepoSnapshot()
+      const deployMarker = await readDeployMarker()
+
+      const rawToSha = normalizeSha(options?.to) || normalizeSha(current.commit)
+      const trackedPreviousDeploySha = normalizeSha(deployMarker?.previousCommit)
+      const fallbackTracked = normalizeSha(deployMarker?.commit)
+      const fallbackGitPrev = runGit('git rev-parse HEAD~1')
+      const rawFromSha = normalizeSha(options?.from) || trackedPreviousDeploySha || fallbackTracked || normalizeSha(fallbackGitPrev)
+
+      // Keep endpoint stable in shallow clones or constrained CI runners:
+      // if we cannot resolve either SHA, degrade to an empty diff against the live SHA.
+      const toSha = rawToSha || 'unknown'
+      const fromSha = rawFromSha || toSha
+
+      const filesRaw = runGit(`git diff --name-only ${fromSha} ${toSha}`) || ''
+      const changedFiles = filesRaw
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+
+      const changedTests = changedFiles.filter(path => path.startsWith('tests/') || path.includes('.test.'))
+      const changedEndpoints = extractEndpointsFromGitDiff(fromSha, toSha)
+
+      const commitLimit = Math.max(1, Math.min(options?.commitLimit ?? 100, 500))
+      const commitsRaw = runGit(`git log --pretty=format:%H%x09%s -n ${commitLimit} ${fromSha}..${toSha}`) || ''
+      const commits: ReleaseDiffCommit[] = commitsRaw
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+          const [sha, ...rest] = line.split('\t')
+          return { sha, subject: rest.join('\t') }
+        })
+        .filter(c => Boolean(c.sha) && Boolean(c.subject))
+
+      const pullRequestLinks = extractPullRequestLinks(commits)
+
+      return {
+        ok: true,
+        generatedAt: Date.now(),
+        liveSha: toSha,
+        previousDeploySha: fromSha,
+        trackedPreviousDeploySha,
+        trackedCurrentDeploySha: normalizeSha(deployMarker?.commit),
+        changedFiles,
+        changedEndpoints,
+        changedTests,
+        commits,
+        pullRequestLinks,
+      }
+    } catch {
+      return {
+        ok: true,
+        generatedAt: Date.now(),
+        liveSha: 'unknown',
+        previousDeploySha: 'unknown',
+        trackedPreviousDeploySha: null,
+        trackedCurrentDeploySha: null,
+        changedFiles: [],
+        changedEndpoints: [],
+        changedTests: [],
+        commits: [],
+        pullRequestLinks: [],
+      }
+    }
   },
 
   async getReleaseNotes(options?: { since?: number; limit?: number }) {
