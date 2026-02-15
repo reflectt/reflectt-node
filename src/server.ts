@@ -551,6 +551,79 @@ export async function createServer(): Promise<FastifyInstance> {
     return payload
   })
 
+  // Unified per-agent workflow state (task + PR + artifact + blocker)
+  app.get('/health/workflow', async (request, reply) => {
+    const now = Date.now()
+    const tasks = taskManager.listTasks({})
+    const messages = chatManager.getMessages({ limit: 500 })
+    const presences = presenceManager.getAllPresence()
+
+    const agents = Array.from(new Set([
+      ...presences.map(p => (p.agent || '').toLowerCase()).filter(Boolean),
+      ...tasks.map(t => (t.assignee || '').toLowerCase()).filter(Boolean),
+      ...messages.map((m: any) => (m.from || '').toLowerCase()).filter(Boolean),
+    ])).sort()
+
+    const rows = agents.map((agent) => {
+      const doingTasks = tasks
+        .filter(t => (t.assignee || '').toLowerCase() === agent && t.status === 'doing')
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+      const doingTask = doingTasks[0] || null
+      const doingTaskAgeMs = doingTask ? Math.max(0, now - Number(doingTask.updatedAt || doingTask.createdAt || now)) : null
+
+      const agentMessages = messages
+        .filter((m: any) => (m.from || '').toLowerCase() === agent)
+        .sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+
+      const shippedMsg = agentMessages.find((m: any) => {
+        const c = String(m.content || '')
+        return /\bshipped\b/i.test(c)
+      })
+      const lastShippedAt = shippedMsg ? Number(shippedMsg.timestamp || 0) : null
+
+      const blockerMsg = agentMessages.find((m: any) => {
+        const c = String(m.content || '')
+        return /\bblocker\b/i.test(c)
+      })
+      const blockerText = blockerMsg ? String(blockerMsg.content || '') : null
+      const blockerActive = blockerText ? !/blocker\s*:\s*none/i.test(blockerText) : false
+
+      const taskMeta = doingTask?.metadata as Record<string, unknown> | undefined
+      const artifacts = Array.isArray(taskMeta?.artifacts) ? taskMeta?.artifacts as unknown[] : []
+      const artifactPath = typeof taskMeta?.artifact_path === 'string' ? taskMeta.artifact_path : null
+
+      const prCandidate = [
+        typeof taskMeta?.pr === 'string' ? taskMeta.pr : null,
+        typeof taskMeta?.pr_url === 'string' ? taskMeta.pr_url : null,
+        ...artifacts.map(a => typeof a === 'string' ? a : null),
+      ].find((s): s is string => !!s && /github\.com\/[^/]+\/[^/]+\/pull\/\d+/i.test(s)) || null
+
+      const prState = prCandidate ? 'linked' : 'none'
+
+      return {
+        agent,
+        doingTaskId: doingTask?.id || null,
+        doingTaskAgeMs,
+        lastShippedAt,
+        blockerActive,
+        blockerText,
+        artifactPath,
+        pr: prCandidate,
+        prState,
+      }
+    })
+
+    const payload = {
+      agents: rows,
+      timestamp: now,
+    }
+
+    if (applyConditionalCaching(request, reply, payload, payload.timestamp)) {
+      return
+    }
+    return payload
+  })
+
   // Team health compliance payload (dashboard panel)
   app.get('/health/compliance', async (request, reply) => {
     const compliance = await healthMonitor.getCollaborationCompliance()
