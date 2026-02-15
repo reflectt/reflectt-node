@@ -265,6 +265,8 @@ describe('Task Close Gate', () => {
 })
 
 describe('Chat Messages', () => {
+  let authorMessageId: string
+
   it('POST /chat/messages sends a message', async () => {
     const { status, body } = await req('POST', '/chat/messages', {
       from: 'test-runner',
@@ -275,6 +277,49 @@ describe('Chat Messages', () => {
     expect(body.success).toBe(true)
     expect(body.message).toBeDefined()
     expect(body.message.id).toBeDefined()
+    authorMessageId = body.message.id
+  })
+
+  it('PATCH /chat/messages/:id edits content for original author', async () => {
+    const { status, body } = await req('PATCH', `/chat/messages/${authorMessageId}`, {
+      from: 'test-runner',
+      content: 'TEST: edited content',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.message.content).toBe('TEST: edited content')
+    expect(body.message.metadata).toBeDefined()
+    expect(body.message.metadata.editedAt).toBeDefined()
+  })
+
+  it('PATCH /chat/messages/:id rejects non-author edits', async () => {
+    const { status, body } = await req('PATCH', `/chat/messages/${authorMessageId}`, {
+      from: 'someone-else',
+      content: 'hijack',
+    })
+    expect(status).toBe(403)
+    expect(body.error).toContain('Only original author')
+  })
+
+  it('DELETE /chat/messages/:id rejects non-author delete', async () => {
+    const { status, body } = await req('DELETE', `/chat/messages/${authorMessageId}`, {
+      from: 'someone-else',
+    })
+    expect(status).toBe(403)
+    expect(body.error).toContain('Only original author')
+  })
+
+  it('DELETE /chat/messages/:id deletes for original author', async () => {
+    const { status, body } = await req('DELETE', `/chat/messages/${authorMessageId}`, {
+      from: 'test-runner',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+
+    const { status: getStatus, body: getBody } = await req('GET', '/chat/messages?channel=general&limit=200')
+    expect(getStatus).toBe(200)
+    const found = (getBody.messages || []).find((m: any) => m.id === authorMessageId)
+    expect(found).toBeUndefined()
   })
 
   it('GET /chat/messages returns messages', async () => {

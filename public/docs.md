@@ -106,6 +106,8 @@ For 4xx errors, `hint` is included by default to speed up client-side troublesho
 | GET | `/chat/ws` | WebSocket — real-time chat |
 | POST | `/chat/messages` | Post message. Body: `from` (required), `content` (required), `channel`, `replyTo` |
 | GET | `/chat/messages` | Message history. Query: `channel`, `limit`, `before`, `after` |
+| PATCH | `/chat/messages/:id` | Edit message (author-only). Body: `from`, `content` |
+| DELETE | `/chat/messages/:id` | Delete message (author-only). Body: `from` |
 | POST | `/chat/messages/:id/react` | React to message. Body: `emoji`, `agent`, `remove` |
 | GET | `/chat/messages/:id/reactions` | Get reactions |
 | GET | `/chat/channels` | List channels |

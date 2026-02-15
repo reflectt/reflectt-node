@@ -376,6 +376,65 @@ class ChatManager {
     return message ? (message.reactions || {}) : null
   }
 
+  async editMessage(messageId: string, editor: string, content: string): Promise<{ ok: true; message: AgentMessage } | { ok: false; error: 'not_found' | 'forbidden' | 'invalid_content' }> {
+    const trimmed = content.trim()
+    if (!trimmed) {
+      return { ok: false, error: 'invalid_content' }
+    }
+
+    const message = this.messages.find(m => m.id === messageId)
+    if (!message) {
+      return { ok: false, error: 'not_found' }
+    }
+
+    if (message.from !== editor) {
+      return { ok: false, error: 'forbidden' }
+    }
+
+    message.content = trimmed
+    message.metadata = {
+      ...(message.metadata || {}),
+      editedAt: Date.now(),
+      editedBy: editor,
+    }
+
+    await this.rewriteMessages()
+    this.notifySubscribers(message)
+
+    eventBus.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'message_posted',
+      timestamp: Date.now(),
+      data: { ...message, editUpdate: true },
+    })
+
+    return { ok: true, message }
+  }
+
+  async deleteMessage(messageId: string, actor: string): Promise<{ ok: true } | { ok: false; error: 'not_found' | 'forbidden' }> {
+    const messageIndex = this.messages.findIndex(m => m.id === messageId)
+    if (messageIndex === -1) {
+      return { ok: false, error: 'not_found' }
+    }
+
+    const message = this.messages[messageIndex]
+    if (message.from !== actor) {
+      return { ok: false, error: 'forbidden' }
+    }
+
+    this.messages.splice(messageIndex, 1)
+    await this.rewriteMessages()
+
+    eventBus.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'message_posted',
+      timestamp: Date.now(),
+      data: { id: messageId, deleteUpdate: true },
+    })
+
+    return { ok: true }
+  }
+
   /**
    * Search messages by content
    */
