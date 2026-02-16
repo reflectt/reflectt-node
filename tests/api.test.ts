@@ -50,6 +50,21 @@ async function req(method: string, url: string, body?: unknown) {
   }
 }
 
+/** Build a valid QA bundle that passes QaBundleSchema */
+function validQaBundle(overrides: Record<string, unknown> = {}) {
+  return {
+    lane: 'test',
+    summary: 'test bundle',
+    pr_link: 'https://github.com/reflectt/reflectt-node/pull/999',
+    commit_shas: ['abc1234'],
+    changed_files: ['src/server.ts'],
+    artifact_links: ['process/TASK-test-proof.md'],
+    checks: ['npm test'],
+    screenshot_proof: ['process/TASK-test-proof.md'],
+    ...overrides,
+  }
+}
+
 describe('Health', () => {
   it('GET /health returns ok', async () => {
     const { status, body } = await req('GET', '/health')
@@ -498,11 +513,7 @@ describe('Task History Changelog', () => {
       actor: 'test-agent',
       metadata: {
         artifact_path: 'process/TASK-history-proof.md',
-        qa_bundle: {
-          summary: 'history test',
-          artifact_links: ['process/TASK-history-proof.md'],
-          checks: ['npm test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'history test', artifact_links: ['process/TASK-history-proof.md'] }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -573,11 +584,7 @@ describe('Artifact Path Canonicalization', () => {
       metadata: {
         eta: '1h',
         artifact_path: '/tmp/TASK-proof.md',
-        qa_bundle: {
-          summary: 'test bundle',
-          artifact_links: ['process/TASK-test-proof.md'],
-          checks: ['npm test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'test bundle' }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -601,11 +608,7 @@ describe('Artifact Path Canonicalization', () => {
       metadata: {
         eta: '1h',
         artifact_path: 'process/TASK-test-proof.md',
-        qa_bundle: {
-          summary: 'test bundle',
-          artifact_links: ['process/TASK-test-proof.md'],
-          checks: ['npm test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'test bundle' }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -648,11 +651,7 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: {
-          summary: 'handoff gate test',
-          artifact_links: ['process/TASK-handoff-proof.md'],
-          checks: ['npm test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'handoff gate test', artifact_links: ['process/TASK-handoff-proof.md'] }),
       },
     })
 
@@ -665,11 +664,7 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: {
-          summary: 'handoff gate test',
-          artifact_links: ['process/TASK-handoff-proof.md'],
-          checks: ['npm test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'handoff gate test', artifact_links: ['process/TASK-handoff-proof.md'] }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -689,11 +684,7 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: {
-          summary: 'handoff gate test',
-          artifact_links: ['process/TASK-handoff-proof.md'],
-          checks: ['npm test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'handoff gate test', artifact_links: ['process/TASK-handoff-proof.md'] }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -711,11 +702,7 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: {
-          summary: 'handoff gate test rerun',
-          artifact_links: ['process/TASK-handoff-proof.md'],
-          checks: ['npm test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'handoff gate test rerun', artifact_links: ['process/TASK-handoff-proof.md'] }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -734,11 +721,7 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: {
-          summary: 'handoff gate test rerun',
-          artifact_links: ['process/TASK-handoff-proof.md'],
-          checks: ['npm test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'handoff gate test rerun', artifact_links: ['process/TASK-handoff-proof.md'] }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -852,11 +835,7 @@ describe('My Now cockpit', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-test-cockpit-review.md',
-        qa_bundle: {
-          summary: 'cockpit test bundle',
-          artifact_links: ['process/TASK-test-cockpit-review.md'],
-          checks: ['npm run test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'cockpit test bundle', artifact_links: ['process/TASK-test-cockpit-review.md'] }),
       },
     })
     reviewTaskId = createReview.body.task.id
@@ -1147,15 +1126,18 @@ describe('Review State Tracking Metadata', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/test-review-state-artifact.md',
-        qa_bundle: {
-          lane: 'test-lane',
+        qa_bundle: validQaBundle({
           summary: 'test review bundle',
-          pr_link: 'https://github.com/reflectt/reflectt-node/pull/99999',
-          commit_shas: ['deadbeef'],
-          changed_files: ['src/server.ts'],
           artifact_links: ['test://artifact'],
-          checks: ['npm test'],
-          screenshot_proof: ['test://screenshot'],
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/99999',
+          commit_sha: 'deadbeef',
+          artifact_path: 'process/test-review-state-artifact.md',
+          test_proof: 'npm test (pass)',
+          known_caveats: 'none',
         },
       },
     })
@@ -1809,11 +1791,7 @@ describe('Task review bundle', () => {
       status: 'validating',
       metadata: {
         artifact_path: artifactRelPath,
-        qa_bundle: {
-          summary: 'test summary',
-          artifact_links: [artifactRelPath],
-          checks: ['npm test'],
-        },
+        qa_bundle: validQaBundle({ summary: 'test summary', artifact_links: [artifactRelPath] }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
