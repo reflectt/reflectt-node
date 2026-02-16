@@ -10,7 +10,7 @@ import fastifyCors from '@fastify/cors'
 import { z } from 'zod'
 import { createHash } from 'crypto'
 import { promises as fs } from 'fs'
-import { resolve, sep } from 'path'
+import { resolve, sep, join } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { serverConfig, isDev, REFLECTT_HOME } from './config.js'
@@ -3084,6 +3084,70 @@ export async function createServer(): Promise<FastifyInstance> {
       return { activity: null, message: 'No activity data for this agent' }
     }
     return { activity }
+  })
+
+  // ============ TEAM MANIFEST ENDPOINT ============
+
+  function parseMarkdownSections(markdown: string): Array<{ heading: string; level: number; content: string }> {
+    const sections: Array<{ heading: string; level: number; content: string }> = []
+    const lines = markdown.split(/\r?\n/)
+    let currentHeading = 'Preamble'
+    let currentLevel = 0
+    let buffer: string[] = []
+
+    for (const line of lines) {
+      const match = line.match(/^(#{1,6})\s+(.+)$/)
+      if (match) {
+        sections.push({
+          heading: currentHeading,
+          level: currentLevel,
+          content: buffer.join('\n').trim(),
+        })
+        currentHeading = match[2].trim()
+        currentLevel = match[1].length
+        buffer = []
+      } else {
+        buffer.push(line)
+      }
+    }
+
+    sections.push({
+      heading: currentHeading,
+      level: currentLevel,
+      content: buffer.join('\n').trim(),
+    })
+
+    return sections.filter((section) => section.heading !== 'Preamble' || section.content.length > 0)
+  }
+
+  app.get('/team/manifest', async (_request, reply) => {
+    try {
+      const manifestPath = join(REFLECTT_HOME, 'TEAM.md')
+      const stat = await fs.stat(manifestPath)
+      const content = await fs.readFile(manifestPath, 'utf8')
+      const version = createHash('sha256').update(content).digest('hex')
+      const sections = parseMarkdownSections(content)
+
+      return {
+        manifest: {
+          raw_markdown: content,
+          sections,
+          version,
+          updated_at: stat.mtimeMs,
+          path: manifestPath,
+          relative_path: 'TEAM.md',
+          source: 'reflectt_home',
+        },
+      }
+    } catch (error: any) {
+      reply.code(404)
+      return {
+        success: false,
+        error: 'TEAM manifest not found',
+        message: error?.message || `TEAM.md is missing under ${REFLECTT_HOME}`,
+        hint: 'Create ~/.reflectt/TEAM.md (or set REFLECTT_HOME) to define your team charter.',
+      }
+    }
   })
 
   // ============ ACTIVITY FEED ENDPOINT ============
