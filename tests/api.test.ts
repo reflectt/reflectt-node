@@ -1437,6 +1437,104 @@ describe('Cloud Integration', () => {
     expect(typeof body.heartbeatCount).toBe('number')
     expect(typeof body.errors).toBe('number')
   })
+
+  it('POST /cloud/sync/restart returns success or graceful message', async () => {
+    const { status, body } = await req('POST', '/cloud/sync/restart')
+    expect(status).toBe(200)
+    expect(typeof body.success).toBe('boolean')
+    if (!body.success) {
+      // In test env without cloud config, expect a graceful message
+      expect(typeof body.message).toBe('string')
+    } else {
+      expect(body.status).toBeDefined()
+      expect(typeof body.status.running).toBe('boolean')
+    }
+  })
+
+  it('POST /cloud/re-enroll returns success or graceful message', async () => {
+    const { status, body } = await req('POST', '/cloud/re-enroll')
+    expect(status).toBe(200)
+    expect(typeof body.success).toBe('boolean')
+    if (!body.success) {
+      expect(typeof body.message).toBe('string')
+    } else {
+      expect(body.status).toBeDefined()
+    }
+  })
+
+  it('DELETE /cloud/host returns success', async () => {
+    const { status, body } = await req('DELETE', '/cloud/host')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+
+    // Verify status reflects removal
+    const { body: afterStatus } = await req('GET', '/cloud/status')
+    expect(afterStatus.registered).toBe(false)
+    expect(afterStatus.running).toBe(false)
+  })
+})
+
+describe('Team Activity Feed', () => {
+  it('GET /activity returns events array', async () => {
+    const { status, body } = await req('GET', '/activity?limit=10')
+    expect(status).toBe(200)
+    expect(Array.isArray(body.events)).toBe(true)
+    expect(typeof body.count).toBe('number')
+  })
+
+  it('POST /activity/pr-merged emits pr_merged event', async () => {
+    const { status, body } = await req('POST', '/activity/pr-merged', {
+      prNumber: 999,
+      title: 'TEST: merge event',
+      mergedBy: 'link',
+      repo: 'reflectt/reflectt-node',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+
+    // Verify the event shows up in activity feed
+    const { body: feed } = await req('GET', '/activity?limit=5')
+    const prEvent = feed.events.find((e: any) => e.type === 'pr_merged' && e.data?.prNumber === 999)
+    expect(prEvent).toBeDefined()
+    expect(prEvent.data.title).toBe('TEST: merge event')
+    expect(prEvent.data.url).toContain('/pull/999')
+  })
+
+  it('POST /activity/pr-merged validates required fields', async () => {
+    const { status, body } = await req('POST', '/activity/pr-merged', { prNumber: 1 })
+    expect(status).toBe(200)
+    expect(body.success).toBe(false)
+  })
+
+  it('activity feed includes task_created events from task creation', async () => {
+    // Create a task — this should emit task_created to the event bus
+    const createRes = await req('POST', '/tasks', {
+      title: 'TEST: activity feed task event',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['done'],
+      createdBy: 'link',
+      eta: '2026-12-31',
+    })
+    expect(createRes.body.task).toBeDefined()
+    const taskId = createRes.body.task.id
+
+    // Check activity feed for the task_created event
+    const { body: feed } = await req('GET', '/activity?limit=25')
+    const createEvent = feed.events.find(
+      (e: any) => e.type === 'task_created' && e.data?.id === taskId
+    )
+    expect(createEvent).toBeDefined()
+    expect(createEvent.data.title).toBe('TEST: activity feed task event')
+  })
+
+  it('GET /events/types includes new event types', async () => {
+    const { status, body } = await req('GET', '/events/types')
+    expect(status).toBe(200)
+    expect(body.types).toContain('task_completed')
+    expect(body.types).toContain('pr_merged')
+    expect(body.types).toContain('deploy_marked')
+  })
 })
 
 describe('Docs', () => {

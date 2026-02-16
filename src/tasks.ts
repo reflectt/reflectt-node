@@ -1284,8 +1284,9 @@ class TaskManager {
       eventBus.emitTaskAssigned(updated)
     }
     
-    // If task completed, check for unblocked tasks
+    // If task completed, emit completion event and check for unblocked tasks
     if (updates.status === 'done' && task.status !== 'done') {
+      eventBus.emitTaskCompleted(updated)
       this.checkUnblockedTasks(id)
     }
     

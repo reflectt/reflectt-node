@@ -919,6 +919,94 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// ---- Activity Rendering ----
+
+function activityIcon(type) {
+  const icons = {
+    'task_completed': '✅',
+    'task_created': '📋',
+    'task_assigned': '👤',
+    'task_updated': '📝',
+    'pr_merged': '🔀',
+    'deploy_marked': '🚀',
+    'message_posted': '💬',
+    'memory_written': '🧠',
+    'presence_updated': '🟢',
+  };
+  return icons[type] || '⚡';
+}
+
+function activityLabel(type) {
+  const labels = {
+    'task_completed': 'completed',
+    'task_created': 'created',
+    'task_assigned': 'assigned',
+    'task_updated': 'updated',
+    'pr_merged': 'merged',
+    'deploy_marked': 'deployed',
+    'message_posted': 'message',
+    'memory_written': 'memory',
+    'presence_updated': 'status',
+  };
+  return labels[type] || type || 'event';
+}
+
+function renderActivityItem(e) {
+  const d = e.data || {};
+  const icon = activityIcon(e.type);
+  const label = activityLabel(e.type);
+  const time = ago(e.timestamp);
+  let detail = '';
+  let link = '';
+
+  switch (e.type) {
+    case 'task_completed':
+      detail = `<strong>${esc(d.assignee || '?')}</strong> completed <em>${esc(truncate(d.title || d.id || '', 50))}</em>`;
+      if (d.id) link = ` <span class="event-link" onclick="openTaskById('${esc(d.id)}')" style="cursor:pointer;color:var(--accent);font-size:11px">→ view</span>`;
+      break;
+    case 'task_created':
+      detail = `<strong>${esc(d.assignee || d.createdBy || '?')}</strong> created <em>${esc(truncate(d.title || '', 50))}</em>`;
+      if (d.id) link = ` <span class="event-link" onclick="openTaskById('${esc(d.id)}')" style="cursor:pointer;color:var(--accent);font-size:11px">→ view</span>`;
+      break;
+    case 'task_assigned':
+      detail = `<em>${esc(truncate(d.title || '', 40))}</em> → <strong>${esc(d.assignee || '?')}</strong>`;
+      break;
+    case 'task_updated':
+      detail = `<em>${esc(truncate(d.title || '', 40))}</em>`;
+      if (d.updates) {
+        const keys = Object.keys(d.updates).filter(k => k !== 'metadata').slice(0, 3);
+        if (keys.length) detail += ` (${esc(keys.join(', '))})`;
+      }
+      break;
+    case 'pr_merged':
+      detail = `<strong>${esc(d.mergedBy || '?')}</strong> merged PR #${d.prNumber || '?'}: <em>${esc(truncate(d.title || '', 40))}</em>`;
+      if (d.url) link = ` <a href="${esc(d.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:11px">→ GitHub</a>`;
+      break;
+    case 'deploy_marked':
+      detail = `<strong>${esc(d.deployedBy || '?')}</strong> deployed`;
+      if (d.note) detail += `: ${esc(truncate(d.note, 40))}`;
+      if (d.sha) detail += ` <code style="font-size:10px;color:var(--text-muted)">${esc(d.sha.substring(0, 7))}</code>`;
+      break;
+    case 'message_posted':
+      const agent = d.from || d.agent || '?';
+      const channel = d.channel || 'general';
+      detail = `<strong>${esc(agent)}</strong> in #${esc(channel)}`;
+      if (d.content) detail += `: ${esc(truncate(d.content, 40))}`;
+      break;
+    default:
+      detail = e.summary || e.description || '';
+      if (e.agent) detail = `<strong>${esc(e.agent)}</strong> ${esc(truncate(String(detail), 50))}`;
+      else detail = esc(truncate(String(detail), 60));
+      break;
+  }
+
+  return `<div class="event-row">
+    <span class="event-type">${icon} ${esc(label)}</span>
+    <span class="event-desc">${detail}${link}</span>
+    <span class="event-time">${time}</span>
+  </div>`;
+}
+
 // ---- Activity ----
 async function loadActivity(forceFull = false) {
   try {
@@ -948,13 +1036,7 @@ async function loadActivity(forceFull = false) {
     document.getElementById('activity-count').textContent = allEvents.length + ' events';
     const body = document.getElementById('activity-body');
     if (allEvents.length === 0) { body.innerHTML = '<div class="empty">No recent activity</div>'; return; }
-    body.innerHTML = allEvents.slice(0, 20).map(e => `
-      <div class="event-row">
-        <span class="event-type">${esc(e.type || 'event')}</span>
-        ${e.agent ? '<span class="event-agent">' + esc(e.agent) + '</span>' : ''}
-        <span class="event-desc">${esc(truncate(e.summary || e.description || '', 60))}</span>
-        <span class="event-time">${ago(e.timestamp)}</span>
-      </div>`).join('');
+    body.innerHTML = allEvents.slice(0, 25).map(e => renderActivityItem(e)).join('');
   } catch (e) {}
 }
 
@@ -1506,6 +1588,9 @@ function handleSsePayload(eventType, payload) {
     case 'task_created':
     case 'task_assigned':
     case 'task_updated':
+    case 'task_completed':
+    case 'pr_merged':
+    case 'deploy_marked':
     case 'presence_updated':
     case 'memory_written':
       queueSseRefresh();
@@ -1582,6 +1667,8 @@ function setTaskModalInteractivity(enabled) {
   const assigneeInput = document.getElementById('modal-task-assignee');
   if (assigneeInput) assigneeInput.disabled = !enabled;
 }
+
+function openTaskById(taskId) { openTaskModal(taskId); }
 
 function openTaskModal(taskId) {
   currentTask = allTasks.find(t => t.id === taskId);
@@ -1688,8 +1775,83 @@ async function updateTaskAssignee() {
   }
 }
 
+// ---- Cloud Host Panel ----
+
+async function loadCloudStatus() {
+  const statusEl = document.getElementById('cloud-host-status');
+  if (!statusEl) return;
+  try {
+    const r = await fetch(`${BASE}/cloud/status`);
+    if (!r.ok) { statusEl.textContent = 'Failed to load cloud status'; return; }
+    const d = await r.json();
+    const lines = [];
+    lines.push(`<strong>Configured:</strong> ${d.configured ? '✅' : '❌'}`);
+    lines.push(`<strong>Registered:</strong> ${d.registered ? '✅' : '❌'}`);
+    if (d.hostId) lines.push(`<strong>Host ID:</strong> <code style="font-size:11px;color:var(--text-muted)">${d.hostId}</code>`);
+    lines.push(`<strong>Running:</strong> ${d.running ? '✅' : '❌'}`);
+    lines.push(`<strong>Heartbeats:</strong> ${d.heartbeatCount || 0}`);
+    if (d.lastHeartbeat) lines.push(`<strong>Last heartbeat:</strong> ${new Date(d.lastHeartbeat).toLocaleTimeString()}`);
+    if (d.lastTaskSync) lines.push(`<strong>Last task sync:</strong> ${new Date(d.lastTaskSync).toLocaleTimeString()}`);
+    if (d.errors > 0) lines.push(`<strong style="color:var(--red)">Errors:</strong> ${d.errors}`);
+    statusEl.innerHTML = lines.join('<br>');
+  } catch (e) {
+    statusEl.textContent = 'Cloud status unavailable';
+  }
+}
+
+function showHostError(msg) {
+  const el = document.getElementById('cloud-host-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 8000);
+}
+
+function clearHostError() {
+  const el = document.getElementById('cloud-host-error');
+  if (el) el.style.display = 'none';
+}
+
+async function hostAction(action) {
+  clearHostError();
+
+  const confirmMessages = {
+    'restart-sync': 'Restart cloud sync? This will reset heartbeat and task sync loops.',
+    're-enroll': 'Force re-enroll? This will drop current credentials and re-register with cloud.',
+    'remove': 'Remove this host from cloud? This will stop all cloud integration.'
+  };
+
+  if (!confirm(confirmMessages[action] || 'Are you sure?')) return;
+
+  const btnMap = { 'restart-sync': 'btn-restart-sync', 're-enroll': 'btn-re-enroll', 'remove': 'btn-remove-host' };
+  const btn = document.getElementById(btnMap[action]);
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+
+  const endpointMap = {
+    'restart-sync': { url: `${BASE}/cloud/sync/restart`, method: 'POST' },
+    're-enroll': { url: `${BASE}/cloud/re-enroll`, method: 'POST' },
+    'remove': { url: `${BASE}/cloud/host`, method: 'DELETE' }
+  };
+
+  const ep = endpointMap[action];
+  try {
+    const r = await fetch(ep.url, { method: ep.method });
+    const d = await r.json();
+    if (!r.ok || d.success === false) {
+      showHostError(d.error || d.message || `Action failed (HTTP ${r.status})`);
+    }
+    await loadCloudStatus();
+  } catch (e) {
+    showHostError(`Network error: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  }
+}
+
 updateClock();
 setInterval(updateClock, 30000);
 refresh();
 connectEventStream();
 startAdaptiveRefresh();
+loadCloudStatus();
+setInterval(loadCloudStatus, 30000);

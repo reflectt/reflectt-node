@@ -193,6 +193,124 @@ export function stopCloudIntegration(): void {
   console.log('☁️  Cloud integration: stopped')
 }
 
+/**
+ * Force restart cloud sync — stops and restarts heartbeat + task sync loops.
+ * Returns the new cloud status.
+ */
+export async function restartCloudSync(): Promise<{ success: boolean; message?: string; error?: string; status?: ReturnType<typeof getCloudStatus> }> {
+  if (!isCloudConfigured()) {
+    return { success: false, message: 'Cloud integration not configured' }
+  }
+  if (!state.hostId) {
+    return { success: false, message: 'Host not registered — try re-enroll first' }
+  }
+
+  // Stop existing loops
+  if (state.heartbeatTimer) {
+    clearInterval(state.heartbeatTimer)
+    state.heartbeatTimer = null
+  }
+  if (state.taskSyncTimer) {
+    clearInterval(state.taskSyncTimer)
+    state.taskSyncTimer = null
+  }
+
+  // Reset error count
+  state.errors = 0
+  state.running = true
+
+  // Immediate heartbeat
+  await sendHeartbeat().catch(() => {})
+
+  // Restart loops
+  if (config) {
+    state.heartbeatTimer = setInterval(() => {
+      sendHeartbeat().catch(() => {})
+    }, config.heartbeatIntervalMs)
+
+    state.taskSyncTimer = setInterval(() => {
+      syncTasks().catch(() => {})
+    }, config.taskSyncIntervalMs)
+  }
+
+  console.log('☁️  Cloud sync restarted')
+  return { success: true, status: getCloudStatus() }
+}
+
+/**
+ * Force re-enroll — drops current credentials and re-registers with cloud.
+ * Requires REFLECTT_HOST_TOKEN (join token) to be set.
+ */
+export async function forceReEnroll(): Promise<{ success: boolean; message?: string; error?: string; status?: ReturnType<typeof getCloudStatus> }> {
+  if (!config) {
+    return { success: false, message: 'Cloud integration not configured' }
+  }
+  if (!config.token) {
+    return { success: false, message: 'No join token (REFLECTT_HOST_TOKEN) — cannot re-enroll' }
+  }
+
+  // Stop existing integration
+  stopCloudIntegration()
+
+  // Clear persisted credentials
+  state.hostId = null
+  state.credential = null
+  state.errors = 0
+  state.heartbeatCount = 0
+  state.lastHeartbeat = null
+  state.lastTaskSync = null
+
+  // Re-register
+  try {
+    const result = await cloudPost<{ host: { id: string }; credential: { token: string } }>('/api/hosts/claim', {
+      joinToken: config.token,
+      name: config.hostName,
+      capabilities: config.capabilities,
+    })
+
+    if (result.data?.host?.id && result.data?.credential?.token) {
+      state.hostId = result.data.host.id
+      state.credential = result.data.credential.token
+      state.running = true
+      state.startedAt = Date.now()
+
+      // Restart loops
+      await sendHeartbeat().catch(() => {})
+      state.heartbeatTimer = setInterval(() => {
+        sendHeartbeat().catch(() => {})
+      }, config.heartbeatIntervalMs)
+      state.taskSyncTimer = setInterval(() => {
+        syncTasks().catch(() => {})
+      }, config.taskSyncIntervalMs)
+
+      console.log(`☁️  Re-enrolled successfully (hostId: ${state.hostId})`)
+      return { success: true, status: getCloudStatus() }
+    } else {
+      return { success: false, error: result.error || 'Registration returned unexpected response' }
+    }
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Re-enrollment failed' }
+  }
+}
+
+/**
+ * Remove host — stops cloud integration and clears all cloud state.
+ * Does NOT delete config.json cloud section (caller can do that separately).
+ */
+export function removeHost(): { success: boolean; error?: string } {
+  stopCloudIntegration()
+
+  state.hostId = null
+  state.credential = null
+  state.errors = 0
+  state.heartbeatCount = 0
+  state.lastHeartbeat = null
+  state.lastTaskSync = null
+
+  console.log('☁️  Host removed from cloud integration')
+  return { success: true }
+}
+
 // ---- Data providers ----
 
 function getAgents(): AgentInfo[] {

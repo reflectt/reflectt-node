@@ -19,6 +19,9 @@ export type EventType =
   | 'task_created'
   | 'task_assigned'
   | 'task_updated'
+  | 'task_completed'
+  | 'pr_merged'
+  | 'deploy_marked'
   | 'memory_written'
   | 'presence_updated'
 
@@ -27,6 +30,9 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'task_created',
   'task_assigned',
   'task_updated',
+  'task_completed',
+  'pr_merged',
+  'deploy_marked',
   'memory_written',
   'presence_updated',
 ])
@@ -335,6 +341,58 @@ class EventBus {
       data: {
         ...task,
         updates,
+      },
+    })
+  }
+
+  /**
+   * Helper: Emit task_completed event (task moved to done)
+   */
+  emitTaskCompleted(task: Task): void {
+    this.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'task_completed',
+      timestamp: Date.now(),
+      data: {
+        id: task.id,
+        title: task.title,
+        assignee: task.assignee,
+        reviewer: task.reviewer,
+        priority: task.priority,
+      },
+    })
+  }
+
+  /**
+   * Helper: Emit pr_merged event
+   */
+  emitPrMerged(prNumber: number, title: string, mergedBy: string, repo?: string): void {
+    this.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'pr_merged',
+      timestamp: Date.now(),
+      data: {
+        prNumber,
+        title,
+        mergedBy,
+        repo: repo || 'reflectt/reflectt-node',
+        url: `https://github.com/${repo || 'reflectt/reflectt-node'}/pull/${prNumber}`,
+      },
+    })
+  }
+
+  /**
+   * Helper: Emit deploy_marked event
+   */
+  emitDeployMarked(deployedBy: string, note?: string, sha?: string): void {
+    this.emit({
+      id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'deploy_marked',
+      timestamp: Date.now(),
+      data: {
+        deployedBy,
+        note,
+        sha,
       },
     })
   }
