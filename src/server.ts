@@ -2914,7 +2914,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Agent role registry
-  app.get('/agents/roles', async () => {
+  const buildRoleRegistryPayload = () => {
     const roles = getAgentRoles()
     const allTasks = taskManager.listTasks({})
 
@@ -2931,6 +2931,21 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const sourceInfo = getAgentRolesSource()
     return { success: true, agents: enriched, config: sourceInfo }
+  }
+
+  app.get('/agents/roles', async () => buildRoleRegistryPayload())
+
+  // Team-scoped alias for assignment-engine consumers
+  app.get('/team/roles', async () => {
+    const payload = buildRoleRegistryPayload()
+    return {
+      ...payload,
+      roleRegistry: {
+        source: payload.config.source,
+        count: payload.config.count,
+        format: 'TEAM-ROLES.yaml',
+      },
+    }
   })
 
   // Suggest assignee for a task
