@@ -976,7 +976,12 @@ export async function createServer(): Promise<FastifyInstance> {
     
     if (reply.statusCode >= 400) {
       healthMonitor.trackError()
-      trackTelemetryError(`HTTP_${reply.statusCode}`, `${request.method} ${request.url}`)
+      // Normalize URL before telemetry to prevent PII leaks in query params
+      const sanitizedUrl = request.url.split('?')[0]
+        .replace(/\/task-\d+-[a-z0-9]+/g, '/:id')
+        .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '/:uuid')
+        .replace(/\/msg-\d+-[a-z0-9]+/g, '/:msgId')
+      trackTelemetryError(`HTTP_${reply.statusCode}`, `${request.method} ${sanitizedUrl}`)
     }
   })
 
