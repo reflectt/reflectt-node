@@ -157,6 +157,36 @@ interface CloudApiResponse<T = unknown> {
   error?: string
 }
 
+async function enrollHostWithApiKey(input: {
+  cloudUrl: string
+  apiKey: string
+  hostName: string
+  hostType: string
+}): Promise<CloudRegisterResult> {
+  const url = `${input.cloudUrl.replace(/\/+$/, '')}/api/hosts/enroll`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${input.apiKey}`,
+    },
+    body: JSON.stringify({
+      name: input.hostName,
+      capabilities: [input.hostType],
+    }),
+  })
+
+  const payload: any = await response.json().catch(() => ({}))
+  const hostId = payload?.host?.id
+  const credential = payload?.credential?.token
+
+  if (response.ok && hostId && credential) {
+    return { hostId: String(hostId), credential: String(credential) }
+  }
+
+  throw new Error(`API key enrollment failed: ${payload?.error || `${response.status} ${response.statusText}`}`)
+}
+
 async function registerHostWithCloud(input: {
   cloudUrl: string
   joinToken: string
@@ -752,8 +782,9 @@ const host = program.command('host').description('Cloud host enrollment and stat
 
 host
   .command('connect')
-  .description('Enroll this reflectt-node host with Reflectt Cloud using a join token')
-  .requiredOption('--join-token <token>', 'Cloud host join token')
+  .description('Enroll this reflectt-node host with Reflectt Cloud')
+  .option('--join-token <token>', 'Cloud host join token (from dashboard)')
+  .option('--api-key <key>', 'Team API key for agent-friendly enrollment (no browser needed)')
   .option('--cloud-url <url>', 'Cloud API base URL', 'https://api.reflectt.ai')
   .option('--name <hostName>', 'Host display name', hostname())
   .option('--type <hostType>', 'Host type', 'openclaw')
@@ -761,6 +792,13 @@ host
   .option('--no-restart', 'Do not restart/start local reflectt server after enrollment')
   .action(async (options) => {
     try {
+      if (!options.joinToken && !options.apiKey) {
+        console.error('❌ Either --join-token or --api-key is required')
+        console.error('   --join-token <token>  From dashboard (human flow)')
+        console.error('   --api-key <key>       Team API key (agent flow)')
+        process.exit(1)
+      }
+
       ensureReflecttHome()
       const config = loadConfig()
       const cloudUrl = String(options.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, '')
@@ -768,14 +806,22 @@ host
       console.log('☁️  Enrolling host with Reflectt Cloud...')
       console.log(`   Cloud: ${cloudUrl}`)
       console.log(`   Host: ${options.name} (${options.type})`)
+      console.log(`   Method: ${options.apiKey ? 'API key' : 'join token'}`)
 
-      const registered = await registerHostWithCloud({
-        cloudUrl,
-        joinToken: options.joinToken,
-        hostName: options.name,
-        hostType: options.type,
-        authToken: options.authToken,
-      })
+      const registered = options.apiKey
+        ? await enrollHostWithApiKey({
+            cloudUrl,
+            apiKey: options.apiKey,
+            hostName: options.name,
+            hostType: options.type,
+          })
+        : await registerHostWithCloud({
+            cloudUrl,
+            joinToken: options.joinToken,
+            hostName: options.name,
+            hostType: options.type,
+            authToken: options.authToken,
+          })
 
       const nextConfig: Config = {
         ...config,

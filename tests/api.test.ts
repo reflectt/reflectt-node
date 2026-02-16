@@ -1087,7 +1087,8 @@ describe('Idle Nudge lane-state transitions', () => {
   }
 
   async function getDecision(agent: string): Promise<any> {
-    const { status, body } = await req('POST', '/health/idle-nudge/tick?dryRun=true')
+    // force=true bypasses quiet hours — tests must work at any time of day
+    const { status, body } = await req('POST', '/health/idle-nudge/tick?dryRun=true&force=true')
     expect(status).toBe(200)
     const decision = (body.decisions || []).find((d: any) => d.agent === agent)
     expect(decision).toBeDefined()
@@ -1199,7 +1200,8 @@ describe('Idle Nudge shipped cooldown', () => {
     await postShippedUpdate(agent)
 
     const tickNowMs = Date.now() + (10 * 60_000)
-    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&nowMs=${tickNowMs}`)
+    // force=true bypasses quiet hours — tests must work at any time of day
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true&nowMs=${tickNowMs}`)
     expect(status).toBe(200)
 
     const decision = (body.decisions || []).find((d: any) => d.agent === agent)
