@@ -41,6 +41,14 @@ async function main() {
     const db = getDb()
     console.log(`📦 SQLite database initialized (WAL mode)`)
 
+    // Initialize vector search (sqlite-vec) — optional, degrades gracefully
+    try {
+      const { initVectorSearch } = await import('./db.js')
+      initVectorSearch()
+    } catch {
+      console.warn('⚠️  Vector search not available (sqlite-vec not installed)')
+    }
+
     const app = await createServer()
     
     await app.listen({

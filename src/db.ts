@@ -250,6 +250,10 @@ function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_inbox_acks_message_id ON inbox_acks(message_id);
       `,
     },
+    {
+      version: 4,
+      sql: 'SELECT 1', // Vector tables initialized via initVectorTables() after extension load
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
@@ -344,4 +348,32 @@ export async function embedTextForDb(text: string): Promise<Float32Array> {
 export async function embedBatchForDb(texts: string[]): Promise<Float32Array[]> {
   const { embedBatch } = await import('./embeddings.js')
   return embedBatch(texts)
+}
+
+/**
+ * Initialize vector search tables (sqlite-vec).
+ * Called lazily on first vector operation or explicitly at startup.
+ * Safe to call multiple times.
+ */
+let _vecInitialized = false
+export function initVectorSearch(): void {
+  if (_vecInitialized) return
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { initVectorTables } = require('./vector-store.js')
+    const db = getDb()
+    initVectorTables(db)
+    _vecInitialized = true
+    console.log('[DB] Vector search tables initialized')
+  } catch (err: any) {
+    console.warn('[DB] Vector search not available:', err?.message)
+  }
+}
+
+export function isVectorSearchAvailable(): boolean {
+  return _vecInitialized
+}
+
+export function resetVecInitForTests(): void {
+  _vecInitialized = false
 }

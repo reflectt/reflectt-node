@@ -198,6 +198,14 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | POST | `/memory/:agent` | Save memory. Body: `{ "content": "..." }` |
 | GET | `/memory/:agent/search` | Search memory. Query: `q` |
 
+## Semantic Search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/search/semantic` | Semantic search across indexed tasks and chat messages. Query: `q` (required), `limit`, `type` (`task`\|`chat`) |
+| GET | `/search/semantic/status` | Vector index status — availability and counts by source type |
+| POST | `/search/semantic/reindex` | Bulk reindex all existing tasks for semantic search |
+
 ## Experiments
 
 | Method | Path | Description |
