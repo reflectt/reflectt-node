@@ -10,12 +10,161 @@ import { join } from 'path'
 import { eventBus } from './events.js'
 import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 import { createTaskStateAdapterFromEnv, type TaskStateAdapter } from './taskStateSync.js'
+import { getDb, importJsonlIfNeeded, safeJsonStringify, safeJsonParse } from './db.js'
+import type Database from 'better-sqlite3'
 
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
 const LEGACY_TASKS_FILE = join(LEGACY_DATA_DIR, 'tasks.jsonl')
 const RECURRING_TASKS_FILE = join(DATA_DIR, 'tasks.recurring.jsonl')
 const TASK_HISTORY_FILE = join(DATA_DIR, 'tasks.history.jsonl')
 const TASK_COMMENTS_FILE = join(DATA_DIR, 'tasks.comments.jsonl')
+
+/**
+ * Import functions for one-time JSONL → SQLite migration
+ */
+
+function importTasks(db: Database.Database, records: unknown[]): number {
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO tasks (
+      id, title, description, status, assignee, reviewer, done_criteria,
+      created_by, created_at, updated_at, priority, blocked_by, epic_id,
+      tags, metadata, comment_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const insertMany = db.transaction((tasks: unknown[]) => {
+    for (const record of tasks) {
+      const task = record as Task
+      insert.run(
+        task.id,
+        task.title,
+        task.description ?? null,
+        task.status,
+        task.assignee ?? null,
+        task.reviewer ?? null,
+        safeJsonStringify(task.done_criteria),
+        task.createdBy,
+        task.createdAt,
+        task.updatedAt,
+        task.priority ?? null,
+        safeJsonStringify(task.blocked_by),
+        task.epic_id ?? null,
+        safeJsonStringify(task.tags),
+        safeJsonStringify(task.metadata),
+        0 // comment_count will be recalculated when comments are imported
+      )
+    }
+  })
+
+  insertMany(records)
+  return records.length
+}
+
+function importRecurringTasks(db: Database.Database, records: unknown[]): number {
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO recurring_tasks (
+      id, title, description, assignee, reviewer, done_criteria, created_by,
+      priority, blocked_by, epic_id, tags, metadata, schedule, enabled,
+      status, last_run_at, last_skip_at, last_skip_reason, next_run_at,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const insertMany = db.transaction((tasks: unknown[]) => {
+    for (const record of tasks) {
+      const rt = record as RecurringTask
+      insert.run(
+        rt.id,
+        rt.title,
+        rt.description ?? null,
+        rt.assignee ?? null,
+        rt.reviewer ?? null,
+        safeJsonStringify(rt.done_criteria),
+        rt.createdBy,
+        rt.priority ?? null,
+        safeJsonStringify(rt.blocked_by),
+        rt.epic_id ?? null,
+        safeJsonStringify(rt.tags),
+        safeJsonStringify(rt.metadata),
+        safeJsonStringify(rt.schedule),
+        rt.enabled ? 1 : 0,
+        rt.status ?? 'todo',
+        rt.lastRunAt ?? null,
+        rt.lastSkipAt ?? null,
+        rt.lastSkipReason ?? null,
+        rt.nextRunAt,
+        rt.createdAt,
+        rt.updatedAt
+      )
+    }
+  })
+
+  insertMany(records)
+  return records.length
+}
+
+function importTaskHistory(db: Database.Database, records: unknown[]): number {
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO task_history (
+      id, task_id, type, actor, timestamp, data
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `)
+
+  const insertMany = db.transaction((events: unknown[]) => {
+    for (const record of events) {
+      const event = record as TaskHistoryEvent
+      insert.run(
+        event.id,
+        event.taskId,
+        event.type,
+        event.actor,
+        event.timestamp,
+        safeJsonStringify(event.data)
+      )
+    }
+  })
+
+  insertMany(records)
+  return records.length
+}
+
+function importTaskComments(db: Database.Database, records: unknown[]): number {
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO task_comments (
+      id, task_id, author, content, timestamp
+    ) VALUES (?, ?, ?, ?, ?)
+  `)
+
+  const updateCommentCount = db.prepare(`
+    UPDATE tasks
+    SET comment_count = (SELECT COUNT(*) FROM task_comments WHERE task_id = ?)
+    WHERE id = ?
+  `)
+
+  const insertMany = db.transaction((comments: unknown[]) => {
+    const taskIds = new Set<string>()
+    
+    for (const record of comments) {
+      const comment = record as TaskComment
+      insert.run(
+        comment.id,
+        comment.taskId,
+        comment.author,
+        comment.content,
+        comment.timestamp
+      )
+      taskIds.add(comment.taskId)
+    }
+
+    // Update comment counts for all affected tasks
+    for (const taskId of taskIds) {
+      updateCommentCount.run(taskId, taskId)
+    }
+  })
+
+  insertMany(records)
+  return records.length
+}
 
 class TaskManager {
   private tasks = new Map<string, Task>()
@@ -91,62 +240,58 @@ class TaskManager {
       // Ensure data directory exists
       await fs.mkdir(DATA_DIR, { recursive: true })
 
-      // Try to read existing tasks
-      let tasksLoaded = false
-      try {
-        const content = await fs.readFile(TASKS_FILE, 'utf-8')
-        const lines = content.trim().split('\n').filter(line => line.length > 0)
-        
-        for (const line of lines) {
-          try {
-            const task = JSON.parse(line) as Task
-            this.tasks.set(task.id, task)
-          } catch (err) {
-            console.error('[Tasks] Failed to parse task line:', err)
-          }
+      const db = getDb()
+
+      // Import JSONL → SQLite if needed (one-time migration)
+      importJsonlIfNeeded(db, TASKS_FILE, 'tasks', importTasks)
+
+      // Also check legacy location for migration
+      importJsonlIfNeeded(db, LEGACY_TASKS_FILE, 'tasks', importTasks)
+
+      // Load tasks from SQLite into in-memory Map
+      const rows = db.prepare('SELECT * FROM tasks').all() as Array<{
+        id: string
+        title: string
+        description: string | null
+        status: Task['status']
+        assignee: string | null
+        reviewer: string | null
+        done_criteria: string | null
+        created_by: string
+        created_at: number
+        updated_at: number
+        priority: string | null
+        blocked_by: string | null
+        epic_id: string | null
+        tags: string | null
+        metadata: string | null
+        comment_count: number
+      }>
+
+      for (const row of rows) {
+        const task: Task = {
+          id: row.id,
+          title: row.title,
+          description: row.description ?? undefined,
+          status: row.status,
+          assignee: row.assignee ?? undefined,
+          reviewer: row.reviewer ?? undefined,
+          done_criteria: safeJsonParse<string[]>(row.done_criteria),
+          createdBy: row.created_by,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          priority: (row.priority as Task['priority']) ?? undefined,
+          blocked_by: safeJsonParse<string[]>(row.blocked_by),
+          epic_id: row.epic_id ?? undefined,
+          tags: safeJsonParse<string[]>(row.tags),
+          metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
         }
-        
-        console.log(`[Tasks] Loaded ${this.tasks.size} tasks from disk`)
-        tasksLoaded = true
-      } catch (err: any) {
-        if (err.code !== 'ENOENT') {
-          throw err
-        }
-        // File doesn't exist yet - try legacy location
+        this.tasks.set(task.id, task)
       }
 
-      // Migration: Check legacy data directory
-      if (!tasksLoaded) {
-        try {
-          const legacyContent = await fs.readFile(LEGACY_TASKS_FILE, 'utf-8')
-          const lines = legacyContent.trim().split('\n').filter(line => line.length > 0)
-          
-          for (const line of lines) {
-            try {
-              const task = JSON.parse(line) as Task
-              this.tasks.set(task.id, task)
-            } catch (err) {
-              console.error('[Tasks] Failed to parse legacy task line:', err)
-            }
-          }
-          
-          console.log(`[Tasks] Migrated ${this.tasks.size} tasks from legacy location`)
-          
-          // Write to new location
-          if (this.tasks.size > 0) {
-            const lines = Array.from(this.tasks.values()).map(task => JSON.stringify(task))
-            await fs.writeFile(TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
-            console.log('[Tasks] Migration complete - tasks saved to new location')
-          }
-        } catch (err: any) {
-          if (err.code !== 'ENOENT') {
-            console.error('[Tasks] Failed to migrate from legacy location:', err)
-          }
-          // No legacy file either - starting fresh
-          console.log('[Tasks] No existing tasks file, starting fresh')
-        }
-      }
+      console.log(`[Tasks] Loaded ${this.tasks.size} tasks from SQLite`)
 
+      // Cloud hydration if empty
       if (this.tasks.size === 0 && this.taskStateAdapter) {
         try {
           const remoteTasks = await this.taskStateAdapter.pullTasks()
@@ -155,9 +300,8 @@ class TaskManager {
           }
 
           if (remoteTasks.length > 0) {
-            const lines = remoteTasks.map(task => JSON.stringify(task))
-            await fs.writeFile(TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
-            console.log(`[Tasks] Hydrated ${remoteTasks.length} tasks from cloud state into local JSON store`)
+            await this.persistTasks()
+            console.log(`[Tasks] Hydrated ${remoteTasks.length} tasks from cloud state`)
           }
         } catch (err) {
           console.error('[Tasks] Failed to hydrate tasks from cloud state:', err)
@@ -179,26 +323,64 @@ class TaskManager {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
 
-      try {
-        const content = await fs.readFile(RECURRING_TASKS_FILE, 'utf-8')
-        const lines = content.trim().split('\n').filter(line => line.length > 0)
+      const db = getDb()
 
-        for (const line of lines) {
-          try {
-            const recurring = this.normalizeRecurringTask(JSON.parse(line) as RecurringTask)
-            this.recurringTasks.set(recurring.id, recurring)
-          } catch (err) {
-            console.error('[Tasks] Failed to parse recurring task line:', err)
-          }
-        }
+      // Import JSONL → SQLite if needed
+      importJsonlIfNeeded(db, RECURRING_TASKS_FILE, 'recurring_tasks', importRecurringTasks)
 
-        console.log(`[Tasks] Loaded ${this.recurringTasks.size} recurring task definitions`)
-      } catch (err: any) {
-        if (err.code !== 'ENOENT') {
-          throw err
+      // Load from SQLite into in-memory Map
+      const rows = db.prepare('SELECT * FROM recurring_tasks').all() as Array<{
+        id: string
+        title: string
+        description: string | null
+        assignee: string | null
+        reviewer: string | null
+        done_criteria: string | null
+        created_by: string
+        priority: string | null
+        blocked_by: string | null
+        epic_id: string | null
+        tags: string | null
+        metadata: string | null
+        schedule: string
+        enabled: number
+        status: string | null
+        last_run_at: number | null
+        last_skip_at: number | null
+        last_skip_reason: string | null
+        next_run_at: number
+        created_at: number
+        updated_at: number
+      }>
+
+      for (const row of rows) {
+        const recurring: RecurringTask = {
+          id: row.id,
+          title: row.title,
+          description: row.description ?? undefined,
+          assignee: row.assignee ?? undefined,
+          reviewer: row.reviewer ?? undefined,
+          done_criteria: safeJsonParse<string[]>(row.done_criteria),
+          createdBy: row.created_by,
+          priority: (row.priority as Task['priority']) ?? undefined,
+          blocked_by: safeJsonParse<string[]>(row.blocked_by),
+          epic_id: row.epic_id ?? undefined,
+          tags: safeJsonParse<string[]>(row.tags),
+          metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
+          schedule: safeJsonParse<RecurringTaskSchedule>(row.schedule)!,
+          enabled: Boolean(row.enabled),
+          status: (row.status as Task['status']) ?? undefined,
+          lastRunAt: row.last_run_at ?? undefined,
+          lastSkipAt: row.last_skip_at ?? undefined,
+          lastSkipReason: row.last_skip_reason ?? undefined,
+          nextRunAt: row.next_run_at,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
         }
-        console.log('[Tasks] No recurring task definitions yet')
+        this.recurringTasks.set(recurring.id, this.normalizeRecurringTask(recurring))
       }
+
+      console.log(`[Tasks] Loaded ${this.recurringTasks.size} recurring task definitions from SQLite`)
     } finally {
       this.recurringInitialized = true
     }
@@ -208,34 +390,38 @@ class TaskManager {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
 
-      try {
-        const content = await fs.readFile(TASK_HISTORY_FILE, 'utf-8')
-        const lines = content.trim().split('\n').filter(line => line.length > 0)
+      const db = getDb()
 
-        for (const line of lines) {
-          try {
-            const event = JSON.parse(line) as TaskHistoryEvent
-            const existing = this.taskHistory.get(event.taskId) || []
-            existing.push(event)
-            this.taskHistory.set(event.taskId, existing)
-          } catch (err) {
-            console.error('[Tasks] Failed to parse task history line:', err)
-          }
+      // Import JSONL → SQLite if needed
+      importJsonlIfNeeded(db, TASK_HISTORY_FILE, 'task_history', importTaskHistory)
+
+      // Load from SQLite into in-memory Map
+      const rows = db.prepare('SELECT * FROM task_history ORDER BY timestamp ASC').all() as Array<{
+        id: string
+        task_id: string
+        type: TaskHistoryEvent['type']
+        actor: string
+        timestamp: number
+        data: string | null
+      }>
+
+      for (const row of rows) {
+        const event: TaskHistoryEvent = {
+          id: row.id,
+          taskId: row.task_id,
+          type: row.type,
+          actor: row.actor,
+          timestamp: row.timestamp,
+          data: safeJsonParse<Record<string, unknown>>(row.data),
         }
 
-        for (const [taskId, events] of this.taskHistory.entries()) {
-          events.sort((a, b) => a.timestamp - b.timestamp)
-          this.taskHistory.set(taskId, events)
-        }
-
-        const loadedCount = Array.from(this.taskHistory.values()).reduce((sum, events) => sum + events.length, 0)
-        console.log(`[Tasks] Loaded ${loadedCount} task history events`)
-      } catch (err: any) {
-        if (err.code !== 'ENOENT') {
-          throw err
-        }
-        console.log('[Tasks] No task history yet')
+        const existing = this.taskHistory.get(event.taskId) || []
+        existing.push(event)
+        this.taskHistory.set(event.taskId, existing)
       }
+
+      const loadedCount = Array.from(this.taskHistory.values()).reduce((sum, events) => sum + events.length, 0)
+      console.log(`[Tasks] Loaded ${loadedCount} task history events from SQLite`)
     } catch (err) {
       console.error('[Tasks] Failed to load task history:', err)
     }
@@ -245,34 +431,36 @@ class TaskManager {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
 
-      try {
-        const content = await fs.readFile(TASK_COMMENTS_FILE, 'utf-8')
-        const lines = content.trim().split('\n').filter(line => line.length > 0)
+      const db = getDb()
 
-        for (const line of lines) {
-          try {
-            const comment = JSON.parse(line) as TaskComment
-            const existing = this.taskComments.get(comment.taskId) || []
-            existing.push(comment)
-            this.taskComments.set(comment.taskId, existing)
-          } catch (err) {
-            console.error('[Tasks] Failed to parse task comment line:', err)
-          }
+      // Import JSONL → SQLite if needed
+      importJsonlIfNeeded(db, TASK_COMMENTS_FILE, 'task_comments', importTaskComments)
+
+      // Load from SQLite into in-memory Map
+      const rows = db.prepare('SELECT * FROM task_comments ORDER BY timestamp ASC').all() as Array<{
+        id: string
+        task_id: string
+        author: string
+        content: string
+        timestamp: number
+      }>
+
+      for (const row of rows) {
+        const comment: TaskComment = {
+          id: row.id,
+          taskId: row.task_id,
+          author: row.author,
+          content: row.content,
+          timestamp: row.timestamp,
         }
 
-        for (const [taskId, comments] of this.taskComments.entries()) {
-          comments.sort((a, b) => a.timestamp - b.timestamp)
-          this.taskComments.set(taskId, comments)
-        }
-
-        const loadedCount = Array.from(this.taskComments.values()).reduce((sum, comments) => sum + comments.length, 0)
-        console.log(`[Tasks] Loaded ${loadedCount} task comments`)
-      } catch (err: any) {
-        if (err.code !== 'ENOENT') {
-          throw err
-        }
-        console.log('[Tasks] No task comments yet')
+        const existing = this.taskComments.get(comment.taskId) || []
+        existing.push(comment)
+        this.taskComments.set(comment.taskId, existing)
       }
+
+      const loadedCount = Array.from(this.taskComments.values()).reduce((sum, comments) => sum + comments.length, 0)
+      console.log(`[Tasks] Loaded ${loadedCount} task comments from SQLite`)
     } catch (err) {
       console.error('[Tasks] Failed to load task comments:', err)
     }
@@ -285,6 +473,23 @@ class TaskManager {
     this.taskHistory.set(event.taskId, existing)
 
     try {
+      const db = getDb()
+
+      // Write to SQLite (primary)
+      const insert = db.prepare(`
+        INSERT INTO task_history (id, task_id, type, actor, timestamp, data)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      insert.run(
+        event.id,
+        event.taskId,
+        event.type,
+        event.actor,
+        event.timestamp,
+        safeJsonStringify(event.data)
+      )
+
+      // Append to JSONL (audit log)
       await fs.mkdir(DATA_DIR, { recursive: true })
       await fs.appendFile(TASK_HISTORY_FILE, `${JSON.stringify(event)}\n`, 'utf-8')
     } catch (err) {
@@ -317,6 +522,30 @@ class TaskManager {
     this.taskComments.set(comment.taskId, existing)
 
     try {
+      const db = getDb()
+
+      // Write to SQLite (primary)
+      const insert = db.prepare(`
+        INSERT INTO task_comments (id, task_id, author, content, timestamp)
+        VALUES (?, ?, ?, ?, ?)
+      `)
+      insert.run(
+        comment.id,
+        comment.taskId,
+        comment.author,
+        comment.content,
+        comment.timestamp
+      )
+
+      // Update comment count for the task
+      const updateCount = db.prepare(`
+        UPDATE tasks
+        SET comment_count = (SELECT COUNT(*) FROM task_comments WHERE task_id = ?)
+        WHERE id = ?
+      `)
+      updateCount.run(comment.taskId, comment.taskId)
+
+      // Append to JSONL (audit log)
       await fs.mkdir(DATA_DIR, { recursive: true })
       await fs.appendFile(TASK_COMMENTS_FILE, `${JSON.stringify(comment)}\n`, 'utf-8')
     } catch (err) {
@@ -326,6 +555,40 @@ class TaskManager {
 
   private async persistRecurringTasks(): Promise<void> {
     try {
+      const db = getDb()
+      const upsert = db.prepare(`
+        INSERT OR REPLACE INTO recurring_tasks (
+          id, title, description, assignee, reviewer, done_criteria, created_by,
+          priority, blocked_by, epic_id, tags, metadata, schedule, enabled,
+          status, last_run_at, last_skip_at, last_skip_reason, next_run_at,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+
+      const upsertAll = db.transaction(() => {
+        for (const rt of this.recurringTasks.values()) {
+          upsert.run(
+            rt.id, rt.title, rt.description ?? null,
+            rt.assignee ?? null, rt.reviewer ?? null,
+            safeJsonStringify(rt.done_criteria), rt.createdBy,
+            rt.priority ?? null, safeJsonStringify(rt.blocked_by),
+            rt.epic_id ?? null, safeJsonStringify(rt.tags),
+            safeJsonStringify(rt.metadata), safeJsonStringify(rt.schedule),
+            rt.enabled ? 1 : 0, rt.status ?? 'todo',
+            rt.lastRunAt ?? null, rt.lastSkipAt ?? null,
+            rt.lastSkipReason ?? null, rt.nextRunAt,
+            rt.createdAt, rt.updatedAt
+          )
+        }
+      })
+
+      upsertAll()
+    } catch (err) {
+      console.error('[Tasks] Failed to persist recurring tasks to SQLite:', err)
+    }
+
+    // JSONL audit log
+    try {
       await fs.mkdir(DATA_DIR, { recursive: true })
       const lines = Array.from(this.recurringTasks.values()).map(task => JSON.stringify({
         ...task,
@@ -333,7 +596,7 @@ class TaskManager {
       }))
       await fs.writeFile(RECURRING_TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
     } catch (err) {
-      console.error('[Tasks] Failed to persist recurring tasks:', err)
+      console.error('[Tasks] Failed to write recurring tasks JSONL audit log:', err)
     }
   }
 
@@ -453,14 +716,51 @@ class TaskManager {
 
   private async persistTasks(): Promise<void> {
     try {
-      // Ensure data directory exists
+      const db = getDb()
+      const upsert = db.prepare(`
+        INSERT OR REPLACE INTO tasks (
+          id, title, description, status, assignee, reviewer, done_criteria,
+          created_by, created_at, updated_at, priority, blocked_by, epic_id,
+          tags, metadata, comment_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+
+      const upsertAll = db.transaction(() => {
+        for (const task of this.tasks.values()) {
+          const commentCount = (this.taskComments.get(task.id) || []).length
+          upsert.run(
+            task.id,
+            task.title,
+            task.description ?? null,
+            task.status,
+            task.assignee ?? null,
+            task.reviewer ?? null,
+            safeJsonStringify(task.done_criteria),
+            task.createdBy,
+            task.createdAt,
+            task.updatedAt,
+            task.priority ?? null,
+            safeJsonStringify(task.blocked_by),
+            task.epic_id ?? null,
+            safeJsonStringify(task.tags),
+            safeJsonStringify(task.metadata),
+            commentCount
+          )
+        }
+      })
+
+      upsertAll()
+    } catch (err) {
+      console.error('[Tasks] Failed to persist tasks to SQLite:', err)
+    }
+
+    // JSONL audit log (append-only, best-effort)
+    try {
       await fs.mkdir(DATA_DIR, { recursive: true })
-      
-      // Write all tasks as JSONL
       const lines = Array.from(this.tasks.values()).map(task => JSON.stringify(task))
       await fs.writeFile(TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
     } catch (err) {
-      console.error('[Tasks] Failed to persist tasks:', err)
+      console.error('[Tasks] Failed to write JSONL audit log:', err)
     }
   }
 
