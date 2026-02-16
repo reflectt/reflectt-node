@@ -5,6 +5,7 @@
 agents:
   - name: link
     role: builder
+    description: Core implementation owner for backend/api/integration work.
     affinityTags:
       - backend
       - api
@@ -18,10 +19,17 @@ agents:
       - task-lifecycle
       - watchdog
       - database
+    alwaysRoute:
+      - backend
+      - integration
+      - api
+    neverRoute:
+      - brand-copy
     wipCap: 2
 
   - name: pixel
     role: designer
+    description: UX and dashboard experience owner.
     affinityTags:
       - dashboard
       - ui
@@ -33,10 +41,17 @@ agents:
       - ux
       - modal
       - chart
+    alwaysRoute:
+      - ui
+      - ux
+      - dashboard
+    neverRoute:
+      - infra
     wipCap: 1
 
   - name: sage
     role: ops
+    description: Process/ops strategist focused on reliability and execution quality.
     affinityTags:
       - ci
       - deploy
@@ -48,6 +63,12 @@ agents:
       - pipeline
       - release
       - codeowners
+    alwaysRoute:
+      - ops
+      - ci
+      - release
+    neverRoute:
+      - visual-polish
     protectedDomains:
       - deploy
       - ci
@@ -56,6 +77,7 @@ agents:
 
   - name: echo
     role: voice
+    description: Content and messaging execution owner.
     affinityTags:
       - content
       - docs
@@ -67,10 +89,17 @@ agents:
       - blog
       - readme
       - onboarding
+    alwaysRoute:
+      - docs
+      - content
+      - standards
+    neverRoute:
+      - db-migration
     wipCap: 1
 
   - name: harmony
     role: reviewer
+    description: Quality gate and audit owner.
     affinityTags:
       - qa
       - review
@@ -80,6 +109,12 @@ agents:
       - compliance
       - testing
       - quality
+    alwaysRoute:
+      - qa
+      - audit
+      - security-review
+    neverRoute:
+      - feature-spec
     protectedDomains:
       - security
       - audit
@@ -87,6 +122,7 @@ agents:
 
   - name: scout
     role: analyst
+    description: Analytics/research owner for insights and prioritization inputs.
     affinityTags:
       - research
       - analysis
@@ -96,4 +132,10 @@ agents:
       - data
       - reporting
       - benchmark
+    alwaysRoute:
+      - analytics
+      - research
+      - sla
+    neverRoute:
+      - frontend-polish
     wipCap: 1
