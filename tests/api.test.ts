@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { promises as fs } from 'fs'
 import { join } from 'path'
 import { createServer } from '../src/server.js'
-import { DATA_DIR } from '../src/config.js'
+import { DATA_DIR, REFLECTT_HOME } from '../src/config.js'
 import { getDb } from '../src/db.js'
 import type { FastifyInstance } from 'fastify'
 
@@ -1436,6 +1436,38 @@ describe('Cloud Integration', () => {
     expect(typeof body.running).toBe('boolean')
     expect(typeof body.heartbeatCount).toBe('number')
     expect(typeof body.errors).toBe('number')
+  })
+})
+
+describe('Team Manifest', () => {
+  const teamManifestPath = join(REFLECTT_HOME, 'TEAM.md')
+
+  it('GET /team/manifest returns ~/.reflectt TEAM.md (raw + parsed sections + metadata)', async () => {
+    await fs.mkdir(REFLECTT_HOME, { recursive: true })
+    const fixture = [
+      '# TEAM.md — Test Team',
+      '',
+      '## Mission',
+      'Ship real value.',
+      '',
+      '## Principles',
+      '- Reflection over apology',
+      '- Quality over quantity',
+      '',
+    ].join('\n')
+    await fs.writeFile(teamManifestPath, fixture, 'utf8')
+
+    const { status, body } = await req('GET', '/team/manifest')
+    expect(status).toBe(200)
+    expect(typeof body.manifest?.raw_markdown).toBe('string')
+    expect(body.manifest.raw_markdown).toContain('Test Team')
+    expect(Array.isArray(body.manifest?.sections)).toBe(true)
+    expect(body.manifest.sections.some((section: any) => section.heading === 'Mission')).toBe(true)
+    expect(typeof body.manifest?.version).toBe('string')
+    expect(body.manifest.version.length).toBeGreaterThanOrEqual(32)
+    expect(typeof body.manifest?.updated_at).toBe('number')
+    expect(body.manifest.relative_path).toBe('TEAM.md')
+    expect(body.manifest.source).toBe('reflectt_home')
   })
 })
 
