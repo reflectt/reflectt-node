@@ -43,4 +43,4 @@ Added a SQLite-backed `sync_ledger` (migration v2) and wired cloud task sync to 
 - `npx vitest run tests/api.test.ts -t "SQLite sync ledger|GET /cloud/status returns cloud state"` ✅
 
 ## PR
-- (to be added)
+- https://github.com/reflectt/reflectt-node/pull/88
