@@ -1807,3 +1807,59 @@ describe('WIP cap enforcement', () => {
     expect(body.task.metadata.wip_override_used).toBe(true)
   })
 })
+
+describe('Model performance analytics', () => {
+  it('GET /analytics/models returns model stats', async () => {
+    const { status, body } = await req('GET', '/analytics/models')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.analytics).toBeDefined()
+    expect(typeof body.analytics.totalTracked).toBe('number')
+    expect(typeof body.analytics.totalUntracked).toBe('number')
+    expect(Array.isArray(body.analytics.models)).toBe(true)
+  })
+
+  it('GET /analytics/agents returns per-agent stats', async () => {
+    const { status, body } = await req('GET', '/analytics/agents')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.agents)).toBe(true)
+  })
+
+  it('model metadata persists through task lifecycle', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: model tracking lifecycle',
+      assignee: 'test-model-agent',
+      reviewer: 'kai',
+      done_criteria: ['Model tracked'],
+      createdBy: 'test',
+      eta: '1h',
+      priority: 'P3',
+    })
+    const taskId = created.task.id
+
+    // Move to doing with model info
+    const { body: doing } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: { model: 'anthropic/claude-sonnet-4-5' },
+    })
+    expect(doing.task.metadata.model).toBe('anthropic/claude-sonnet-4-5')
+
+    // Model should persist through to done
+    const { body: done } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['test-evidence'],
+        reviewer_approved: true,
+      },
+    })
+    expect(done.task.metadata.model).toBe('anthropic/claude-sonnet-4-5')
+
+    // Check it shows in analytics
+    const { body: analytics } = await req('GET', '/analytics/models')
+    const modelEntry = analytics.analytics.models.find((m: any) => m.model === 'anthropic/claude-sonnet-4-5')
+    expect(modelEntry).toBeDefined()
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+})

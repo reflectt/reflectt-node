@@ -3207,6 +3207,22 @@ export async function createServer(): Promise<FastifyInstance> {
     return { analytics }
   })
 
+  // Model performance analytics
+  app.get('/analytics/models', async (request) => {
+    const query = request.query as Record<string, string>
+    const since = query.since ? parseInt(query.since, 10) : undefined
+    const analytics = analyticsManager.getModelAnalytics(since)
+    return { success: true, analytics }
+  })
+
+  // Per-agent model + performance stats
+  app.get('/analytics/agents', async (request) => {
+    const query = request.query as Record<string, string>
+    const since = query.since ? parseInt(query.since, 10) : undefined
+    const agents = analyticsManager.getAgentModelAnalytics(since)
+    return { success: true, agents }
+  })
+
   // Operational metrics endpoint (lightweight dashboard contract)
   app.get('/metrics', async () => {
     const startedAt = Date.now()
