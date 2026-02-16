@@ -20,6 +20,19 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  // Clean up all TEST: prefixed tasks created during this run
+  // to prevent pollution across test runs sharing the same DB
+  try {
+    const res = await app.inject({ method: 'GET', url: '/tasks?limit=500' })
+    const tasks = JSON.parse(res.body)?.tasks || []
+    for (const task of tasks) {
+      if (typeof task.title === 'string' && task.title.startsWith('TEST:')) {
+        await app.inject({ method: 'DELETE', url: `/tasks/${task.id}` })
+      }
+    }
+  } catch {
+    // Best-effort cleanup — don't fail the suite if cleanup errors
+  }
   await app.close()
 })
 
