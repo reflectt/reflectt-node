@@ -287,6 +287,12 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | POST | `/cloud/reload` | Hot-reload cloud config from `~/.reflectt/config.json` without server restart. Updates env vars and restarts heartbeat/sync loops. Used by CLI after `host connect` enrollment. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
+## Team
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/team/manifest` | Team charter manifest from `~/.reflectt/TEAM.md`. Returns parsed sections, version hash, update timestamp, and raw markdown. Returns `404` if TEAM.md is missing with creation hint. |
+
 ## Other
 
 | Method | Path | Description |
