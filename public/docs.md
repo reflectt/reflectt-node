@@ -259,6 +259,12 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/sse` | MCP SSE transport |
 | POST | `/mcp/messages` | MCP message handler |
 
+## Database
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/db/status` | SQLite database status (engine, WAL mode, schema version, table row counts) |
+
 ## Cloud
 
 | Method | Path | Description |
