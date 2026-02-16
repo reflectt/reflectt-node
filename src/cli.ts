@@ -162,27 +162,83 @@ async function registerHostWithCloud(input: {
   joinToken: string
   hostName: string
   hostType: string
+  authToken?: string
 }): Promise<CloudRegisterResult> {
-  const url = `${input.cloudUrl.replace(/\/+$/, '')}/v1/hosts/register`
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${input.joinToken}`,
-    },
-    body: JSON.stringify({
-      joinToken: input.joinToken,
-      hostName: input.hostName,
-      hostType: input.hostType,
-    }),
-  })
+  const cloudBase = input.cloudUrl.replace(/\/+$/, '')
 
-  const payload = await response.json() as CloudApiResponse<CloudRegisterResult>
-  if (!response.ok || !payload.success || !payload.data?.hostId || !payload.data?.credential) {
-    throw new Error(payload.error || `Cloud registration failed (${response.status})`)
+  // New cloud API path (reflectt-cloud): /api/hosts/claim
+  // Legacy path (older API): /v1/hosts/register
+  const attempts = [
+    {
+      name: 'claim-join-token',
+      url: `${cloudBase}/api/hosts/claim`,
+      bearer: input.joinToken,
+      body: {
+        joinToken: input.joinToken,
+        name: input.hostName,
+        hostName: input.hostName,
+        hostType: input.hostType,
+      },
+    },
+    ...(input.authToken
+      ? [{
+          name: 'claim-user-jwt',
+          url: `${cloudBase}/api/hosts/claim`,
+          bearer: input.authToken,
+          body: {
+            joinToken: input.joinToken,
+            name: input.hostName,
+            hostName: input.hostName,
+            hostType: input.hostType,
+          },
+        }]
+      : []),
+    {
+      name: 'legacy-register',
+      url: `${cloudBase}/v1/hosts/register`,
+      bearer: input.joinToken,
+      body: {
+        joinToken: input.joinToken,
+        hostName: input.hostName,
+        hostType: input.hostType,
+      },
+    },
+  ]
+
+  const errors: string[] = []
+
+  for (const attempt of attempts) {
+    try {
+      const response = await fetch(attempt.url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${attempt.bearer}`,
+        },
+        body: JSON.stringify(attempt.body),
+      })
+
+      const payload: any = await response.json().catch(() => ({}))
+
+      // Current cloud response shape
+      const hostId = payload?.host?.id || payload?.data?.hostId
+      const credential = payload?.credential?.token || payload?.data?.credential
+
+      if (response.ok && hostId && credential) {
+        return {
+          hostId: String(hostId),
+          credential: String(credential),
+        }
+      }
+
+      const detail = payload?.error || payload?.message || `${response.status} ${response.statusText}`
+      errors.push(`${attempt.name}: ${detail}`)
+    } catch (err: any) {
+      errors.push(`${attempt.name}: ${err?.message || 'request failed'}`)
+    }
   }
 
-  return payload.data
+  throw new Error(`Cloud registration failed (${errors.join(' | ')})`)
 }
 
 async function waitForCloudHeartbeat(timeoutMs = 45_000): Promise<{ hostId: string; heartbeatCount: number } | null> {
@@ -701,6 +757,7 @@ host
   .option('--cloud-url <url>', 'Cloud API base URL', 'https://api.reflectt.ai')
   .option('--name <hostName>', 'Host display name', hostname())
   .option('--type <hostType>', 'Host type', 'openclaw')
+  .option('--auth-token <jwt>', 'Temporary user JWT for environments where claim endpoint is JWT-gated')
   .option('--no-restart', 'Do not restart/start local reflectt server after enrollment')
   .action(async (options) => {
     try {
@@ -717,6 +774,7 @@ host
         joinToken: options.joinToken,
         hostName: options.name,
         hostType: options.type,
+        authToken: options.authToken,
       })
 
       const nextConfig: Config = {

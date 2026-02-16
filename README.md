@@ -93,7 +93,13 @@ You should see the live dashboard with task board, team health, chat, and activi
 If you have a Reflectt Cloud host join token, you can enroll this node and start heartbeats in one command:
 
 ```bash
-reflectt host connect --join-token <token>
+reflectt host connect --join-token <token> --cloud-url http://127.0.0.1:3001
+```
+
+If your cloud API still requires a user JWT for `/api/hosts/claim`, use temporary compatibility mode:
+
+```bash
+reflectt host connect --join-token <token> --cloud-url http://127.0.0.1:3001 --auth-token <jwt>
 ```
 
 This command:
