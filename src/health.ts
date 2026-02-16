@@ -182,6 +182,8 @@ export type IdleNudgeDecision = {
     | 'stale-active-task'
     | 'ambiguous-active-task'
     | 'presence-task-mismatch'
+    | 'recent-task-comment-suppressed'
+    | 'eta-loop-escalation'
     | 'eligible'
   lane: IdleNudgeLaneState
   renderedMessage: string | null
@@ -221,6 +223,7 @@ class TeamHealthMonitor {
   private readonly idleNudgeCooldownMin = Number(process.env.IDLE_NUDGE_COOLDOWN_MIN || 20)
   private readonly idleNudgeSuppressRecentMin = Number(process.env.IDLE_NUDGE_SUPPRESS_RECENT_MIN || 20)
   private readonly idleNudgeShipCooldownMin = Number(process.env.IDLE_NUDGE_SHIP_COOLDOWN_MIN || 30)
+  private readonly idleNudgeTaskCommentSuppressMin = Number(process.env.IDLE_NUDGE_TASK_COMMENT_SUPPRESS_MIN || 120)
   private readonly idleNudgeActiveTaskMaxAgeMin = Number(process.env.IDLE_NUDGE_ACTIVE_TASK_MAX_AGE_MIN || 180)
   private readonly idleNudgeExcluded = new Set(
     (process.env.IDLE_NUDGE_EXCLUDE || 'ryan,system,diag')
@@ -529,6 +532,55 @@ class TeamHealthMonitor {
     return lastAt
   }
 
+  private getLastTaskCommentAt(taskId: string): number | null {
+    const comments = taskManager.getTaskComments(taskId)
+    if (!comments.length) return null
+
+    let lastAt = 0
+    for (const comment of comments) {
+      const ts = this.parseTimestamp((comment as any).timestamp)
+      if (ts > lastAt) lastAt = ts
+    }
+
+    return lastAt || null
+  }
+
+  private isEtaOnlyStatusUpdate(content: string, taskId: string): boolean {
+    const normalized = content.toLowerCase()
+    if (!normalized.includes(taskId.toLowerCase())) return false
+
+    const hasNextOrEta = /\bnext\b|\beta\b/.test(normalized)
+    if (!hasNextOrEta) return false
+
+    const shippedNone = /\bshipped\b[^\n]*\b(none|not yet|n\/a|pending)\b/.test(normalized)
+    const blockerNone = /\bblocker\b[^\n]*\b(none|no blocker|n\/a|nil)\b/.test(normalized)
+    const hasArtifactSignal = /\bartifact\b|\bcommit\b|\bpr\b|\bpull request\b|https?:\/\//.test(normalized)
+
+    return shippedNone && blockerNone && !hasArtifactSignal
+  }
+
+  private countRecentEtaOnlyUpdates(messages: any[], agent: string, taskId: string, now: number): number {
+    const windowMs = 6 * 60 * 60_000
+    let count = 0
+
+    for (const m of messages) {
+      if ((m.from || '').toLowerCase() !== agent) continue
+      if ((m.channel || 'general') !== 'general') continue
+
+      const ts = this.parseTimestamp(m.timestamp)
+      if (!ts || now - ts > windowMs) continue
+
+      const content = typeof m.content === 'string' ? m.content : ''
+      if (!content) continue
+
+      if (this.isEtaOnlyStatusUpdate(content, taskId)) {
+        count += 1
+      }
+    }
+
+    return count
+  }
+
   private findLastTrioGeneralUpdate(messages: any[]): number {
     const trioSet = new Set(this.trioAgents)
     let lastAt = 0
@@ -550,8 +602,10 @@ class TeamHealthMonitor {
       const content = typeof m.content === 'string' ? m.content : ''
       if (!content) continue
 
-      // Productive shipping signal: artifact/commit/proof/merged/shipped references.
-      const hasProductiveSignal = /\b(shipped|shipped:|artifact|artifacts|commit|proof|merged|pr\s*#?\d+|pull request|deployed)\b/i.test(content)
+      const hasShippedNone = /\bshipped\b[^\n]*\b(none|none yet|not yet|n\/a|pending)\b/i.test(content)
+      // Productive shipping signal: artifact/commit/proof/merged/deployed references.
+      const hasProductiveSignal = /\b(artifact|artifacts|commit|proof|merged|pr\s*#?\d+|pull request|deployed)\b/i.test(content)
+        || (/\bshipped\b/i.test(content) && !hasShippedNone)
       if (!hasProductiveSignal) continue
 
       const ts = this.parseTimestamp(m.timestamp)
@@ -1307,6 +1361,17 @@ class TeamHealthMonitor {
         }
       }
 
+      if (taskId) {
+        const lastTaskCommentAt = this.getLastTaskCommentAt(taskId)
+        if (lastTaskCommentAt) {
+          const sinceLastCommentMin = Math.floor((now - lastTaskCommentAt) / 60_000)
+          if (sinceLastCommentMin < this.idleNudgeTaskCommentSuppressMin) {
+            decisions.push({ ...baseDecision, decision: 'none', reason: 'recent-task-comment-suppressed', renderedMessage: null })
+            continue
+          }
+        }
+      }
+
       const state = this.idleNudgeState.get(agent)
       if (state) {
         const sinceNudgeMin = Math.floor((now - state.lastNudgeAt) / 60_000)
@@ -1364,23 +1429,35 @@ class TeamHealthMonitor {
         continue
       }
 
-      const intro = tier === 1
-        ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
-        : `@${agent} @kai system escalation: ${inactivityMin}m idle. Post required status format now.`
+      const etaOnlyCount = this.countRecentEtaOnlyUpdates(messages, agent, taskId, now)
+      const forceEscalation = etaOnlyCount >= 2
 
-      const template = [
-        `Task: ${taskId}`,
-        '1) Shipped: <artifact/commit/file>',
-        '2) Blocker: <none or explicit blocker>',
-        '3) Next: <next deliverable + ETA>',
-      ].join('\n')
+      const intro = forceEscalation
+        ? `@${agent} @kai system escalation: repeated ETA-only updates detected (${etaOnlyCount}x) on ${taskId}.`
+        : tier === 1
+          ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
+          : `@${agent} @kai system escalation: ${inactivityMin}m idle. Post required status format now.`
+
+      const template = forceEscalation
+        ? [
+            `Task: ${taskId}`,
+            '1) Shipped: <artifact/commit/file NOW>',
+            '2) Blocker: <explicit blocker + unblock owner>',
+            '3) If neither, request reassignment now (no additional ETA-only updates).',
+          ].join('\n')
+        : [
+            `Task: ${taskId}`,
+            '1) Shipped: <artifact/commit/file>',
+            '2) Blocker: <none or explicit blocker>',
+            '3) Next: <next deliverable + ETA>',
+          ].join('\n')
 
       const renderedMessage = `${intro}\n${template}`
 
       decisions.push({
         ...baseDecision,
-        decision: tier === 1 ? 'warn' : 'escalate',
-        reason: 'eligible',
+        decision: (forceEscalation || tier === 2) ? 'escalate' : 'warn',
+        reason: forceEscalation ? 'eta-loop-escalation' : 'eligible',
         renderedMessage,
       })
 
@@ -1400,7 +1477,7 @@ class TeamHealthMonitor {
 
       this.idleNudgeState.set(agent, {
         lastNudgeAt: now,
-        lastTier: tier,
+        lastTier: (forceEscalation || tier === 2) ? 2 : 1,
         lastSignature: signature,
         unchangedNudgeCount,
       })
@@ -1419,6 +1496,7 @@ class TeamHealthMonitor {
       cooldownMin: number
       recentSuppressMin: number
       shipCooldownMin: number
+      taskCommentSuppressMin: number
       activeTaskMaxAgeMin: number
       excluded: string[]
     }
@@ -1449,6 +1527,7 @@ class TeamHealthMonitor {
         cooldownMin: this.idleNudgeCooldownMin,
         recentSuppressMin: this.idleNudgeSuppressRecentMin,
         shipCooldownMin: this.idleNudgeShipCooldownMin,
+        taskCommentSuppressMin: this.idleNudgeTaskCommentSuppressMin,
         activeTaskMaxAgeMin: this.idleNudgeActiveTaskMaxAgeMin,
         excluded: Array.from(this.idleNudgeExcluded.values()).sort(),
       },
