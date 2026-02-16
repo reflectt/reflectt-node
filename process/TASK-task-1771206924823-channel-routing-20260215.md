@@ -47,4 +47,4 @@ Implemented core channel routing support for the new team comms protocol by intr
 - `npx vitest run tests/api.test.ts -t "GET /chat/channels lists channels|POST /chat/messages supports reviews and blockers channels|POST /inbox/:agent/subscribe updates per-agent channel subscriptions"` ✅
 
 ## PR
-- (to be added)
+- https://github.com/reflectt/reflectt-node/pull/85
