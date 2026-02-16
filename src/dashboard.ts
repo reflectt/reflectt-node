@@ -787,6 +787,85 @@ export function getDashboardHTML(): string {
       transition-duration: 0.01ms !important;
     }
   }
+
+  /* ============================================
+     Focus Mode — single active lane emphasis
+     ============================================ */
+  .focus-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: 1px solid var(--border); background: var(--surface-raised);
+    color: var(--text-muted); transition: all var(--transition-base) var(--easing-smooth);
+    user-select: none;
+  }
+  .focus-toggle:hover { border-color: var(--accent); color: var(--text); }
+  .focus-toggle.active {
+    background: var(--accent-dim); border-color: var(--accent); color: var(--accent);
+  }
+  .focus-toggle .focus-icon { font-size: 14px; }
+
+  /* Focus mode active: dim non-active kanban columns */
+  body.focus-mode .kanban-col:not([data-status="doing"]) {
+    opacity: 0.3;
+    transform: scale(0.97);
+    transition: all var(--transition-slow) var(--easing-smooth);
+    pointer-events: none;
+  }
+  body.focus-mode .kanban-col:not([data-status="doing"]):hover {
+    opacity: 0.6;
+    pointer-events: auto;
+  }
+  body.focus-mode .kanban-col[data-status="doing"] {
+    flex: 2;
+    transition: flex var(--transition-slow) var(--easing-smooth);
+  }
+  body.focus-mode .kanban-col[data-status="doing"] .kanban-col-header {
+    border-bottom-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* QA contract badge on task cards in focus mode */
+  .qa-contract {
+    margin-top: 8px; padding: 6px 8px; border-radius: var(--radius-sm);
+    background: var(--surface-raised); border: 1px solid var(--border-subtle);
+    font-size: 11px; line-height: 1.5;
+  }
+  .qa-contract .qa-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .qa-contract .qa-row + .qa-row { margin-top: 3px; }
+  .qa-contract .qa-label { color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; font-size: 10px; }
+  .qa-contract .qa-value { color: var(--text-bright); font-weight: 500; }
+  .qa-contract .qa-value.missing { color: var(--yellow); font-style: italic; }
+  .qa-contract .qa-value.has-artifact { color: var(--green); }
+
+  /* Focus mode: dim agent cards not working on active tasks */
+  body.focus-mode .agent-card:not(.active) {
+    opacity: 0.25;
+    transition: opacity var(--transition-base) var(--easing-smooth);
+  }
+  body.focus-mode .agent-card:not(.active):hover {
+    opacity: 0.7;
+  }
+
+  /* Focus mode: collapse non-essential panels */
+  body.focus-mode .panel.focus-collapse .panel-body,
+  body.focus-mode .panel.focus-collapse .channel-tabs,
+  body.focus-mode .panel.focus-collapse .chat-input-bar,
+  body.focus-mode .panel.focus-collapse .project-tabs,
+  body.focus-mode .panel.focus-collapse .kanban {
+    display: none;
+  }
+  body.focus-mode .panel.focus-collapse {
+    opacity: 0.5;
+    transition: opacity var(--transition-base) var(--easing-smooth);
+    cursor: pointer;
+  }
+  body.focus-mode .panel.focus-collapse:hover {
+    opacity: 0.8;
+  }
+  body.focus-mode .panel.focus-collapse .panel-header::after {
+    content: ' (click to expand)';
+    font-size: 11px; color: var(--text-muted); font-weight: 400; font-style: italic;
+  }
 </style>
 <link rel="stylesheet" href="/dashboard-animations.css">
 </head>
@@ -798,6 +877,9 @@ export function getDashboardHTML(): string {
   </div>
   <div class="header-right">
     <span><span class="status-dot"></span>Running</span>
+    <button class="focus-toggle" id="focus-toggle" onclick="toggleFocusMode()" title="Focus Mode: highlight active work, collapse noise">
+      <span class="focus-icon">🎯</span> Focus
+    </button>
     <span id="release-badge" class="release-badge" title="Deploy status">deploy: checking…</span>
     <span id="build-badge" class="release-badge" title="Build info">build: loading…</span>
     <span id="clock"></span>
@@ -828,12 +910,12 @@ export function getDashboardHTML(): string {
     <div class="panel-body" id="backlog-body" style="max-height:300px;overflow-y:auto"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel focus-collapse">
     <div class="panel-header">🔍 Research Intake <span class="count" id="research-count"></span></div>
     <div class="panel-body" id="research-body" style="max-height:260px;overflow-y:auto"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel focus-collapse">
     <div class="panel-header">🏁 Outcome Feed <span class="count" id="outcome-count"></span></div>
     <div class="panel-body" id="outcome-body" style="max-height:320px;overflow-y:auto"></div>
   </div>
@@ -843,12 +925,12 @@ export function getDashboardHTML(): string {
     <div class="panel-body" id="health-body"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel focus-collapse">
     <div class="panel-header">🛡️ Collaboration Compliance <span class="count" id="compliance-count"></span></div>
     <div class="panel-body" id="compliance-body"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel focus-collapse">
     <div class="panel-header">🧭 Promotion SSOT <span class="count" id="ssot-count"></span></div>
     <div class="panel-body" id="ssot-body"></div>
   </div>

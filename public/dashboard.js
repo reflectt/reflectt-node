@@ -6,6 +6,7 @@ let allTasks = [];
 let allEvents = [];
 let taskById = new Map();
 let healthAgentMap = new Map();
+let focusModeActive = false;
 
 const TASK_ID_PATTERN = /\b(task-[a-z0-9-]+)\b/gi;
 
@@ -610,6 +611,7 @@ function renderKanban() {
           ${renderBlockedByLinks(t, { compact: true })}
           ${renderStatusContractWarning(t)}
           ${renderLaneTransitionMeta(t)}
+          ${renderQaContract(t)}
         </div>`;
       }).join('');
     const extra = isDone && items.length > 3
@@ -1704,6 +1706,84 @@ async function updateTaskAssignee() {
     console.error('Failed to update task assignee:', e);
   }
 }
+
+// ============ FOCUS MODE ============
+
+function toggleFocusMode() {
+  focusModeActive = !focusModeActive;
+  document.body.classList.toggle('focus-mode', focusModeActive);
+  const btn = document.getElementById('focus-toggle');
+  if (btn) btn.classList.toggle('active', focusModeActive);
+
+  // Persist preference
+  try { localStorage.setItem('reflectt-focus-mode', focusModeActive ? '1' : '0'); } catch {}
+
+  // Re-render kanban to add/remove QA contract details
+  renderKanban();
+
+  // Toggle collapsed panels — allow click to temporarily expand
+  document.querySelectorAll('.panel.focus-collapse').forEach(panel => {
+    if (!panel.dataset.focusClickBound) {
+      panel.addEventListener('click', () => {
+        if (!focusModeActive) return;
+        panel.classList.toggle('focus-expanded');
+        if (panel.classList.contains('focus-expanded')) {
+          panel.style.opacity = '1';
+          panel.querySelectorAll('.panel-body, .channel-tabs, .chat-input-bar, .project-tabs, .kanban').forEach(el => {
+            el.style.display = '';
+          });
+        } else {
+          panel.style.opacity = '';
+          // CSS will re-hide via focus-collapse rules
+        }
+      });
+      panel.dataset.focusClickBound = 'true';
+    }
+    // Reset expanded state when toggling focus mode
+    panel.classList.remove('focus-expanded');
+    panel.style.opacity = '';
+  });
+}
+
+function renderQaContract(task) {
+  if (!focusModeActive) return '';
+  const meta = task.metadata || {};
+  const reviewer = task.reviewer || null;
+  const eta = meta.eta || null;
+  const hasArtifact = !!(meta.artifact_path || (Array.isArray(meta.artifacts) && meta.artifacts.length > 0));
+  const prUrl = extractTaskPrLink(task);
+
+  return `<div class="qa-contract">
+    <div class="qa-row">
+      <span class="qa-label">Owner</span>
+      <span class="qa-value">${task.assignee ? esc(task.assignee) : '<span class="missing">unassigned</span>'}</span>
+    </div>
+    <div class="qa-row">
+      <span class="qa-label">Reviewer</span>
+      <span class="qa-value${!reviewer ? ' missing' : ''}">${reviewer ? esc(reviewer) : 'none'}</span>
+    </div>
+    <div class="qa-row">
+      <span class="qa-label">ETA</span>
+      <span class="qa-value${!eta ? ' missing' : ''}">${eta ? esc(String(eta)) : 'not set'}</span>
+    </div>
+    <div class="qa-row">
+      <span class="qa-label">Artifact</span>
+      <span class="qa-value${hasArtifact ? ' has-artifact' : ' missing'}">${hasArtifact ? (prUrl ? '<a href="' + esc(prUrl) + '" target="_blank" style="color:var(--green)">PR ↗</a>' : '✓ present') : 'none'}</span>
+    </div>
+  </div>`;
+}
+
+// Restore focus mode from localStorage
+(function restoreFocusMode() {
+  try {
+    if (localStorage.getItem('reflectt-focus-mode') === '1') {
+      focusModeActive = true;
+      document.body.classList.add('focus-mode');
+      const btn = document.getElementById('focus-toggle');
+      if (btn) btn.classList.add('active');
+    }
+  } catch {}
+})();
 
 updateClock();
 setInterval(updateClock, 30000);
