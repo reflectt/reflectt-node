@@ -2726,6 +2726,112 @@ export async function createServer(): Promise<FastifyInstance> {
     return { task: enrichTaskWithComments(task) }
   })
 
+  // Per-agent cockpit summary (single-pane "My Now" payload)
+  app.get<{ Params: { agent: string } }>('/me/:agent', async (request) => {
+    const agent = String(request.params.agent || '').trim()
+    if (!agent) {
+      return { error: 'agent is required' }
+    }
+
+    const now = Date.now()
+    const tasks = taskManager.listTasks({})
+    const messages = chatManager.getMessages({ limit: 500 })
+    const presence = presenceManager.getPresence(agent)
+
+    const assignedTasks = tasks
+      .filter((task) => (task.assignee || '').toLowerCase() === agent.toLowerCase() && task.status !== 'done')
+      .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+
+    const pendingReviews = tasks
+      .filter((task) => (task.reviewer || '').toLowerCase() === agent.toLowerCase() && task.status === 'validating')
+      .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+
+    const blockerTasks = assignedTasks.filter((task) => task.status === 'blocked')
+
+    const prPattern = /github\.com\/[^/]+\/[^/]+\/pull\/\d+/i
+    const taskPrLinks = assignedTasks.concat(pendingReviews).map((task) => {
+      const meta = (task.metadata || {}) as Record<string, unknown>
+      const artifacts = Array.isArray(meta.artifacts) ? meta.artifacts as unknown[] : []
+      const candidates = [
+        typeof meta.pr === 'string' ? meta.pr : null,
+        typeof meta.pr_url === 'string' ? meta.pr_url : null,
+        ...artifacts.map((item) => (typeof item === 'string' ? item : null)),
+      ]
+      return candidates.find((entry): entry is string => typeof entry === 'string' && prPattern.test(entry)) || null
+    }).filter((link): link is string => Boolean(link))
+
+    const failingChecks = messages
+      .filter((message: any) => Number(message.timestamp || 0) >= now - (24 * 60 * 60 * 1000))
+      .filter((message: any) => {
+        const content = String(message.content || '')
+        const targetsAgent = new RegExp(`@${agent}\\b`, 'i').test(content) || /\bci\b|\bcheck\b|\bbuild\b/i.test(content)
+        return targetsAgent && /\bfail|failed|failing|error|flake|conflict\b/i.test(content)
+      })
+      .slice(-10)
+      .map((message: any) => ({
+        id: message.id,
+        timestamp: message.timestamp,
+        channel: message.channel || 'general',
+        from: message.from,
+        content: String(message.content || '').slice(0, 240),
+      }))
+
+    const since = presence?.lastUpdate || (now - 60 * 60 * 1000)
+    const changelog = [
+      ...tasks
+        .filter((task) => Number(task.updatedAt || 0) >= since)
+        .filter((task) => {
+          const isAssignee = (task.assignee || '').toLowerCase() === agent.toLowerCase()
+          const isReviewer = (task.reviewer || '').toLowerCase() === agent.toLowerCase()
+          return isAssignee || isReviewer
+        })
+        .map((task) => ({
+          ts: Number(task.updatedAt || task.createdAt || now),
+          type: 'task_update',
+          taskId: task.id,
+          summary: `${task.id} → ${task.status}`,
+        })),
+      ...messages
+        .filter((message: any) => Number(message.timestamp || 0) >= since)
+        .filter((message: any) => new RegExp(`@${agent}\\b`, 'i').test(String(message.content || '')))
+        .map((message: any) => ({
+          ts: Number(message.timestamp || now),
+          type: 'mention',
+          messageId: message.id,
+          summary: String(message.content || '').slice(0, 200),
+          channel: message.channel || 'general',
+        })),
+    ]
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 30)
+
+    const activeTask = assignedTasks.find((task) => task.status === 'doing') || assignedTasks[0] || null
+
+    const nextAction = blockerTasks.length > 0
+      ? `Unblock ${blockerTasks[0].id} or escalate in #blockers with @owner + task id.`
+      : pendingReviews.length > 0
+        ? `Review ${pendingReviews[0].id} or post PASS/FAIL with evidence.`
+        : activeTask
+          ? `Advance ${activeTask.id} and post artifact/PR checkpoint.`
+          : 'Pull next task with /tasks/next and move it to doing.'
+
+    return {
+      agent,
+      timestamp: now,
+      activeTask,
+      assignedTasks: assignedTasks.slice(0, 20),
+      pendingReviews: pendingReviews.slice(0, 20),
+      blockers: blockerTasks.slice(0, 20),
+      taskPrLinks: Array.from(new Set(taskPrLinks)).slice(0, 20),
+      failingChecks,
+      sinceLastSeen: {
+        since,
+        changes: changelog,
+      },
+      nextAction,
+    }
+  })
+
   // Backlog: ranked list of unassigned tasks any agent can claim
   app.get('/tasks/backlog', async () => {
     const pOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }

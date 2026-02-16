@@ -646,6 +646,104 @@ describe('Backlog', () => {
   })
 })
 
+describe('My Now cockpit', () => {
+  let doingTaskId: string
+  let blockedTaskId: string
+  let reviewTaskId: string
+
+  beforeAll(async () => {
+    const createDoing = await req('POST', '/tasks', {
+      title: 'TEST: cockpit assigned doing',
+      createdBy: 'test-runner',
+      assignee: 'cockpit-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Cockpit includes assigned task'],
+      eta: '1h',
+      status: 'doing',
+      metadata: {
+        artifacts: ['https://github.com/reflectt/reflectt-node/pull/999'],
+      },
+    })
+    doingTaskId = createDoing.body.task.id
+
+    const createBlocked = await req('POST', '/tasks', {
+      title: 'TEST: cockpit blocked task',
+      createdBy: 'test-runner',
+      assignee: 'cockpit-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Cockpit includes blocker lane'],
+      eta: '1h',
+      status: 'blocked',
+      metadata: {
+        blocker: 'Waiting for dependency update',
+      },
+    })
+    blockedTaskId = createBlocked.body.task.id
+
+    const createReview = await req('POST', '/tasks', {
+      title: 'TEST: cockpit pending review',
+      createdBy: 'test-runner',
+      assignee: 'other-agent',
+      reviewer: 'cockpit-agent',
+      priority: 'P2',
+      done_criteria: ['Cockpit includes pending review'],
+      eta: '1h',
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-test-cockpit-review.md',
+        qa_bundle: {
+          summary: 'cockpit test bundle',
+          artifact_links: ['process/TASK-test-cockpit-review.md'],
+          checks: ['npm run test'],
+        },
+      },
+    })
+    reviewTaskId = createReview.body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${doingTaskId}`)
+    await req('DELETE', `/tasks/${blockedTaskId}`)
+    await req('DELETE', `/tasks/${reviewTaskId}`)
+  })
+
+  it('GET /me/:agent returns single-pane payload with assigned/review lanes + blockers + changelog', async () => {
+    await req('POST', '/chat/messages', {
+      from: 'system',
+      channel: 'general',
+      content: '@cockpit-agent build failed on CI check for PR #999',
+    })
+
+    const { status, body } = await req('GET', '/me/cockpit-agent')
+    expect(status).toBe(200)
+    expect(body.agent).toBe('cockpit-agent')
+    expect(body.assignedTasks).toBeInstanceOf(Array)
+    expect(body.pendingReviews).toBeInstanceOf(Array)
+    expect(body.blockers).toBeInstanceOf(Array)
+    expect(body.taskPrLinks).toBeInstanceOf(Array)
+    expect(body.failingChecks).toBeInstanceOf(Array)
+    expect(body.sinceLastSeen).toBeDefined()
+    expect(body.sinceLastSeen.changes).toBeInstanceOf(Array)
+    expect(typeof body.nextAction).toBe('string')
+
+    const assignedIds = body.assignedTasks.map((t: any) => t.id)
+    const reviewIds = body.pendingReviews.map((t: any) => t.id)
+    const blockerIds = body.blockers.map((t: any) => t.id)
+
+    expect(assignedIds).toContain(doingTaskId)
+    expect(assignedIds).toContain(blockedTaskId)
+    expect(reviewIds).toContain(reviewTaskId)
+    expect(blockerIds).toContain(blockedTaskId)
+
+    expect(body.taskPrLinks).toEqual(expect.arrayContaining(['https://github.com/reflectt/reflectt-node/pull/999']))
+    expect(body.failingChecks.length).toBeGreaterThan(0)
+    expect(body.sinceLastSeen.changes.length).toBeGreaterThan(0)
+    expect(body.nextAction).toContain('Unblock')
+  })
+})
+
 describe('Task Claim', () => {
   let taskId: string
 

@@ -98,6 +98,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | PATCH | `/tasks/:id` | Update task (partial). Any task field, plus optional `actor` for history attribution. Status contract: `doing` requires reviewer + `metadata.eta`; `validating` requires `metadata.artifact_path` under `process/` (workspace-agnostic). |
 | DELETE | `/tasks/:id` | Delete task |
 | GET | `/tasks/next` | Pull-based assignment. Query: `agent` |
+| GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action |
 | GET | `/tasks/search` | Keyword search across task `title` + `description` (case-insensitive). Query: `q`, optional `limit` |
 | GET | `/tasks/analytics` | Task completion analytics and velocity |
 | GET | `/tasks/instrumentation/lifecycle` | Reviewer/done-criteria gates + status-contract violations (`doing` missing ETA, `validating` missing artifact path) |
