@@ -34,6 +34,7 @@ import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
 import { getAgentRoles, suggestAssignee, checkWipCap } from './assignment.js'
+import { getTeamConfigHealth } from './team-config.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -844,6 +845,20 @@ export async function createServer(): Promise<FastifyInstance> {
       tasks: taskManager.getStats(),
       inbox: inboxManager.getStats(),
       timestamp: Date.now(),
+    }
+  })
+
+  // Team configuration linter health (TEAM.md / TEAM-ROLES.yaml / TEAM-STANDARDS.md)
+  app.get('/team/health', async () => {
+    const health = getTeamConfigHealth()
+    return {
+      ok: health.ok,
+      checkedAt: health.checkedAt,
+      root: health.root,
+      files: health.files,
+      issues: health.issues,
+      roleNamesFromConfig: health.roleNamesFromConfig,
+      assignmentRoleNames: health.assignmentRoleNames,
     }
   })
 
