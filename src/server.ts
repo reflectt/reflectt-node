@@ -3129,6 +3129,95 @@ export async function createServer(): Promise<FastifyInstance> {
     return { stats }
   })
 
+  // ============ WEBHOOK ENDPOINTS ============
+
+  // GitHub webhook: auto-populate pr_url + branch on matching tasks
+  app.post('/webhooks/github', async (request, reply) => {
+    try {
+      const event = request.headers['x-github-event'] as string | undefined
+      const payload = request.body as Record<string, unknown>
+
+      if (!event) {
+        reply.code(400)
+        return { success: false, error: 'Missing x-github-event header' }
+      }
+
+      // Only handle pull_request events
+      if (event !== 'pull_request') {
+        return { success: true, message: `Ignored event type: ${event}`, matched: 0 }
+      }
+
+      const action = payload.action as string | undefined
+      const pr = payload.pull_request as Record<string, unknown> | undefined
+      if (!pr) {
+        reply.code(400)
+        return { success: false, error: 'Missing pull_request payload' }
+      }
+
+      const prUrl = pr.html_url as string
+      const prTitle = pr.title as string | undefined
+      const prState = pr.state as string | undefined
+      const prMerged = pr.merged as boolean | undefined
+      const headRef = (pr.head as Record<string, unknown>)?.ref as string | undefined
+      const prNumber = pr.number as number | undefined
+
+      if (!prUrl || !headRef) {
+        reply.code(400)
+        return { success: false, error: 'Missing pr.html_url or pr.head.ref' }
+      }
+
+      // Match branch to tasks: find doing/validating tasks whose branch matches the PR head ref
+      const allTasks = taskManager.listTasks({})
+      const matchedTasks: string[] = []
+
+      for (const task of allTasks) {
+        if (task.status !== 'doing' && task.status !== 'validating') continue
+        const taskBranch = (task.metadata as Record<string, unknown>)?.branch as string | undefined
+        if (!taskBranch) continue
+
+        // Match if task branch equals the PR head ref
+        if (taskBranch === headRef) {
+          const meta = { ...(task.metadata as Record<string, unknown>) }
+          meta.pr_url = prUrl
+          if (prNumber) meta.pr_number = prNumber
+          if (prTitle) meta.pr_title = prTitle
+          meta.pr_state = prMerged ? 'merged' : (prState || 'open')
+          meta.pr_updated_at = Date.now()
+
+          await taskManager.updateTask(task.id, { metadata: meta })
+          matchedTasks.push(task.id)
+
+          // Emit SSE event for dashboard updates
+          eventBus.emit({
+            type: 'task_updated',
+            agent: task.assignee || 'unknown',
+            message: `PR ${action}: ${prUrl} linked to task ${task.id}`,
+            metadata: {
+              taskId: task.id,
+              prUrl,
+              prNumber,
+              prState: prMerged ? 'merged' : prState,
+              action,
+            },
+          })
+        }
+      }
+
+      return {
+        success: true,
+        event,
+        action,
+        prUrl,
+        branch: headRef,
+        matched: matchedTasks.length,
+        matchedTasks,
+      }
+    } catch (err: any) {
+      reply.code(500)
+      return { success: false, error: err.message || 'Webhook processing failed' }
+    }
+  })
+
   // ============ EVENT ENDPOINTS ============
 
   // Subscribe to events via SSE

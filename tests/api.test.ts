@@ -1524,3 +1524,112 @@ describe('Branch tracking on doing transition', () => {
     await req('DELETE', `/tasks/${taskId}`)
   })
 })
+
+/* ── GitHub Webhook: PR/branch linking ─────────────────────────────── */
+describe('GitHub Webhook', () => {
+  let taskId: string
+
+  afterEach(async () => {
+    if (taskId) {
+      await req('DELETE', `/tasks/${taskId}`)
+    }
+  })
+
+  it('POST /webhooks/github requires x-github-event header', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/webhooks/github',
+      payload: {},
+      headers: { 'content-type': 'application/json' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(JSON.parse(res.body).error).toContain('x-github-event')
+  })
+
+  it('ignores non-pull_request events', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/webhooks/github',
+      payload: { action: 'completed' },
+      headers: {
+        'content-type': 'application/json',
+        'x-github-event': 'push',
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body).message).toContain('Ignored')
+  })
+
+  it('links PR to task when branch matches', async () => {
+    // Create a task in doing status (which auto-populates branch)
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: webhook PR linking',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['PR linked'],
+      priority: 'P3',
+      eta: '30m',
+    })
+    taskId = created.task.id
+    const shortId = taskId.replace(/^task-\d+-/, '')
+    const expectedBranch = `test-agent/task-${shortId}`
+
+    // Move to doing to get branch assigned
+    await req('PATCH', `/tasks/${taskId}`, { status: 'doing' })
+
+    // Simulate GitHub webhook with matching branch
+    const res = await app.inject({
+      method: 'POST',
+      url: '/webhooks/github',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          html_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+          title: 'feat: webhook test',
+          state: 'open',
+          number: 999,
+          head: { ref: expectedBranch },
+        },
+      },
+      headers: {
+        'content-type': 'application/json',
+        'x-github-event': 'pull_request',
+      },
+    })
+    const body = JSON.parse(res.body)
+    expect(res.statusCode).toBe(200)
+    expect(body.matched).toBe(1)
+    expect(body.matchedTasks).toContain(taskId)
+
+    // Verify task metadata was updated
+    const { body: taskBody } = await req('GET', `/tasks/${taskId}`)
+    expect(taskBody.task.metadata.pr_url).toBe('https://github.com/reflectt/reflectt-node/pull/999')
+    expect(taskBody.task.metadata.pr_number).toBe(999)
+    expect(taskBody.task.metadata.pr_state).toBe('open')
+  })
+
+  it('returns matched=0 when no branch matches', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/webhooks/github',
+      payload: {
+        action: 'opened',
+        pull_request: {
+          html_url: 'https://github.com/reflectt/reflectt-node/pull/888',
+          title: 'unrelated PR',
+          state: 'open',
+          number: 888,
+          head: { ref: 'some-unrelated-branch' },
+        },
+      },
+      headers: {
+        'content-type': 'application/json',
+        'x-github-event': 'pull_request',
+      },
+    })
+    const body = JSON.parse(res.body)
+    expect(res.statusCode).toBe(200)
+    expect(body.matched).toBe(0)
+  })
+})

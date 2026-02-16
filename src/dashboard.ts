@@ -928,6 +928,11 @@ export function getDashboardHTML(): string {
         <div class="modal-label">Branch</div>
         <div class="modal-value" id="modal-task-branch" style="font-family:monospace;font-size:12px;color:var(--accent)"></div>
       </div>
+
+      <div class="modal-section" id="modal-pr-section" style="display:none">
+        <div class="modal-label">Pull Request</div>
+        <div class="modal-value" id="modal-task-pr"></div>
+      </div>
       
       <div class="modal-section">
         <div class="modal-label">Created</div>

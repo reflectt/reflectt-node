@@ -594,8 +594,14 @@ function renderKanban() {
         const assigneeDisplay = t.assignee 
           ? `<span class="assignee-tag">👤 ${esc(t.assignee)}${assigneeAgent ? ' <span class="role-small">' + esc(assigneeAgent.role) + '</span>' : ''}</span>`
           : '<span class="assignee-tag" style="color:var(--yellow)">unassigned</span>';
-        const branchDisplay = t.metadata?.branch && t.status === 'doing'
+        const branchDisplay = t.metadata?.branch && (t.status === 'doing' || t.status === 'validating')
           ? `<div style="margin-top:4px"><span class="assignee-tag" style="font-family:monospace;font-size:10px;color:var(--accent)">🌿 ${esc(t.metadata.branch)}</span></div>`
+          : '';
+        const prUrl = t.metadata?.pr_url;
+        const prState = t.metadata?.pr_state || (prUrl ? 'open' : null);
+        const prNumber = t.metadata?.pr_number;
+        const prDisplay = prUrl
+          ? `<div style="margin-top:2px"><a href="${esc(prUrl)}" target="_blank" rel="noopener" class="assignee-tag" style="font-size:10px;color:${prState === 'merged' ? 'var(--green)' : 'var(--accent)'};text-decoration:none">🔗 PR${prNumber ? ' #' + prNumber : ''} (${esc(prState)})</a></div>`
           : '';
         return `
         <div class="task-card" data-task-id="${t.id}">
@@ -607,6 +613,7 @@ function renderKanban() {
             ${renderTaskTags(t.tags)}
           </div>
           ${branchDisplay}
+          ${prDisplay}
           ${renderBlockedByLinks(t, { compact: true })}
           ${renderStatusContractWarning(t)}
           ${renderLaneTransitionMeta(t)}
@@ -1627,6 +1634,22 @@ function openTaskModal(taskId) {
       branchSection.style.display = '';
     } else {
       branchSection.style.display = 'none';
+    }
+  }
+
+  // PR display
+  const prSection = document.getElementById('modal-pr-section');
+  const prEl = document.getElementById('modal-task-pr');
+  if (prSection && prEl) {
+    const prUrl = currentTask.metadata?.pr_url;
+    const prState = currentTask.metadata?.pr_state || (prUrl ? 'open' : null);
+    const prNumber = currentTask.metadata?.pr_number;
+    if (prUrl) {
+      const stateColor = prState === 'merged' ? 'var(--green)' : prState === 'closed' ? 'var(--red)' : 'var(--accent)';
+      prEl.innerHTML = `<a href="${esc(prUrl)}" target="_blank" rel="noopener" style="color:${stateColor};text-decoration:none">PR${prNumber ? ' #' + prNumber : ''}</a> <span style="color:${stateColor}">(${esc(prState)})</span>`;
+      prSection.style.display = '';
+    } else {
+      prSection.style.display = 'none';
     }
   }
 
