@@ -126,6 +126,30 @@ export function getDashboardHTML(): string {
   }
   .panel-header .count { font-size: 12px; color: var(--text-muted); font-weight: 400; }
   .panel-body { padding: 14px 18px; max-height: 450px; overflow-y: auto; }
+  .truth-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+  }
+  .truth-item {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    padding: 10px 12px;
+  }
+  .truth-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .truth-value {
+    font-size: 12px;
+    color: var(--text-bright);
+    line-height: 1.35;
+    word-break: break-word;
+  }
   .project-tabs { display: flex; gap: 2px; padding: 10px 18px 0; border-bottom: 1px solid var(--border); }
   .project-tab {
     padding: 8px 16px; font-size: 13px; font-weight: 500; border: none; background: transparent;
@@ -783,6 +807,11 @@ export function getDashboardHTML(): string {
 <div class="agent-strip" id="agent-strip"></div>
 
 <div class="main">
+  <div class="panel">
+    <div class="panel-header">🧭 Runtime Truth Card <span class="count" id="truth-count">loading…</span></div>
+    <div class="panel-body" id="truth-body"></div>
+  </div>
+
   <div class="panel">
     <div class="panel-header">📋 Task Board <span class="count" id="task-count"></span></div>
     <div class="project-tabs" id="project-tabs"></div>

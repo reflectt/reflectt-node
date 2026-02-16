@@ -13,7 +13,7 @@ import { promises as fs } from 'fs'
 import { resolve, sep } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
-import { serverConfig, isDev } from './config.js'
+import { serverConfig, isDev, REFLECTT_HOME } from './config.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { inboxManager } from './inbox.js'
@@ -3239,6 +3239,68 @@ export async function createServer(): Promise<FastifyInstance> {
       success: true,
       message: 'Cloud integration reloaded from config.json',
       status: getCloudStatus(),
+    }
+  })
+
+  app.get('/runtime/truth', async () => {
+    const build = getBuildInfo()
+    const deploy = await releaseManager.getDeployStatus()
+
+    let cloud: Record<string, unknown> = {
+      configured: false,
+      registered: false,
+      running: false,
+      heartbeatCount: 0,
+      errors: 0,
+    }
+
+    try {
+      const { getCloudStatus } = await import('./cloud.js')
+      cloud = getCloudStatus() as Record<string, unknown>
+    } catch (err: any) {
+      cloud = {
+        configured: false,
+        registered: false,
+        running: false,
+        heartbeatCount: 0,
+        errors: 0,
+        error: err?.message || 'cloud status unavailable',
+      }
+    }
+
+    return {
+      timestamp: Date.now(),
+      repo: {
+        name: process.env.REFLECTT_REPO || 'reflectt/reflectt-node',
+        branch: build.gitBranch,
+        sha: build.gitSha,
+        shortSha: build.gitShortSha,
+        cwd: process.cwd(),
+      },
+      runtime: {
+        status: 'running',
+        pid: build.pid,
+        nodeVersion: build.nodeVersion,
+        startedAt: build.startedAt,
+        uptimeSec: build.uptime,
+        host: serverConfig.host,
+        port: serverConfig.port,
+        baseUrl: `http://${serverConfig.host}:${serverConfig.port}`,
+      },
+      ports: {
+        api: serverConfig.port,
+        dashboard: serverConfig.port,
+      },
+      cloud,
+      deploy: {
+        stale: Boolean(deploy.stale),
+        reasons: Array.isArray(deploy.reasons) ? deploy.reasons : [],
+        startupCommit: deploy.startup?.commit || null,
+        currentCommit: deploy.current?.commit || null,
+      },
+      paths: {
+        reflecttHome: REFLECTT_HOME,
+      },
     }
   })
 
