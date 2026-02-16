@@ -1297,7 +1297,20 @@ class TaskManager {
     if (!task) return false
 
     this.tasks.delete(id)
-    await this.persistTasks()
+
+    // Delete from SQLite directly (persistTasks only upserts, won't remove rows)
+    try {
+      const db = getDb()
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+      db.prepare('DELETE FROM task_comments WHERE task_id = ?').run(id)
+      db.prepare('DELETE FROM task_history WHERE task_id = ?').run(id)
+    } catch (err) {
+      console.error(`[Tasks] SQLite delete failed for ${id}:`, err)
+    }
+
+    // Also clean up in-memory comments
+    this.taskComments.delete(id)
+
     await this.syncTaskDeleteToCloud(id)
     this.notifySubscribers(task, 'deleted')
     return true
