@@ -7,17 +7,28 @@
  * Entry point
  */
 import { createServer } from './server.js'
-import { serverConfig } from './config.js'
-import { acquirePidLock, releasePidLock } from './pidlock.js'
+import { serverConfig, isDev } from './config.js'
+import { acquirePidLock, releasePidLock, getPidPath } from './pidlock.js'
 import { startCloudIntegration, stopCloudIntegration, isCloudConfigured } from './cloud.js'
 import { getDb, closeDb } from './db.js'
 // OpenClaw connection is optional — server works for chat/tasks without it
 
 async function main() {
   console.log('🚀 Starting reflectt-node...')
+
+  // Dev-mode port guard: prevent dev servers from hijacking production port
+  const PRODUCTION_PORT = 4445
+  if (isDev && serverConfig.port === PRODUCTION_PORT) {
+    console.error(`\n🚫 BLOCKED: Cannot run dev server on port ${PRODUCTION_PORT} — that's the production port.`)
+    console.error(`   Use a different port: PORT=${PRODUCTION_PORT + 1} npm run dev`)
+    console.error(`   Or set NODE_ENV=production if this IS the production server.\n`)
+    process.exit(1)
+  }
   
   // Acquire PID lock — kills any previous instance and resolves port conflicts
-  const lockResult = acquirePidLock(serverConfig.port)
+  // Use port-specific lockfile to avoid cross-port conflicts
+  const pidPath = getPidPath(serverConfig.port)
+  const lockResult = acquirePidLock(serverConfig.port, pidPath)
   if (lockResult.killedPrevious) {
     console.log(`   Replaced previous instance (pid ${lockResult.previousPid})`)
   }
@@ -58,7 +69,7 @@ async function main() {
       console.log(`\n${signal} received, shutting down...`)
       stopCloudIntegration()
       closeDb()
-      releasePidLock()
+      releasePidLock(pidPath)
       await app.close()
       process.exit(0)
     }
@@ -67,7 +78,7 @@ async function main() {
     process.on('SIGINT', () => shutdown('SIGINT'))
     
   } catch (err) {
-    releasePidLock()
+    releasePidLock(pidPath)
     console.error('Failed to start server:', err)
     process.exit(1)
   }
