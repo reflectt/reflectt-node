@@ -2988,6 +2988,31 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ============ DATABASE ============
+
+  app.get('/db/status', async () => {
+    const { getDb } = await import('./db.js')
+    try {
+      const db = getDb()
+      const version = db.prepare('SELECT MAX(version) as v FROM _migrations').get() as { v: number }
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_%'").all() as { name: string }[]
+      const counts: Record<string, number> = {}
+      for (const { name } of tables) {
+        const row = db.prepare(`SELECT COUNT(*) as c FROM "${name}"`).get() as { c: number }
+        counts[name] = row.c
+      }
+      return {
+        status: 'ok',
+        engine: 'sqlite',
+        walMode: true,
+        schemaVersion: version.v,
+        tables: counts,
+      }
+    } catch (err: any) {
+      return { status: 'error', error: err?.message }
+    }
+  })
+
   // ============ CLOUD INTEGRATION ============
 
   app.get('/cloud/status', async () => {

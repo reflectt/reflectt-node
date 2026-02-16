@@ -10,6 +10,7 @@ import { createServer } from './server.js'
 import { serverConfig } from './config.js'
 import { acquirePidLock, releasePidLock } from './pidlock.js'
 import { startCloudIntegration, stopCloudIntegration, isCloudConfigured } from './cloud.js'
+import { getDb, closeDb } from './db.js'
 // OpenClaw connection is optional — server works for chat/tasks without it
 
 async function main() {
@@ -25,6 +26,10 @@ async function main() {
   }
 
   try {
+    // Initialize SQLite database (WAL mode, auto-migration from JSONL)
+    const db = getDb()
+    console.log(`📦 SQLite database initialized (WAL mode)`)
+
     const app = await createServer()
     
     await app.listen({
@@ -52,6 +57,7 @@ async function main() {
     const shutdown = async (signal: string) => {
       console.log(`\n${signal} received, shutting down...`)
       stopCloudIntegration()
+      closeDb()
       releasePidLock()
       await app.close()
       process.exit(0)
