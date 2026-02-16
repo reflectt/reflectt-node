@@ -2293,6 +2293,178 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Batch create tasks with deduplication
+  const BatchCreateSchema = z.object({
+    tasks: z.array(CreateTaskSchema).min(1).max(20),
+    deduplicate: z.boolean().default(true),
+    dryRun: z.boolean().default(false),
+    createdBy: z.string().min(1),
+  })
+
+  app.post('/tasks/batch-create', async (request, reply) => {
+    try {
+      const data = BatchCreateSchema.parse(request.body)
+      const results: Array<{
+        title: string
+        status: 'created' | 'duplicate' | 'error'
+        task?: ReturnType<typeof enrichTaskWithComments>
+        duplicateOf?: string
+        similarity?: number
+        error?: string
+      }> = []
+
+      for (const taskData of data.tasks) {
+        try {
+          // Reject TEST: tasks in production
+          if (process.env.NODE_ENV === 'production' && taskData.title.startsWith('TEST:')) {
+            results.push({ title: taskData.title, status: 'error', error: 'TEST: tasks not allowed in production' })
+            continue
+          }
+
+          // Deduplication: check existing tasks for similar titles
+          if (data.deduplicate) {
+            const existingTasks = taskManager.listTasks({})
+            const activeTasks = existingTasks.filter(t => t.status !== 'done')
+            const normalizedNew = taskData.title.toLowerCase().trim()
+
+            // Exact title match
+            const exactMatch = activeTasks.find(t =>
+              t.title.toLowerCase().trim() === normalizedNew
+            )
+            if (exactMatch) {
+              results.push({
+                title: taskData.title,
+                status: 'duplicate',
+                duplicateOf: exactMatch.id,
+                similarity: 1.0,
+              })
+              continue
+            }
+
+            // Fuzzy match: check for high word overlap
+            const newWords = new Set(normalizedNew.split(/\s+/).filter(w => w.length > 3))
+            let bestMatch: { id: string; overlap: number } | null = null
+            for (const existing of activeTasks) {
+              const existingWords = new Set(existing.title.toLowerCase().split(/\s+/).filter(w => w.length > 3))
+              const intersection = [...newWords].filter(w => existingWords.has(w))
+              const union = new Set([...newWords, ...existingWords])
+              const overlap = union.size > 0 ? intersection.length / union.size : 0
+              if (overlap > 0.6 && (!bestMatch || overlap > bestMatch.overlap)) {
+                bestMatch = { id: existing.id, overlap }
+              }
+            }
+            if (bestMatch) {
+              results.push({
+                title: taskData.title,
+                status: 'duplicate',
+                duplicateOf: bestMatch.id,
+                similarity: Math.round(bestMatch.overlap * 100) / 100,
+              })
+              continue
+            }
+          }
+
+          if (data.dryRun) {
+            results.push({ title: taskData.title, status: 'created' })
+            continue
+          }
+
+          const { eta, ...rest } = taskData
+          const task = await taskManager.createTask({
+            ...rest,
+            createdBy: taskData.createdBy || data.createdBy,
+            metadata: {
+              ...(rest.metadata || {}),
+              eta,
+              batch_created: true,
+            },
+          })
+
+          // Index for semantic search
+          if (!taskData.title.startsWith('TEST:')) {
+            import('./vector-store.js')
+              .then(({ indexTask }) => indexTask(task.id, task.title, undefined, taskData.done_criteria))
+              .catch(() => {})
+          }
+
+          results.push({
+            title: taskData.title,
+            status: 'created',
+            task: enrichTaskWithComments(task),
+          })
+        } catch (err: any) {
+          results.push({ title: taskData.title, status: 'error', error: err.message })
+        }
+      }
+
+      const created = results.filter(r => r.status === 'created').length
+      const duplicates = results.filter(r => r.status === 'duplicate').length
+      const errors = results.filter(r => r.status === 'error').length
+
+      return {
+        success: true,
+        dryRun: data.dryRun,
+        summary: { total: results.length, created, duplicates, errors },
+        results,
+      }
+    } catch (err: any) {
+      reply.code(400)
+      return { success: false, error: err.message || 'Batch create failed' }
+    }
+  })
+
+  // Board health: low-watermark detection
+  app.get('/tasks/board-health', async () => {
+    const allTasks = taskManager.listTasks({})
+    const agents = [...new Set(allTasks.map(t => t.assignee).filter(Boolean))] as string[]
+
+    const agentHealth = agents.map(agent => {
+      const agentTasks = allTasks.filter(t => (t.assignee || '').toLowerCase() === agent.toLowerCase())
+      const doing = agentTasks.filter(t => t.status === 'doing').length
+      const validating = agentTasks.filter(t => t.status === 'validating').length
+      const todo = agentTasks.filter(t => t.status === 'todo').length
+      const active = doing + validating
+
+      return {
+        agent,
+        doing,
+        validating,
+        todo,
+        active,
+        needsWork: active === 0 && todo === 0,
+        lowWatermark: active < 1,
+      }
+    })
+
+    const totalTodo = allTasks.filter(t => t.status === 'todo').length
+    const totalDoing = allTasks.filter(t => t.status === 'doing').length
+    const totalValidating = allTasks.filter(t => t.status === 'validating').length
+    const unassignedTodo = allTasks.filter(t => t.status === 'todo' && !t.assignee).length
+
+    const agentsNeedingWork = agentHealth.filter(a => a.needsWork).map(a => a.agent)
+    const agentsLowWatermark = agentHealth.filter(a => a.lowWatermark).map(a => a.agent)
+    const replenishNeeded = agentsNeedingWork.length >= 2 || totalTodo < 3
+
+    return {
+      success: true,
+      board: {
+        totalTodo,
+        totalDoing,
+        totalValidating,
+        unassignedTodo,
+        replenishNeeded,
+        replenishReason: replenishNeeded
+          ? agentsNeedingWork.length >= 2
+            ? `${agentsNeedingWork.length} agents have no work: ${agentsNeedingWork.join(', ')}`
+            : `Only ${totalTodo} tasks in backlog (threshold: 3)`
+          : null,
+      },
+      agents: agentHealth,
+      agentsNeedingWork,
+      agentsLowWatermark,
+    }
+  })
+
   // Update task
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
     try {

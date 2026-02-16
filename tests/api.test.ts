@@ -1524,3 +1524,118 @@ describe('Branch tracking on doing transition', () => {
     await req('DELETE', `/tasks/${taskId}`)
   })
 })
+
+/* ── Batch create + board health ───────────────────────────────────── */
+describe('Batch task creation', () => {
+  const createdIds: string[] = []
+
+  afterAll(async () => {
+    for (const id of createdIds) {
+      await req('DELETE', `/tasks/${id}`)
+    }
+  })
+
+  it('POST /tasks/batch-create creates multiple tasks', async () => {
+    const { status, body } = await req('POST', '/tasks/batch-create', {
+      createdBy: 'test-runner',
+      deduplicate: false,
+      tasks: [
+        {
+          title: 'TEST: batch task alpha',
+          assignee: 'test-agent',
+          reviewer: 'test-reviewer',
+          done_criteria: ['Alpha done'],
+          eta: '30m',
+          priority: 'P3',
+          createdBy: 'test-runner',
+        },
+        {
+          title: 'TEST: batch task beta',
+          assignee: 'test-agent',
+          reviewer: 'test-reviewer',
+          done_criteria: ['Beta done'],
+          eta: '30m',
+          priority: 'P3',
+          createdBy: 'test-runner',
+        },
+      ],
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.summary.created).toBe(2)
+    expect(body.results.length).toBe(2)
+    for (const r of body.results) {
+      if (r.task?.id) createdIds.push(r.task.id)
+    }
+  })
+
+  it('deduplicates against existing tasks', async () => {
+    // First create a task
+    const { body: first } = await req('POST', '/tasks', {
+      title: 'TEST: unique dedup target task',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Dedup tested'],
+      eta: '30m',
+      priority: 'P3',
+      createdBy: 'test-runner',
+    })
+    createdIds.push(first.task.id)
+
+    // Try batch-create with same title
+    const { body } = await req('POST', '/tasks/batch-create', {
+      createdBy: 'test-runner',
+      deduplicate: true,
+      tasks: [
+        {
+          title: 'TEST: unique dedup target task',
+          assignee: 'test-agent',
+          reviewer: 'test-reviewer',
+          done_criteria: ['Dedup tested'],
+          eta: '30m',
+          priority: 'P3',
+          createdBy: 'test-runner',
+        },
+      ],
+    })
+    expect(body.summary.duplicates).toBe(1)
+    expect(body.results[0].status).toBe('duplicate')
+    expect(body.results[0].duplicateOf).toBe(first.task.id)
+  })
+
+  it('supports dryRun mode', async () => {
+    const { body } = await req('POST', '/tasks/batch-create', {
+      createdBy: 'test-runner',
+      deduplicate: false,
+      dryRun: true,
+      tasks: [
+        {
+          title: 'TEST: dry run task',
+          assignee: 'test-agent',
+          reviewer: 'test-reviewer',
+          done_criteria: ['Dry run done'],
+          eta: '30m',
+          priority: 'P3',
+          createdBy: 'test-runner',
+        },
+      ],
+    })
+    expect(body.dryRun).toBe(true)
+    expect(body.summary.created).toBe(1)
+    // No actual task created
+    expect(body.results[0].task).toBeUndefined()
+  })
+})
+
+describe('Board health', () => {
+  it('GET /tasks/board-health returns board status', async () => {
+    const { status, body } = await req('GET', '/tasks/board-health')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.board).toBeDefined()
+    expect(typeof body.board.totalTodo).toBe('number')
+    expect(typeof body.board.totalDoing).toBe('number')
+    expect(typeof body.board.replenishNeeded).toBe('boolean')
+    expect(Array.isArray(body.agents)).toBe(true)
+  })
+})
