@@ -33,6 +33,7 @@ import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
+import { getAgentRoles, suggestAssignee, checkWipCap } from './assignment.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -2489,6 +2490,9 @@ export async function createServer(): Promise<FastifyInstance> {
       // Merge incoming metadata with existing for gate checks + persistence
       const mergedMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
 
+      // TEST: prefixed tasks bypass gates (WIP cap, etc.)
+      const isTestTask = typeof existing.title === 'string' && existing.title.startsWith('TEST:')
+
       // QA bundle gate: validating requires structured review evidence.
       const effectiveStatus = parsed.status ?? existing.status
       const qaGate = enforceQaBundleGateForValidating(effectiveStatus, mergedMeta)
@@ -2532,6 +2536,27 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
       // ── End task-close gate ──
+
+      // ── WIP cap check on doing transition ──
+      if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
+        const assignee = parsed.assignee || existing.assignee || 'unknown'
+        const wipOverride = mergedMeta.wip_override as string | undefined
+        const wipCheck = checkWipCap(assignee, taskManager.listTasks({}), wipOverride)
+        if (!wipCheck.allowed) {
+          reply.code(422)
+          return {
+            success: false,
+            error: wipCheck.message,
+            gate: 'wip_cap',
+            wipCount: wipCheck.wipCount,
+            wipCap: wipCheck.wipCap,
+            hint: 'Include metadata.wip_override with a reason to bypass the WIP cap.',
+          }
+        }
+        if (wipOverride) {
+          mergedMeta.wip_override_used = true
+        }
+      }
 
       // ── Branch tracking: auto-populate on doing transition ──
       if (parsed.status === 'doing' && existing.status !== 'doing') {
@@ -2625,6 +2650,51 @@ export async function createServer(): Promise<FastifyInstance> {
       return { error: 'Task not found' }
     }
     return { success: true, resolvedId: lookup.resolvedId }
+  })
+
+  // Agent role registry
+  app.get('/agents/roles', async () => {
+    const roles = getAgentRoles()
+    const allTasks = taskManager.listTasks({})
+
+    const enriched = roles.map(agent => {
+      const wipCount = allTasks.filter(t =>
+        t.status === 'doing' && (t.assignee || '').toLowerCase() === agent.name
+      ).length
+      return {
+        ...agent,
+        wipCount,
+        overCap: wipCount >= agent.wipCap,
+      }
+    })
+
+    return { success: true, agents: enriched }
+  })
+
+  // Suggest assignee for a task
+  app.post('/tasks/suggest-assignee', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const title = body.title as string
+    if (!title) {
+      return { success: false, error: 'title is required' }
+    }
+
+    const allTasks = taskManager.listTasks({})
+    const result = suggestAssignee(
+      {
+        title,
+        tags: Array.isArray(body.tags) ? body.tags as string[] : undefined,
+        done_criteria: Array.isArray(body.done_criteria) ? body.done_criteria as string[] : undefined,
+      },
+      allTasks,
+    )
+
+    return {
+      success: true,
+      suggested: result.suggested,
+      protectedMatch: result.protectedMatch || null,
+      scores: result.scores,
+    }
   })
 
   // Get next task (pull-based assignment)

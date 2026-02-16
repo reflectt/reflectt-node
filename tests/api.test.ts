@@ -1570,7 +1570,6 @@ describe('Batch task creation', () => {
   })
 
   it('deduplicates against existing tasks', async () => {
-    // First create a task
     const { body: first } = await req('POST', '/tasks', {
       title: 'TEST: unique dedup target task',
       assignee: 'test-agent',
@@ -1582,7 +1581,6 @@ describe('Batch task creation', () => {
     })
     createdIds.push(first.task.id)
 
-    // Try batch-create with same title
     const { body } = await req('POST', '/tasks/batch-create', {
       createdBy: 'test-runner',
       deduplicate: true,
@@ -1622,7 +1620,6 @@ describe('Batch task creation', () => {
     })
     expect(body.dryRun).toBe(true)
     expect(body.summary.created).toBe(1)
-    // No actual task created
     expect(body.results[0].task).toBeUndefined()
   })
 })
@@ -1637,5 +1634,118 @@ describe('Board health', () => {
     expect(typeof body.board.totalDoing).toBe('number')
     expect(typeof body.board.replenishNeeded).toBe('boolean')
     expect(Array.isArray(body.agents)).toBe(true)
+  })
+})
+
+/* ── Role-based assignment engine ──────────────────────────────────── */
+describe('Agent role registry', () => {
+  it('GET /agents/roles returns all agents with WIP status', async () => {
+    const { status, body } = await req('GET', '/agents/roles')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.agents)).toBe(true)
+    expect(body.agents.length).toBeGreaterThan(0)
+
+    const link = body.agents.find((a: any) => a.name === 'link')
+    expect(link).toBeDefined()
+    expect(link.role).toBe('builder')
+    expect(Array.isArray(link.affinityTags)).toBe(true)
+    expect(typeof link.wipCount).toBe('number')
+    expect(typeof link.wipCap).toBe('number')
+  })
+})
+
+describe('Suggest assignee', () => {
+  it('scores backend-related tasks highest for link', async () => {
+    const { status, body } = await req('POST', '/tasks/suggest-assignee', {
+      title: 'Fix API endpoint bug in server.ts webhook handler',
+      done_criteria: ['Backend endpoint fixed', 'Tests pass'],
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    const linkScore = body.scores.find((s: any) => s.agent === 'link')
+    expect(linkScore).toBeDefined()
+    expect(linkScore.breakdown.affinity).toBeGreaterThan(0)
+    for (const s of body.scores) {
+      if (s.agent !== 'link') {
+        expect(linkScore.breakdown.affinity).toBeGreaterThanOrEqual(s.breakdown.affinity)
+      }
+    }
+  })
+
+  it('scores dashboard tasks highest for pixel', async () => {
+    const { body } = await req('POST', '/tasks/suggest-assignee', {
+      title: 'Dashboard UI layout fix: modal animation and CSS cleanup',
+    })
+    const pixelScore = body.scores.find((s: any) => s.agent === 'pixel')
+    expect(pixelScore).toBeDefined()
+    expect(pixelScore.breakdown.affinity).toBeGreaterThan(0)
+  })
+
+  it('routes deploy/CI tasks to sage via protected domain', async () => {
+    const { body } = await req('POST', '/tasks/suggest-assignee', {
+      title: 'Fix CI deploy pipeline timeout issue',
+    })
+    expect(body.suggested).toBe('sage')
+    expect(body.protectedMatch).toContain('deploy')
+  })
+
+  it('requires title parameter', async () => {
+    const { body } = await req('POST', '/tasks/suggest-assignee', {})
+    expect(body.success).toBe(false)
+    expect(body.error).toContain('title')
+  })
+})
+
+describe('WIP cap enforcement', () => {
+  const taskIds: string[] = []
+  const wipAgent = 'echo'
+
+  afterAll(async () => {
+    for (const id of taskIds) {
+      await req('DELETE', `/tasks/${id}`)
+    }
+  })
+
+  it('blocks doing transition when agent hits WIP cap', async () => {
+    const { body: t1 } = await req('POST', '/tasks', {
+      title: 'TEST: WIP cap test task 1',
+      createdBy: 'test-runner',
+      assignee: wipAgent,
+      reviewer: 'test-reviewer',
+      done_criteria: ['WIP tested'],
+      eta: '30m',
+      priority: 'P3',
+    })
+    taskIds.push(t1.task.id)
+    await req('PATCH', `/tasks/${t1.task.id}`, { status: 'doing' })
+
+    const { body: t2 } = await req('POST', '/tasks', {
+      title: 'WIP cap test task 2',
+      createdBy: 'test-runner',
+      assignee: wipAgent,
+      reviewer: 'test-reviewer',
+      done_criteria: ['WIP tested'],
+      eta: '30m',
+      priority: 'P3',
+    })
+    taskIds.push(t2.task.id)
+
+    const { status, body } = await req('PATCH', `/tasks/${t2.task.id}`, {
+      status: 'doing',
+    })
+    expect(status).toBe(422)
+    expect(body.gate).toBe('wip_cap')
+  })
+
+  it('allows doing transition with wip_override', async () => {
+    const t2Id = taskIds[taskIds.length - 1]
+    const { status, body } = await req('PATCH', `/tasks/${t2Id}`, {
+      status: 'doing',
+      metadata: { wip_override: 'Urgent P0 needs parallel work' },
+    })
+    expect(status).toBe(200)
+    expect(body.task.status).toBe('doing')
+    expect(body.task.metadata.wip_override_used).toBe(true)
   })
 })
