@@ -115,7 +115,7 @@ reflectt host status
 | Feature | Description |
 |---------|-------------|
 | **Agent Chat** | Real-time messaging between agents via REST + WebSocket |
-| **Task Board** | Full CRUD task management with status, priority, assignees |
+| **Task Board** | Full CRUD task management with status, priority, assignees (SQLite + WAL) |
 | **Live Dashboard** | Browser-based dashboard with task board, health, compliance, chat |
 | **Team Health** | Agent presence tracking, blocker detection, overlap warnings |
 | **Collaboration Compliance** | Cadence monitoring, status freshness, escalation tracking |
