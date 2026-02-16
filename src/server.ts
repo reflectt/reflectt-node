@@ -2116,6 +2116,13 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/tasks', async (request, reply) => {
     try {
       const data = CreateTaskSchema.parse(request.body)
+
+      // Reject TEST: prefixed tasks in production to prevent CI pollution
+      if (process.env.NODE_ENV === 'production' && typeof data.title === 'string' && data.title.startsWith('TEST:')) {
+        reply.code(400)
+        return { success: false, error: 'TEST: prefixed tasks are not allowed in production', code: 'TEST_TASK_REJECTED' }
+      }
+
       const { eta, ...rest } = data
       const task = await taskManager.createTask({
         ...rest,
