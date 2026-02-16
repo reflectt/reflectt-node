@@ -102,6 +102,19 @@ describe('Health', () => {
     expect(body.uptime).toBeTypeOf('number')
   })
 
+  it('GET /team/health returns team config linter status payload', async () => {
+    const { status, body } = await req('GET', '/team/health')
+    expect(status).toBe(200)
+    expect(typeof body.ok).toBe('boolean')
+    expect(typeof body.checkedAt).toBe('number')
+    expect(body.files).toBeDefined()
+    expect(typeof body.files.teamMd).toBe('string')
+    expect(typeof body.files.rolesYaml).toBe('string')
+    expect(typeof body.files.standardsMd).toBe('string')
+    expect(Array.isArray(body.issues)).toBe(true)
+    expect(Array.isArray(body.assignmentRoleNames)).toBe(true)
+  })
+
   it('GET /health/team includes active task title + PR link for each agent when available', async () => {
     const prLink = 'https://github.com/reflectt/reflectt-node/pull/59'
     const agentName = `health-agent-${Date.now()}`
