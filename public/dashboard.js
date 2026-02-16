@@ -594,6 +594,9 @@ function renderKanban() {
         const assigneeDisplay = t.assignee 
           ? `<span class="assignee-tag">👤 ${esc(t.assignee)}${assigneeAgent ? ' <span class="role-small">' + esc(assigneeAgent.role) + '</span>' : ''}</span>`
           : '<span class="assignee-tag" style="color:var(--yellow)">unassigned</span>';
+        const branchDisplay = t.metadata?.branch && t.status === 'doing'
+          ? `<div style="margin-top:4px"><span class="assignee-tag" style="font-family:monospace;font-size:10px;color:var(--accent)">🌿 ${esc(t.metadata.branch)}</span></div>`
+          : '';
         return `
         <div class="task-card" data-task-id="${t.id}">
           <div class="task-title">${esc(truncate(t.title, 60))}</div>
@@ -603,6 +606,7 @@ function renderKanban() {
             ${(t.commentCount || 0) > 0 ? '<span class="assignee-tag">💬 ' + t.commentCount + '</span>' : ''}
             ${renderTaskTags(t.tags)}
           </div>
+          ${branchDisplay}
           ${renderBlockedByLinks(t, { compact: true })}
           ${renderStatusContractWarning(t)}
           ${renderLaneTransitionMeta(t)}
@@ -1612,6 +1616,20 @@ function openTaskModal(taskId) {
   document.getElementById('modal-task-id').textContent = currentTask.id || '(missing id)';
   document.getElementById('modal-task-assignee').value = currentTask.assignee || '';
   document.getElementById('modal-task-priority').textContent = currentTask.priority || 'P3';
+
+  // Branch display
+  const branchSection = document.getElementById('modal-branch-section');
+  const branchEl = document.getElementById('modal-task-branch');
+  if (branchSection && branchEl) {
+    const branch = currentTask.metadata?.branch;
+    if (branch) {
+      branchEl.textContent = branch;
+      branchSection.style.display = '';
+    } else {
+      branchSection.style.display = 'none';
+    }
+  }
+
   document.getElementById('modal-task-created').textContent = createdText;
 
   const blockerEl = document.getElementById('modal-task-blockers');
