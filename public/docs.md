@@ -304,9 +304,6 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/openclaw/status` | OpenClaw connection status |
 | GET | `/analytics/models` | Model performance analytics — tasks per model, avg cycle time, review pass rate |
 | GET | `/analytics/agents` | Per-agent analytics — model used, performance stats |
-| GET | `/telemetry` | Full telemetry snapshot (config + metrics) |
-| GET | `/telemetry/config` | Telemetry configuration (safe — no secrets) |
-| POST | `/api/telemetry/ingest` | Cloud telemetry ingest endpoint (receives snapshots from hosts) |
 
 ---
 
