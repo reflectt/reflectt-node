@@ -38,7 +38,7 @@ function saveConfig(config: Config) {
 async function apiRequest(path: string, options: RequestInit = {}): Promise<any> {
   const config = loadConfig()
   const url = `http://${config.host}:${config.port}${path}`
-  
+
   try {
     const response = await fetch(url, options)
     if (!response.ok) {
@@ -53,6 +53,25 @@ async function apiRequest(path: string, options: RequestInit = {}): Promise<any>
     }
     process.exit(1)
   }
+}
+
+async function cloudRequest(url: string, token: string, method: string, body?: unknown): Promise<{ status: number; json: any }> {
+  const response = await fetch(url, {
+    method,
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${token}`,
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+
+  const json = await response.json().catch(() => ({}))
+  return { status: response.status, json }
+}
+
+function printStep(name: string, pass: boolean, detail: string) {
+  const icon = pass ? '✅' : '❌'
+  console.log(`${icon} ${name} — ${detail}`)
 }
 
 const program = new Command()
@@ -415,6 +434,118 @@ tasks
     console.log(`   ID: ${result.task.id}`)
     console.log(`   Title: ${result.task.title}`)
     console.log(`   Status: ${result.task.status}`)
+  })
+
+// ============ DOGFOOD COMMANDS ============
+const dogfood = program.command('dogfood').description('Dogfood verification commands')
+
+dogfood
+  .command('smoke')
+  .description('Run end-to-end cloud enrollment chain verification')
+  .requiredOption('--team-id <id>', 'Cloud team id to target')
+  .requiredOption('--token <jwt>', 'Bearer token for cloud API auth (team admin/owner)')
+  .option('--cloud-url <url>', 'Cloud API base URL', process.env.REFLECTT_CLOUD_URL || 'https://api.reflectt.ai')
+  .option('--dashboard-url <url>', 'Dashboard base URL', process.env.REFLECTT_APP_URL || 'https://app.reflectt.ai')
+  .option('--host-name <name>', 'Host name to register', `dogfood-${process.pid}`)
+  .option('--capability <value...>', 'Host capabilities', ['openclaw', 'dogfood-smoke'])
+  .action(async (options) => {
+    const cloudBase = String(options.cloudUrl || '').replace(/\/+$/, '')
+    const dashboardBase = String(options.dashboardUrl || '').replace(/\/+$/, '')
+    const teamId = String(options.teamId)
+    const token = String(options.token)
+    const hostName = String(options.hostName)
+    const capabilities = Array.isArray(options.capability) ? options.capability.map((v: string) => String(v).trim()).filter(Boolean) : ['openclaw']
+
+    if (!cloudBase || !token || !teamId) {
+      console.error('❌ Missing required inputs: --cloud-url, --token, --team-id')
+      process.exit(1)
+    }
+
+    let failed = false
+    let hostId = ''
+
+    console.log('🧪 Running dogfood smoke chain\n')
+    console.log(`   Cloud API: ${cloudBase}`)
+    console.log(`   Dashboard: ${dashboardBase}`)
+    console.log(`   Team ID: ${teamId}`)
+    console.log(`   Host Name: ${hostName}\n`)
+
+    // 1) register host token
+    const register = await cloudRequest(`${cloudBase}/api/hosts/register-token`, token, 'POST', { teamId })
+    const joinToken = register.json?.registerToken?.joinToken
+    const registerOk = register.status === 201 && typeof joinToken === 'string' && joinToken.length > 0
+    printStep('register host token', registerOk, registerOk ? 'join token issued' : `status ${register.status} ${(register.json?.error || '').toString()}`)
+    failed = failed || !registerOk
+
+    // 2) claim host
+    let credential = ''
+    if (registerOk) {
+      const claim = await cloudRequest(`${cloudBase}/api/hosts/claim`, token, 'POST', {
+        joinToken,
+        name: hostName,
+        capabilities,
+      })
+      hostId = String(claim.json?.host?.id || '')
+      credential = String(claim.json?.credential?.token || '')
+      const claimOk = claim.status === 201 && Boolean(hostId)
+      printStep('claim host', claimOk, claimOk ? `hostId=${hostId}` : `status ${claim.status} ${(claim.json?.error || '').toString()}`)
+      failed = failed || !claimOk
+    }
+
+    // 3) heartbeat
+    if (hostId) {
+      const heartbeat = await cloudRequest(`${cloudBase}/api/hosts/${encodeURIComponent(hostId)}/heartbeat`, token, 'POST', {
+        status: 'online',
+        agents: [{ id: 'dogfood-smoke', state: 'active' }],
+        activeTasks: [{ id: `smoke-${Date.now()}`, status: 'doing' }],
+      })
+      const heartbeatOk = heartbeat.status === 200 && String(heartbeat.json?.host?.status || '') === 'online'
+      printStep('heartbeat', heartbeatOk, heartbeatOk ? 'cloud accepted heartbeat' : `status ${heartbeat.status} ${(heartbeat.json?.error || '').toString()}`)
+      failed = failed || !heartbeatOk
+    }
+
+    // 4) verify cloud state
+    let cloudHostSeen = false
+    if (hostId) {
+      const verify = await cloudRequest(`${cloudBase}/api/hosts?teamId=${encodeURIComponent(teamId)}`, token, 'GET')
+      const hosts = Array.isArray(verify.json?.hosts) ? verify.json.hosts : []
+      const match = hosts.find((h: any) => String(h?.id || '') === hostId)
+      cloudHostSeen = Boolean(match)
+      const verifyOk = verify.status === 200 && cloudHostSeen
+      printStep('verify cloud state', verifyOk, verifyOk ? 'host visible in /api/hosts' : `status ${verify.status} host missing`)
+      failed = failed || !verifyOk
+    }
+
+    // 5) verify dashboard reachability + data source alignment
+    if (hostId) {
+      const dashboardProbe = await fetch(`${dashboardBase}/dashboard/hosts`, { method: 'GET' })
+        .then((res) => ({ ok: res.status < 500, status: res.status }))
+        .catch(() => ({ ok: false, status: 0 }))
+
+      const dashboardOk = dashboardProbe.ok && cloudHostSeen
+      printStep(
+        'verify dashboard reflection path',
+        dashboardOk,
+        dashboardOk
+          ? `dashboard reachable (HTTP ${dashboardProbe.status}); host present in dashboard source endpoint`
+          : `dashboard probe HTTP ${dashboardProbe.status}; or host missing from source endpoint`,
+      )
+      failed = failed || !dashboardOk
+    }
+
+    console.log('')
+    if (failed) {
+      console.error('❌ Dogfood smoke FAILED')
+      process.exit(1)
+    }
+
+    console.log('✅ Dogfood smoke PASSED')
+    if (hostId) {
+      console.log(`   hostId: ${hostId}`)
+      if (credential) {
+        console.log('   credential: issued (shown once)')
+      }
+    }
   })
 
 // ============ MEMORY COMMANDS ============
