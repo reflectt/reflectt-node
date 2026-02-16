@@ -9,6 +9,7 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 import { createServer } from '../src/server.js'
 import { DATA_DIR } from '../src/config.js'
+import { getDb } from '../src/db.js'
 import type { FastifyInstance } from 'fastify'
 
 let app: FastifyInstance
@@ -107,6 +108,60 @@ describe('Health', () => {
     expect(agent.activeTaskPrLink).toBe(prLink)
 
     await req('DELETE', `/tasks/${taskId}`)
+  })
+})
+
+describe('SQLite sync ledger', () => {
+  it('creates sync_ledger table in schema v2', async () => {
+    const { status, body } = await req('GET', '/db/status')
+    expect(status).toBe(200)
+    expect(body.status).toBe('ok')
+    expect(body.schemaVersion).toBeGreaterThanOrEqual(2)
+    expect(body.tables).toBeDefined()
+    expect(typeof body.tables.sync_ledger).toBe('number')
+  })
+
+  it('supports pending -> synced lifecycle fields for task sync rows', async () => {
+    const db = getDb()
+    const taskId = `task-sync-ledger-${Date.now()}`
+    const now = Date.now()
+
+    db.prepare(`
+      INSERT INTO sync_ledger (record_type, record_id, local_updated_at, sync_status, attempt_count)
+      VALUES ('task', ?, ?, 'pending', 0)
+      ON CONFLICT(record_type, record_id) DO UPDATE SET
+        local_updated_at = excluded.local_updated_at,
+        sync_status = 'pending'
+    `).run(taskId, now)
+
+    db.prepare(`
+      UPDATE sync_ledger
+      SET cloud_synced_at = ?, sync_status = 'synced', attempt_count = attempt_count + 1
+      WHERE record_type = 'task' AND record_id = ?
+    `).run(now + 500, taskId)
+
+    const ledgerRow = db.prepare(`
+      SELECT record_type, record_id, sync_status, local_updated_at, cloud_synced_at, attempt_count
+      FROM sync_ledger
+      WHERE record_type = 'task' AND record_id = ?
+    `).get(taskId) as {
+      record_type: string
+      record_id: string
+      sync_status: string
+      local_updated_at: number
+      cloud_synced_at: number
+      attempt_count: number
+    } | undefined
+
+    expect(ledgerRow).toBeDefined()
+    expect(ledgerRow?.record_type).toBe('task')
+    expect(ledgerRow?.record_id).toBe(taskId)
+    expect(ledgerRow?.sync_status).toBe('synced')
+    expect(typeof ledgerRow?.local_updated_at).toBe('number')
+    expect(typeof ledgerRow?.cloud_synced_at).toBe('number')
+    expect(ledgerRow?.attempt_count).toBeGreaterThanOrEqual(1)
+
+    db.prepare(`DELETE FROM sync_ledger WHERE record_type = 'task' AND record_id = ?`).run(taskId)
   })
 })
 

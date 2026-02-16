@@ -174,6 +174,60 @@ function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_inbox_read ON inbox(read);
       `,
     },
+    {
+      version: 2,
+      sql: `
+        -- Sync ledger for incremental cloud coordination
+        CREATE TABLE IF NOT EXISTS sync_ledger (
+          record_type TEXT NOT NULL,
+          record_id TEXT NOT NULL,
+          local_updated_at INTEGER NOT NULL,
+          cloud_synced_at INTEGER,
+          sync_status TEXT NOT NULL DEFAULT 'pending',
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          PRIMARY KEY (record_type, record_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sync_ledger_status ON sync_ledger(sync_status);
+        CREATE INDEX IF NOT EXISTS idx_sync_ledger_local_updated ON sync_ledger(local_updated_at);
+
+        -- Backfill current task state into sync ledger (first incremental run)
+        INSERT OR IGNORE INTO sync_ledger (record_type, record_id, local_updated_at, sync_status)
+        SELECT 'task', id, updated_at, 'pending'
+        FROM tasks;
+
+        -- Keep ledger pending whenever tasks are inserted/updated/deleted
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_sync_ledger_insert
+        AFTER INSERT ON tasks
+        BEGIN
+          INSERT INTO sync_ledger (record_type, record_id, local_updated_at, cloud_synced_at, sync_status, attempt_count, last_error)
+          VALUES ('task', NEW.id, NEW.updated_at, NULL, 'pending', 0, NULL)
+          ON CONFLICT(record_type, record_id) DO UPDATE SET
+            local_updated_at = excluded.local_updated_at,
+            sync_status = 'pending',
+            last_error = NULL;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_sync_ledger_update
+        AFTER UPDATE ON tasks
+        BEGIN
+          INSERT INTO sync_ledger (record_type, record_id, local_updated_at, cloud_synced_at, sync_status, attempt_count, last_error)
+          VALUES ('task', NEW.id, NEW.updated_at, NULL, 'pending', 0, NULL)
+          ON CONFLICT(record_type, record_id) DO UPDATE SET
+            local_updated_at = excluded.local_updated_at,
+            sync_status = 'pending',
+            last_error = NULL;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_tasks_sync_ledger_delete
+        AFTER DELETE ON tasks
+        BEGIN
+          DELETE FROM sync_ledger
+          WHERE record_type = 'task' AND record_id = OLD.id;
+        END;
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')

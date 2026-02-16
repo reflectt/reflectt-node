@@ -15,6 +15,7 @@
 
 import { presenceManager } from './presence.js'
 import { taskManager } from './tasks.js'
+import { getDb } from './db.js'
 
 // ---- Types matching @reflectt/host-agent ----
 // We inline the types to avoid a build-time dependency on the monorepo package.
@@ -256,13 +257,186 @@ async function sendHeartbeat(): Promise<void> {
   }
 }
 
+interface DirtyTaskRow {
+  id: string
+  title: string
+  status: string
+  assignee: string | undefined
+  priority: string | undefined
+  local_updated_at: number
+}
+
+interface LedgerTaskRow {
+  record_id: string
+  local_updated_at: number
+}
+
+function refreshTaskLedger(tasks: TaskStateEntry[]): void {
+  const db = getDb()
+  const snapshotIds = new Set(tasks.map((task) => task.id))
+
+  const upsert = db.prepare(`
+    INSERT INTO sync_ledger (
+      record_type,
+      record_id,
+      local_updated_at,
+      cloud_synced_at,
+      sync_status,
+      attempt_count,
+      last_error
+    ) VALUES ('task', ?, ?, NULL, 'pending', 0, NULL)
+    ON CONFLICT(record_type, record_id) DO UPDATE SET
+      local_updated_at = excluded.local_updated_at,
+      sync_status = CASE
+        WHEN sync_ledger.local_updated_at = excluded.local_updated_at THEN sync_ledger.sync_status
+        ELSE 'pending'
+      END,
+      last_error = CASE
+        WHEN sync_ledger.local_updated_at = excluded.local_updated_at THEN sync_ledger.last_error
+        ELSE NULL
+      END
+  `)
+
+  const listTaskLedgerIds = db.prepare(`
+    SELECT record_id
+    FROM sync_ledger
+    WHERE record_type = 'task'
+  `)
+
+  const deleteLedgerRow = db.prepare(`
+    DELETE FROM sync_ledger
+    WHERE record_type = 'task' AND record_id = ?
+  `)
+
+  const tx = db.transaction((snapshot: TaskStateEntry[]) => {
+    for (const task of snapshot) {
+      const updatedAt = Number(task.updatedAt || Date.now())
+      upsert.run(task.id, updatedAt)
+    }
+
+    const ledgerIds = listTaskLedgerIds.all() as Array<{ record_id: string }>
+    for (const row of ledgerIds) {
+      if (!snapshotIds.has(row.record_id)) {
+        deleteLedgerRow.run(row.record_id)
+      }
+    }
+  })
+
+  tx(tasks)
+}
+
+function getDirtyTaskLedgerRows(limit = 200): LedgerTaskRow[] {
+  const db = getDb()
+  return db.prepare(`
+    SELECT record_id, local_updated_at
+    FROM sync_ledger
+    WHERE record_type = 'task'
+      AND (
+        cloud_synced_at IS NULL
+        OR cloud_synced_at < local_updated_at
+        OR sync_status != 'synced'
+      )
+    ORDER BY local_updated_at ASC
+    LIMIT ?
+  `).all(limit) as LedgerTaskRow[]
+}
+
+function markTaskRowsSynced(rows: DirtyTaskRow[], syncedAt: number): void {
+  if (rows.length === 0) return
+  const db = getDb()
+  const markSynced = db.prepare(`
+    UPDATE sync_ledger
+    SET cloud_synced_at = ?,
+        sync_status = 'synced',
+        attempt_count = attempt_count + 1,
+        last_error = NULL
+    WHERE record_type = 'task'
+      AND record_id = ?
+      AND local_updated_at = ?
+  `)
+
+  const tx = db.transaction((items: DirtyTaskRow[]) => {
+    for (const row of items) {
+      markSynced.run(syncedAt, row.id, row.local_updated_at)
+    }
+  })
+
+  tx(rows)
+}
+
+function markTaskRowsErrored(rows: DirtyTaskRow[], errorMessage: string): void {
+  if (rows.length === 0) return
+  const db = getDb()
+  const markError = db.prepare(`
+    UPDATE sync_ledger
+    SET sync_status = 'error',
+        attempt_count = attempt_count + 1,
+        last_error = ?
+    WHERE record_type = 'task'
+      AND record_id = ?
+      AND local_updated_at = ?
+  `)
+
+  const tx = db.transaction((items: DirtyTaskRow[]) => {
+    for (const row of items) {
+      markError.run(errorMessage, row.id, row.local_updated_at)
+    }
+  })
+
+  tx(rows)
+}
+
 async function syncTasks(): Promise<void> {
   if (!state.hostId || !config) return
 
-  // Task sync endpoint not yet available in cloud API.
-  // When /api/hosts/:hostId/tasks/sync is added, wire it here.
-  // For now, task state is included in heartbeat payloads (activeTasks).
-  state.lastTaskSync = Date.now()
+  const tasksSnapshot = getTasks()
+  refreshTaskLedger(tasksSnapshot)
+
+  const taskById = new Map(tasksSnapshot.map((task) => [task.id, task]))
+  const dirtyLedgerRows = getDirtyTaskLedgerRows()
+
+  const dirtyRows: DirtyTaskRow[] = dirtyLedgerRows
+    .map((ledgerRow) => {
+      const task = taskById.get(ledgerRow.record_id)
+      if (!task) return null
+      return {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        assignee: task.assignee,
+        priority: task.priority,
+        local_updated_at: ledgerRow.local_updated_at,
+      }
+    })
+    .filter((row): row is DirtyTaskRow => row !== null)
+
+  if (dirtyRows.length === 0) {
+    state.lastTaskSync = Date.now()
+    return
+  }
+
+  const tasksPayload = dirtyRows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    assignee: row.assignee ?? undefined,
+    priority: row.priority ?? undefined,
+    updatedAt: new Date(row.local_updated_at).toISOString(),
+  }))
+
+  const result = await cloudPost(`/api/hosts/${state.hostId}/tasks/sync`, {
+    tasks: tasksPayload,
+  })
+
+  if (result.success || result.data) {
+    const syncedAt = Date.now()
+    markTaskRowsSynced(dirtyRows, syncedAt)
+    state.lastTaskSync = syncedAt
+  } else {
+    const errorMessage = result.error || 'task sync failed'
+    markTaskRowsErrored(dirtyRows, errorMessage)
+    state.errors++
+  }
 }
 
 // ---- HTTP helper ----

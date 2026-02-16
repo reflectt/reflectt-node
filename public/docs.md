@@ -263,7 +263,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/db/status` | SQLite database status (engine, WAL mode, schema version, table row counts) |
+| GET | `/db/status` | SQLite database status (engine, WAL mode, schema version, table row counts including `sync_ledger`) |
 
 ## Cloud
 
