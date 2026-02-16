@@ -1524,3 +1524,134 @@ describe('Branch tracking on doing transition', () => {
     await req('DELETE', `/tasks/${taskId}`)
   })
 })
+
+/* ── Stale context detection: warnings for done task references ────── */
+describe('Stale context detection', () => {
+  let taskId: string
+
+  afterAll(async () => {
+    if (taskId) await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('warns when chat message references a done task', async () => {
+    // Create a task and move it to done with full gates
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'Stale context test task',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Done criteria met'],
+      priority: 'P3',
+      eta: '30m',
+    })
+    taskId = created.task.id
+
+    // Move through lifecycle to done (with required gates)
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: { eta: '30m' },
+    })
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/test-artifact.md',
+        qa_bundle: {
+          summary: 'test',
+          artifact_links: ['https://github.com/test/pr/1'],
+          checks: ['npm test'],
+        },
+      },
+    })
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['https://github.com/test/pr/1'],
+        reviewer_approved: true,
+      },
+    })
+
+    // Verify task is done
+    const { body: taskCheck } = await req('GET', `/tasks/${taskId}`)
+    expect(taskCheck.task.status).toBe('done')
+
+    // Post a chat message referencing the done task
+    const { body: chatBody } = await req('POST', '/chat/messages', {
+      from: 'test-agent',
+      content: `Working on ${taskId} — almost done with the implementation`,
+      channel: 'general',
+    })
+    expect(chatBody.success).toBe(true)
+    expect(chatBody.warnings).toBeDefined()
+    expect(chatBody.warnings.length).toBeGreaterThan(0)
+
+    const taskWarning = chatBody.warnings.find((w: any) => w.reason === 'done_task')
+    expect(taskWarning).toBeDefined()
+    expect(taskWarning.taskId).toBe(taskId)
+    expect(taskWarning.message).toContain('already done')
+  })
+
+  it('does not warn when referencing an active task', async () => {
+    // Create a task in doing status
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: active task reference check',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Check done'],
+      priority: 'P3',
+      eta: '30m',
+    })
+    const activeTaskId = created.task.id
+
+    await req('PATCH', `/tasks/${activeTaskId}`, { status: 'doing' })
+
+    const { body: chatBody } = await req('POST', '/chat/messages', {
+      from: 'test-agent',
+      content: `Status update on ${activeTaskId}: making progress`,
+      channel: 'general',
+    })
+    expect(chatBody.success).toBe(true)
+    // Should have no task warnings (might have mention warnings)
+    const taskWarnings = (chatBody.warnings || []).filter((w: any) => w.reason === 'done_task')
+    expect(taskWarnings.length).toBe(0)
+
+    await req('DELETE', `/tasks/${activeTaskId}`)
+  })
+})
+
+/* ── GET /tasks/active: quick status check for agents ──────────────── */
+describe('Active tasks endpoint', () => {
+  it('GET /tasks/active requires agent param', async () => {
+    const { status, body } = await req('GET', '/tasks/active')
+    expect(body.error).toContain('agent')
+  })
+
+  it('GET /tasks/active returns doing and validating tasks', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: active tasks endpoint check',
+      createdBy: 'test-runner',
+      assignee: 'active-check-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Active check done'],
+      priority: 'P3',
+      eta: '30m',
+    })
+    const tid = created.task.id
+
+    await req('PATCH', `/tasks/${tid}`, { status: 'doing' })
+
+    const { body } = await req('GET', '/tasks/active?agent=active-check-agent')
+    expect(body.success).toBe(true)
+    expect(body.doing.length).toBeGreaterThanOrEqual(1)
+    expect(body.doing.some((t: any) => t.id === tid)).toBe(true)
+
+    await req('DELETE', `/tasks/${tid}`)
+  })
+
+  it('GET /tasks/active returns hint when no active tasks', async () => {
+    const { body } = await req('GET', '/tasks/active?agent=nonexistent-agent-xyz')
+    expect(body.success).toBe(true)
+    expect(body.doing.length).toBe(0)
+    expect(body.hint).toBeDefined()
+  })
+})

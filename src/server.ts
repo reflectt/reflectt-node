@@ -670,6 +670,43 @@ function buildMentionWarnings(content: string): MentionWarning[] {
   return warnings
 }
 
+type TaskReferenceWarning = {
+  taskId: string
+  reason: 'done_task' | 'unknown_task'
+  message: string
+  taskTitle?: string
+}
+
+function buildTaskReferenceWarnings(content: string): TaskReferenceWarning[] {
+  // Extract task ID references from message content
+  const taskIdPattern = /\btask-[\w-]+/gi
+  const matches = content.match(taskIdPattern)
+  if (!matches) return []
+
+  const seen = new Set<string>()
+  const warnings: TaskReferenceWarning[] = []
+
+  for (const rawId of matches) {
+    const id = rawId.toLowerCase()
+    if (seen.has(id)) continue
+    seen.add(id)
+
+    const lookup = taskManager.resolveTaskId(rawId)
+    if (!lookup.task) continue // don't warn on unresolved — could be a partial ID
+
+    if (lookup.task.status === 'done') {
+      warnings.push({
+        taskId: lookup.resolvedId || rawId,
+        reason: 'done_task',
+        message: `⚠️ ${rawId} is already done ("${lookup.task.title?.slice(0, 50)}"). You may be working from stale context — check your task queue.`,
+        taskTitle: lookup.task.title,
+      })
+    }
+  }
+
+  return warnings
+}
+
 function inferErrorStatus(errorText: string): number {
   const text = errorText.toLowerCase()
   if (text.includes('not found')) return 404
@@ -1387,7 +1424,9 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/chat/messages', async (request) => {
     const data = SendMessageSchema.parse(request.body)
     const message = await chatManager.sendMessage(data)
-    const warnings = buildMentionWarnings(data.content)
+    const mentionWarnings = buildMentionWarnings(data.content)
+    const taskRefWarnings = buildTaskReferenceWarnings(data.content)
+    const warnings = [...mentionWarnings, ...taskRefWarnings]
 
     // Auto-update presence: if you're posting, you're active
     if (data.from) {
@@ -2456,6 +2495,45 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Get next task (pull-based assignment)
+  // Active tasks for an agent (quick status check to prevent stale context)
+  app.get('/tasks/active', async (request) => {
+    const query = request.query as Record<string, string>
+    const agent = query.agent?.toLowerCase()
+    if (!agent) {
+      return { success: false, error: 'agent query parameter required' }
+    }
+
+    const allTasks = taskManager.listTasks({})
+    const doing = allTasks.filter(t =>
+      t.status === 'doing' && (t.assignee || '').toLowerCase() === agent
+    ).map(t => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      branch: (t.metadata as Record<string, unknown>)?.branch || null,
+      pr_url: (t.metadata as Record<string, unknown>)?.pr_url || null,
+      updatedAt: t.updatedAt,
+    }))
+
+    const validating = allTasks.filter(t =>
+      t.status === 'validating' && (t.assignee || '').toLowerCase() === agent
+    ).map(t => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      updatedAt: t.updatedAt,
+    }))
+
+    return {
+      success: true,
+      agent,
+      doing,
+      validating,
+      total: doing.length + validating.length,
+      hint: doing.length === 0 ? 'No active tasks — check /tasks/next or /tasks/backlog' : undefined,
+    }
+  })
+
   app.get('/tasks/next', async (request) => {
     const query = request.query as Record<string, string>
     const agent = query.agent
