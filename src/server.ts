@@ -2889,6 +2889,13 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ============ CLOUD INTEGRATION ============
+
+  app.get('/cloud/status', async () => {
+    const { getCloudStatus } = await import('./cloud.js')
+    return getCloudStatus()
+  })
+
   // ============ OPENCLAW ENDPOINTS ============
 
   // OpenClaw status (TODO: wire up when gateway token configured)

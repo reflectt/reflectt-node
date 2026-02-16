@@ -9,6 +9,7 @@
 import { createServer } from './server.js'
 import { serverConfig } from './config.js'
 import { acquirePidLock, releasePidLock } from './pidlock.js'
+import { startCloudIntegration, stopCloudIntegration, isCloudConfigured } from './cloud.js'
 // OpenClaw connection is optional — server works for chat/tasks without it
 
 async function main() {
@@ -36,10 +37,21 @@ async function main() {
     console.log(`   - WebSocket: ws://${serverConfig.host}:${serverConfig.port}/chat/ws`)
     console.log(`   - Health: http://${serverConfig.host}:${serverConfig.port}/health`)
     console.log(`   - PID: ${process.pid}`)
+
+    // Cloud integration (optional — requires REFLECTT_HOST_TOKEN)
+    if (isCloudConfigured()) {
+      // Non-blocking: don't prevent server from starting if cloud is down
+      startCloudIntegration().catch(err => {
+        console.warn(`☁️  Cloud integration error: ${err?.message || err}`)
+      })
+    } else {
+      console.log('☁️  Cloud integration: disabled (set REFLECTT_HOST_TOKEN to enable)')
+    }
     
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       console.log(`\n${signal} received, shutting down...`)
+      stopCloudIntegration()
       releasePidLock()
       await app.close()
       process.exit(0)
