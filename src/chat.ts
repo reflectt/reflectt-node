@@ -9,6 +9,7 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 import { eventBus } from './events.js'
 import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
+import { CHANNEL_DEFINITIONS, DEFAULT_CHAT_CHANNELS } from './channels.js'
 // OpenClaw integration pending — chat works standalone for now
 
 const MESSAGES_FILE = join(DATA_DIR, 'messages.jsonl')
@@ -25,8 +26,10 @@ class ChatManager {
     // TODO: re-enable when OpenClaw connection is configured
     // openclawClient.on('message', ...)
 
-    // Create default room
-    this.createRoom('general', 'General Chat')
+    // Create default rooms/channels
+    for (const channel of CHANNEL_DEFINITIONS) {
+      this.createRoom(channel.id, channel.name)
+    }
     
     // Load persisted messages
     this.loadMessages().catch(err => {
@@ -299,8 +302,7 @@ class ChatManager {
     const channelMap = new Map<string, { count: number; lastActivity: number }>()
     
     // Default channels
-    const defaultChannels = ['general', 'problems', 'shipping', 'dev', 'decisions']
-    defaultChannels.forEach(channel => {
+    DEFAULT_CHAT_CHANNELS.forEach(channel => {
       channelMap.set(channel, { count: 0, lastActivity: 0 })
     })
     

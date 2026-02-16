@@ -967,6 +967,27 @@ describe('Chat Messages', () => {
     const { status, body } = await req('GET', '/chat/channels')
     expect(status).toBe(200)
     expect(body.channels).toBeInstanceOf(Array)
+
+    const channelNames = (body.channels || []).map((channel: any) => channel.channel)
+    expect(channelNames).toEqual(expect.arrayContaining(['general', 'shipping', 'reviews', 'blockers']))
+  })
+
+  it('POST /chat/messages supports reviews and blockers channels', async () => {
+    const { status: reviewStatus, body: reviewBody } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'review requested for task-123',
+      channel: 'reviews',
+    })
+    expect(reviewStatus).toBe(200)
+    expect(reviewBody.message.channel).toBe('reviews')
+
+    const { status: blockerStatus, body: blockerBody } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'blocked on migration dependency',
+      channel: 'blockers',
+    })
+    expect(blockerStatus).toBe(200)
+    expect(blockerBody.message.channel).toBe('blockers')
   })
 })
 
@@ -1167,6 +1188,20 @@ describe('Inbox', () => {
     const { status, body } = await req('GET', '/inbox/test-agent/subscriptions')
     expect(status).toBe(200)
     expect(body.subscriptions).toBeInstanceOf(Array)
+  })
+
+  it('POST /inbox/:agent/subscribe updates per-agent channel subscriptions', async () => {
+    const agent = 'channel-reviewer'
+
+    const { status: subscribeStatus, body: subscribeBody } = await req('POST', `/inbox/${agent}/subscribe`, {
+      channels: ['reviews', 'blockers'],
+    })
+    expect(subscribeStatus).toBe(200)
+    expect(subscribeBody.subscriptions).toEqual(['reviews', 'blockers'])
+
+    const { status: getStatus, body: getBody } = await req('GET', `/inbox/${agent}/subscriptions`)
+    expect(getStatus).toBe(200)
+    expect(getBody.subscriptions).toEqual(['reviews', 'blockers'])
   })
 })
 
