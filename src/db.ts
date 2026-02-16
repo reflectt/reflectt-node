@@ -329,3 +329,19 @@ export function safeJsonParse<T = unknown>(value: string | null | undefined): T 
     return undefined
   }
 }
+
+/**
+ * SQLite-vec helper utilities.
+ *
+ * Kept in db.ts so search/indexing code can depend on one storage module
+ * while embeddings implementation stays isolated in src/embeddings.ts.
+ */
+export async function embedTextForDb(text: string): Promise<Float32Array> {
+  const { embed } = await import('./embeddings.js')
+  return embed(text)
+}
+
+export async function embedBatchForDb(texts: string[]): Promise<Float32Array[]> {
+  const { embedBatch } = await import('./embeddings.js')
+  return embedBatch(texts)
+}
