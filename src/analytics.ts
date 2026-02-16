@@ -50,6 +50,38 @@ interface TaskAnalytics {
   byAssignee: Record<string, { total: number; completed: number; avgCycleTimeMs: number }>
 }
 
+interface ModelStats {
+  model: string
+  total: number
+  completed: number
+  avgCycleTimeMs: number
+  reviewPassRate: number
+  _cycleTimes: number[]
+  _reviewPasses: number
+  _reviewTotal: number
+}
+
+interface ModelAnalytics {
+  totalTracked: number
+  totalUntracked: number
+  models: Array<{
+    model: string
+    total: number
+    completed: number
+    avgCycleTimeMs: number
+    reviewPassRate: number
+  }>
+}
+
+interface AgentModelAnalytics {
+  agent: string
+  models: string[]
+  total: number
+  completed: number
+  avgCycleTimeMs: number
+  reviewPassRate: number
+}
+
 interface MetricsSummary {
   tasks: TaskAnalytics
   content?: ContentPerformance
@@ -362,6 +394,111 @@ class AnalyticsManager {
       generatedAt: now,
       note: 'Funnel structure is live; signups/activations are placeholders until instrumentation is wired.',
     }
+  }
+
+  /**
+   * Model performance analytics: tasks per model, avg cycle time, review pass rates
+   */
+  getModelAnalytics(since?: number): ModelAnalytics {
+    const tasks = taskManager.listTasks()
+    const filtered = since ? tasks.filter(t => t.createdAt >= since) : tasks
+    const completed = filtered.filter(t => t.status === 'done')
+
+    const byModel: Record<string, ModelStats> = {}
+
+    for (const task of filtered) {
+      const model = (task.metadata?.model as string) || 'unknown'
+      if (!byModel[model]) {
+        byModel[model] = {
+          model,
+          total: 0,
+          completed: 0,
+          avgCycleTimeMs: 0,
+          reviewPassRate: 0,
+          _cycleTimes: [],
+          _reviewPasses: 0,
+          _reviewTotal: 0,
+        }
+      }
+      byModel[model].total++
+      if (task.status === 'done') {
+        byModel[model].completed++
+        const cycleTime = task.updatedAt - task.createdAt
+        if (cycleTime > 0) byModel[model]._cycleTimes.push(cycleTime)
+        
+        byModel[model]._reviewTotal++
+        if (task.metadata?.reviewer_approved) {
+          byModel[model]._reviewPasses++
+        }
+      }
+    }
+
+    // Finalize averages
+    const models = Object.values(byModel).map(m => {
+      const ct = m._cycleTimes
+      return {
+        model: m.model,
+        total: m.total,
+        completed: m.completed,
+        avgCycleTimeMs: ct.length > 0 ? Math.round(ct.reduce((s, v) => s + v, 0) / ct.length) : 0,
+        reviewPassRate: m._reviewTotal > 0 ? Math.round((m._reviewPasses / m._reviewTotal) * 100) / 100 : 0,
+      }
+    }).sort((a, b) => b.completed - a.completed)
+
+    return {
+      totalTracked: filtered.filter(t => t.metadata?.model).length,
+      totalUntracked: filtered.filter(t => !t.metadata?.model).length,
+      models,
+    }
+  }
+
+  /**
+   * Per-agent model + performance stats
+   */
+  getAgentModelAnalytics(since?: number): AgentModelAnalytics[] {
+    const tasks = taskManager.listTasks()
+    const filtered = since ? tasks.filter(t => t.createdAt >= since) : tasks
+
+    const byAgent: Record<string, {
+      agent: string
+      models: Set<string>
+      total: number
+      completed: number
+      cycleTimes: number[]
+      reviewPasses: number
+      reviewTotal: number
+    }> = {}
+
+    for (const task of filtered) {
+      const agent = task.assignee || 'unassigned'
+      if (!byAgent[agent]) {
+        byAgent[agent] = { agent, models: new Set(), total: 0, completed: 0, cycleTimes: [], reviewPasses: 0, reviewTotal: 0 }
+      }
+      const model = task.metadata?.model as string
+      if (model) byAgent[agent].models.add(model)
+      byAgent[agent].total++
+
+      if (task.status === 'done') {
+        byAgent[agent].completed++
+        const ct = task.updatedAt - task.createdAt
+        if (ct > 0) byAgent[agent].cycleTimes.push(ct)
+        byAgent[agent].reviewTotal++
+        if (task.metadata?.reviewer_approved) byAgent[agent].reviewPasses++
+      }
+    }
+
+    return Object.values(byAgent).map(a => ({
+      agent: a.agent,
+      models: Array.from(a.models),
+      total: a.total,
+      completed: a.completed,
+      avgCycleTimeMs: a.cycleTimes.length > 0
+        ? Math.round(a.cycleTimes.reduce((s, v) => s + v, 0) / a.cycleTimes.length)
+        : 0,
+      reviewPassRate: a.reviewTotal > 0
+        ? Math.round((a.reviewPasses / a.reviewTotal) * 100) / 100
+        : 0,
+    })).sort((a, b) => b.completed - a.completed)
   }
 
   /**

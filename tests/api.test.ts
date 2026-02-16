@@ -503,6 +503,15 @@ describe('Task History Changelog', () => {
           artifact_links: ['process/TASK-history-proof.md'],
           checks: ['npm test'],
         },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/123',
+          commit_sha: 'abcdef1',
+          artifact_path: 'process/TASK-history-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
       },
     })
 
@@ -569,6 +578,15 @@ describe('Artifact Path Canonicalization', () => {
           artifact_links: ['process/TASK-test-proof.md'],
           checks: ['npm test'],
         },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/456',
+          commit_sha: 'abcdef2',
+          artifact_path: 'process/TASK-test-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
       },
     })
 
@@ -588,11 +606,152 @@ describe('Artifact Path Canonicalization', () => {
           artifact_links: ['process/TASK-test-proof.md'],
           checks: ['npm test'],
         },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/457',
+          commit_sha: 'abcdef3',
+          artifact_path: 'process/TASK-test-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
       },
     })
 
     expect(status).toBe(200)
     expect(body.task.status).toBe('validating')
+  })
+})
+
+describe('Validating review handoff gate', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: validating review handoff gate',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Handoff contract enforced'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('rejects validating status when review_handoff is missing', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.gate).toBe('review_handoff')
+  })
+
+  it('rejects validating when PR URL/commit SHA missing unless doc_only=true', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toContain('open PR URL required')
+  })
+
+  it('accepts validating with doc_only handoff and enforces delta note on re-review', async () => {
+    const first = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+          doc_only: true,
+        },
+      },
+    })
+
+    expect(first.status).toBe(200)
+
+    const second = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test rerun',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+          doc_only: true,
+        },
+      },
+    })
+
+    expect(second.status).toBe(400)
+    expect(second.body.gate).toBe('review_delta')
+
+    const third = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test rerun',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+          doc_only: true,
+        },
+        review_delta_note: 'Updated test proof wording and summary for re-review.',
+      },
+    })
+
+    expect(third.status).toBe(200)
   })
 })
 
@@ -643,6 +802,104 @@ describe('Backlog', () => {
         expect(pp).toBeLessThanOrEqual(cp)
       }
     }
+  })
+})
+
+describe('My Now cockpit', () => {
+  let doingTaskId: string
+  let blockedTaskId: string
+  let reviewTaskId: string
+
+  beforeAll(async () => {
+    const createDoing = await req('POST', '/tasks', {
+      title: 'TEST: cockpit assigned doing',
+      createdBy: 'test-runner',
+      assignee: 'cockpit-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Cockpit includes assigned task'],
+      eta: '1h',
+      status: 'doing',
+      metadata: {
+        artifacts: ['https://github.com/reflectt/reflectt-node/pull/999'],
+      },
+    })
+    doingTaskId = createDoing.body.task.id
+
+    const createBlocked = await req('POST', '/tasks', {
+      title: 'TEST: cockpit blocked task',
+      createdBy: 'test-runner',
+      assignee: 'cockpit-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Cockpit includes blocker lane'],
+      eta: '1h',
+      status: 'blocked',
+      metadata: {
+        blocker: 'Waiting for dependency update',
+      },
+    })
+    blockedTaskId = createBlocked.body.task.id
+
+    const createReview = await req('POST', '/tasks', {
+      title: 'TEST: cockpit pending review',
+      createdBy: 'test-runner',
+      assignee: 'other-agent',
+      reviewer: 'cockpit-agent',
+      priority: 'P2',
+      done_criteria: ['Cockpit includes pending review'],
+      eta: '1h',
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-test-cockpit-review.md',
+        qa_bundle: {
+          summary: 'cockpit test bundle',
+          artifact_links: ['process/TASK-test-cockpit-review.md'],
+          checks: ['npm run test'],
+        },
+      },
+    })
+    reviewTaskId = createReview.body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${doingTaskId}`)
+    await req('DELETE', `/tasks/${blockedTaskId}`)
+    await req('DELETE', `/tasks/${reviewTaskId}`)
+  })
+
+  it('GET /me/:agent returns single-pane payload with assigned/review lanes + blockers + changelog', async () => {
+    await req('POST', '/chat/messages', {
+      from: 'system',
+      channel: 'general',
+      content: '@cockpit-agent build failed on CI check for PR #999',
+    })
+
+    const { status, body } = await req('GET', '/me/cockpit-agent')
+    expect(status).toBe(200)
+    expect(body.agent).toBe('cockpit-agent')
+    expect(body.assignedTasks).toBeInstanceOf(Array)
+    expect(body.pendingReviews).toBeInstanceOf(Array)
+    expect(body.blockers).toBeInstanceOf(Array)
+    expect(body.taskPrLinks).toBeInstanceOf(Array)
+    expect(body.failingChecks).toBeInstanceOf(Array)
+    expect(body.sinceLastSeen).toBeDefined()
+    expect(body.sinceLastSeen.changes).toBeInstanceOf(Array)
+    expect(typeof body.nextAction).toBe('string')
+
+    const assignedIds = body.assignedTasks.map((t: any) => t.id)
+    const reviewIds = body.pendingReviews.map((t: any) => t.id)
+    const blockerIds = body.blockers.map((t: any) => t.id)
+
+    expect(assignedIds).toContain(doingTaskId)
+    expect(assignedIds).toContain(blockedTaskId)
+    expect(reviewIds).toContain(reviewTaskId)
+    expect(blockerIds).toContain(blockedTaskId)
+
+    expect(body.taskPrLinks).toEqual(expect.arrayContaining(['https://github.com/reflectt/reflectt-node/pull/999']))
+    expect(body.failingChecks.length).toBeGreaterThan(0)
+    expect(body.sinceLastSeen.changes.length).toBeGreaterThan(0)
+    expect(body.nextAction).toContain('Unblock')
   })
 })
 
@@ -1116,7 +1373,7 @@ describe('Chat Messages', () => {
   it('POST /chat/messages supports reviews and blockers channels', async () => {
     const { status: reviewStatus, body: reviewBody } = await req('POST', '/chat/messages', {
       from: 'test-runner',
-      content: 'review requested for task-123',
+      content: '@harmony review requested for task-123',
       channel: 'reviews',
     })
     expect(reviewStatus).toBe(200)
@@ -1124,11 +1381,36 @@ describe('Chat Messages', () => {
 
     const { status: blockerStatus, body: blockerBody } = await req('POST', '/chat/messages', {
       from: 'test-runner',
-      content: 'blocked on migration dependency',
+      content: '@kai blocked on task-123 migration dependency',
       channel: 'blockers',
     })
     expect(blockerStatus).toBe(200)
     expect(blockerBody.message.channel).toBe('blockers')
+  })
+
+  it('POST /chat/messages blocks action-required reviews/blockers messages without @owner + task-id', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'please review this soon',
+      channel: 'reviews',
+    })
+
+    expect(status).toBe(400)
+    expect(body.gate).toBe('action_message_contract')
+    expect(body.error).toContain('@owner')
+  })
+
+  it('POST /chat/messages warns (but allows) likely action-required messages in general missing @owner/task-id', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'Please review task-123 when you can',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.action_warnings)).toBe(true)
+    expect(body.action_warnings.length).toBeGreaterThan(0)
   })
 })
 
@@ -1307,6 +1589,66 @@ describe('Idle Nudge shipped cooldown', () => {
 
     await req('DELETE', `/tasks/${taskId}`)
   })
+
+  it('suppresses nudges when task comment posted recently', async () => {
+    const agent = 'lane-comment-suppress'
+    await cleanupAgentTasks(agent)
+    const taskId = await createDoingTask(agent, 'TEST: comment suppression')
+
+    await req('POST', `/presence/${agent}`, {
+      status: 'working',
+      task: taskId,
+      since: Date.now() - (50 * 60_000),
+    })
+
+    // Post a task comment
+    await req('POST', `/tasks/${taskId}/comments`, {
+      author: agent,
+      content: 'Working on the implementation, making progress',
+    })
+
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true`)
+    expect(status).toBe(200)
+
+    const decision = (body.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    expect(decision.reason).toBe('recent-task-comment')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('starts task focus window on doing transition', async () => {
+    const agent = 'lane-focus-window'
+    await cleanupAgentTasks(agent)
+
+    // Create task and move to doing — should start focus window
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: focus window task',
+      createdBy: 'test-runner',
+      assignee: agent,
+      reviewer: 'test-reviewer',
+      done_criteria: ['Focus tested'],
+      eta: '45m',
+      priority: 'P3',
+    })
+    const taskId = body.task.id
+    await req('PATCH', `/tasks/${taskId}`, { status: 'doing' })
+
+    await req('POST', `/presence/${agent}`, {
+      status: 'working',
+      task: taskId,
+      since: Date.now() - (50 * 60_000),
+    })
+
+    const { status: s, body: b } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true`)
+    expect(s).toBe(200)
+
+    const decision = (b.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    expect(decision.reason).toBe('task-focus-window')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
 })
 
 describe('SSE Event Filtering', () => {
@@ -1471,6 +1813,14 @@ describe('Task review bundle', () => {
           summary: 'test summary',
           artifact_links: [artifactRelPath],
           checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: artifactRelPath,
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'No PR expected for this doc-only review-bundle test fixture.',
+          doc_only: true,
         },
         artifacts: [artifactRelPath],
       },
@@ -1878,5 +2228,61 @@ describe('WIP cap enforcement', () => {
     expect(status).toBe(200)
     expect(body.task.status).toBe('doing')
     expect(body.task.metadata.wip_override_used).toBe(true)
+  })
+})
+
+describe('Model performance analytics', () => {
+  it('GET /analytics/models returns model stats', async () => {
+    const { status, body } = await req('GET', '/analytics/models')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.analytics).toBeDefined()
+    expect(typeof body.analytics.totalTracked).toBe('number')
+    expect(typeof body.analytics.totalUntracked).toBe('number')
+    expect(Array.isArray(body.analytics.models)).toBe(true)
+  })
+
+  it('GET /analytics/agents returns per-agent stats', async () => {
+    const { status, body } = await req('GET', '/analytics/agents')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.agents)).toBe(true)
+  })
+
+  it('model metadata persists through task lifecycle', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: model tracking lifecycle',
+      assignee: 'test-model-agent',
+      reviewer: 'kai',
+      done_criteria: ['Model tracked'],
+      createdBy: 'test',
+      eta: '1h',
+      priority: 'P3',
+    })
+    const taskId = created.task.id
+
+    // Move to doing with model info
+    const { body: doing } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: { model: 'anthropic/claude-sonnet-4-5' },
+    })
+    expect(doing.task.metadata.model).toBe('anthropic/claude-sonnet-4-5')
+
+    // Model should persist through to done
+    const { body: done } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['test-evidence'],
+        reviewer_approved: true,
+      },
+    })
+    expect(done.task.metadata.model).toBe('anthropic/claude-sonnet-4-5')
+
+    // Check it shows in analytics
+    const { body: analytics } = await req('GET', '/analytics/models')
+    const modelEntry = analytics.analytics.models.find((m: any) => m.model === 'anthropic/claude-sonnet-4-5')
+    expect(modelEntry).toBeDefined()
+
+    await req('DELETE', `/tasks/${taskId}`)
   })
 })

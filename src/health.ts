@@ -182,6 +182,8 @@ export type IdleNudgeDecision = {
     | 'stale-active-task'
     | 'ambiguous-active-task'
     | 'presence-task-mismatch'
+    | 'recent-task-comment'
+    | 'task-focus-window'
     | 'eligible'
   lane: IdleNudgeLaneState
   renderedMessage: string | null
@@ -541,6 +543,77 @@ class TeamHealthMonitor {
     }
 
     return lastAt || Date.now()
+  }
+
+  /** Check if agent posted a task comment recently (returns age in minutes or null) */
+  private getTaskCommentAgeForAgent(taskId: string, agent: string, now: number): number | null {
+    const comments = taskManager.getTaskComments(taskId)
+    if (!comments.length) return null
+
+    // Find most recent comment by this agent
+    let latestTs = 0
+    for (const c of comments) {
+      if ((c.author || '').toLowerCase() !== agent) continue
+      const ts = this.parseTimestamp(c.timestamp)
+      if (ts > latestTs) latestTs = ts
+    }
+
+    if (!latestTs) return null
+    return Math.floor((now - latestTs) / 60_000)
+  }
+
+  /** Per-task focus window: agent started doing task recently → deep work window */
+  private taskFocusWindows = new Map<string, { agent: string; startedAt: number; durationMin: number }>()
+
+  getTaskFocusWindow(taskId: string, agent: string, now: number): { active: boolean; remainingMin: number } | null {
+    const key = `${agent}:${taskId}`
+    const window = this.taskFocusWindows.get(key)
+    if (!window) return null
+
+    const elapsed = Math.floor((now - window.startedAt) / 60_000)
+    if (elapsed >= window.durationMin) {
+      this.taskFocusWindows.delete(key)
+      return null
+    }
+
+    return { active: true, remainingMin: window.durationMin - elapsed }
+  }
+
+  /** Start a focus window for a task (called when agent moves task to doing) */
+  startTaskFocusWindow(agent: string, taskId: string, durationMin: number = 45): void {
+    const key = `${agent}:${taskId}`
+    this.taskFocusWindows.set(key, { agent, startedAt: Date.now(), durationMin })
+  }
+
+  /** Count recent status updates from agent on a task that mention ETA but no artifacts */
+  private countRecentEtaOnlyUpdates(messages: any[], agent: string, taskId: string | null): number {
+    if (!taskId) return 0
+
+    let etaOnlyCount = 0
+    const cutoff = Date.now() - (4 * 60 * 60 * 1000) // last 4 hours
+
+    for (const m of messages) {
+      if ((m.from || '').toLowerCase() !== agent) continue
+      const ts = this.parseTimestamp(m.timestamp)
+      if (!ts || ts < cutoff) continue
+
+      const content = typeof m.content === 'string' ? m.content : ''
+      if (!content.includes(taskId)) continue
+
+      // Has ETA/time reference
+      const hasEta = /\beta\b|\b\d+\s*(?:min|m|h|hr|hour)/i.test(content)
+      if (!hasEta) continue
+
+      // Does NOT have artifact signal
+      const hasArtifact = /\b(shipped|artifact|commit|pr\s*#?\d+|pull request|merged|deployed|https?:\/\/github\.com)/i.test(content)
+      const hasBlocker = /\bblocker\b.*:.*\S/i.test(content) && !/\bblocker\b.*:\s*none\b/i.test(content)
+
+      if (!hasArtifact && !hasBlocker) {
+        etaOnlyCount++
+      }
+    }
+
+    return etaOnlyCount
   }
 
   private findLastProductiveActionAt(messages: any[], agent: string): number | null {
@@ -1298,6 +1371,24 @@ class TeamHealthMonitor {
         }
       }
 
+      // Task-comment activity suppression: treat task comments as not-idle
+      if (taskId) {
+        const taskCommentAge = this.getTaskCommentAgeForAgent(taskId, agent, now)
+        if (taskCommentAge !== null && taskCommentAge < 30) {
+          decisions.push({ ...baseDecision, decision: 'none', reason: 'recent-task-comment', renderedMessage: null })
+          continue
+        }
+      }
+
+      // Per-task focus window: 45-60m deep work suppression
+      if (taskId) {
+        const focusWindow = this.getTaskFocusWindow(taskId, agent, now)
+        if (focusWindow && focusWindow.active) {
+          decisions.push({ ...baseDecision, decision: 'none', reason: 'task-focus-window', renderedMessage: null })
+          continue
+        }
+      }
+
       if (inactivityMin < this.idleNudgeWarnMin) {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'below-warn-threshold', renderedMessage: null })
         continue
@@ -1369,16 +1460,29 @@ class TeamHealthMonitor {
         continue
       }
 
-      const intro = tier === 1
-        ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
-        : `@${agent} @kai system escalation: ${inactivityMin}m idle. Post required status format now.`
+      // ETA-only escalation: after 2 repeated status updates without artifacts,
+      // require artifact link or explicit blocker, else flag for reassignment
+      const etaOnlyCount = this.countRecentEtaOnlyUpdates(messages, agent, taskId)
+      const needsArtifact = etaOnlyCount >= 2
 
-      const template = [
-        `Task: ${taskId}`,
-        '1) Shipped: <artifact/commit/file>',
-        '2) Blocker: <none or explicit blocker>',
-        '3) Next: <next deliverable + ETA>',
-      ].join('\n')
+      const intro = needsArtifact
+        ? `@${agent} @kai escalation: ${etaOnlyCount} status updates on ${taskId} with no artifact or blocker. Post artifact link or explicit blocker now, or task will be flagged for reassignment.`
+        : tier === 1
+          ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
+          : `@${agent} @kai system escalation: ${inactivityMin}m idle. Post required status format now.`
+
+      const template = needsArtifact
+        ? [
+            `Task: ${taskId}`,
+            '1) Artifact: <PR link, commit, or file path> (REQUIRED)',
+            '2) Blocker: <explicit blocker if no artifact>',
+          ].join('\n')
+        : [
+            `Task: ${taskId}`,
+            '1) Shipped: <artifact/commit/file>',
+            '2) Blocker: <none or explicit blocker>',
+            '3) Next: <next deliverable + ETA>',
+          ].join('\n')
 
       const renderedMessage = `${intro}\n${template}`
 
