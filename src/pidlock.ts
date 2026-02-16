@@ -16,6 +16,14 @@ import { execSync } from 'node:child_process'
 
 const DEFAULT_PID_PATH = '/tmp/reflectt-node.pid'
 
+/**
+ * Get port-specific PID path to avoid cross-port lockfile conflicts.
+ * Production (4445) uses the default path for backward compatibility.
+ */
+export function getPidPath(port: number): string {
+  return port === 4445 ? DEFAULT_PID_PATH : `/tmp/reflectt-node-${port}.pid`
+}
+
 export interface PidLockResult {
   previousPid: number | null
   killedPrevious: boolean
