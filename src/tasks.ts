@@ -186,8 +186,11 @@ class TaskManager {
     return normalized.startsWith('process/')
   }
 
-  private validateLifecycleGates(task: Pick<Task, 'status' | 'reviewer' | 'done_criteria' | 'metadata'>): void {
+  private validateLifecycleGates(task: Pick<Task, 'status' | 'reviewer' | 'done_criteria' | 'metadata' | 'priority'>): void {
     if (task.status === 'todo') return
+
+    // Lightweight path: P3/P4 tasks skip artifact and qa gates
+    const isLightweight = (task.priority === 'P3' || task.priority === 'P4')
 
     const hasReviewer = Boolean(task.reviewer && task.reviewer.trim().length > 0)
     const hasDoneCriteria = Boolean(task.done_criteria && task.done_criteria.length > 0)
@@ -208,11 +211,11 @@ class TaskManager {
       throw new Error('Status contract: doing requires metadata.eta')
     }
 
-    if (task.status === 'validating' && !hasArtifactPath) {
+    if (!isLightweight && task.status === 'validating' && !hasArtifactPath) {
       throw new Error('Status contract: validating requires metadata.artifact_path')
     }
 
-    if (task.status === 'validating' && hasArtifactPath && !this.isCanonicalArtifactPath(artifactPath)) {
+    if (!isLightweight && task.status === 'validating' && hasArtifactPath && !this.isCanonicalArtifactPath(artifactPath)) {
       throw new Error('Status contract: validating requires metadata.artifact_path under process/ (repo-relative, workspace-agnostic)')
     }
   }

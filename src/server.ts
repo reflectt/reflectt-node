@@ -53,7 +53,7 @@ const CreateTaskSchema = z.object({
   done_criteria: z.array(z.string().trim().min(1)).min(1),
   eta: z.string().trim().min(1),
   createdBy: z.string().min(1),
-  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']).optional(),
   blocked_by: z.array(z.string()).optional(),
   epic_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
@@ -67,7 +67,7 @@ const UpdateTaskSchema = z.object({
   assignee: z.string().optional(),
   reviewer: z.string().optional(),
   done_criteria: z.array(z.string().min(1)).optional(),
-  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']).optional(),
   blocked_by: z.array(z.string()).optional(),
   epic_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
@@ -119,7 +119,7 @@ const CreateRecurringTaskSchema = z.object({
   done_criteria: z.array(z.string().trim().min(1)).min(1),
   eta: z.string().trim().min(1),
   createdBy: z.string().min(1),
-  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']).optional(),
   blocked_by: z.array(z.string()).optional(),
   epic_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
@@ -162,7 +162,7 @@ const CreateResearchRequestSchema = z.object({
   requestedBy: z.string().trim().min(1),
   owner: z.string().trim().min(1).optional(),
   category: z.enum(['market', 'competitor', 'customer', 'other']).optional(),
-  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']).optional(),
   status: z.enum(['open', 'in_progress', 'answered', 'archived']).optional(),
   taskId: z.string().trim().min(1).optional(),
   dueAt: z.number().int().positive().optional(),
@@ -190,7 +190,7 @@ const CreateResearchHandoffSchema = z.object({
   reviewer: z.string().trim().min(1),
   eta: z.string().trim().min(1),
   createdBy: z.string().trim().min(1).optional(),
-  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3', 'P4']).optional(),
   done_criteria: z.array(z.string().trim().min(1)).optional(),
   tags: z.array(z.string().trim().min(1)).optional(),
   artifactUrl: z.string().trim().url().optional(),
@@ -2317,21 +2317,27 @@ export async function createServer(): Promise<FastifyInstance> {
       // Merge incoming metadata with existing for gate checks + persistence
       const mergedMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
 
-      // QA bundle gate: validating requires structured review evidence.
-      const effectiveStatus = parsed.status ?? existing.status
-      const qaGate = enforceQaBundleGateForValidating(effectiveStatus, mergedMeta)
-      if (!qaGate.ok) {
-        reply.code(400)
-        return {
-          success: false,
-          error: qaGate.error,
-          gate: 'qa_bundle',
-          hint: qaGate.hint,
+      // Lightweight close path: P3/P4 tasks skip qa_bundle, artifact, and reviewer gates.
+      // They can go doing → done directly with just a close_result in metadata.
+      const isLightweight = (existing.priority === 'P3' || existing.priority === 'P4')
+
+      // QA bundle gate: validating requires structured review evidence (skip for lightweight)
+      if (!isLightweight) {
+        const effectiveStatus = parsed.status ?? existing.status
+        const qaGate = enforceQaBundleGateForValidating(effectiveStatus, mergedMeta)
+        if (!qaGate.ok) {
+          reply.code(400)
+          return {
+            success: false,
+            error: qaGate.error,
+            gate: 'qa_bundle',
+            hint: qaGate.hint,
+          }
         }
       }
 
       // ── Task-close gate: enforce proof + reviewer sign-off before done ──
-      if (parsed.status === 'done') {
+      if (parsed.status === 'done' && !isLightweight) {
         const artifacts = mergedMeta.artifacts as string[] | undefined
 
         // Gate 1: require artifacts (links, PR URLs, evidence)

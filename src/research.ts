@@ -12,7 +12,7 @@ export interface ResearchRequest {
   requestedBy: string
   owner?: string
   category?: 'market' | 'competitor' | 'customer' | 'other'
-  priority?: 'P0' | 'P1' | 'P2' | 'P3'
+  priority?: 'P0' | 'P1' | 'P2' | 'P3' | 'P4'
   status: 'open' | 'in_progress' | 'answered' | 'archived'
   taskId?: string
   dueAt?: number

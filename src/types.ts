@@ -29,7 +29,7 @@ export interface Task {
   createdBy: string
   createdAt: number
   updatedAt: number
-  priority?: 'P0' | 'P1' | 'P2' | 'P3'
+  priority?: 'P0' | 'P1' | 'P2' | 'P3' | 'P4'
   blocked_by?: string[]
   epic_id?: string
   tags?: string[]
@@ -76,7 +76,7 @@ export interface RecurringTask {
   reviewer?: string
   done_criteria?: string[]
   createdBy: string
-  priority?: 'P0' | 'P1' | 'P2' | 'P3'
+  priority?: 'P0' | 'P1' | 'P2' | 'P3' | 'P4'
   blocked_by?: string[]
   epic_id?: string
   tags?: string[]

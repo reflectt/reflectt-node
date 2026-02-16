@@ -746,6 +746,41 @@ describe('Task Close Gate', () => {
   })
 })
 
+describe('Lightweight Close (P3/P4)', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: lightweight close P3 task',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P3',
+      done_criteria: ['Quick fix done'],
+      eta: '15m',
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('P3 task can go doing → done without qa_bundle or artifacts', async () => {
+    // Move to doing first
+    await req('PATCH', `/tasks/${taskId}`, { status: 'doing' })
+
+    // Go directly to done — no validating, no qa_bundle, no artifacts, no reviewer sign-off
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      metadata: { close_result: 'pass' },
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('done')
+  })
+})
+
 describe('Task review endpoint', () => {
   let taskId: string
 
