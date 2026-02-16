@@ -1922,6 +1922,46 @@ export async function createServer(): Promise<FastifyInstance> {
       const data = CreateTaskCommentSchema.parse(request.body)
       const comment = await taskManager.addTaskComment(resolved.resolvedId, data.author, data.content)
 
+      // Task-comments are now primary execution comms:
+      // fan out inbox-visible notifications to assignee/reviewer + explicit @mentions.
+      const task = taskManager.getTask(resolved.resolvedId)
+      if (task) {
+        const targets = new Set<string>()
+
+        if (task.assignee) targets.add(task.assignee)
+        if (task.reviewer) targets.add(task.reviewer)
+        for (const mention of extractMentions(data.content)) {
+          targets.add(mention)
+        }
+
+        // Keep sender out of forced mention fanout to avoid self-noise.
+        targets.delete(data.author)
+
+        const mentionPrefix = Array.from(targets)
+          .map(agent => `@${agent}`)
+          .join(' ')
+
+        const maxContent = 280
+        const snippet = data.content.length > maxContent
+          ? `${data.content.slice(0, maxContent)}…`
+          : data.content
+
+        const inboxNotification = `${mentionPrefix} [task-comment:${task.id}] ${snippet}`.trim()
+
+        // Non-blocking best-effort notification path via chat/inbox routing.
+        // Uses dedicated task-comments channel; mentions still route as high-priority inbox items.
+        await chatManager.sendMessage({
+          from: data.author,
+          content: inboxNotification,
+          channel: 'task-comments',
+          metadata: {
+            kind: 'task_comment',
+            taskId: task.id,
+            commentId: comment.id,
+          },
+        })
+      }
+
       presenceManager.recordActivity(data.author, 'message')
       presenceManager.updatePresence(data.author, 'working')
 
