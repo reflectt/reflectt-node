@@ -662,6 +662,68 @@ describe('Task Close Gate', () => {
   })
 })
 
+describe('Task review endpoint', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: task review endpoint',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'assigned-reviewer',
+      priority: 'P2',
+      done_criteria: ['Review captured in metadata'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('POST /tasks/:id/review rejects non-assigned reviewer', async () => {
+    const { status, body } = await req('POST', `/tasks/${taskId}/review`, {
+      reviewer: 'wrong-reviewer',
+      decision: 'approve',
+      comment: 'LGTM',
+    })
+
+    expect(status).toBe(403)
+    expect(body.success).toBe(false)
+    expect(body.error).toContain('Only assigned reviewer')
+  })
+
+  it('POST /tasks/:id/review stores reviewer decision metadata', async () => {
+    const { status, body } = await req('POST', `/tasks/${taskId}/review`, {
+      reviewer: 'assigned-reviewer',
+      decision: 'approve',
+      comment: 'Ship it',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.decision.decision).toBe('approved')
+    expect(body.task.metadata.reviewer_approved).toBe(true)
+    expect(body.task.metadata.reviewer_decision.reviewer).toBe('assigned-reviewer')
+    expect(body.task.metadata.reviewer_decision.comment).toBe('Ship it')
+  })
+
+  it('POST /tasks/:id/review supports reject and flips reviewer_approved false', async () => {
+    const { status, body } = await req('POST', `/tasks/${taskId}/review`, {
+      reviewer: 'assigned-reviewer',
+      decision: 'reject',
+      comment: 'Missing validation evidence',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.decision.decision).toBe('rejected')
+    expect(body.task.metadata.reviewer_approved).toBe(false)
+    expect(body.task.metadata.reviewer_decision.comment).toBe('Missing validation evidence')
+  })
+})
+
 describe('Lane-state transition lock', () => {
   let taskId: string
 

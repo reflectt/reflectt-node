@@ -91,6 +91,12 @@ const ReviewBundleBodySchema = z.object({
   strict: z.boolean().optional(),
 })
 
+const TaskReviewDecisionSchema = z.object({
+  reviewer: z.string().trim().min(1),
+  decision: z.enum(['approve', 'reject']),
+  comment: z.string().trim().min(1),
+})
+
 const RecurringTaskScheduleSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('weekly'),
@@ -2011,6 +2017,82 @@ export async function createServer(): Promise<FastifyInstance> {
     )
 
     return { success: true, bundle }
+  })
+
+  // Reviewer decision endpoint (approve/reject in-tool)
+  app.post<{ Params: { id: string } }>('/tasks/:id/review', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) {
+      const match = taskManager.resolveTaskId(request.params.id)
+      if (match.matchType === 'ambiguous') {
+        return {
+          success: false,
+          error: 'Ambiguous task ID prefix',
+          details: {
+            input: request.params.id,
+            suggestions: match.suggestions,
+          },
+          hint: 'Use a longer prefix or the full task ID',
+        }
+      }
+      return { success: false, error: 'Task not found', details: { input: request.params.id, suggestions: match.suggestions } }
+    }
+
+    let body: { reviewer: string; decision: 'approve' | 'reject'; comment: string }
+    try {
+      body = TaskReviewDecisionSchema.parse(request.body || {})
+    } catch (err: any) {
+      reply.code(400)
+      return { success: false, error: err.message || 'Invalid review body' }
+    }
+
+    const task = resolved.task
+    if (!task.reviewer || task.reviewer.trim().length === 0) {
+      reply.code(400)
+      return { success: false, error: 'Task has no assigned reviewer' }
+    }
+
+    const expectedReviewer = task.reviewer.trim().toLowerCase()
+    const actualReviewer = body.reviewer.trim().toLowerCase()
+    if (expectedReviewer !== actualReviewer) {
+      reply.code(403)
+      return {
+        success: false,
+        error: `Only assigned reviewer "${task.reviewer}" can submit task review decisions`,
+      }
+    }
+
+    const decidedAt = Date.now()
+    const decisionLabel = body.decision === 'approve' ? 'approved' : 'rejected'
+    const mergedMetadata = {
+      ...(task.metadata || {}),
+      reviewer_approved: body.decision === 'approve',
+      reviewer_decision: {
+        decision: decisionLabel,
+        reviewer: body.reviewer,
+        comment: body.comment,
+        decidedAt,
+      },
+      reviewer_notes: body.comment,
+    }
+
+    const updated = await taskManager.updateTask(task.id, {
+      metadata: mergedMetadata,
+    })
+
+    await taskManager.addTaskComment(task.id, body.reviewer, `[review] ${decisionLabel}: ${body.comment}`)
+
+    return {
+      success: true,
+      decision: {
+        taskId: task.id,
+        reviewer: body.reviewer,
+        decision: decisionLabel,
+        comment: body.comment,
+        decidedAt,
+      },
+      task: updated ? enrichTaskWithComments(updated) : null,
+    }
   })
 
   // Create task
