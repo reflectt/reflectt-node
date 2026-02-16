@@ -161,7 +161,8 @@ export function trackRequest(method: string, path: string, statusCode: number, d
 export function trackError(type: string, endpoint?: string): void {
   if (!config.enabled) return
 
-  const key = `${type}:${endpoint || 'unknown'}`
+  const sanitized = endpoint ? normalizePath(endpoint) : 'unknown'
+  const key = `${type}:${sanitized}`
   const existing = errorLog.get(key) || { count: 0, lastSeen: 0 }
   existing.count++
   existing.lastSeen = Date.now()
