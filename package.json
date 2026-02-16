@@ -47,6 +47,7 @@
     "fastify": "^5.2.2",
     "sqlite-vec": "^0.1.7-alpha.2",
     "ws": "^8.18.0",
+    "yaml": "^2.8.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
