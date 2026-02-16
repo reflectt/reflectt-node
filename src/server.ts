@@ -9,8 +9,8 @@ import fastifyWebsocket from '@fastify/websocket'
 import fastifyCors from '@fastify/cors'
 import { z } from 'zod'
 import { createHash } from 'crypto'
-import { promises as fs } from 'fs'
-import { resolve, sep } from 'path'
+import { promises as fs, existsSync, readFileSync, statSync } from 'fs'
+import { resolve, sep, join } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { serverConfig, isDev, REFLECTT_HOME } from './config.js'
@@ -2654,6 +2654,78 @@ export async function createServer(): Promise<FastifyInstance> {
       return { error: 'Task not found' }
     }
     return { success: true, resolvedId: lookup.resolvedId }
+  })
+
+  // Team manifest: serve TEAM.md from ~/.reflectt/ with structured sections
+  app.get('/team/manifest', async () => {
+    const { createHash } = await import('crypto')
+    const teamPaths = [
+      join(REFLECTT_HOME, 'TEAM.md'),
+    ]
+
+    // Try defaults if no user file
+    const defaultPath = new URL('../defaults/TEAM.md', import.meta.url)
+
+    let content: string | null = null
+    let source = 'none'
+
+    for (const p of teamPaths) {
+      try {
+        if (existsSync(p)) {
+          content = readFileSync(p, 'utf-8')
+          source = p
+          break
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (!content) {
+      try {
+        content = readFileSync(defaultPath, 'utf-8')
+        source = 'defaults/TEAM.md'
+      } catch { /* ignore */ }
+    }
+
+    if (!content) {
+      return { success: false, message: 'No TEAM.md found. Run `reflectt init` to create one.' }
+    }
+
+    // Parse into structured sections
+    const sections: Record<string, string> = {}
+    let currentSection = '_preamble'
+    const lines = content.split('\n')
+
+    for (const line of lines) {
+      const headingMatch = line.match(/^#{1,3}\s+(.+)/)
+      if (headingMatch) {
+        currentSection = headingMatch[1].trim().toLowerCase().replace(/\s+/g, '_')
+        sections[currentSection] = ''
+      } else {
+        sections[currentSection] = (sections[currentSection] || '') + line + '\n'
+      }
+    }
+
+    // Trim whitespace from sections
+    for (const key of Object.keys(sections)) {
+      sections[key] = sections[key].trim()
+      if (!sections[key]) delete sections[key]
+    }
+
+    const hash = createHash('sha256').update(content).digest('hex').slice(0, 16)
+    let updatedAt: number | null = null
+    try {
+      const stat = statSync(source === 'defaults/TEAM.md' ? defaultPath : source)
+      updatedAt = stat.mtimeMs
+    } catch { /* ignore */ }
+
+    return {
+      success: true,
+      source,
+      hash,
+      updatedAt,
+      content,
+      sections,
+    }
   })
 
   // Agent role registry

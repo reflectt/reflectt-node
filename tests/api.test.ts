@@ -1663,6 +1663,21 @@ describe('Board health', () => {
   })
 })
 
+/* ── Team manifest ─────────────────────────────────────────────────── */
+describe('Team manifest', () => {
+  it('GET /team/manifest returns TEAM.md content with sections', async () => {
+    const { status, body } = await req('GET', '/team/manifest')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(typeof body.content).toBe('string')
+    expect(body.content.length).toBeGreaterThan(0)
+    expect(typeof body.hash).toBe('string')
+    expect(body.hash.length).toBe(16)
+    expect(typeof body.sections).toBe('object')
+    expect(body.source).toBeDefined()
+  })
+})
+
 /* ── Role-based assignment engine ──────────────────────────────────── */
 describe('Agent role registry', () => {
   it('GET /agents/roles returns all agents with WIP status', async () => {

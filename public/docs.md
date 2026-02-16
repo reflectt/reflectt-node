@@ -105,6 +105,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/board-health` | Board-level health metrics for backlog replenishment. Returns per-agent breakdown (doing, validating, todo, active counts), `needsWork`/`lowWatermark` flags, and `replenishNeeded` trigger (fires when 2+ agents idle or <3 backlog tasks). |
 | GET | `/agents/roles` | Agent role registry with live WIP status. Returns all agents with `name`, `role`, `affinityTags`, `protectedDomains`, `wipCap`, `wipCount`, `overCap`. |
 | POST | `/tasks/suggest-assignee` | Suggest best assignee for a task. Body: `{ "title": "...", "tags": [...], "done_criteria": [...] }`. Returns `suggested` agent name, `scores` array with affinity/WIP/throughput breakdown, and `protectedMatch` if a protected domain applies. |
+| GET | `/team/manifest` | Serve TEAM.md from `~/.reflectt/` (falls back to defaults). Returns raw `content`, parsed `sections` object, `hash` (SHA-256 prefix), `updatedAt` timestamp, and `source` path. |
 
 ### Lane-state transition metadata (required on guarded transitions)
 
