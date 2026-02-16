@@ -295,6 +295,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/team/manifest` | Team charter manifest from `~/.reflectt/TEAM.md`. Returns parsed sections, version hash, update timestamp, and raw markdown. Returns `404` if TEAM.md is missing with creation hint. |
+| GET | `/team/roles` | TEAM-ROLES routing matrix — agent skills, affinity scores, WIP caps |
 
 ## Other
 
