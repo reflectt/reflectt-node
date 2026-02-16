@@ -1260,6 +1260,53 @@ async function loadBuildInfo() {
   }
 }
 
+async function loadRuntimeTruthCard() {
+  const body = document.getElementById('truth-body');
+  const count = document.getElementById('truth-count');
+  if (!body || !count) return;
+
+  try {
+    const r = await fetch(BASE + '/runtime/truth');
+    if (!r.ok) throw new Error('status ' + r.status);
+    const truth = await r.json();
+
+    const deployLabel = truth?.deploy?.stale ? 'stale' : 'in sync';
+    const cloudLabel = truth?.cloud?.registered
+      ? `registered • hb ${truth?.cloud?.heartbeatCount ?? 0}`
+      : 'not registered';
+
+    count.textContent = `${truth?.repo?.shortSha || 'unknown'} • ${deployLabel}`;
+
+    body.innerHTML = `
+      <div class="truth-grid">
+        <div class="truth-item">
+          <div class="truth-label">Repo</div>
+          <div class="truth-value">${esc(truth?.repo?.name || 'reflectt/reflectt-node')}<br>${esc(truth?.repo?.branch || 'unknown')} • ${esc((truth?.repo?.shortSha || 'unknown'))}</div>
+        </div>
+        <div class="truth-item">
+          <div class="truth-label">Runtime</div>
+          <div class="truth-value">PID ${esc(String(truth?.runtime?.pid ?? 'n/a'))} • Node ${esc(truth?.runtime?.nodeVersion || 'n/a')}<br>${esc(String(truth?.runtime?.host || '0.0.0.0'))}:${esc(String(truth?.runtime?.port || 'n/a'))} • up ${esc(String(truth?.runtime?.uptimeSec ?? 0))}s</div>
+        </div>
+        <div class="truth-item">
+          <div class="truth-label">Deploy</div>
+          <div class="truth-value">${esc(deployLabel)}<br>startup ${esc((truth?.deploy?.startupCommit || 'unknown').slice(0, 8))} → current ${esc((truth?.deploy?.currentCommit || 'unknown').slice(0, 8))}</div>
+        </div>
+        <div class="truth-item">
+          <div class="truth-label">Cloud</div>
+          <div class="truth-value">${esc(cloudLabel)}<br>host ${esc(String(truth?.cloud?.hostId || 'none'))}</div>
+        </div>
+        <div class="truth-item">
+          <div class="truth-label">Paths</div>
+          <div class="truth-value">home ${esc(String(truth?.paths?.reflecttHome || 'n/a'))}</div>
+        </div>
+      </div>
+    `;
+  } catch (err) {
+    count.textContent = 'unavailable';
+    body.innerHTML = '<div class="empty">Failed to load runtime truth card</div>';
+  }
+}
+
 function updateClock() {
   document.getElementById('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -1397,7 +1444,7 @@ async function refresh() {
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo()]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard()]);
   await renderPromotionSSOT();
 }
 
