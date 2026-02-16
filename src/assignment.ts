@@ -20,9 +20,6 @@ const CONFIG_PATHS = [
   join(homedir(), '.reflectt', 'TEAM-ROLES.yml'),
 ]
 
-// Resolve defaults dir relative to this file's location
-const DEFAULTS_PATH = new URL('../defaults/TEAM-ROLES.yaml', import.meta.url)
-
 // ── Built-in fallback (identical to defaults/TEAM-ROLES.yaml) ──
 const BUILTIN_ROLES: AgentRole[] = [
   { name: 'link', role: 'builder', affinityTags: ['backend', 'api', 'integration', 'bug', 'test', 'webhook', 'server', 'fastify', 'typescript', 'task-lifecycle', 'watchdog', 'database'], wipCap: 2 },
