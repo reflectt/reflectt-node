@@ -159,7 +159,7 @@ function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_chat_messages_from ON chat_messages("from");
         CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id);
 
-        -- Inbox
+        -- Legacy inbox message table (kept for backward compatibility)
         CREATE TABLE IF NOT EXISTS inbox (
           id TEXT PRIMARY KEY,
           agent TEXT NOT NULL,
@@ -226,6 +226,28 @@ function runMigrations(db: Database.Database): void {
           DELETE FROM sync_ledger
           WHERE record_type = 'task' AND record_id = OLD.id;
         END;
+      `,
+    },
+    {
+      version: 3,
+      sql: `
+        -- Inbox state moved from per-agent files to SQLite
+        CREATE TABLE IF NOT EXISTS inbox_states (
+          agent TEXT PRIMARY KEY,
+          subscriptions TEXT NOT NULL, -- JSON array
+          last_read_timestamp INTEGER NOT NULL DEFAULT 0,
+          last_updated INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS inbox_acks (
+          agent TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          acked_at INTEGER NOT NULL,
+          PRIMARY KEY (agent, message_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_inbox_acks_agent ON inbox_acks(agent);
+        CREATE INDEX IF NOT EXISTS idx_inbox_acks_message_id ON inbox_acks(message_id);
       `,
     },
   ]

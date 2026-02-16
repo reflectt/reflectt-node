@@ -15,9 +15,72 @@
 import type { AgentMessage, InboxState, InboxMessage } from './types.js'
 import { promises as fs } from 'fs'
 import { join } from 'path'
-import { INBOX_DIR } from './config.js'
+import { INBOX_DIR, DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 import { eventBus } from './events.js'
 import { DEFAULT_INBOX_SUBSCRIPTIONS } from './channels.js'
+import { getDb, importJsonlIfNeeded, safeJsonParse, safeJsonStringify } from './db.js'
+import type Database from 'better-sqlite3'
+
+const INBOX_STATES_AUDIT_FILE = join(DATA_DIR, 'inbox.states.jsonl')
+const LEGACY_INBOX_STATES_AUDIT_FILE = join(LEGACY_DATA_DIR, 'inbox.states.jsonl')
+const LEGACY_INBOX_DIR = join(LEGACY_DATA_DIR, 'inbox')
+
+function normalizeInboxState(input: Partial<InboxState> & { agent: string }): InboxState {
+  return {
+    agent: input.agent,
+    subscriptions: Array.isArray(input.subscriptions) && input.subscriptions.length > 0
+      ? [...new Set(input.subscriptions)]
+      : [...DEFAULT_INBOX_SUBSCRIPTIONS],
+    ackedMessageIds: Array.isArray(input.ackedMessageIds)
+      ? [...new Set(input.ackedMessageIds.filter((id): id is string => typeof id === 'string' && id.length > 0))]
+      : [],
+    lastReadTimestamp: typeof input.lastReadTimestamp === 'number' ? input.lastReadTimestamp : 0,
+    lastUpdated: typeof input.lastUpdated === 'number' ? input.lastUpdated : Date.now(),
+  }
+}
+
+function importInboxStateRecords(db: Database.Database, records: unknown[]): number {
+  const latestByAgent = new Map<string, InboxState>()
+
+  for (const record of records) {
+    if (!record || typeof record !== 'object') continue
+    const raw = record as Partial<InboxState>
+    if (typeof raw.agent !== 'string' || raw.agent.length === 0) continue
+
+    const normalized = normalizeInboxState({ ...raw, agent: raw.agent })
+    const existing = latestByAgent.get(normalized.agent)
+    if (!existing || normalized.lastUpdated >= existing.lastUpdated) {
+      latestByAgent.set(normalized.agent, normalized)
+    }
+  }
+
+  if (latestByAgent.size === 0) return 0
+
+  const upsertState = db.prepare(`
+    INSERT OR REPLACE INTO inbox_states (agent, subscriptions, last_read_timestamp, last_updated)
+    VALUES (?, ?, ?, ?)
+  `)
+  const clearAcks = db.prepare('DELETE FROM inbox_acks WHERE agent = ?')
+  const insertAck = db.prepare('INSERT OR REPLACE INTO inbox_acks (agent, message_id, acked_at) VALUES (?, ?, ?)')
+
+  const tx = db.transaction((states: InboxState[]) => {
+    for (const state of states) {
+      upsertState.run(
+        state.agent,
+        safeJsonStringify(state.subscriptions) ?? '[]',
+        state.lastReadTimestamp ?? 0,
+        state.lastUpdated,
+      )
+      clearAcks.run(state.agent)
+      for (const messageId of state.ackedMessageIds) {
+        insertAck.run(state.agent, messageId, state.lastUpdated)
+      }
+    }
+  })
+
+  tx(Array.from(latestByAgent.values()))
+  return latestByAgent.size
+}
 
 class InboxManager {
   private states = new Map<string, InboxState>()
@@ -30,29 +93,87 @@ class InboxManager {
   }
 
   /**
-   * Load all inbox states from disk
+   * Load all inbox states from SQLite (primary), with one-time file import.
    */
   private async loadStates(): Promise<void> {
     try {
       await fs.mkdir(INBOX_DIR, { recursive: true })
+      await fs.mkdir(DATA_DIR, { recursive: true })
 
-      const files = await fs.readdir(INBOX_DIR)
-      
-      for (const file of files) {
-        if (file.endsWith('.json')) {
-          try {
-            const content = await fs.readFile(join(INBOX_DIR, file), 'utf-8')
-            const state = JSON.parse(content) as InboxState
-            this.states.set(state.agent, state)
-          } catch (err) {
-            console.error(`[Inbox] Failed to load state for ${file}:`, err)
-          }
-        }
-      }
-      
-      console.log(`[Inbox] Loaded ${this.states.size} inbox states from disk`)
+      const db = getDb()
+
+      // One-time JSONL import (current + legacy audit files)
+      importJsonlIfNeeded(db, INBOX_STATES_AUDIT_FILE, 'inbox_states', importInboxStateRecords)
+      importJsonlIfNeeded(db, LEGACY_INBOX_STATES_AUDIT_FILE, 'inbox_states', importInboxStateRecords)
+
+      await this.importLegacyInboxFilesIfNeeded(db, INBOX_DIR)
+      await this.importLegacyInboxFilesIfNeeded(db, LEGACY_INBOX_DIR)
+
+      this.loadStatesFromDb(db)
+
+      console.log(`[Inbox] Loaded ${this.states.size} inbox states from SQLite`)
     } finally {
       this.initialized = true
+    }
+  }
+
+  private loadStatesFromDb(db: Database.Database): void {
+    this.states.clear()
+
+    const rows = db.prepare('SELECT * FROM inbox_states').all() as Array<{
+      agent: string
+      subscriptions: string | null
+      last_read_timestamp: number
+      last_updated: number
+    }>
+
+    const selectAcks = db.prepare('SELECT message_id FROM inbox_acks WHERE agent = ? ORDER BY acked_at ASC')
+
+    for (const row of rows) {
+      const ackRows = selectAcks.all(row.agent) as Array<{ message_id: string }>
+      const state: InboxState = {
+        agent: row.agent,
+        subscriptions: safeJsonParse<string[]>(row.subscriptions) || [...DEFAULT_INBOX_SUBSCRIPTIONS],
+        ackedMessageIds: ackRows.map((entry) => entry.message_id),
+        lastReadTimestamp: row.last_read_timestamp ?? 0,
+        lastUpdated: row.last_updated,
+      }
+      this.states.set(state.agent, state)
+    }
+  }
+
+  private async importLegacyInboxFilesIfNeeded(db: Database.Database, dirPath: string): Promise<void> {
+    const count = db.prepare('SELECT COUNT(*) as c FROM inbox_states').get() as { c: number }
+    if (count.c > 0) return
+
+    let files: string[] = []
+    try {
+      files = await fs.readdir(dirPath)
+    } catch (err: any) {
+      if (err?.code !== 'ENOENT') {
+        console.error('[Inbox] Failed to read legacy inbox directory:', err)
+      }
+      return
+    }
+
+    const records: InboxState[] = []
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      try {
+        const content = await fs.readFile(join(dirPath, file), 'utf-8')
+        const parsed = JSON.parse(content) as Partial<InboxState>
+        if (!parsed.agent) continue
+        records.push(normalizeInboxState({ ...parsed, agent: parsed.agent }))
+      } catch (err) {
+        console.error(`[Inbox] Failed to parse legacy inbox state ${file}:`, err)
+      }
+    }
+
+    if (records.length === 0) return
+
+    const imported = importInboxStateRecords(db, records)
+    if (imported > 0) {
+      console.log(`[Inbox] Imported ${imported} legacy inbox state files from ${dirPath}`)
     }
   }
 
@@ -78,13 +199,38 @@ class InboxManager {
   }
 
   /**
-   * Persist a single inbox state to disk
+   * Persist a single inbox state to SQLite (primary) + JSONL audit.
    */
   private async persistState(state: InboxState): Promise<void> {
+    const normalized = normalizeInboxState(state)
+
     try {
-      await fs.mkdir(INBOX_DIR, { recursive: true })
-      const path = join(INBOX_DIR, `${state.agent}.json`)
-      await fs.writeFile(path, JSON.stringify(state, null, 2), 'utf-8')
+      const db = getDb()
+      const upsertState = db.prepare(`
+        INSERT OR REPLACE INTO inbox_states (agent, subscriptions, last_read_timestamp, last_updated)
+        VALUES (?, ?, ?, ?)
+      `)
+      const clearAcks = db.prepare('DELETE FROM inbox_acks WHERE agent = ?')
+      const insertAck = db.prepare('INSERT OR REPLACE INTO inbox_acks (agent, message_id, acked_at) VALUES (?, ?, ?)')
+
+      const tx = db.transaction(() => {
+        upsertState.run(
+          normalized.agent,
+          safeJsonStringify(normalized.subscriptions) ?? '[]',
+          normalized.lastReadTimestamp ?? 0,
+          normalized.lastUpdated,
+        )
+
+        clearAcks.run(normalized.agent)
+        for (const messageId of normalized.ackedMessageIds) {
+          insertAck.run(normalized.agent, messageId, normalized.lastUpdated)
+        }
+      })
+
+      tx()
+
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      await fs.appendFile(INBOX_STATES_AUDIT_FILE, JSON.stringify(normalized) + '\n', 'utf-8')
     } catch (err) {
       console.error(`[Inbox] Failed to persist state for ${state.agent}:`, err)
     }
