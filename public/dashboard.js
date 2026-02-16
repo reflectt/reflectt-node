@@ -1641,8 +1641,83 @@ async function updateTaskAssignee() {
   }
 }
 
+// ---- Cloud Host Panel ----
+
+async function loadCloudStatus() {
+  const statusEl = document.getElementById('cloud-host-status');
+  if (!statusEl) return;
+  try {
+    const r = await fetch(`${BASE}/cloud/status`);
+    if (!r.ok) { statusEl.textContent = 'Failed to load cloud status'; return; }
+    const d = await r.json();
+    const lines = [];
+    lines.push(`<strong>Configured:</strong> ${d.configured ? '✅' : '❌'}`);
+    lines.push(`<strong>Registered:</strong> ${d.registered ? '✅' : '❌'}`);
+    if (d.hostId) lines.push(`<strong>Host ID:</strong> <code style="font-size:11px;color:var(--text-muted)">${d.hostId}</code>`);
+    lines.push(`<strong>Running:</strong> ${d.running ? '✅' : '❌'}`);
+    lines.push(`<strong>Heartbeats:</strong> ${d.heartbeatCount || 0}`);
+    if (d.lastHeartbeat) lines.push(`<strong>Last heartbeat:</strong> ${new Date(d.lastHeartbeat).toLocaleTimeString()}`);
+    if (d.lastTaskSync) lines.push(`<strong>Last task sync:</strong> ${new Date(d.lastTaskSync).toLocaleTimeString()}`);
+    if (d.errors > 0) lines.push(`<strong style="color:var(--red)">Errors:</strong> ${d.errors}`);
+    statusEl.innerHTML = lines.join('<br>');
+  } catch (e) {
+    statusEl.textContent = 'Cloud status unavailable';
+  }
+}
+
+function showHostError(msg) {
+  const el = document.getElementById('cloud-host-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 8000);
+}
+
+function clearHostError() {
+  const el = document.getElementById('cloud-host-error');
+  if (el) el.style.display = 'none';
+}
+
+async function hostAction(action) {
+  clearHostError();
+
+  const confirmMessages = {
+    'restart-sync': 'Restart cloud sync? This will reset heartbeat and task sync loops.',
+    're-enroll': 'Force re-enroll? This will drop current credentials and re-register with cloud.',
+    'remove': 'Remove this host from cloud? This will stop all cloud integration.'
+  };
+
+  if (!confirm(confirmMessages[action] || 'Are you sure?')) return;
+
+  const btnMap = { 'restart-sync': 'btn-restart-sync', 're-enroll': 'btn-re-enroll', 'remove': 'btn-remove-host' };
+  const btn = document.getElementById(btnMap[action]);
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+
+  const endpointMap = {
+    'restart-sync': { url: `${BASE}/cloud/sync/restart`, method: 'POST' },
+    're-enroll': { url: `${BASE}/cloud/re-enroll`, method: 'POST' },
+    'remove': { url: `${BASE}/cloud/host`, method: 'DELETE' }
+  };
+
+  const ep = endpointMap[action];
+  try {
+    const r = await fetch(ep.url, { method: ep.method });
+    const d = await r.json();
+    if (!r.ok || d.success === false) {
+      showHostError(d.error || d.message || `Action failed (HTTP ${r.status})`);
+    }
+    await loadCloudStatus();
+  } catch (e) {
+    showHostError(`Network error: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  }
+}
+
 updateClock();
 setInterval(updateClock, 30000);
 refresh();
 connectEventStream();
 startAdaptiveRefresh();
+loadCloudStatus();
+setInterval(loadCloudStatus, 30000);

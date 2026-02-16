@@ -820,6 +820,19 @@ export function getDashboardHTML(): string {
   </div>
 
   <div class="panel">
+    <div class="panel-header">☁️ Cloud Host</div>
+    <div class="panel-body" id="cloud-host-body">
+      <div id="cloud-host-status" style="margin-bottom:12px;color:var(--text-muted)">Loading…</div>
+      <div id="cloud-host-error" style="display:none;padding:8px 12px;background:var(--red-dim);border:1px solid var(--red);border-radius:var(--radius-sm);color:var(--red);font-size:12px;margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="host-action-btn" id="btn-restart-sync" onclick="hostAction('restart-sync')" style="padding:6px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface-raised);color:var(--text);cursor:pointer;font-size:12px;transition:border-color .15s">🔄 Restart Sync</button>
+        <button class="host-action-btn" id="btn-re-enroll" onclick="hostAction('re-enroll')" style="padding:6px 14px;border-radius:var(--radius-sm);border:1px solid var(--yellow);background:var(--yellow-dim);color:var(--yellow);cursor:pointer;font-size:12px;transition:border-color .15s">🔑 Force Re-Enroll</button>
+        <button class="host-action-btn" id="btn-remove-host" onclick="hostAction('remove')" style="padding:6px 14px;border-radius:var(--radius-sm);border:1px solid var(--red);background:var(--red-dim);color:var(--red);cursor:pointer;font-size:12px;transition:border-color .15s">🗑️ Remove Host</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
     <div class="panel-header">🧭 Promotion SSOT <span class="count" id="ssot-count"></span></div>
     <div class="panel-body" id="ssot-body"></div>
   </div>

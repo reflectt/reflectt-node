@@ -1437,6 +1437,41 @@ describe('Cloud Integration', () => {
     expect(typeof body.heartbeatCount).toBe('number')
     expect(typeof body.errors).toBe('number')
   })
+
+  it('POST /cloud/sync/restart returns success or graceful message', async () => {
+    const { status, body } = await req('POST', '/cloud/sync/restart')
+    expect(status).toBe(200)
+    expect(typeof body.success).toBe('boolean')
+    if (!body.success) {
+      // In test env without cloud config, expect a graceful message
+      expect(typeof body.message).toBe('string')
+    } else {
+      expect(body.status).toBeDefined()
+      expect(typeof body.status.running).toBe('boolean')
+    }
+  })
+
+  it('POST /cloud/re-enroll returns success or graceful message', async () => {
+    const { status, body } = await req('POST', '/cloud/re-enroll')
+    expect(status).toBe(200)
+    expect(typeof body.success).toBe('boolean')
+    if (!body.success) {
+      expect(typeof body.message).toBe('string')
+    } else {
+      expect(body.status).toBeDefined()
+    }
+  })
+
+  it('DELETE /cloud/host returns success', async () => {
+    const { status, body } = await req('DELETE', '/cloud/host')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+
+    // Verify status reflects removal
+    const { body: afterStatus } = await req('GET', '/cloud/status')
+    expect(afterStatus.registered).toBe(false)
+    expect(afterStatus.running).toBe(false)
+  })
 })
 
 describe('Docs', () => {

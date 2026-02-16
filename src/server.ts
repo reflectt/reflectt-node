@@ -3156,6 +3156,29 @@ export async function createServer(): Promise<FastifyInstance> {
     return getCloudStatus()
   })
 
+  // Host action controls — restart sync, force re-enroll, remove host
+  app.post('/cloud/sync/restart', async (_request, reply) => {
+    const { restartCloudSync } = await import('./cloud.js')
+    const result = await restartCloudSync().catch((err: any) => ({
+      success: false as const, error: err?.message || 'Failed to restart sync'
+    }))
+    reply.status(200).send(result)
+  })
+
+  app.post('/cloud/re-enroll', async (_request, reply) => {
+    const { forceReEnroll } = await import('./cloud.js')
+    const result = await forceReEnroll().catch((err: any) => ({
+      success: false as const, error: err?.message || 'Failed to re-enroll'
+    }))
+    reply.status(200).send(result)
+  })
+
+  app.delete('/cloud/host', async (_request, reply) => {
+    const { removeHost } = await import('./cloud.js')
+    const result = removeHost()
+    reply.status(200).send(result)
+  })
+
   app.post('/cloud/reload', async () => {
     const { stopCloudIntegration, startCloudIntegration, getCloudStatus } = await import('./cloud.js')
     const { readFileSync, existsSync } = await import('node:fs')
