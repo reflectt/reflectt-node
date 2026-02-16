@@ -748,8 +748,13 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const body = payload as Record<string, unknown>
     const hasError = typeof body.error === 'string'
-    const alreadyEnvelope = typeof body.success === 'boolean' && hasError
     if (!hasError) return payload
+
+    // If the handler already set success + an explicit HTTP status, it owns the envelope — don't override.
+    // This prevents the hook from inferring 500 for legitimate { success: false, error: "not configured" } responses.
+    // Responses without an explicit status still flow through for validation field extraction.
+    const hasExplicitStatus = typeof body.status === 'number' && body.status > 0
+    if (typeof body.success === 'boolean' && hasExplicitStatus) return payload
 
     let status = Number(body.status)
     if (!Number.isFinite(status) || status <= 0) {
@@ -782,7 +787,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
     if (body.details !== undefined) envelope.details = body.details
     if (body.gate !== undefined) envelope.gate = body.gate
-    if (alreadyEnvelope && body.data !== undefined) envelope.data = body.data
+    if (body.data !== undefined) envelope.data = body.data
 
     return envelope
   })
@@ -3211,7 +3216,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const updates = request.body as Record<string, unknown>
     if (!updates || typeof updates !== 'object') {
-      return { success: false, message: 'Request body must be an object' }
+      return { success: false, error: 'Request body must be an object', status: 400 }
     }
 
     // Load existing config
@@ -3259,7 +3264,7 @@ export async function createServer(): Promise<FastifyInstance> {
     try {
       writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
     } catch (err: any) {
-      return { success: false, message: `Failed to write config: ${err?.message}` }
+      return { success: false, error: `Failed to write config: ${err?.message}`, status: 500 }
     }
 
     // Trigger cloud reload if cloud config changed
