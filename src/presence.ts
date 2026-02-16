@@ -9,6 +9,7 @@
  */
 
 import { eventBus } from './events.js'
+import { getDb } from './db.js'
 
 export type PresenceStatus = 'idle' | 'working' | 'reviewing' | 'blocked' | 'offline'
 
@@ -70,6 +71,98 @@ class PresenceManager {
     
     // Reset daily activity at midnight
     this.scheduleDailyReset()
+
+    // Restore persisted focus states from SQLite
+    this.loadFocusStates()
+  }
+
+  /**
+   * Load persisted focus states from SQLite on startup
+   */
+  private loadFocusStates(): void {
+    try {
+      const db = getDb()
+      const rows = db.prepare(
+        'SELECT agent, active, level, started_at, expires_at, reason FROM focus_states WHERE active = 1'
+      ).all() as Array<{
+        agent: string
+        active: number
+        level: string
+        started_at: number
+        expires_at: number | null
+        reason: string | null
+      }>
+
+      const now = Date.now()
+      let restored = 0
+
+      for (const row of rows) {
+        // Skip expired focus states
+        if (row.expires_at && now > row.expires_at) {
+          db.prepare('UPDATE focus_states SET active = 0 WHERE agent = ?').run(row.agent)
+          continue
+        }
+
+        const focus: FocusState = {
+          active: true,
+          level: (row.level === 'deep' ? 'deep' : 'soft') as FocusLevel,
+          startedAt: row.started_at,
+          expiresAt: row.expires_at ?? undefined,
+          reason: row.reason ?? undefined,
+        }
+
+        const existing = this.presence.get(row.agent)
+        if (existing) {
+          existing.focus = focus
+        } else {
+          this.presence.set(row.agent, {
+            agent: row.agent,
+            status: 'offline',
+            since: now,
+            lastUpdate: now,
+            focus,
+          })
+        }
+        restored++
+      }
+
+      if (restored > 0) {
+        console.log(`[Focus] Restored ${restored} persisted focus state(s) from SQLite`)
+      }
+    } catch (err: any) {
+      // DB might not be ready yet on very first boot — non-fatal
+      console.warn('[Focus] Could not load persisted focus states:', err?.message)
+    }
+  }
+
+  /**
+   * Persist focus state to SQLite
+   */
+  private persistFocusState(agent: string, focus: FocusState): void {
+    try {
+      const db = getDb()
+      db.prepare(`
+        INSERT INTO focus_states (agent, active, level, started_at, expires_at, reason, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(agent) DO UPDATE SET
+          active = excluded.active,
+          level = excluded.level,
+          started_at = excluded.started_at,
+          expires_at = excluded.expires_at,
+          reason = excluded.reason,
+          updated_at = excluded.updated_at
+      `).run(
+        agent,
+        focus.active ? 1 : 0,
+        focus.level,
+        focus.startedAt,
+        focus.expiresAt ?? null,
+        focus.reason ?? null,
+        Date.now(),
+      )
+    } catch (err: any) {
+      console.warn('[Focus] Could not persist focus state:', err?.message)
+    }
   }
   
   private getCurrentDate(): string {
@@ -187,6 +280,7 @@ class PresenceManager {
     }
 
     console.log(`[Focus] ${agent} → ${active ? `ON (${focus.level})` : 'OFF'}${focus.reason ? ` — ${focus.reason}` : ''}`)
+    this.persistFocusState(agent, focus)
     return focus
   }
 
@@ -201,6 +295,7 @@ class PresenceManager {
     if (presence.focus.expiresAt && Date.now() > presence.focus.expiresAt) {
       presence.focus.active = false
       console.log(`[Focus] ${agent} → OFF (expired)`)
+      this.persistFocusState(agent, presence.focus)
       return null
     }
 
