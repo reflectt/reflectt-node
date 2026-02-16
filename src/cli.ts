@@ -733,31 +733,62 @@ dogfood
       failed = failed || !heartbeatOk
     }
 
-    // 4) verify cloud state
+    // 4) task sync
+    const smokeTaskId = `dogfood-sync-${Date.now()}`
+    if (hostId) {
+      const sync = await cloudRequest(`${cloudBase}/api/hosts/${encodeURIComponent(hostId)}/tasks/sync`, token, 'POST', {
+        tasks: [
+          {
+            taskId: smokeTaskId,
+            title: 'Dogfood smoke sync check',
+            status: 'doing',
+            assignee: 'dogfood-smoke',
+            sourceUpdatedAt: new Date().toISOString(),
+            payload: { source: 'reflectt-node-dogfood-smoke' },
+          },
+        ],
+      })
+      const syncOk = sync.status === 200 && Number(sync.json?.syncedCount || 0) >= 1
+      printStep('task sync', syncOk, syncOk ? 'task sync accepted by cloud' : `status ${sync.status} ${(sync.json?.error || '').toString()}`)
+      failed = failed || !syncOk
+    }
+
+    // 5) verify cloud state
     let cloudHostSeen = false
+    let cloudTaskSynced = false
     if (hostId) {
       const verify = await cloudRequest(`${cloudBase}/api/hosts?teamId=${encodeURIComponent(teamId)}`, token, 'GET')
       const hosts = Array.isArray(verify.json?.hosts) ? verify.json.hosts : []
       const match = hosts.find((h: any) => String(h?.id || '') === hostId)
       cloudHostSeen = Boolean(match)
-      const verifyOk = verify.status === 200 && cloudHostSeen
-      printStep('verify cloud state', verifyOk, verifyOk ? 'host visible in /api/hosts' : `status ${verify.status} host missing`)
+
+      const syncedTasks = Array.isArray(match?.syncedTasks) ? match.syncedTasks : []
+      cloudTaskSynced = syncedTasks.some((task: any) => String(task?.taskId || '') === smokeTaskId)
+
+      const verifyOk = verify.status === 200 && cloudHostSeen && cloudTaskSynced
+      printStep(
+        'verify cloud state',
+        verifyOk,
+        verifyOk
+          ? 'host + synced task visible in /api/hosts'
+          : `status ${verify.status} hostSeen=${cloudHostSeen} taskSynced=${cloudTaskSynced}`,
+      )
       failed = failed || !verifyOk
     }
 
-    // 5) verify dashboard reachability + data source alignment
+    // 6) verify dashboard reachability + data source alignment
     if (hostId) {
       const dashboardProbe = await fetch(`${dashboardBase}/dashboard/hosts`, { method: 'GET' })
         .then((res) => ({ ok: res.status < 500, status: res.status }))
         .catch(() => ({ ok: false, status: 0 }))
 
-      const dashboardOk = dashboardProbe.ok && cloudHostSeen
+      const dashboardOk = dashboardProbe.ok && cloudHostSeen && cloudTaskSynced
       printStep(
         'verify dashboard reflection path',
         dashboardOk,
         dashboardOk
-          ? `dashboard reachable (HTTP ${dashboardProbe.status}); host present in dashboard source endpoint`
-          : `dashboard probe HTTP ${dashboardProbe.status}; or host missing from source endpoint`,
+          ? `dashboard reachable (HTTP ${dashboardProbe.status}); host + sync visible in dashboard source endpoint`
+          : `dashboard probe HTTP ${dashboardProbe.status}; hostSeen=${cloudHostSeen} taskSynced=${cloudTaskSynced}`,
       )
       failed = failed || !dashboardOk
     }
