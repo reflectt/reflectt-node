@@ -34,6 +34,7 @@ import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, checkWipCap } from './assignment.js'
+import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { getTeamConfigHealth } from './team-config.js'
 
 // Schemas
@@ -976,9 +977,16 @@ export async function createServer(): Promise<FastifyInstance> {
   app.addHook('onResponse', async (request, reply) => {
     const duration = Date.now() - ((request as any).startTime || Date.now())
     healthMonitor.trackRequest(duration)
+    trackTelemetryRequest(request.method, request.url, reply.statusCode, duration)
     
     if (reply.statusCode >= 400) {
       healthMonitor.trackError()
+      // Normalize URL before telemetry to prevent PII leaks in query params
+      const sanitizedUrl = request.url.split('?')[0]
+        .replace(/\/task-\d+-[a-z0-9]+/g, '/:id')
+        .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '/:uuid')
+        .replace(/\/msg-\d+-[a-z0-9]+/g, '/:msgId')
+      trackTelemetryError(`HTTP_${reply.statusCode}`, `${request.method} ${sanitizedUrl}`)
     }
   })
 
@@ -990,6 +998,14 @@ export async function createServer(): Promise<FastifyInstance> {
   // Load agent roles from YAML config (or fall back to built-in defaults)
   loadAgentRoles()
   startConfigWatch()
+
+  // Initialize telemetry (opt-in via REFLECTT_TELEMETRY=true)
+  initTelemetry({
+    enabled: process.env.REFLECTT_TELEMETRY === 'true',
+    cloudUrl: process.env.REFLECTT_CLOUD_URL || '',
+    hostId: process.env.REFLECTT_HOST_ID || process.env.HOSTNAME || 'unknown',
+    reportIntervalMs: parseInt(process.env.REFLECTT_TELEMETRY_INTERVAL || '300000', 10),
+  })
 
   // System idle nudge watchdog (process-in-code guardrail)
   const idleNudgeTimer = setInterval(() => {
@@ -2510,6 +2526,7 @@ export async function createServer(): Promise<FastifyInstance> {
           .catch(() => {})
       }
       
+      trackTaskEvent('created')
       return { success: true, task: enrichTaskWithComments(task) }
     } catch (err: any) {
       reply.code(400)
@@ -2871,6 +2888,7 @@ export async function createServer(): Promise<FastifyInstance> {
         if (parsed.status === 'done') {
           presenceManager.recordActivity(task.assignee, 'task_completed')
           presenceManager.updatePresence(task.assignee, 'working')
+          trackTaskEvent('completed')
         } else if (parsed.status === 'doing') {
           presenceManager.updatePresence(task.assignee, 'working')
         } else if (parsed.status === 'blocked') {
@@ -3594,6 +3612,31 @@ export async function createServer(): Promise<FastifyInstance> {
     const since = query.since ? parseInt(query.since, 10) : undefined
     const agents = analyticsManager.getAgentModelAnalytics(since)
     return { success: true, agents }
+  })
+
+  // Telemetry endpoints
+  app.get('/telemetry', async () => {
+    return {
+      success: true,
+      config: getTelemetryConfig(),
+      snapshot: getTelemetrySnapshot(),
+    }
+  })
+
+  app.get('/telemetry/config', async () => {
+    return { success: true, config: getTelemetryConfig() }
+  })
+
+  // Cloud telemetry ingest endpoint (for receiving telemetry from other hosts)
+  app.post('/api/telemetry/ingest', async (request, reply) => {
+    const payload = request.body as Record<string, unknown>
+    if (!payload?.version || !payload?.hostId) {
+      reply.code(400)
+      return { success: false, error: 'Invalid telemetry payload' }
+    }
+    // Store telemetry data (for cloud aggregation)
+    // For now, just acknowledge — storage comes with reflectt-cloud
+    return { success: true, received: true, timestamp: Date.now() }
   })
 
   // Operational metrics endpoint (lightweight dashboard contract)

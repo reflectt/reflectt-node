@@ -310,3 +310,6 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 ---
 
 *Manually curated from source routes. Base: http://localhost:4445*
+| GET | `/telemetry` | Full telemetry snapshot (config + metrics) |
+| GET | `/telemetry/config` | Telemetry configuration (safe — no secrets) |
+| POST | `/api/telemetry/ingest` | Cloud telemetry ingest endpoint (receives snapshots from hosts) |
