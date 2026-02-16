@@ -34,6 +34,7 @@ import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, checkWipCap } from './assignment.js'
+import { getTeamConfigHealth } from './team-config.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -201,22 +202,24 @@ const CreateResearchHandoffSchema = z.object({
 const QaBundleSchema = z.object({
   lane: z.string().trim().min(1),
   summary: z.string().trim().min(1),
-  pr_link: z.string().trim().min(1),
-  commit_shas: z.array(z.string().trim().min(1)).min(1),
+  pr_link: z.string().trim().min(1).optional(),        // optional for config_only tasks
+  commit_shas: z.array(z.string().trim().min(1)).optional(),  // optional for config_only tasks
   changed_files: z.array(z.string().trim().min(1)).min(1),
   artifact_links: z.array(z.string().trim().min(1)).min(1),
   checks: z.array(z.string().trim().min(1)).min(1),
   screenshot_proof: z.array(z.string().trim().min(1)).min(1),
   reviewer_notes: z.string().trim().min(1).optional(),
+  config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
 })
 
 const ReviewHandoffSchema = z.object({
   task_id: z.string().trim().regex(/^task-[a-zA-Z0-9-]+$/),
-  repo: z.string().trim().min(1),
-  artifact_path: z.string().trim().regex(/^process\//),
+  repo: z.string().trim().min(1).optional(),  // optional for config_only tasks
+  artifact_path: z.string().trim().min(1),    // relaxed: accepts any path (process/, ~/.reflectt/, etc.)
   test_proof: z.string().trim().min(1),
   known_caveats: z.string().trim().min(1),
   doc_only: z.boolean().optional(),
+  config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
   pr_url: z.string().trim().url().optional(),
   commit_sha: z.string().trim().regex(/^[a-fA-F0-9]{7,40}$/).optional(),
 })
@@ -398,8 +401,8 @@ function enforceReviewHandoffGateForValidating(
   if (!parsed.success) {
     return {
       ok: false,
-      error: 'Review handoff required: metadata.review_handoff must include task_id, repo, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true).',
-      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }',
+      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true or config_only=true).',
+      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For config tasks: set config_only=true.',
     }
   }
 
@@ -412,18 +415,20 @@ function enforceReviewHandoffGateForValidating(
     }
   }
 
-  if (!handoff.doc_only) {
+  // config_only: artifacts live in ~/.reflectt/, no repo/PR required
+  // doc_only: docs-only work, no PR/commit required
+  if (!handoff.doc_only && !handoff.config_only) {
     if (!handoff.pr_url || !parseGitHubPrUrl(handoff.pr_url)) {
       return {
         ok: false,
-        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or set review_handoff.doc_only=true for docs-only work).',
+        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or set doc_only=true for docs-only, config_only=true for ~/.reflectt/ config tasks).',
         hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>.',
       }
     }
     if (!handoff.commit_sha) {
       return {
         ok: false,
-        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when doc_only is not set.',
+        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when doc_only/config_only is not set.',
         hint: 'Use 7-40 hex chars, e.g. "a1b2c3d".',
       }
     }
@@ -1023,6 +1028,20 @@ export async function createServer(): Promise<FastifyInstance> {
       tasks: taskManager.getStats(),
       inbox: inboxManager.getStats(),
       timestamp: Date.now(),
+    }
+  })
+
+  // Team configuration linter health (TEAM.md / TEAM-ROLES.yaml / TEAM-STANDARDS.md)
+  app.get('/team/health', async () => {
+    const health = getTeamConfigHealth()
+    return {
+      ok: health.ok,
+      checkedAt: health.checkedAt,
+      root: health.root,
+      files: health.files,
+      issues: health.issues,
+      roleNamesFromConfig: health.roleNamesFromConfig,
+      assignmentRoleNames: health.assignmentRoleNames,
     }
   })
 
