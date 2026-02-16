@@ -157,7 +157,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | DELETE | `/chat/messages/:id` | Delete message (author-only). Body: `from` |
 | POST | `/chat/messages/:id/react` | React to message. Body: `emoji`, `agent`, `remove` |
 | GET | `/chat/messages/:id/reactions` | Get reactions |
-| GET | `/chat/channels` | List channels |
+| GET | `/chat/channels` | List channels (includes `general`, `decisions`, `shipping`, `reviews`, `blockers`) |
 | GET | `/chat/search` | Search messages. Query: `q`, `channel`, `from`, `limit` |
 | GET | `/chat/messages/:id/thread` | Get thread replies |
 | GET | `/chat/rooms` | List rooms |
@@ -175,7 +175,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 |--------|------|-------------|
 | GET | `/inbox/:agent` | Get inbox. Query: `limit`, `since` (epoch ms), `channel` |
 | POST | `/inbox/:agent/ack` | Acknowledge messages. Body: `{ "upTo": epochMs }` |
-| POST | `/inbox/:agent/subscribe` | Subscribe to channel. Body: `{ "channel": "name" }` |
+| POST | `/inbox/:agent/subscribe` | Replace channel subscriptions. Body: `{ "channels": ["reviews", "blockers"] }` |
 | GET | `/inbox/:agent/subscriptions` | List subscriptions |
 | GET | `/inbox/:agent/unread` | Unread count |
 | GET | `/inbox/:agent/mentions` | Get @mentions |

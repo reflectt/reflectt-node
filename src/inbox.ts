@@ -17,8 +17,7 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 import { INBOX_DIR } from './config.js'
 import { eventBus } from './events.js'
-
-const DEFAULT_SUBSCRIPTIONS = ['general', 'decisions', 'problems', 'shipping']
+import { DEFAULT_INBOX_SUBSCRIPTIONS } from './channels.js'
 
 class InboxManager {
   private states = new Map<string, InboxState>()
@@ -65,7 +64,7 @@ class InboxManager {
     if (!state) {
       state = {
         agent,
-        subscriptions: [...DEFAULT_SUBSCRIPTIONS],
+        subscriptions: [...DEFAULT_INBOX_SUBSCRIPTIONS],
         ackedMessageIds: [],
         lastReadTimestamp: 0, // Initialize to 0 so first check gets all messages
         lastUpdated: Date.now(),
@@ -364,7 +363,7 @@ class InboxManager {
   getStats() {
     return {
       agents: this.states.size,
-      defaultSubscriptions: DEFAULT_SUBSCRIPTIONS,
+      defaultSubscriptions: DEFAULT_INBOX_SUBSCRIPTIONS,
     }
   }
 }

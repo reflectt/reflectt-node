@@ -832,9 +832,11 @@ export function getDashboardHTML(): string {
       <div class="chat-input-bar">
         <select id="chat-channel">
           <option value="general">#general</option>
-          <option value="problems-and-ideas">#problems</option>
-          <option value="shipping">#shipping</option>
           <option value="decisions">#decisions</option>
+          <option value="shipping">#shipping</option>
+          <option value="reviews">#reviews</option>
+          <option value="blockers">#blockers</option>
+          <option value="problems">#problems</option>
         </select>
         <input type="text" id="chat-input" placeholder="Message as ryan…" autocomplete="off" />
         <button id="chat-send" onclick="sendChat()">Send</button>
