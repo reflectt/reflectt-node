@@ -27,9 +27,14 @@ Use this template to create tasks that can be claimed and reviewed without clari
     "Criterion 3 captures edge-case or quality gate"
   ],
   "priority": "P1",
-  "eta": "45m"
+  "eta": "45m",
+  "metadata": {
+    "files_touched": ["src/example.ts", "tests/example.test.ts"]
+  }
 }
 ```
+
+> **File ownership:** Always declare `metadata.files_touched` when creating or claiming a task. Check other `doing` tasks for overlap before starting. See [File Ownership Convention](FILE_OWNERSHIP_CONVENTION.md).
 
 ## Strong examples (5)
 
