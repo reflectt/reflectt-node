@@ -9,7 +9,10 @@ import { homedir } from 'os'
 export interface AgentRole {
   name: string
   role: string
+  description?: string
   affinityTags: string[]
+  alwaysRoute?: string[]       // soft routing preference for assignment suggestions
+  neverRoute?: string[]        // explicit routing exclusions
   protectedDomains?: string[]  // hard-enforce: only this agent for these tags
   wipCap: number               // max doing tasks (default 1)
 }
@@ -22,12 +25,62 @@ const CONFIG_PATHS = [
 
 // ── Built-in fallback (identical to defaults/TEAM-ROLES.yaml) ──
 const BUILTIN_ROLES: AgentRole[] = [
-  { name: 'link', role: 'builder', affinityTags: ['backend', 'api', 'integration', 'bug', 'test', 'webhook', 'server', 'fastify', 'typescript', 'task-lifecycle', 'watchdog', 'database'], wipCap: 2 },
-  { name: 'pixel', role: 'designer', affinityTags: ['dashboard', 'ui', 'css', 'visual', 'animation', 'frontend', 'layout', 'ux', 'modal', 'chart'], wipCap: 1 },
-  { name: 'sage', role: 'ops', affinityTags: ['ci', 'deploy', 'ops', 'merge', 'infra', 'github-actions', 'docker', 'pipeline', 'release', 'codeowners'], protectedDomains: ['deploy', 'ci', 'release'], wipCap: 1 },
-  { name: 'echo', role: 'voice', affinityTags: ['content', 'docs', 'landing', 'copy', 'brand', 'marketing', 'social', 'blog', 'readme', 'onboarding'], wipCap: 1 },
-  { name: 'harmony', role: 'reviewer', affinityTags: ['qa', 'review', 'validation', 'audit', 'security', 'compliance', 'testing', 'quality'], protectedDomains: ['security', 'audit'], wipCap: 2 },
-  { name: 'scout', role: 'analyst', affinityTags: ['research', 'analysis', 'metrics', 'monitoring', 'analytics', 'data', 'reporting', 'benchmark'], wipCap: 1 },
+  {
+    name: 'link',
+    role: 'builder',
+    description: 'Core implementation owner for backend/api/integration work.',
+    affinityTags: ['backend', 'api', 'integration', 'bug', 'test', 'webhook', 'server', 'fastify', 'typescript', 'task-lifecycle', 'watchdog', 'database'],
+    alwaysRoute: ['backend', 'integration', 'api'],
+    neverRoute: ['brand-copy'],
+    wipCap: 2,
+  },
+  {
+    name: 'pixel',
+    role: 'designer',
+    description: 'UX and dashboard experience owner.',
+    affinityTags: ['dashboard', 'ui', 'css', 'visual', 'animation', 'frontend', 'layout', 'ux', 'modal', 'chart'],
+    alwaysRoute: ['ui', 'ux', 'dashboard'],
+    neverRoute: ['infra'],
+    wipCap: 1,
+  },
+  {
+    name: 'sage',
+    role: 'ops',
+    description: 'Process/ops strategist focused on reliability and execution quality.',
+    affinityTags: ['ci', 'deploy', 'ops', 'merge', 'infra', 'github-actions', 'docker', 'pipeline', 'release', 'codeowners'],
+    alwaysRoute: ['ops', 'ci', 'release'],
+    neverRoute: ['visual-polish'],
+    protectedDomains: ['deploy', 'ci', 'release'],
+    wipCap: 1,
+  },
+  {
+    name: 'echo',
+    role: 'voice',
+    description: 'Content and messaging execution owner.',
+    affinityTags: ['content', 'docs', 'landing', 'copy', 'brand', 'marketing', 'social', 'blog', 'readme', 'onboarding'],
+    alwaysRoute: ['docs', 'content', 'standards'],
+    neverRoute: ['db-migration'],
+    wipCap: 1,
+  },
+  {
+    name: 'harmony',
+    role: 'reviewer',
+    description: 'Quality gate and audit owner.',
+    affinityTags: ['qa', 'review', 'validation', 'audit', 'security', 'compliance', 'testing', 'quality'],
+    alwaysRoute: ['qa', 'audit', 'security-review'],
+    neverRoute: ['feature-spec'],
+    protectedDomains: ['security', 'audit'],
+    wipCap: 2,
+  },
+  {
+    name: 'scout',
+    role: 'analyst',
+    description: 'Analytics/research owner for insights and prioritization inputs.',
+    affinityTags: ['research', 'analysis', 'metrics', 'monitoring', 'analytics', 'data', 'reporting', 'benchmark'],
+    alwaysRoute: ['analytics', 'research', 'sla'],
+    neverRoute: ['frontend-polish'],
+    wipCap: 1,
+  },
 ]
 
 // ── Loaded state ──
@@ -51,7 +104,10 @@ function parseRolesYaml(content: string): AgentRole[] {
     return {
       name: a.name,
       role: a.role,
+      description: typeof a.description === 'string' ? a.description : undefined,
       affinityTags: Array.isArray(a.affinityTags) ? a.affinityTags.map(String) : [],
+      alwaysRoute: Array.isArray(a.alwaysRoute) ? a.alwaysRoute.map(String) : undefined,
+      neverRoute: Array.isArray(a.neverRoute) ? a.neverRoute.map(String) : undefined,
       protectedDomains: Array.isArray(a.protectedDomains) ? a.protectedDomains.map(String) : undefined,
       wipCap: typeof a.wipCap === 'number' && a.wipCap > 0 ? a.wipCap : 1,
     }

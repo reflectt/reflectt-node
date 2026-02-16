@@ -58,6 +58,7 @@ Operationally:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | System health — task counts, chat stats, inbox stats |
+| GET | `/team/health` | Team config linter status for `~/.reflectt/TEAM.md`, `TEAM-ROLES.yaml`, `TEAM-STANDARDS.md` (issues, role coverage, last check timestamp) |
 | GET | `/health/team` | Team health metrics with compliance + `staleDoing` snapshot. Per-agent rows include `activeTaskTitle` and `activeTaskPrLink` when an agent has a doing task with PR evidence. Flagged agents also include `actionable_reason` (last comment age, last transition, last mention age, suggested action). |
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
@@ -294,6 +295,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/team/manifest` | Team charter manifest from `~/.reflectt/TEAM.md`. Returns parsed sections, version hash, update timestamp, and raw markdown. Returns `404` if TEAM.md is missing with creation hint. |
+| GET | `/team/roles` | TEAM-ROLES routing matrix — agent skills, affinity scores, WIP caps |
 
 ## Other
 
@@ -302,7 +304,12 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/dashboard` | HTML dashboard UI |
 | GET | `/docs` | This API reference |
 | GET | `/openclaw/status` | OpenClaw connection status |
+| GET | `/analytics/models` | Model performance analytics — tasks per model, avg cycle time, review pass rate |
+| GET | `/analytics/agents` | Per-agent analytics — model used, performance stats |
 
 ---
 
 *Manually curated from source routes. Base: http://localhost:4445*
+| GET | `/telemetry` | Full telemetry snapshot (config + metrics) |
+| GET | `/telemetry/config` | Telemetry configuration (safe — no secrets) |
+| POST | `/api/telemetry/ingest` | Cloud telemetry ingest endpoint (receives snapshots from hosts) |
