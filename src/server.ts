@@ -2995,7 +2995,7 @@ export async function createServer(): Promise<FastifyInstance> {
     try {
       const db = getDb()
       const version = db.prepare('SELECT MAX(version) as v FROM _migrations').get() as { v: number }
-      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE '_%'").all() as { name: string }[]
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB '_*'").all() as { name: string }[]
       const counts: Record<string, number> = {}
       for (const { name } of tables) {
         const row = db.prepare(`SELECT COUNT(*) as c FROM "${name}"`).get() as { c: number }
