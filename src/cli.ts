@@ -5,19 +5,30 @@
  * reflectt CLI - Command line interface for reflectt-node
  */
 import { Command } from 'commander'
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs'
+import { homedir, hostname } from 'os'
+import { join, dirname } from 'path'
 import { spawn } from 'child_process'
+import { fileURLToPath } from 'url'
 
 const REFLECTT_HOME = process.env.REFLECTT_HOME || join(homedir(), '.reflectt')
 const CONFIG_PATH = join(REFLECTT_HOME, 'config.json')
 const DATA_DIR = join(REFLECTT_HOME, 'data')
 const PID_FILE = join(REFLECTT_HOME, 'server.pid')
 
+interface CloudEnrollmentConfig {
+  cloudUrl: string
+  hostName: string
+  hostType: string
+  hostId: string
+  credential: string
+  connectedAt: number
+}
+
 interface Config {
   port: number
   host: string
+  cloud?: CloudEnrollmentConfig
 }
 
 function loadConfig(): Config {
@@ -33,6 +44,158 @@ function loadConfig(): Config {
 
 function saveConfig(config: Config) {
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2))
+}
+
+function ensureReflecttHome() {
+  mkdirSync(REFLECTT_HOME, { recursive: true })
+  mkdirSync(DATA_DIR, { recursive: true })
+  mkdirSync(join(DATA_DIR, 'inbox'), { recursive: true })
+}
+
+function isServerRunning(): boolean {
+  if (!existsSync(PID_FILE)) return false
+  try {
+    const pid = Number(readFileSync(PID_FILE, 'utf-8').trim())
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function getRuntimePaths() {
+  const __filename = fileURLToPath(import.meta.url)
+  const __dirname = dirname(__filename)
+  const projectRoot = join(__dirname, '..')
+  const serverPath = join(projectRoot, 'src', 'index.ts')
+  return { projectRoot, serverPath }
+}
+
+function buildServerEnv(config: Config): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    REFLECTT_HOME,
+    PORT: String(config.port),
+    HOST: config.host,
+  }
+
+  if (config.cloud) {
+    env.REFLECTT_CLOUD_URL = config.cloud.cloudUrl
+    env.REFLECTT_HOST_NAME = config.cloud.hostName
+    env.REFLECTT_HOST_TYPE = config.cloud.hostType
+    env.REFLECTT_HOST_ID = config.cloud.hostId
+    env.REFLECTT_HOST_CREDENTIAL = config.cloud.credential
+    env.REFLECTT_HOST_TOKEN = config.cloud.credential
+  }
+
+  return env
+}
+
+function startServerDetached(config: Config): number {
+  const { projectRoot, serverPath } = getRuntimePaths()
+
+  if (!existsSync(serverPath)) {
+    throw new Error(`Server file not found: ${serverPath}`)
+  }
+
+  const child = spawn('npx', ['tsx', serverPath], {
+    env: buildServerEnv(config),
+    detached: true,
+    stdio: 'ignore',
+    cwd: projectRoot,
+  })
+
+  child.unref()
+  writeFileSync(PID_FILE, String(child.pid))
+  return child.pid ?? -1
+}
+
+function stopServerIfRunning() {
+  if (!existsSync(PID_FILE)) return
+
+  const pidRaw = readFileSync(PID_FILE, 'utf-8').trim()
+  const pid = Number(pidRaw)
+  if (!Number.isFinite(pid)) {
+    unlinkSync(PID_FILE)
+    return
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM')
+  } catch {
+    // process already gone
+  }
+
+  try {
+    unlinkSync(PID_FILE)
+  } catch {
+    // ignore cleanup errors
+  }
+}
+
+async function tryApiRequest(path: string, options: RequestInit = {}): Promise<any | null> {
+  const config = loadConfig()
+  const url = `http://${config.host}:${config.port}${path}`
+
+  try {
+    const response = await fetch(url, options)
+    if (!response.ok) return null
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
+interface CloudRegisterResult {
+  hostId: string
+  credential: string
+}
+
+interface CloudApiResponse<T = unknown> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
+async function registerHostWithCloud(input: {
+  cloudUrl: string
+  joinToken: string
+  hostName: string
+  hostType: string
+}): Promise<CloudRegisterResult> {
+  const url = `${input.cloudUrl.replace(/\/+$/, '')}/v1/hosts/register`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${input.joinToken}`,
+    },
+    body: JSON.stringify({
+      joinToken: input.joinToken,
+      hostName: input.hostName,
+      hostType: input.hostType,
+    }),
+  })
+
+  const payload = await response.json() as CloudApiResponse<CloudRegisterResult>
+  if (!response.ok || !payload.success || !payload.data?.hostId || !payload.data?.credential) {
+    throw new Error(payload.error || `Cloud registration failed (${response.status})`)
+  }
+
+  return payload.data
+}
+
+async function waitForCloudHeartbeat(timeoutMs = 45_000): Promise<{ hostId: string; heartbeatCount: number } | null> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    const status = await tryApiRequest('/cloud/status')
+    if (status?.registered && typeof status.hostId === 'string' && (status.heartbeatCount || 0) > 0) {
+      return { hostId: status.hostId, heartbeatCount: status.heartbeatCount }
+    }
+    await new Promise(resolve => setTimeout(resolve, 1500))
+  }
+
+  return null
 }
 
 async function apiRequest(path: string, options: RequestInit = {}): Promise<any> {
@@ -144,61 +307,43 @@ program
     }
 
     const config = loadConfig()
-    
-    // Find the project root (where package.json is)
-    const { fileURLToPath } = await import('url')
-    const { dirname } = await import('path')
-    const __filename = fileURLToPath(import.meta.url)
-    const __dirname = dirname(__filename)
-    const projectRoot = join(__dirname, '..')
-    
-    const serverPath = join(projectRoot, 'src', 'index.ts')
-    
+    const { projectRoot, serverPath } = getRuntimePaths()
+
     if (!existsSync(serverPath)) {
       console.error(`❌ Server file not found: ${serverPath}`)
       process.exit(1)
     }
 
-    const env = {
-      ...process.env,
-      REFLECTT_HOME,
-      PORT: String(config.port),
-      HOST: config.host,
-    }
+    const env = buildServerEnv(config)
 
     if (options.detach) {
-      // Background mode
-      const child = spawn('npx', ['tsx', serverPath], {
-        env,
-        detached: true,
-        stdio: 'ignore',
-        cwd: projectRoot,
-      })
-      
-      child.unref()
-      writeFileSync(PID_FILE, String(child.pid))
-      
+      const pid = startServerDetached(config)
       console.log('✅ Server started in background')
-      console.log(`   PID: ${child.pid}`)
+      console.log(`   PID: ${pid}`)
       console.log(`   URL: http://${config.host}:${config.port}`)
+      if (config.cloud) {
+        console.log(`   Cloud: ${config.cloud.cloudUrl} (host: ${config.cloud.hostName})`)
+      }
       console.log('\nCheck status: reflectt status')
     } else {
       // Foreground mode
       console.log('🚀 Starting reflectt server...')
       console.log(`   URL: http://${config.host}:${config.port}`)
+      if (config.cloud) {
+        console.log(`   Cloud: ${config.cloud.cloudUrl} (host: ${config.cloud.hostName})`)
+      }
       console.log('   Press Ctrl+C to stop\n')
-      
+
       const child = spawn('npx', ['tsx', serverPath], {
         env,
         stdio: 'inherit',
         cwd: projectRoot,
       })
-      
+
       writeFileSync(PID_FILE, String(child.pid))
-      
+
       child.on('exit', (code) => {
         if (existsSync(PID_FILE)) {
-          const { unlinkSync } = require('fs')
           unlinkSync(PID_FILE)
         }
         process.exit(code || 0)
@@ -222,12 +367,10 @@ program
       process.kill(Number(pid), 'SIGTERM')
       console.log('✅ Server stopped')
       
-      const { unlinkSync } = require('fs')
       unlinkSync(PID_FILE)
     } catch (err: any) {
       if (err.code === 'ESRCH') {
         console.log('⚠️  Process not found (already stopped?)')
-        const { unlinkSync } = require('fs')
         unlinkSync(PID_FILE)
       } else {
         console.error('❌ Failed to stop server:', err.message)
@@ -423,13 +566,13 @@ tasks
     }
     if (options.description) body.description = options.description
     if (options.priority) body.priority = options.priority
-    
+
     const result = await apiRequest('/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    
+
     console.log('✅ Task created')
     console.log(`   ID: ${result.task.id}`)
     console.log(`   Title: ${result.task.title}`)
@@ -545,6 +688,119 @@ dogfood
       if (credential) {
         console.log('   credential: issued (shown once)')
       }
+    }
+  })
+
+// ============ HOST COMMANDS ============
+const host = program.command('host').description('Cloud host enrollment and status')
+
+host
+  .command('connect')
+  .description('Enroll this reflectt-node host with Reflectt Cloud using a join token')
+  .requiredOption('--join-token <token>', 'Cloud host join token')
+  .option('--cloud-url <url>', 'Cloud API base URL', 'https://api.reflectt.ai')
+  .option('--name <hostName>', 'Host display name', hostname())
+  .option('--type <hostType>', 'Host type', 'openclaw')
+  .option('--no-restart', 'Do not restart/start local reflectt server after enrollment')
+  .action(async (options) => {
+    try {
+      ensureReflecttHome()
+      const config = loadConfig()
+      const cloudUrl = String(options.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, '')
+
+      console.log('☁️  Enrolling host with Reflectt Cloud...')
+      console.log(`   Cloud: ${cloudUrl}`)
+      console.log(`   Host: ${options.name} (${options.type})`)
+
+      const registered = await registerHostWithCloud({
+        cloudUrl,
+        joinToken: options.joinToken,
+        hostName: options.name,
+        hostType: options.type,
+      })
+
+      const nextConfig: Config = {
+        ...config,
+        cloud: {
+          cloudUrl,
+          hostName: options.name,
+          hostType: options.type,
+          hostId: registered.hostId,
+          credential: registered.credential,
+          connectedAt: Date.now(),
+        },
+      }
+      saveConfig(nextConfig)
+
+      console.log('✅ Cloud registration complete')
+      console.log(`   Host ID: ${registered.hostId}`)
+      console.log('   Credential: received and stored in ~/.reflectt/config.json')
+
+      if (options.restart) {
+        if (isServerRunning()) {
+          console.log('🔄 Restarting local reflectt server to apply cloud config...')
+          stopServerIfRunning()
+        } else {
+          console.log('🚀 Starting local reflectt server...')
+        }
+
+        const pid = startServerDetached(nextConfig)
+        console.log(`   Server PID: ${pid}`)
+
+        const heartbeat = await waitForCloudHeartbeat()
+        if (heartbeat) {
+          console.log('✅ Heartbeat verified')
+          console.log(`   Cloud host ID: ${heartbeat.hostId}`)
+          console.log(`   Heartbeats sent: ${heartbeat.heartbeatCount}`)
+        } else {
+          console.log('⚠️  Enrollment saved, but heartbeat verification timed out')
+          console.log('   Check: reflectt status')
+          console.log('   Check: reflectt host status')
+          process.exitCode = 1
+        }
+      } else {
+        console.log('ℹ️  Enrollment saved. Restart/start reflectt manually to begin heartbeats.')
+      }
+    } catch (err: any) {
+      console.error(`❌ Host connect failed: ${err?.message || err}`)
+      process.exit(1)
+    }
+  })
+
+host
+  .command('status')
+  .description('Show local host cloud enrollment + heartbeat status')
+  .action(async () => {
+    const config = loadConfig()
+    if (!config.cloud) {
+      console.log('Cloud enrollment not configured.')
+      console.log('Run: reflectt host connect --join-token <token>')
+      return
+    }
+
+    console.log('☁️  Cloud Enrollment')
+    console.log(`   Cloud URL: ${config.cloud.cloudUrl}`)
+    console.log(`   Host ID: ${config.cloud.hostId}`)
+    console.log(`   Host Name: ${config.cloud.hostName}`)
+    console.log(`   Host Type: ${config.cloud.hostType}`)
+    console.log(`   Connected At: ${new Date(config.cloud.connectedAt).toLocaleString()}`)
+
+    const status = await tryApiRequest('/cloud/status')
+    if (!status) {
+      console.log('\n⚠️  Local server not reachable (cloud runtime status unavailable)')
+      return
+    }
+
+    console.log('\n📡 Runtime Cloud Status')
+    console.log(`   Configured: ${status.configured ? 'yes' : 'no'}`)
+    console.log(`   Registered: ${status.registered ? 'yes' : 'no'}`)
+    console.log(`   Running: ${status.running ? 'yes' : 'no'}`)
+    console.log(`   Heartbeats: ${status.heartbeatCount || 0}`)
+    if (status.lastHeartbeat) {
+      console.log(`   Last Heartbeat: ${new Date(status.lastHeartbeat).toLocaleString()}`)
+    }
+    if (status.errors) {
+      console.log(`   Errors: ${status.errors}`)
     }
   })
 

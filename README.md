@@ -88,6 +88,26 @@ You should see the live dashboard with task board, team health, chat, and activi
 
 **That's it. You're running.**
 
+### Optional: one-command cloud enrollment (dogfooding)
+
+If you have a Reflectt Cloud host join token, you can enroll this node and start heartbeats in one command:
+
+```bash
+reflectt host connect --join-token <token>
+```
+
+This command:
+- registers the host with cloud,
+- stores cloud credential + host metadata in `~/.reflectt/config.json`,
+- restarts/starts local reflectt-node,
+- verifies heartbeat via `GET /cloud/status`.
+
+Check enrollment/runtime status anytime:
+
+```bash
+reflectt host status
+```
+
 ---
 
 ## What reflectt-node Does
