@@ -2231,6 +2231,48 @@ describe('WIP cap enforcement', () => {
   })
 })
 
+describe('Telemetry', () => {
+  it('GET /telemetry returns snapshot + config', async () => {
+    const { status, body } = await req('GET', '/telemetry')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.config).toBeDefined()
+    expect(typeof body.config.enabled).toBe('boolean')
+    expect(body.snapshot).toBeDefined()
+    expect(body.snapshot.version).toBe('1.0.0')
+    expect(body.snapshot.team).toBeDefined()
+    expect(typeof body.snapshot.team.agentCount).toBe('number')
+    expect(body.snapshot.tasks).toBeDefined()
+    expect(body.snapshot.health).toBeDefined()
+    expect(typeof body.snapshot.health.uptimeMs).toBe('number')
+  })
+
+  it('GET /telemetry/config returns config only', async () => {
+    const { status, body } = await req('GET', '/telemetry/config')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(typeof body.config.enabled).toBe('boolean')
+    expect(typeof body.config.reportIntervalMs).toBe('number')
+  })
+
+  it('POST /api/telemetry/ingest accepts valid payload', async () => {
+    const { status, body } = await req('POST', '/api/telemetry/ingest', {
+      version: '1.0.0',
+      hostId: 'test-host',
+      timestamp: Date.now(),
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.received).toBe(true)
+  })
+
+  it('POST /api/telemetry/ingest rejects invalid payload', async () => {
+    const { status, body } = await req('POST', '/api/telemetry/ingest', {})
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+  })
+})
+
 describe('Model performance analytics', () => {
   it('GET /analytics/models returns model stats', async () => {
     const { status, body } = await req('GET', '/analytics/models')
