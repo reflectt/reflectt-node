@@ -11,6 +11,7 @@ import { serverConfig, isDev } from './config.js'
 import { acquirePidLock, releasePidLock, getPidPath } from './pidlock.js'
 import { startCloudIntegration, stopCloudIntegration, isCloudConfigured } from './cloud.js'
 import { getDb, closeDb } from './db.js'
+import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
 // OpenClaw connection is optional — server works for chat/tasks without it
 
 async function main() {
@@ -49,6 +50,9 @@ async function main() {
       console.warn('⚠️  Vector search not available (sqlite-vec not installed)')
     }
 
+    // Team config linter (TEAM.md + TEAM-ROLES.yaml + TEAM-STANDARDS.md)
+    startTeamConfigLinter()
+
     const app = await createServer()
     
     await app.listen({
@@ -76,6 +80,7 @@ async function main() {
     const shutdown = async (signal: string) => {
       console.log(`\n${signal} received, shutting down...`)
       stopCloudIntegration()
+      stopTeamConfigLinter()
       closeDb()
       releasePidLock(pidPath)
       await app.close()
