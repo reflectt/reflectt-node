@@ -10,7 +10,7 @@ import fastifyCors from '@fastify/cors'
 import { z } from 'zod'
 import { createHash } from 'crypto'
 import { promises as fs } from 'fs'
-import { resolve, sep } from 'path'
+import { resolve, sep, join } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { serverConfig, isDev, REFLECTT_HOME } from './config.js'
@@ -33,7 +33,7 @@ import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
-import { getAgentRoles, suggestAssignee, checkWipCap } from './assignment.js'
+import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, checkWipCap } from './assignment.js'
 import { getTeamConfigHealth } from './team-config.js'
 
 // Schemas
@@ -200,10 +200,28 @@ const CreateResearchHandoffSchema = z.object({
 })
 
 const QaBundleSchema = z.object({
+  lane: z.string().trim().min(1),
   summary: z.string().trim().min(1),
+  pr_link: z.string().trim().min(1).optional(),        // optional for config_only tasks
+  commit_shas: z.array(z.string().trim().min(1)).optional(),  // optional for config_only tasks
+  changed_files: z.array(z.string().trim().min(1)).min(1),
   artifact_links: z.array(z.string().trim().min(1)).min(1),
   checks: z.array(z.string().trim().min(1)).min(1),
+  screenshot_proof: z.array(z.string().trim().min(1)).min(1),
   reviewer_notes: z.string().trim().min(1).optional(),
+  config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
+})
+
+const ReviewHandoffSchema = z.object({
+  task_id: z.string().trim().regex(/^task-[a-zA-Z0-9-]+$/),
+  repo: z.string().trim().min(1).optional(),  // optional for config_only tasks
+  artifact_path: z.string().trim().min(1),    // relaxed: accepts any path (process/, ~/.reflectt/, etc.)
+  test_proof: z.string().trim().min(1),
+  known_caveats: z.string().trim().min(1),
+  doc_only: z.boolean().optional(),
+  config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
+  pr_url: z.string().trim().url().optional(),
+  commit_sha: z.string().trim().regex(/^[a-fA-F0-9]{7,40}$/).optional(),
 })
 
 const ChatMessagesQuerySchema = z.object({
@@ -300,8 +318,119 @@ function enforceQaBundleGateForValidating(
   if (!parsed.success) {
     return {
       ok: false,
-      error: 'QA bundle required: PATCH to status=validating must include metadata.qa_bundle { summary, artifact_links[], checks[] }',
-      hint: 'Example: { "status":"validating", "metadata": { "artifact_path":"...", "qa_bundle": { "summary":"what changed", "artifact_links": ["PR/link"], "checks": ["npm run build"] } } }',
+      error: 'QA bundle required: PATCH to status=validating must include metadata.qa_bundle { lane, summary, pr_link, commit_shas[], changed_files[], artifact_links[], checks[], screenshot_proof[] }',
+      hint: 'Example: { "status":"validating", "metadata": { "artifact_path":"process/TASK-proof.md", "qa_bundle": { "lane":"docs", "summary":"what changed", "pr_link":"https://github.com/org/repo/pull/123", "commit_shas":["abc1234"], "changed_files":["docs/file.md"], "artifact_links":["process/TASK-proof.md"], "checks":["npm run build"], "screenshot_proof":["docs/screenshot.png"] } } }',
+    }
+  }
+
+  return { ok: true }
+}
+
+function applyReviewStateMetadata(
+  existing: Task,
+  parsed: z.infer<typeof UpdateTaskSchema>,
+  mergedMeta: Record<string, unknown>,
+  now: number,
+): Record<string, unknown> {
+  const metadata = { ...mergedMeta }
+  const previousStatus = existing.status
+  const nextStatus = parsed.status ?? existing.status
+  const incomingMeta = parsed.metadata ?? {}
+  const incomingReviewState = typeof incomingMeta.review_state === 'string'
+    ? incomingMeta.review_state.trim().toLowerCase()
+    : ''
+
+  if (nextStatus === 'validating' && previousStatus !== 'validating') {
+    metadata.entered_validating_at = now
+    if (!incomingReviewState) {
+      metadata.review_state = 'queued'
+    }
+    metadata.review_last_activity_at = now
+  }
+
+  if (previousStatus === 'validating' && nextStatus === 'doing' && !incomingReviewState) {
+    metadata.review_state = 'needs_author'
+    metadata.review_last_activity_at = now
+  }
+
+  const actor = parsed.actor?.trim()
+  if (
+    nextStatus === 'validating'
+    && actor
+    && existing.reviewer
+    && actor.toLowerCase() === existing.reviewer.toLowerCase()
+    && !incomingReviewState
+  ) {
+    metadata.review_state = 'in_progress'
+    metadata.review_last_activity_at = now
+  }
+
+  const touchedReviewFields =
+    Object.prototype.hasOwnProperty.call(incomingMeta, 'review_state')
+    || Object.prototype.hasOwnProperty.call(incomingMeta, 'reviewer_approved')
+    || Object.prototype.hasOwnProperty.call(incomingMeta, 'review_notes')
+    || Object.prototype.hasOwnProperty.call(incomingMeta, 'review_last_activity_at')
+
+  if (touchedReviewFields) {
+    metadata.review_last_activity_at = now
+  }
+
+  if (metadata.reviewer_approved === true) {
+    metadata.review_state = 'approved'
+    metadata.review_last_activity_at = now
+  }
+
+  return metadata
+}
+
+function isTaskAutomatedRecurring(metadata: unknown): boolean {
+  const recurringId = (metadata as Record<string, unknown> | null)?.recurring as Record<string, unknown> | undefined
+  return typeof recurringId?.id === 'string' && recurringId.id.trim().length > 0
+}
+
+function enforceReviewHandoffGateForValidating(
+  status: Task['status'] | undefined,
+  taskId: string,
+  metadata: unknown,
+): { ok: true } | { ok: false; error: string; hint: string } {
+  if (status !== 'validating') return { ok: true }
+  if (isTaskAutomatedRecurring(metadata)) return { ok: true }
+
+  const root = (metadata as Record<string, unknown> | null) || {}
+  const parsed = ReviewHandoffSchema.safeParse(root.review_handoff ?? {})
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true or config_only=true).',
+      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For config tasks: set config_only=true.',
+    }
+  }
+
+  const handoff = parsed.data
+  if (handoff.task_id !== taskId) {
+    return {
+      ok: false,
+      error: `Review handoff task_id mismatch: expected ${taskId}`,
+      hint: 'Set metadata.review_handoff.task_id to the exact task being transitioned.',
+    }
+  }
+
+  // config_only: artifacts live in ~/.reflectt/, no repo/PR required
+  // doc_only: docs-only work, no PR/commit required
+  if (!handoff.doc_only && !handoff.config_only) {
+    if (!handoff.pr_url || !parseGitHubPrUrl(handoff.pr_url)) {
+      return {
+        ok: false,
+        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or set doc_only=true for docs-only, config_only=true for ~/.reflectt/ config tasks).',
+        hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>.',
+      }
+    }
+    if (!handoff.commit_sha) {
+      return {
+        ok: false,
+        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when doc_only/config_only is not set.',
+        hint: 'Use 7-40 hex chars, e.g. "a1b2c3d".',
+      }
     }
   }
 
@@ -632,6 +761,56 @@ type MentionWarning = {
   message: string
 }
 
+type ActionMessageValidation = {
+  isActionRequired: boolean
+  blockingError?: string
+  hint?: string
+  warnings: string[]
+}
+
+const STRICT_ACTION_CHANNELS = new Set(['reviews', 'blockers'])
+
+function hasTaskIdReference(content: string): boolean {
+  return /\btask-[a-zA-Z0-9-]+\b/.test(content)
+}
+
+function hasOwnerMention(content: string): boolean {
+  return /@([a-zA-Z][a-zA-Z0-9_-]*)/.test(content)
+}
+
+function isLikelyActionRequired(content: string, channel?: string): boolean {
+  const normalizedChannel = (channel || 'general').toLowerCase()
+  if (STRICT_ACTION_CHANNELS.has(normalizedChannel)) return true
+
+  const actionKeyword = /(please|review|approve|unblock|need|must|action required|can you|owner)/i
+  return hasTaskIdReference(content) && actionKeyword.test(content)
+}
+
+function validateActionRequiredMessage(content: string, channel?: string): ActionMessageValidation {
+  const isActionRequired = isLikelyActionRequired(content, channel)
+  if (!isActionRequired) return { isActionRequired: false, warnings: [] }
+
+  const hasOwner = hasOwnerMention(content)
+  const hasTaskId = hasTaskIdReference(content)
+  const normalizedChannel = (channel || 'general').toLowerCase()
+  const strict = STRICT_ACTION_CHANNELS.has(normalizedChannel)
+
+  if (strict && (!hasOwner || !hasTaskId)) {
+    return {
+      isActionRequired,
+      warnings: [],
+      blockingError: 'Action-required message must include both @owner and task-<id> in #reviews/#blockers.',
+      hint: 'Example: "@owner task-1234 ready for review ..."',
+    }
+  }
+
+  const warnings: string[] = []
+  if (!hasOwner) warnings.push('Action-required message is missing @owner mention.')
+  if (!hasTaskId) warnings.push('Action-required message is missing task-<id> reference.')
+
+  return { isActionRequired, warnings }
+}
+
 function extractMentions(content: string): string[] {
   const matches = content.match(/@(\w+)/g) || []
   return Array.from(new Set(matches.map(token => token.slice(1).toLowerCase()).filter(Boolean)))
@@ -807,6 +986,10 @@ export async function createServer(): Promise<FastifyInstance> {
   app.addHook('onResponse', async () => {
     await healthMonitor.recordSnapshot().catch(() => {}) // Silent fail
   })
+
+  // Load agent roles from YAML config (or fall back to built-in defaults)
+  loadAgentRoles()
+  startConfigWatch()
 
   // System idle nudge watchdog (process-in-code guardrail)
   const idleNudgeTimer = setInterval(() => {
@@ -1400,10 +1583,34 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Send message
-  app.post('/chat/messages', async (request) => {
-    const data = SendMessageSchema.parse(request.body)
+  app.post('/chat/messages', async (request, reply) => {
+    const parsedBody = SendMessageSchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      reply.code(400)
+      return {
+        success: false,
+        error: 'Invalid body: from and content are required',
+        fields: parsedBody.error.issues.map(issue => ({
+          path: issue.path.join('.') || '(root)',
+          message: issue.message,
+        })),
+      }
+    }
+
+    const data = parsedBody.data
+    const actionValidation = validateActionRequiredMessage(data.content, data.channel)
+    if (actionValidation.blockingError) {
+      reply.code(400)
+      return {
+        success: false,
+        error: actionValidation.blockingError,
+        gate: 'action_message_contract',
+        hint: actionValidation.hint,
+      }
+    }
+
     const message = await chatManager.sendMessage(data)
-    const warnings = buildMentionWarnings(data.content)
+    const mentionWarnings = buildMentionWarnings(data.content)
 
     // Auto-update presence: if you're posting, you're active
     if (data.from) {
@@ -1432,7 +1639,8 @@ export async function createServer(): Promise<FastifyInstance> {
     return {
       success: true,
       message,
-      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(mentionWarnings.length > 0 ? { warnings: mentionWarnings } : {}),
+      ...(actionValidation.warnings.length > 0 ? { action_warnings: actionValidation.warnings } : {}),
     }
   })
 
@@ -2502,8 +2710,10 @@ export async function createServer(): Promise<FastifyInstance> {
         return { success: false, error: 'Task not found', input: request.params.id, suggestions: lookup.suggestions }
       }
 
-      // Merge incoming metadata with existing for gate checks + persistence
-      const mergedMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
+      // Merge incoming metadata with existing for gate checks + persistence.
+      // Normalize review-state metadata for state-aware SLA tracking.
+      const mergedRawMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
+      const mergedMeta = applyReviewStateMetadata(existing, parsed, mergedRawMeta, Date.now())
 
       // TEST: prefixed tasks bypass gates (WIP cap, etc.)
       const isTestTask = typeof existing.title === 'string' && existing.title.startsWith('TEST:')
@@ -2518,6 +2728,34 @@ export async function createServer(): Promise<FastifyInstance> {
           error: qaGate.error,
           gate: 'qa_bundle',
           hint: qaGate.hint,
+        }
+      }
+
+      const handoffGate = enforceReviewHandoffGateForValidating(effectiveStatus, lookup.resolvedId, mergedMeta)
+      if (!handoffGate.ok) {
+        reply.code(400)
+        return {
+          success: false,
+          error: handoffGate.error,
+          gate: 'review_handoff',
+          hint: handoffGate.hint,
+        }
+      }
+
+      if (
+        parsed.status === 'validating'
+        && existing.status === 'validating'
+        && !isTaskAutomatedRecurring(mergedMeta)
+      ) {
+        const delta = (mergedMeta.review_delta_note || mergedMeta.re_review_delta || mergedMeta.delta_note) as unknown
+        if (typeof delta !== 'string' || delta.trim().length === 0) {
+          reply.code(400)
+          return {
+            success: false,
+            error: 'Re-review gate: metadata.review_delta_note required when re-requesting validating review.',
+            gate: 'review_delta',
+            hint: 'Add metadata.review_delta_note summarizing what changed since the last reviewed SHA.',
+          }
         }
       }
 
@@ -2591,6 +2829,14 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
       // ── End branch tracking ──
+
+      // Start per-task focus window on doing transition (45m deep work suppression)
+      if (parsed.status === 'doing' && existing.status !== 'doing') {
+        const focusAgent = (parsed.assignee || existing.assignee || '').toLowerCase()
+        if (focusAgent) {
+          healthMonitor.startTaskFocusWindow(focusAgent, lookup.resolvedId, 45)
+        }
+      }
 
       const { actor, ...rest } = parsed
 
@@ -2683,7 +2929,8 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     })
 
-    return { success: true, agents: enriched }
+    const sourceInfo = getAgentRolesSource()
+    return { success: true, agents: enriched, config: sourceInfo }
   })
 
   // Suggest assignee for a task
@@ -2721,6 +2968,112 @@ export async function createServer(): Promise<FastifyInstance> {
       return { task: null, message: 'No available tasks' }
     }
     return { task: enrichTaskWithComments(task) }
+  })
+
+  // Per-agent cockpit summary (single-pane "My Now" payload)
+  app.get<{ Params: { agent: string } }>('/me/:agent', async (request) => {
+    const agent = String(request.params.agent || '').trim()
+    if (!agent) {
+      return { error: 'agent is required' }
+    }
+
+    const now = Date.now()
+    const tasks = taskManager.listTasks({})
+    const messages = chatManager.getMessages({ limit: 500 })
+    const presence = presenceManager.getPresence(agent)
+
+    const assignedTasks = tasks
+      .filter((task) => (task.assignee || '').toLowerCase() === agent.toLowerCase() && task.status !== 'done')
+      .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+
+    const pendingReviews = tasks
+      .filter((task) => (task.reviewer || '').toLowerCase() === agent.toLowerCase() && task.status === 'validating')
+      .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+
+    const blockerTasks = assignedTasks.filter((task) => task.status === 'blocked')
+
+    const prPattern = /github\.com\/[^/]+\/[^/]+\/pull\/\d+/i
+    const taskPrLinks = assignedTasks.concat(pendingReviews).map((task) => {
+      const meta = (task.metadata || {}) as Record<string, unknown>
+      const artifacts = Array.isArray(meta.artifacts) ? meta.artifacts as unknown[] : []
+      const candidates = [
+        typeof meta.pr === 'string' ? meta.pr : null,
+        typeof meta.pr_url === 'string' ? meta.pr_url : null,
+        ...artifacts.map((item) => (typeof item === 'string' ? item : null)),
+      ]
+      return candidates.find((entry): entry is string => typeof entry === 'string' && prPattern.test(entry)) || null
+    }).filter((link): link is string => Boolean(link))
+
+    const failingChecks = messages
+      .filter((message: any) => Number(message.timestamp || 0) >= now - (24 * 60 * 60 * 1000))
+      .filter((message: any) => {
+        const content = String(message.content || '')
+        const targetsAgent = new RegExp(`@${agent}\\b`, 'i').test(content) || /\bci\b|\bcheck\b|\bbuild\b/i.test(content)
+        return targetsAgent && /\bfail|failed|failing|error|flake|conflict\b/i.test(content)
+      })
+      .slice(-10)
+      .map((message: any) => ({
+        id: message.id,
+        timestamp: message.timestamp,
+        channel: message.channel || 'general',
+        from: message.from,
+        content: String(message.content || '').slice(0, 240),
+      }))
+
+    const since = presence?.lastUpdate || (now - 60 * 60 * 1000)
+    const changelog = [
+      ...tasks
+        .filter((task) => Number(task.updatedAt || 0) >= since)
+        .filter((task) => {
+          const isAssignee = (task.assignee || '').toLowerCase() === agent.toLowerCase()
+          const isReviewer = (task.reviewer || '').toLowerCase() === agent.toLowerCase()
+          return isAssignee || isReviewer
+        })
+        .map((task) => ({
+          ts: Number(task.updatedAt || task.createdAt || now),
+          type: 'task_update',
+          taskId: task.id,
+          summary: `${task.id} → ${task.status}`,
+        })),
+      ...messages
+        .filter((message: any) => Number(message.timestamp || 0) >= since)
+        .filter((message: any) => new RegExp(`@${agent}\\b`, 'i').test(String(message.content || '')))
+        .map((message: any) => ({
+          ts: Number(message.timestamp || now),
+          type: 'mention',
+          messageId: message.id,
+          summary: String(message.content || '').slice(0, 200),
+          channel: message.channel || 'general',
+        })),
+    ]
+      .sort((a, b) => b.ts - a.ts)
+      .slice(0, 30)
+
+    const activeTask = assignedTasks.find((task) => task.status === 'doing') || assignedTasks[0] || null
+
+    const nextAction = blockerTasks.length > 0
+      ? `Unblock ${blockerTasks[0].id} or escalate in #blockers with @owner + task id.`
+      : pendingReviews.length > 0
+        ? `Review ${pendingReviews[0].id} or post PASS/FAIL with evidence.`
+        : activeTask
+          ? `Advance ${activeTask.id} and post artifact/PR checkpoint.`
+          : 'Pull next task with /tasks/next and move it to doing.'
+
+    return {
+      agent,
+      timestamp: now,
+      activeTask,
+      assignedTasks: assignedTasks.slice(0, 20),
+      pendingReviews: pendingReviews.slice(0, 20),
+      blockers: blockerTasks.slice(0, 20),
+      taskPrLinks: Array.from(new Set(taskPrLinks)).slice(0, 20),
+      failingChecks,
+      sinceLastSeen: {
+        since,
+        changes: changelog,
+      },
+      nextAction,
+    }
   })
 
   // Backlog: ranked list of unassigned tasks any agent can claim
@@ -3096,6 +3449,70 @@ export async function createServer(): Promise<FastifyInstance> {
     return { activity }
   })
 
+  // ============ TEAM MANIFEST ENDPOINT ============
+
+  function parseMarkdownSections(markdown: string): Array<{ heading: string; level: number; content: string }> {
+    const sections: Array<{ heading: string; level: number; content: string }> = []
+    const lines = markdown.split(/\r?\n/)
+    let currentHeading = 'Preamble'
+    let currentLevel = 0
+    let buffer: string[] = []
+
+    for (const line of lines) {
+      const match = line.match(/^(#{1,6})\s+(.+)$/)
+      if (match) {
+        sections.push({
+          heading: currentHeading,
+          level: currentLevel,
+          content: buffer.join('\n').trim(),
+        })
+        currentHeading = match[2].trim()
+        currentLevel = match[1].length
+        buffer = []
+      } else {
+        buffer.push(line)
+      }
+    }
+
+    sections.push({
+      heading: currentHeading,
+      level: currentLevel,
+      content: buffer.join('\n').trim(),
+    })
+
+    return sections.filter((section) => section.heading !== 'Preamble' || section.content.length > 0)
+  }
+
+  app.get('/team/manifest', async (_request, reply) => {
+    try {
+      const manifestPath = join(REFLECTT_HOME, 'TEAM.md')
+      const stat = await fs.stat(manifestPath)
+      const content = await fs.readFile(manifestPath, 'utf8')
+      const version = createHash('sha256').update(content).digest('hex')
+      const sections = parseMarkdownSections(content)
+
+      return {
+        manifest: {
+          raw_markdown: content,
+          sections,
+          version,
+          updated_at: stat.mtimeMs,
+          path: manifestPath,
+          relative_path: 'TEAM.md',
+          source: 'reflectt_home',
+        },
+      }
+    } catch (error: any) {
+      reply.code(404)
+      return {
+        success: false,
+        error: 'TEAM manifest not found',
+        message: error?.message || `TEAM.md is missing under ${REFLECTT_HOME}`,
+        hint: 'Create ~/.reflectt/TEAM.md (or set REFLECTT_HOME) to define your team charter.',
+      }
+    }
+  })
+
   // ============ ACTIVITY FEED ENDPOINT ============
 
   // Get recent activity across all systems
@@ -3146,6 +3563,22 @@ export async function createServer(): Promise<FastifyInstance> {
     
     const analytics = analyticsManager.getTaskAnalytics(since)
     return { analytics }
+  })
+
+  // Model performance analytics
+  app.get('/analytics/models', async (request) => {
+    const query = request.query as Record<string, string>
+    const since = query.since ? parseInt(query.since, 10) : undefined
+    const analytics = analyticsManager.getModelAnalytics(since)
+    return { success: true, analytics }
+  })
+
+  // Per-agent model + performance stats
+  app.get('/analytics/agents', async (request) => {
+    const query = request.query as Record<string, string>
+    const since = query.since ? parseInt(query.since, 10) : undefined
+    const agents = analyticsManager.getAgentModelAnalytics(since)
+    return { success: true, agents }
   })
 
   // Operational metrics endpoint (lightweight dashboard contract)

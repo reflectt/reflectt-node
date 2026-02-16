@@ -1,0 +1,99 @@
+# TEAM-ROLES.yaml — Agent role registry for assignment engine
+# Place at ~/.reflectt/TEAM-ROLES.yaml to customize for your team.
+# Falls back to these defaults if not found.
+
+agents:
+  - name: link
+    role: builder
+    affinityTags:
+      - backend
+      - api
+      - integration
+      - bug
+      - test
+      - webhook
+      - server
+      - fastify
+      - typescript
+      - task-lifecycle
+      - watchdog
+      - database
+    wipCap: 2
+
+  - name: pixel
+    role: designer
+    affinityTags:
+      - dashboard
+      - ui
+      - css
+      - visual
+      - animation
+      - frontend
+      - layout
+      - ux
+      - modal
+      - chart
+    wipCap: 1
+
+  - name: sage
+    role: ops
+    affinityTags:
+      - ci
+      - deploy
+      - ops
+      - merge
+      - infra
+      - github-actions
+      - docker
+      - pipeline
+      - release
+      - codeowners
+    protectedDomains:
+      - deploy
+      - ci
+      - release
+    wipCap: 1
+
+  - name: echo
+    role: voice
+    affinityTags:
+      - content
+      - docs
+      - landing
+      - copy
+      - brand
+      - marketing
+      - social
+      - blog
+      - readme
+      - onboarding
+    wipCap: 1
+
+  - name: harmony
+    role: reviewer
+    affinityTags:
+      - qa
+      - review
+      - validation
+      - audit
+      - security
+      - compliance
+      - testing
+      - quality
+    protectedDomains:
+      - security
+      - audit
+    wipCap: 2
+
+  - name: scout
+    role: analyst
+    affinityTags:
+      - research
+      - analysis
+      - metrics
+      - monitoring
+      - analytics
+      - data
+      - reporting
+      - benchmark
+    wipCap: 1

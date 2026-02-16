@@ -14,7 +14,7 @@ BASE="http://localhost:4445"
 |---|---|
 | `todo` | `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria[]`, `eta` |
 | `doing` | `reviewer` + `metadata.eta` |
-| `validating` | `metadata.artifact_path` |
+| `validating` | `metadata.artifact_path` + `metadata.qa_bundle { lane, summary, pr_link, commit_shas[], changed_files[], artifact_links[], checks[], screenshot_proof[] }` |
 | `done` | No extra required field (recommended: reviewer sign-off comment) |
 
 ## 1) Create a task
@@ -91,7 +91,17 @@ curl -s -X PATCH "$BASE/tasks/$TASK_ID" \
   -d '{
     "status": "validating",
     "metadata": {
-      "artifact_path": "process/demo.md"
+      "artifact_path": "process/demo.md",
+      "qa_bundle": {
+        "lane": "docs",
+        "summary": "Quickstart updated with validating QA bundle contract",
+        "pr_link": "https://github.com/reflectt/reflectt-node/pull/123",
+        "commit_shas": ["abc1234"],
+        "changed_files": ["docs/TASKS_API_QUICKSTART.md"],
+        "artifact_links": ["process/demo.md"],
+        "checks": ["npm run -s check:route-docs-contract"],
+        "screenshot_proof": ["docs/images/quickstart-validating.png"]
+      }
     },
     "actor": "echo"
   }'

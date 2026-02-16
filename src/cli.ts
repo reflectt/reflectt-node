@@ -8,7 +8,7 @@ import { Command } from 'commander'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs'
 import { homedir, hostname } from 'os'
 import { join, dirname } from 'path'
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 
 const REFLECTT_HOME = process.env.REFLECTT_HOME || join(homedir(), '.reflectt')
@@ -333,36 +333,98 @@ program
 // ============ INIT COMMAND ============
 program
   .command('init')
-  .description('Initialize reflectt with default configuration')
-  .action(() => {
-    if (existsSync(REFLECTT_HOME)) {
-      console.log(`⚠️  ${REFLECTT_HOME} already exists`)
-      
-      // Check if migration is needed
-      const projectDataDir = join(process.cwd(), 'data')
-      if (existsSync(projectDataDir)) {
-        console.log(`\n📦 Found legacy data/ directory at ${projectDataDir}`)
-        console.log('   You can migrate it manually to ~/.reflectt/data/')
-      }
-    } else {
-      // Create directories
-      mkdirSync(REFLECTT_HOME, { recursive: true })
-      mkdirSync(DATA_DIR, { recursive: true })
-      mkdirSync(join(DATA_DIR, 'inbox'), { recursive: true })
-      
-      // Create default config
+  .description('Initialize reflectt team ops directory (~/.reflectt/)')
+  .option('--no-git', 'Skip git init and initial commit')
+  .option('--force', 'Overwrite existing team files with defaults')
+  .action((opts) => {
+    const isNew = !existsSync(REFLECTT_HOME)
+    let filesCreated = 0
+    let filesSkipped = 0
+
+    // Create directories
+    mkdirSync(REFLECTT_HOME, { recursive: true })
+    mkdirSync(DATA_DIR, { recursive: true })
+    mkdirSync(join(DATA_DIR, 'inbox'), { recursive: true })
+
+    // Create default config if missing
+    if (!existsSync(CONFIG_PATH)) {
       const config: Config = { port: 4445, host: '127.0.0.1' }
       saveConfig(config)
-      
-      console.log('✅ Initialized reflectt')
-      console.log(`   Home: ${REFLECTT_HOME}`)
-      console.log(`   Config: ${CONFIG_PATH}`)
-      console.log(`   Data: ${DATA_DIR}`)
-      console.log('\nNext steps:')
-      console.log('  1. Start the server: reflectt start')
-      console.log('  2. Check status: reflectt status')
-      console.log('  3. Send a message: reflectt chat send --from agent --content "Hello"')
+      filesCreated++
+      console.log('  ✅ config.json')
+    } else {
+      filesSkipped++
+      console.log('  ⏭️  config.json (exists)')
     }
+
+    // Copy default team files from defaults/ directory
+    const __filename = fileURLToPath(import.meta.url)
+    const __dirname = dirname(__filename)
+    const defaultsDir = join(__dirname, '..', 'defaults')
+
+    const teamFiles = [
+      { src: 'TEAM.md', desc: 'Team culture and principles' },
+      { src: 'TEAM-ROLES.yaml', desc: 'Agent role registry' },
+      { src: 'TEAM-STANDARDS.md', desc: 'Operational standards' },
+      { src: '.gitignore', desc: 'Git exclusions for runtime data' },
+    ]
+
+    for (const file of teamFiles) {
+      const destPath = join(REFLECTT_HOME, file.src)
+      const srcPath = join(defaultsDir, file.src)
+
+      if (existsSync(destPath) && !opts.force) {
+        filesSkipped++
+        console.log(`  ⏭️  ${file.src} (exists)`)
+      } else if (existsSync(srcPath)) {
+        const content = readFileSync(srcPath, 'utf-8')
+        writeFileSync(destPath, content)
+        filesCreated++
+        console.log(`  ✅ ${file.src} — ${file.desc}`)
+      } else {
+        console.log(`  ⚠️  ${file.src} — default template not found`)
+      }
+    }
+
+    // Git init
+    if (opts.git !== false) {
+      const gitDir = join(REFLECTT_HOME, '.git')
+      if (!existsSync(gitDir)) {
+        try {
+          execSync('git init', { cwd: REFLECTT_HOME, stdio: 'pipe' })
+          execSync('git add -A', { cwd: REFLECTT_HOME, stdio: 'pipe' })
+          execSync('git commit -m "chore: initialize team ops directory"', {
+            cwd: REFLECTT_HOME,
+            stdio: 'pipe',
+            env: {
+              ...process.env,
+              GIT_AUTHOR_NAME: 'reflectt',
+              GIT_AUTHOR_EMAIL: 'init@reflectt.ai',
+              GIT_COMMITTER_NAME: 'reflectt',
+              GIT_COMMITTER_EMAIL: 'init@reflectt.ai',
+            },
+          })
+          console.log('  ✅ git repo initialized with initial commit')
+        } catch (err) {
+          console.log('  ⚠️  git init failed (git may not be installed)')
+        }
+      } else {
+        console.log('  ⏭️  .git (exists)')
+      }
+    }
+
+    console.log('')
+    if (isNew) {
+      console.log('🎉 Team ops directory initialized!')
+    } else {
+      console.log(`✅ Init complete (${filesCreated} created, ${filesSkipped} existing)`)
+    }
+    console.log(`   Home: ${REFLECTT_HOME}`)
+    console.log('')
+    console.log('Next steps:')
+    console.log('  1. Edit TEAM.md with your team\'s mission and values')
+    console.log('  2. Edit TEAM-ROLES.yaml with your agent roster')
+    console.log('  3. Start the server: reflectt start')
   })
 
 // ============ START COMMAND ============

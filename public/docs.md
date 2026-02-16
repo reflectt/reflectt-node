@@ -99,6 +99,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | PATCH | `/tasks/:id` | Update task (partial). Any task field, plus optional `actor` for history attribution. Status contract: `doing` requires reviewer + `metadata.eta`; `validating` requires `metadata.artifact_path` under `process/` (workspace-agnostic). |
 | DELETE | `/tasks/:id` | Delete task |
 | GET | `/tasks/next` | Pull-based assignment. Query: `agent` |
+| GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action |
 | GET | `/tasks/search` | Keyword search across task `title` + `description` (case-insensitive). Query: `q`, optional `limit` |
 | GET | `/tasks/analytics` | Task completion analytics and velocity |
 | GET | `/tasks/instrumentation/lifecycle` | Reviewer/done-criteria gates + status-contract violations (`doing` missing ETA, `validating` missing artifact path) |
@@ -106,6 +107,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/board-health` | Board-level health metrics for backlog replenishment. Returns per-agent breakdown (doing, validating, todo, active counts), `needsWork`/`lowWatermark` flags, and `replenishNeeded` trigger (fires when 2+ agents idle or <3 backlog tasks). |
 | GET | `/agents/roles` | Agent role registry with live WIP status. Returns all agents with `name`, `role`, `affinityTags`, `protectedDomains`, `wipCap`, `wipCount`, `overCap`. |
 | POST | `/tasks/suggest-assignee` | Suggest best assignee for a task. Body: `{ "title": "...", "tags": [...], "done_criteria": [...] }`. Returns `suggested` agent name, `scores` array with affinity/WIP/throughput breakdown, and `protectedMatch` if a protected domain applies. |
+| GET | `/team/manifest` | Serve TEAM.md from `~/.reflectt/` (falls back to defaults). Returns `manifest` object with `raw_markdown`, parsed `sections` array, `version` (SHA-256 hash), `updated_at`, `path`, and `source`. |
 
 ### Lane-state transition metadata (required on guarded transitions)
 
@@ -288,6 +290,12 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | POST | `/cloud/reload` | Hot-reload cloud config from `~/.reflectt/config.json` without server restart. Updates env vars and restarts heartbeat/sync loops. Used by CLI after `host connect` enrollment. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
+## Team
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/team/manifest` | Team charter manifest from `~/.reflectt/TEAM.md`. Returns parsed sections, version hash, update timestamp, and raw markdown. Returns `404` if TEAM.md is missing with creation hint. |
+
 ## Other
 
 | Method | Path | Description |
@@ -295,6 +303,8 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/dashboard` | HTML dashboard UI |
 | GET | `/docs` | This API reference |
 | GET | `/openclaw/status` | OpenClaw connection status |
+| GET | `/analytics/models` | Model performance analytics — tasks per model, avg cycle time, review pass rate |
+| GET | `/analytics/agents` | Per-agent analytics — model used, performance stats |
 
 ---
 
