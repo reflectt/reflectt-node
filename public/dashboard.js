@@ -1688,8 +1688,243 @@ async function updateTaskAssignee() {
   }
 }
 
+// ---- Cloud Host Panel ----
+
+async function loadCloudStatus() {
+  const statusEl = document.getElementById('cloud-host-status');
+  if (!statusEl) return;
+  try {
+    const r = await fetch(`${BASE}/cloud/status`);
+    if (!r.ok) { statusEl.textContent = 'Failed to load cloud status'; return; }
+    const d = await r.json();
+    const lines = [];
+    lines.push(`<strong>Configured:</strong> ${d.configured ? '✅' : '❌'}`);
+    lines.push(`<strong>Registered:</strong> ${d.registered ? '✅' : '❌'}`);
+    if (d.hostId) lines.push(`<strong>Host ID:</strong> <code style="font-size:11px;color:var(--text-muted)">${d.hostId}</code>`);
+    lines.push(`<strong>Running:</strong> ${d.running ? '✅' : '❌'}`);
+    lines.push(`<strong>Heartbeats:</strong> ${d.heartbeatCount || 0}`);
+    if (d.lastHeartbeat) lines.push(`<strong>Last heartbeat:</strong> ${new Date(d.lastHeartbeat).toLocaleTimeString()}`);
+    if (d.errors > 0) lines.push(`<strong style="color:var(--red)">Errors:</strong> ${d.errors}`);
+    statusEl.innerHTML = lines.join('<br>');
+  } catch (e) {
+    statusEl.textContent = 'Cloud status unavailable';
+  }
+}
+
+function showHostError(msg) {
+  const el = document.getElementById('cloud-host-error');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 8000);
+}
+
+async function hostAction(action) {
+  const el = document.getElementById('cloud-host-error');
+  if (el) el.style.display = 'none';
+
+  const msgs = { 'restart-sync': 'Restart cloud sync?', 're-enroll': 'Force re-enroll? Drops credentials.', 'remove': 'Remove host from cloud?' };
+  if (!confirm(msgs[action] || 'Are you sure?')) return;
+
+  const btnMap = { 'restart-sync': 'btn-restart-sync', 're-enroll': 'btn-re-enroll', 'remove': 'btn-remove-host' };
+  const btn = document.getElementById(btnMap[action]);
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+
+  const epMap = { 'restart-sync': ['POST', '/cloud/sync/restart'], 're-enroll': ['POST', '/cloud/re-enroll'], 'remove': ['DELETE', '/cloud/host'] };
+  const [method, url] = epMap[action];
+  try {
+    const r = await fetch(BASE + url, { method });
+    const d = await r.json();
+    if (!r.ok || d.success === false) showHostError(d.error || d.message || 'Action failed');
+    await loadCloudStatus();
+  } catch (e) {
+    showHostError('Network error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  }
+}
+
+// ---- Team Settings Panel ----
+
+let settingsData = null;
+
+async function loadSettings() {
+  const statusEl = document.getElementById('settings-status');
+  const contentEl = document.getElementById('settings-content');
+  if (!statusEl || !contentEl) return;
+  try {
+    const r = await fetch(`${BASE}/settings`);
+    if (!r.ok) { statusEl.textContent = 'Failed to load settings'; return; }
+    settingsData = await r.json();
+    statusEl.style.display = 'none';
+    renderSettings(settingsData);
+  } catch (e) {
+    statusEl.textContent = 'Settings unavailable';
+  }
+}
+
+function renderSettings(s) {
+  const el = document.getElementById('settings-content');
+  if (!el) return;
+  const w = s.watchdog || {};
+  const qh = w.quietHours || {};
+  const idle = w.idleNudge || {};
+  const cad = w.cadence || {};
+  const rescue = w.mentionRescue || {};
+  const cloud = s.cloud || {};
+  const focus = s.focus || [];
+
+  el.innerHTML = `
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-bright);margin-bottom:8px">🔕 Quiet Hours</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--text-muted)">
+          <input type="checkbox" id="s-qh-enabled" ${qh.enabled ? 'checked' : ''} onchange="saveSettings()"> Enabled
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">Start:
+          <input type="number" id="s-qh-start" value="${qh.startHour ?? 23}" min="0" max="23" style="width:50px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px" onchange="saveSettings()">
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">End:
+          <input type="number" id="s-qh-end" value="${qh.endHour ?? 8}" min="0" max="23" style="width:50px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px" onchange="saveSettings()">
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">TZ:
+          <input type="text" id="s-qh-tz" value="${esc(qh.tz || 'America/Vancouver')}" style="width:140px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px" onchange="saveSettings()">
+        </label>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-bright);margin-bottom:8px">⏰ Idle Nudge</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--text-muted)">
+          <input type="checkbox" id="s-idle-enabled" ${idle.enabled ? 'checked' : ''} onchange="saveSettings()"> Enabled
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">Warn:
+          <input type="number" id="s-idle-warn" value="${idle.warnMin ?? 45}" min="1" style="width:50px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px" onchange="saveSettings()">m
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">Escalate:
+          <input type="number" id="s-idle-esc" value="${idle.escalateMin ?? 60}" min="1" style="width:50px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px" onchange="saveSettings()">m
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">Cooldown:
+          <input type="number" id="s-idle-cd" value="${idle.cooldownMin ?? 20}" min="1" style="width:50px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px" onchange="saveSettings()">m
+        </label>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-bright);margin-bottom:8px">📊 Cadence Watchdog</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--text-muted)">
+          <input type="checkbox" id="s-cad-enabled" ${cad.enabled ? 'checked' : ''} onchange="saveSettings()"> Enabled
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">Silence:
+          <input type="number" id="s-cad-silence" value="${cad.silenceMin ?? 60}" min="1" style="width:50px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px" onchange="saveSettings()">m
+        </label>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-bright);margin-bottom:8px">🚨 Mention Rescue</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--text-muted)">
+          <input type="checkbox" id="s-rescue-enabled" ${rescue.enabled ? 'checked' : ''} onchange="saveSettings()"> Enabled
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">Cooldown:
+          <input type="number" id="s-rescue-cd" value="${rescue.cooldownMin ?? 10}" min="1" style="width:50px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px" onchange="saveSettings()">m
+        </label>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-bright);margin-bottom:8px">☁️ Cloud Connection</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--text-muted)">Host Name:
+          <input type="text" id="s-cloud-name" value="${esc(cloud.hostName || '')}" style="width:180px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px">
+        </label>
+        <label style="font-size:12px;color:var(--text-muted)">Cloud URL:
+          <input type="text" id="s-cloud-url" value="${esc(cloud.cloudUrl || '')}" style="width:200px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:2px 6px;font-size:12px">
+        </label>
+      </div>
+    </div>
+
+    ${focus.length > 0 ? `
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:600;color:var(--text-bright);margin-bottom:8px">🎯 Active Focus Modes</div>
+      ${focus.map(f => `<div style="font-size:12px;color:var(--text-muted)"><strong>${esc(f.agent)}</strong>: ${esc(f.level)}${f.reason ? ' — ' + esc(f.reason) : ''}</div>`).join('')}
+    </div>
+    ` : ''}
+
+    <div id="settings-save-status" style="font-size:11px;color:var(--green);display:none;margin-top:8px">✅ Saved</div>
+  `;
+}
+
+let saveSettingsTimer = null;
+async function saveSettings() {
+  if (saveSettingsTimer) clearTimeout(saveSettingsTimer);
+  saveSettingsTimer = setTimeout(doSaveSettings, 500);
+}
+
+async function doSaveSettings() {
+  const errEl = document.getElementById('settings-error');
+  const saveEl = document.getElementById('settings-save-status');
+  if (errEl) errEl.style.display = 'none';
+
+  const payload = {
+    watchdog: {
+      quietHours: {
+        enabled: document.getElementById('s-qh-enabled')?.checked ?? true,
+        startHour: Number(document.getElementById('s-qh-start')?.value) || 23,
+        endHour: Number(document.getElementById('s-qh-end')?.value) || 8,
+        tz: document.getElementById('s-qh-tz')?.value || 'America/Vancouver',
+      },
+      idleNudge: {
+        enabled: document.getElementById('s-idle-enabled')?.checked ?? true,
+        warnMin: Number(document.getElementById('s-idle-warn')?.value) || 45,
+        escalateMin: Number(document.getElementById('s-idle-esc')?.value) || 60,
+        cooldownMin: Number(document.getElementById('s-idle-cd')?.value) || 20,
+      },
+      cadence: {
+        enabled: document.getElementById('s-cad-enabled')?.checked ?? true,
+        silenceMin: Number(document.getElementById('s-cad-silence')?.value) || 60,
+      },
+      mentionRescue: {
+        enabled: document.getElementById('s-rescue-enabled')?.checked ?? true,
+        cooldownMin: Number(document.getElementById('s-rescue-cd')?.value) || 10,
+      },
+    },
+  };
+
+  // Include cloud config only if changed
+  const cloudName = document.getElementById('s-cloud-name')?.value;
+  const cloudUrl = document.getElementById('s-cloud-url')?.value;
+  if (cloudName || cloudUrl) {
+    payload.cloud = {};
+    if (cloudName) payload.cloud.hostName = cloudName;
+    if (cloudUrl) payload.cloud.cloudUrl = cloudUrl;
+  }
+
+  try {
+    const r = await fetch(`${BASE}/settings`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!r.ok || d.success === false) {
+      if (errEl) { errEl.textContent = d.error || d.message || 'Save failed'; errEl.style.display = 'block'; }
+    } else {
+      if (saveEl) { saveEl.style.display = 'block'; setTimeout(() => { saveEl.style.display = 'none'; }, 3000); }
+    }
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Network error: ' + e.message; errEl.style.display = 'block'; }
+  }
+}
+
 updateClock();
 setInterval(updateClock, 30000);
 refresh();
 connectEventStream();
 startAdaptiveRefresh();
+loadSettings();
+loadCloudStatus();
+setInterval(loadCloudStatus, 30000);
