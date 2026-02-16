@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-// Role-based assignment engine: affinity scoring + WIP caps
+// Role-based assignment engine: config-driven from TEAM-ROLES.yaml
+
+import { readFileSync, existsSync, watchFile, unwatchFile, statSync } from 'fs'
+import { join } from 'path'
+import { parse as parseYaml } from 'yaml'
+import { homedir } from 'os'
 
 export interface AgentRole {
   name: string
@@ -9,54 +14,150 @@ export interface AgentRole {
   wipCap: number               // max doing tasks (default 1)
 }
 
-// Agent registry — codifies team routing rules
-const AGENT_ROLES: AgentRole[] = [
-  {
-    name: 'link',
-    role: 'builder',
-    affinityTags: ['backend', 'api', 'integration', 'bug', 'test', 'webhook', 'server', 'fastify', 'typescript', 'task-lifecycle', 'watchdog', 'database'],
-    wipCap: 2,
-  },
-  {
-    name: 'pixel',
-    role: 'designer',
-    affinityTags: ['dashboard', 'ui', 'css', 'visual', 'animation', 'frontend', 'layout', 'ux', 'modal', 'chart'],
-    wipCap: 1,
-  },
-  {
-    name: 'sage',
-    role: 'ops',
-    affinityTags: ['ci', 'deploy', 'ops', 'merge', 'infra', 'github-actions', 'docker', 'pipeline', 'release', 'codeowners'],
-    protectedDomains: ['deploy', 'ci', 'release'],
-    wipCap: 1,
-  },
-  {
-    name: 'echo',
-    role: 'voice',
-    affinityTags: ['content', 'docs', 'landing', 'copy', 'brand', 'marketing', 'social', 'blog', 'readme', 'onboarding'],
-    wipCap: 1,
-  },
-  {
-    name: 'harmony',
-    role: 'reviewer',
-    affinityTags: ['qa', 'review', 'validation', 'audit', 'security', 'compliance', 'testing', 'quality'],
-    protectedDomains: ['security', 'audit'],
-    wipCap: 2,
-  },
-  {
-    name: 'scout',
-    role: 'analyst',
-    affinityTags: ['research', 'analysis', 'metrics', 'monitoring', 'analytics', 'data', 'reporting', 'benchmark'],
-    wipCap: 1,
-  },
+// ── YAML config paths (checked in order) ──
+const CONFIG_PATHS = [
+  join(homedir(), '.reflectt', 'TEAM-ROLES.yaml'),
+  join(homedir(), '.reflectt', 'TEAM-ROLES.yml'),
 ]
 
+// Resolve defaults dir relative to this file's location
+const DEFAULTS_PATH = new URL('../defaults/TEAM-ROLES.yaml', import.meta.url)
+
+// ── Built-in fallback (identical to defaults/TEAM-ROLES.yaml) ──
+const BUILTIN_ROLES: AgentRole[] = [
+  { name: 'link', role: 'builder', affinityTags: ['backend', 'api', 'integration', 'bug', 'test', 'webhook', 'server', 'fastify', 'typescript', 'task-lifecycle', 'watchdog', 'database'], wipCap: 2 },
+  { name: 'pixel', role: 'designer', affinityTags: ['dashboard', 'ui', 'css', 'visual', 'animation', 'frontend', 'layout', 'ux', 'modal', 'chart'], wipCap: 1 },
+  { name: 'sage', role: 'ops', affinityTags: ['ci', 'deploy', 'ops', 'merge', 'infra', 'github-actions', 'docker', 'pipeline', 'release', 'codeowners'], protectedDomains: ['deploy', 'ci', 'release'], wipCap: 1 },
+  { name: 'echo', role: 'voice', affinityTags: ['content', 'docs', 'landing', 'copy', 'brand', 'marketing', 'social', 'blog', 'readme', 'onboarding'], wipCap: 1 },
+  { name: 'harmony', role: 'reviewer', affinityTags: ['qa', 'review', 'validation', 'audit', 'security', 'compliance', 'testing', 'quality'], protectedDomains: ['security', 'audit'], wipCap: 2 },
+  { name: 'scout', role: 'analyst', affinityTags: ['research', 'analysis', 'metrics', 'monitoring', 'analytics', 'data', 'reporting', 'benchmark'], wipCap: 1 },
+]
+
+// ── Loaded state ──
+let loadedRoles: AgentRole[] = BUILTIN_ROLES
+let loadedFromPath: string | null = null
+let lastMtime: number = 0
+let watchActive = false
+
+function parseRolesYaml(content: string): AgentRole[] {
+  const data = parseYaml(content)
+  if (!data?.agents || !Array.isArray(data.agents)) {
+    throw new Error('TEAM-ROLES.yaml: missing or invalid "agents" array')
+  }
+  return data.agents.map((a: any, i: number) => {
+    if (!a.name || typeof a.name !== 'string') {
+      throw new Error(`TEAM-ROLES.yaml: agent[${i}] missing "name"`)
+    }
+    if (!a.role || typeof a.role !== 'string') {
+      throw new Error(`TEAM-ROLES.yaml: agent[${i}] (${a.name}) missing "role"`)
+    }
+    return {
+      name: a.name,
+      role: a.role,
+      affinityTags: Array.isArray(a.affinityTags) ? a.affinityTags.map(String) : [],
+      protectedDomains: Array.isArray(a.protectedDomains) ? a.protectedDomains.map(String) : undefined,
+      wipCap: typeof a.wipCap === 'number' && a.wipCap > 0 ? a.wipCap : 1,
+    }
+  })
+}
+
+function loadFromFile(path: string): AgentRole[] | null {
+  try {
+    if (!existsSync(path)) return null
+    const content = readFileSync(path, 'utf-8')
+    const roles = parseRolesYaml(content)
+    if (roles.length === 0) return null
+    return roles
+  } catch (err) {
+    console.error(`[Assignment] Failed to parse ${path}:`, (err as Error).message)
+    return null
+  }
+}
+
+/** Load roles from YAML config or fall back to built-in defaults */
+export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
+  // Try user config paths first
+  for (const configPath of CONFIG_PATHS) {
+    const roles = loadFromFile(configPath)
+    if (roles) {
+      loadedRoles = roles
+      loadedFromPath = configPath
+      try {
+        lastMtime = statSync(configPath).mtimeMs
+      } catch { /* ignore */ }
+      console.log(`[Assignment] Loaded ${roles.length} agent roles from ${configPath}`)
+      return { roles, source: configPath }
+    }
+  }
+
+  // Try defaults shipped with repo
+  try {
+    const defaultsPath = new URL('../defaults/TEAM-ROLES.yaml', import.meta.url)
+    const content = readFileSync(defaultsPath, 'utf-8')
+    const roles = parseRolesYaml(content)
+    if (roles.length > 0) {
+      loadedRoles = roles
+      loadedFromPath = 'defaults/TEAM-ROLES.yaml'
+      console.log(`[Assignment] Loaded ${roles.length} agent roles from defaults/TEAM-ROLES.yaml`)
+      return { roles, source: 'defaults/TEAM-ROLES.yaml' }
+    }
+  } catch { /* ignore */ }
+
+  // Fall back to built-in
+  loadedRoles = BUILTIN_ROLES
+  loadedFromPath = null
+  console.log(`[Assignment] Using ${BUILTIN_ROLES.length} built-in agent roles (no YAML found)`)
+  return { roles: BUILTIN_ROLES, source: 'builtin' }
+}
+
+/** Start watching the config file for changes (hot-reload) */
+export function startConfigWatch(): void {
+  if (watchActive) return
+  
+  // Watch user config paths
+  for (const configPath of CONFIG_PATHS) {
+    if (existsSync(configPath)) {
+      try {
+        watchFile(configPath, { interval: 5000 }, () => {
+          try {
+            const stat = statSync(configPath)
+            if (stat.mtimeMs !== lastMtime) {
+              console.log(`[Assignment] TEAM-ROLES.yaml changed, reloading...`)
+              loadAgentRoles()
+            }
+          } catch { /* file removed */ }
+        })
+        watchActive = true
+        console.log(`[Assignment] Watching ${configPath} for changes`)
+      } catch { /* ignore */ }
+    }
+  }
+}
+
+/** Stop watching config files */
+export function stopConfigWatch(): void {
+  if (!watchActive) return
+  for (const configPath of CONFIG_PATHS) {
+    try { unwatchFile(configPath) } catch { /* ignore */ }
+  }
+  watchActive = false
+}
+
+/** Get the current loaded roles */
 export function getAgentRoles(): AgentRole[] {
-  return AGENT_ROLES
+  return loadedRoles
+}
+
+/** Get info about where roles were loaded from */
+export function getAgentRolesSource(): { source: string; count: number } {
+  return {
+    source: loadedFromPath || 'builtin',
+    count: loadedRoles.length,
+  }
 }
 
 export function getAgentRole(name: string): AgentRole | undefined {
-  return AGENT_ROLES.find(a => a.name.toLowerCase() === name.toLowerCase())
+  return loadedRoles.find(a => a.name.toLowerCase() === name.toLowerCase())
 }
 
 interface TaskForScoring {
@@ -138,9 +239,11 @@ export function suggestAssignee(
   allTasks: TaskForScoring[],
   recentCompletionsPerAgent?: Map<string, number>,
 ): { suggested: string | null; scores: AssignmentScore[]; protectedMatch?: string } {
+  const roles = getAgentRoles()
+
   // Check protected domains first
   const keywords = extractTaskKeywords(task)
-  for (const agent of AGENT_ROLES) {
+  for (const agent of roles) {
     if (agent.protectedDomains) {
       const protectedMatch = agent.protectedDomains.find(domain =>
         keywords.some(kw => kw.includes(domain) || domain.includes(kw))
@@ -156,7 +259,7 @@ export function suggestAssignee(
   }
 
   // Score all agents
-  const scores = AGENT_ROLES.map(agent => {
+  const scores = roles.map(agent => {
     const currentWip = allTasks.filter(t =>
       t.status === 'doing' && (t.assignee || '').toLowerCase() === agent.name
     ).length
@@ -206,3 +309,6 @@ export function checkWipCap(
 
   return { allowed: true, wipCount, wipCap: agent.wipCap }
 }
+
+// Export for testing
+export { parseRolesYaml as _parseRolesYaml, CONFIG_PATHS as _CONFIG_PATHS }

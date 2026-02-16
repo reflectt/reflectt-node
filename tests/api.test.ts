@@ -1447,6 +1447,32 @@ describe('Docs', () => {
   })
 })
 
+describe('Agent roles config', () => {
+  it('GET /agents/roles returns config source info', async () => {
+    const { status, body } = await req('GET', '/agents/roles')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.agents).toBeDefined()
+    expect(Array.isArray(body.agents)).toBe(true)
+    expect(body.agents.length).toBeGreaterThan(0)
+    expect(body.config).toBeDefined()
+    expect(body.config.source).toBeDefined()
+    expect(body.config.count).toBeGreaterThan(0)
+  })
+
+  it('each agent has required fields', async () => {
+    const { body } = await req('GET', '/agents/roles')
+    for (const agent of body.agents) {
+      expect(agent.name).toBeDefined()
+      expect(agent.role).toBeDefined()
+      expect(Array.isArray(agent.affinityTags)).toBe(true)
+      expect(typeof agent.wipCap).toBe('number')
+      expect(typeof agent.wipCount).toBe('number')
+      expect(typeof agent.overCap).toBe('boolean')
+    }
+  })
+})
+
 describe('Branch tracking on doing transition', () => {
   it('auto-populates metadata.branch when task moves to doing', async () => {
     const agentName = `branch-agent-${Date.now()}`

@@ -33,7 +33,7 @@ import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
-import { getAgentRoles, suggestAssignee, checkWipCap } from './assignment.js'
+import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, checkWipCap } from './assignment.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -806,6 +806,10 @@ export async function createServer(): Promise<FastifyInstance> {
   app.addHook('onResponse', async () => {
     await healthMonitor.recordSnapshot().catch(() => {}) // Silent fail
   })
+
+  // Load agent roles from YAML config (or fall back to built-in defaults)
+  loadAgentRoles()
+  startConfigWatch()
 
   // System idle nudge watchdog (process-in-code guardrail)
   const idleNudgeTimer = setInterval(() => {
@@ -2668,7 +2672,8 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     })
 
-    return { success: true, agents: enriched }
+    const sourceInfo = getAgentRolesSource()
+    return { success: true, agents: enriched, config: sourceInfo }
   })
 
   // Suggest assignee for a task
