@@ -1161,6 +1161,23 @@ export async function createServer(): Promise<FastifyInstance> {
     return getBuildInfo()
   })
 
+  // Deploy identity — version + SHA + build timestamp for attestation workflows
+  app.get('/health/deploy', async () => {
+    const build = getBuildInfo()
+    return {
+      version: build.appVersion,
+      gitSha: build.gitSha,
+      gitShortSha: build.gitShortSha,
+      branch: build.gitBranch,
+      buildTimestamp: build.buildTimestamp,
+      startedAt: build.startedAt,
+      startedAtMs: build.startedAtMs,
+      pid: build.pid,
+      nodeVersion: build.nodeVersion,
+      uptime: build.uptime,
+    }
+  })
+
   // Error logs (for debugging)
   app.get('/logs', async (request, reply) => {
     const parsedQuery = LogsQuerySchema.safeParse(request.query ?? {})

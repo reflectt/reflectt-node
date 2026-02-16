@@ -62,7 +62,8 @@ Operationally:
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
 | GET | `/health/system` | System info (uptime, memory, versions) |
-| GET | `/health/build` | Build/runtime identity (git SHA, branch, PID, uptime) |
+| GET | `/health/build` | Build/runtime identity (version, git SHA, branch, build timestamp, PID, uptime) |
+| GET | `/health/deploy` | Deploy attestation payload for dashboards (`version`, `gitSha`, `branch`, `buildTimestamp`, `startedAt`, `pid`) |
 | GET | `/health/team/summary` | Compact team health summary |
 | GET | `/health/team/history` | Historical team health data |
 | GET | `/health/workflow` | Unified per-agent workflow state: doing-task age, last shipped timestamp, blocker flag, artifact path, and linked PR state |

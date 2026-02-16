@@ -48,12 +48,28 @@ describe('Health', () => {
   it('GET /health/build returns build info with SHA and PID', async () => {
     const { status, body } = await req('GET', '/health/build')
     expect(status).toBe(200)
+    expect(body.appVersion).toBeDefined()
     expect(body.gitSha).toBeDefined()
     expect(body.gitShortSha).toBeDefined()
     expect(body.gitBranch).toBeDefined()
+    expect(body.buildTimestamp).toBeDefined()
     expect(body.pid).toBeTypeOf('number')
     expect(body.nodeVersion).toBeDefined()
     expect(body.startedAt).toBeDefined()
+    expect(body.uptime).toBeTypeOf('number')
+  })
+
+  it('GET /health/deploy returns deploy attestation payload', async () => {
+    const { status, body } = await req('GET', '/health/deploy')
+    expect(status).toBe(200)
+    expect(body.version).toBeDefined()
+    expect(body.gitSha).toBeDefined()
+    expect(body.gitShortSha).toBeDefined()
+    expect(body.branch).toBeDefined()
+    expect(body.buildTimestamp).toBeDefined()
+    expect(body.startedAt).toBeDefined()
+    expect(body.pid).toBeTypeOf('number')
+    expect(body.nodeVersion).toBeDefined()
     expect(body.uptime).toBeTypeOf('number')
   })
 
