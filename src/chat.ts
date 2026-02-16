@@ -10,10 +10,71 @@ import { join } from 'path'
 import { eventBus } from './events.js'
 import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 import { CHANNEL_DEFINITIONS, DEFAULT_CHAT_CHANNELS } from './channels.js'
+import { getDb, importJsonlIfNeeded, safeJsonParse, safeJsonStringify } from './db.js'
+import type Database from 'better-sqlite3'
 // OpenClaw integration pending — chat works standalone for now
 
 const MESSAGES_FILE = join(DATA_DIR, 'messages.jsonl')
 const LEGACY_MESSAGES_FILE = join(LEGACY_DATA_DIR, 'messages.jsonl')
+
+function importMessages(db: Database.Database, records: unknown[]): number {
+  const byId = new Map<string, AgentMessage>()
+
+  for (const record of records) {
+    if (!record || typeof record !== 'object') continue
+
+    const message = record as Partial<AgentMessage>
+    if (typeof message.id !== 'string' || message.id.length === 0) continue
+
+    const deleteUpdate = Boolean((message.metadata as any)?.deleteUpdate)
+    if (deleteUpdate) {
+      byId.delete(message.id)
+      continue
+    }
+
+    if (typeof message.from !== 'string' || typeof message.content !== 'string') continue
+
+    byId.set(message.id, {
+      id: message.id,
+      from: message.from,
+      to: message.to,
+      content: message.content,
+      timestamp: Number(message.timestamp) || Date.now(),
+      channel: message.channel || 'general',
+      reactions: message.reactions || {},
+      threadId: message.threadId,
+      metadata: message.metadata,
+    })
+  }
+
+  if (byId.size === 0) return 0
+
+  const upsert = db.prepare(`
+    INSERT OR REPLACE INTO chat_messages (
+      id, "from", "to", content, timestamp, channel, reactions, thread_id, metadata
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const insertMany = db.transaction((messages: AgentMessage[]) => {
+    for (const msg of messages) {
+      upsert.run(
+        msg.id,
+        msg.from,
+        msg.to ?? null,
+        msg.content,
+        msg.timestamp,
+        msg.channel || 'general',
+        safeJsonStringify(msg.reactions),
+        msg.threadId ?? null,
+        safeJsonStringify(msg.metadata),
+      )
+    }
+  })
+
+  const messages = Array.from(byId.values())
+  insertMany(messages)
+  return messages.length
+}
 
 class ChatManager {
   private messages: AgentMessage[] = []
@@ -39,76 +100,83 @@ class ChatManager {
 
   private async loadMessages(): Promise<void> {
     try {
-      // Ensure data directory exists
       await fs.mkdir(DATA_DIR, { recursive: true })
 
-      // Try to read existing messages
-      let messagesLoaded = false
-      try {
-        const content = await fs.readFile(MESSAGES_FILE, 'utf-8')
-        const lines = content.trim().split('\n').filter(line => line.length > 0)
-        
-        for (const line of lines) {
-          try {
-            const message = JSON.parse(line) as AgentMessage
-            this.messages.push(message)
-          } catch (err) {
-            console.error('[Chat] Failed to parse message line:', err)
-          }
-        }
-        
-        console.log(`[Chat] Loaded ${this.messages.length} messages from disk`)
-        messagesLoaded = true
-      } catch (err: any) {
-        if (err.code !== 'ENOENT') {
-          throw err
-        }
-        // File doesn't exist yet - try legacy location
-      }
+      const db = getDb()
 
-      // Migration: Check legacy data directory
-      if (!messagesLoaded) {
-        try {
-          const legacyContent = await fs.readFile(LEGACY_MESSAGES_FILE, 'utf-8')
-          const lines = legacyContent.trim().split('\n').filter(line => line.length > 0)
-          
-          for (const line of lines) {
-            try {
-              const message = JSON.parse(line) as AgentMessage
-              this.messages.push(message)
-            } catch (err) {
-              console.error('[Chat] Failed to parse legacy message line:', err)
-            }
-          }
-          
-          console.log(`[Chat] Migrated ${this.messages.length} messages from legacy location`)
-          
-          // Write to new location
-          if (this.messages.length > 0) {
-            const content = this.messages.map(m => JSON.stringify(m)).join('\n') + '\n'
-            await fs.writeFile(MESSAGES_FILE, content, 'utf-8')
-            console.log('[Chat] Migration complete - messages saved to new location')
-          }
-        } catch (err: any) {
-          if (err.code !== 'ENOENT') {
-            console.error('[Chat] Failed to migrate from legacy location:', err)
-          }
-          // No legacy file either - starting fresh
-          console.log('[Chat] No existing messages file, starting fresh')
-        }
-      }
+      // One-time JSONL -> SQLite import (current + legacy paths)
+      importJsonlIfNeeded(db, MESSAGES_FILE, 'chat_messages', importMessages)
+      importJsonlIfNeeded(db, LEGACY_MESSAGES_FILE, 'chat_messages', importMessages)
+
+      const rows = db.prepare('SELECT * FROM chat_messages ORDER BY timestamp ASC').all() as Array<{
+        id: string
+        from: string
+        to: string | null
+        content: string
+        timestamp: number
+        channel: string | null
+        reactions: string | null
+        thread_id: string | null
+        metadata: string | null
+      }>
+
+      this.messages = rows.map((row) => ({
+        id: row.id,
+        from: row.from,
+        to: row.to ?? undefined,
+        content: row.content,
+        timestamp: row.timestamp,
+        channel: row.channel || 'general',
+        reactions: safeJsonParse<Record<string, string[]>>(row.reactions) || {},
+        threadId: row.thread_id ?? undefined,
+        metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
+      }))
+
+      console.log(`[Chat] Loaded ${this.messages.length} messages from SQLite`)
     } finally {
       this.initialized = true
     }
   }
 
+  private writeMessageToDb(message: AgentMessage): void {
+    const db = getDb()
+    const upsert = db.prepare(`
+      INSERT OR REPLACE INTO chat_messages (
+        id, "from", "to", content, timestamp, channel, reactions, thread_id, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+
+    upsert.run(
+      message.id,
+      message.from,
+      message.to ?? null,
+      message.content,
+      message.timestamp,
+      message.channel || 'general',
+      safeJsonStringify(message.reactions),
+      message.threadId ?? null,
+      safeJsonStringify(message.metadata),
+    )
+  }
+
+  private deleteMessageFromDb(messageId: string): void {
+    const db = getDb()
+    db.prepare('DELETE FROM chat_messages WHERE id = ?').run(messageId)
+  }
+
+  private async appendAuditRecord(record: unknown): Promise<void> {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      await fs.appendFile(MESSAGES_FILE, JSON.stringify(record) + '\n', 'utf-8')
+    } catch (err) {
+      console.error('[Chat] Failed to append audit record:', err)
+    }
+  }
+
   private async persistMessage(message: AgentMessage): Promise<void> {
     try {
-      // Ensure data directory exists
-      await fs.mkdir(DATA_DIR, { recursive: true })
-      
-      // Append message as JSONL
-      await fs.appendFile(MESSAGES_FILE, JSON.stringify(message) + '\n', 'utf-8')
+      this.writeMessageToDb(message)
+      await this.appendAuditRecord(message)
     } catch (err) {
       console.error('[Chat] Failed to persist message:', err)
     }
@@ -356,9 +424,10 @@ class ChatManager {
       agents.push(from)
     }
     
-    // Persist updated message (rewrite entire JSONL file)
-    await this.rewriteMessages()
-    
+    // Persist updated message to SQLite + JSONL audit
+    this.writeMessageToDb(message)
+    await this.appendAuditRecord(message)
+
     // Notify subscribers
     this.notifySubscribers(message)
     
@@ -403,7 +472,8 @@ class ChatManager {
       editedBy: editor,
     }
 
-    await this.rewriteMessages()
+    this.writeMessageToDb(message)
+    await this.appendAuditRecord(message)
     this.notifySubscribers(message)
 
     eventBus.emit({
@@ -428,7 +498,18 @@ class ChatManager {
     }
 
     this.messages.splice(messageIndex, 1)
-    await this.rewriteMessages()
+    this.deleteMessageFromDb(messageId)
+    await this.appendAuditRecord({
+      id: messageId,
+      from: actor,
+      content: '',
+      timestamp: Date.now(),
+      channel: message.channel || 'general',
+      metadata: {
+        deleteUpdate: true,
+        deletedBy: actor,
+      },
+    })
 
     eventBus.emit({
       id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -456,21 +537,6 @@ class ChatManager {
     }
     
     return results
-  }
-
-  /**
-   * Rewrite all messages to disk (for updates like reactions)
-   */
-  private async rewriteMessages(): Promise<void> {
-    try {
-      await fs.mkdir(DATA_DIR, { recursive: true })
-      
-      // Write all messages as JSONL
-      const content = this.messages.map(m => JSON.stringify(m)).join('\n') + '\n'
-      await fs.writeFile(MESSAGES_FILE, content, 'utf-8')
-    } catch (err) {
-      console.error('[Chat] Failed to rewrite messages:', err)
-    }
   }
 
   getStats() {
