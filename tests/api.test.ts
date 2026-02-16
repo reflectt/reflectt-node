@@ -1234,6 +1234,68 @@ describe('Idle Nudge shipped cooldown', () => {
 
     await req('DELETE', `/tasks/${taskId}`)
   })
+
+  it('suppresses nudge when task has recent comments', async () => {
+    const agent = 'lane-task-comment-suppress'
+    await cleanupAgentTasks(agent)
+    const taskId = await createDoingTask(agent, 'TEST: task comment suppresses nudge')
+
+    await req('POST', `/presence/${agent}`, {
+      status: 'working',
+      task: taskId,
+      since: Date.now() - (50 * 60_000),
+    })
+
+    const commentRes = await req('POST', `/tasks/${taskId}/comments`, {
+      author: 'test-reviewer',
+      content: 'Implementation checkpoint posted in task comments',
+    })
+    expect(commentRes.status).toBe(200)
+
+    const commentTickNowMs = Date.now() + (90 * 60_000)
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true&nowMs=${commentTickNowMs}`)
+    expect(status).toBe(200)
+
+    const decision = (body.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    expect(decision.reason).toBe('recent-task-comment-suppressed')
+    expect(decision.decision).toBe('none')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('escalates after repeated ETA-only updates on same task', async () => {
+    const agent = 'lane-eta-loop'
+    await cleanupAgentTasks(agent)
+    const taskId = await createDoingTask(agent, 'TEST: eta loop escalation')
+
+    await req('POST', `/presence/${agent}`, {
+      status: 'working',
+      task: taskId,
+      since: Date.now() - (50 * 60_000),
+    })
+
+    for (let i = 0; i < 2; i += 1) {
+      const { status: msgStatus } = await req('POST', '/chat/messages', {
+        from: agent,
+        channel: 'general',
+        content: `Task: ${taskId}\n1) Shipped: none yet\n2) Blocker: none\n3) Next: continue work + ETA 15m`,
+      })
+      expect(msgStatus).toBe(200)
+    }
+
+    const etaTickNowMs = Date.now() + (90 * 60_000)
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true&nowMs=${etaTickNowMs}`)
+    expect(status).toBe(200)
+
+    const decision = (body.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    expect(decision.reason).toBe('eta-loop-escalation')
+    expect(decision.decision).toBe('escalate')
+    expect(String(decision.renderedMessage || '')).toContain('request reassignment')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
 })
 
 describe('SSE Event Filtering', () => {
