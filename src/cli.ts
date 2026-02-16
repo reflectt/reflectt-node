@@ -796,25 +796,56 @@ host
 
       if (options.restart) {
         if (isServerRunning()) {
-          console.log('🔄 Restarting local reflectt server to apply cloud config...')
-          stopServerIfRunning()
+          // Try hot-reload first (avoids full restart)
+          console.log('🔄 Reloading cloud config on running server...')
+          const reloadResult = await tryApiRequest('/cloud/reload', { method: 'POST' })
+          if (reloadResult?.success) {
+            console.log('✅ Cloud config hot-reloaded')
+            const heartbeat = await waitForCloudHeartbeat()
+            if (heartbeat) {
+              console.log('✅ Heartbeat verified')
+              console.log(`   Cloud host ID: ${heartbeat.hostId}`)
+              console.log(`   Heartbeats sent: ${heartbeat.heartbeatCount}`)
+            } else {
+              console.log('⚠️  Config reloaded, but heartbeat verification timed out')
+              console.log('   Check: reflectt host status')
+              process.exitCode = 1
+            }
+          } else {
+            // Fallback: full restart (older server without /cloud/reload)
+            console.log('⚠️  Hot-reload unavailable, falling back to full restart...')
+            stopServerIfRunning()
+            const pid = startServerDetached(nextConfig)
+            console.log(`   Server PID: ${pid}`)
+
+            const heartbeat = await waitForCloudHeartbeat()
+            if (heartbeat) {
+              console.log('✅ Heartbeat verified')
+              console.log(`   Cloud host ID: ${heartbeat.hostId}`)
+              console.log(`   Heartbeats sent: ${heartbeat.heartbeatCount}`)
+            } else {
+              console.log('⚠️  Enrollment saved, but heartbeat verification timed out')
+              console.log('   Check: reflectt status')
+              console.log('   Check: reflectt host status')
+              process.exitCode = 1
+            }
+          }
         } else {
           console.log('🚀 Starting local reflectt server...')
-        }
+          const pid = startServerDetached(nextConfig)
+          console.log(`   Server PID: ${pid}`)
 
-        const pid = startServerDetached(nextConfig)
-        console.log(`   Server PID: ${pid}`)
-
-        const heartbeat = await waitForCloudHeartbeat()
-        if (heartbeat) {
-          console.log('✅ Heartbeat verified')
-          console.log(`   Cloud host ID: ${heartbeat.hostId}`)
-          console.log(`   Heartbeats sent: ${heartbeat.heartbeatCount}`)
-        } else {
-          console.log('⚠️  Enrollment saved, but heartbeat verification timed out')
-          console.log('   Check: reflectt status')
-          console.log('   Check: reflectt host status')
-          process.exitCode = 1
+          const heartbeat = await waitForCloudHeartbeat()
+          if (heartbeat) {
+            console.log('✅ Heartbeat verified')
+            console.log(`   Cloud host ID: ${heartbeat.hostId}`)
+            console.log(`   Heartbeats sent: ${heartbeat.heartbeatCount}`)
+          } else {
+            console.log('⚠️  Enrollment saved, but heartbeat verification timed out')
+            console.log('   Check: reflectt status')
+            console.log('   Check: reflectt host status')
+            process.exitCode = 1
+          }
         }
       } else {
         console.log('ℹ️  Enrollment saved. Restart/start reflectt manually to begin heartbeats.')

@@ -270,6 +270,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/cloud/status` | Cloud connection state (registered, heartbeat age, sync status). Only active when `REFLECTT_HOST_TOKEN` is set. |
+| POST | `/cloud/reload` | Hot-reload cloud config from `~/.reflectt/config.json` without server restart. Updates env vars and restarts heartbeat/sync loops. Used by CLI after `host connect` enrollment. |
 
 ## Other
 

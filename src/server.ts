@@ -3013,11 +3013,57 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // ============ CLOUD INTEGRATION ============
+  // ============ CLOUD INTEGRATION (see docs/CLOUD_ENDPOINTS.md) ============
 
   app.get('/cloud/status', async () => {
     const { getCloudStatus } = await import('./cloud.js')
     return getCloudStatus()
+  })
+
+  app.post('/cloud/reload', async () => {
+    const { stopCloudIntegration, startCloudIntegration, getCloudStatus } = await import('./cloud.js')
+    const { readFileSync, existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { homedir } = await import('node:os')
+
+    const reflecttHome = process.env.REFLECTT_HOME || join(homedir(), '.reflectt')
+    const configPath = join(reflecttHome, 'config.json')
+
+    if (!existsSync(configPath)) {
+      return { success: false, error: 'No config.json found', configPath }
+    }
+
+    let config: any
+    try {
+      config = JSON.parse(readFileSync(configPath, 'utf-8'))
+    } catch (err: any) {
+      return { success: false, error: `Failed to parse config.json: ${err?.message}` }
+    }
+
+    if (!config.cloud) {
+      return { success: false, error: 'No cloud enrollment found in config.json' }
+    }
+
+    // Update env vars from config
+    const cloud = config.cloud
+    if (cloud.cloudUrl) process.env.REFLECTT_CLOUD_URL = cloud.cloudUrl
+    if (cloud.hostName) process.env.REFLECTT_HOST_NAME = cloud.hostName
+    if (cloud.hostType) process.env.REFLECTT_HOST_TYPE = cloud.hostType
+    if (cloud.hostId) process.env.REFLECTT_HOST_ID = cloud.hostId
+    if (cloud.credential) {
+      process.env.REFLECTT_HOST_CREDENTIAL = cloud.credential
+      process.env.REFLECTT_HOST_TOKEN = cloud.credential
+    }
+
+    // Restart cloud integration
+    stopCloudIntegration()
+    await startCloudIntegration()
+
+    return {
+      success: true,
+      message: 'Cloud integration reloaded from config.json',
+      status: getCloudStatus(),
+    }
   })
 
   // ============ OPENCLAW ENDPOINTS ============
