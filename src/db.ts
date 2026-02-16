@@ -254,6 +254,21 @@ function runMigrations(db: Database.Database): void {
       version: 4,
       sql: 'SELECT 1', // Vector tables initialized via initVectorTables() after extension load
     },
+    {
+      version: 5,
+      sql: `
+        -- Focus mode persistence across restarts
+        CREATE TABLE IF NOT EXISTS focus_states (
+          agent TEXT PRIMARY KEY,
+          active INTEGER NOT NULL DEFAULT 0,
+          level TEXT NOT NULL DEFAULT 'soft',
+          started_at INTEGER NOT NULL DEFAULT 0,
+          expires_at INTEGER,
+          reason TEXT,
+          updated_at INTEGER NOT NULL
+        );
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
