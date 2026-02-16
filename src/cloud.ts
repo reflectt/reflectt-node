@@ -38,7 +38,7 @@ interface TaskStateEntry {
 
 interface CloudConfig {
   cloudUrl: string
-  token: string
+  token?: string
   hostName: string
   hostType: string
   heartbeatIntervalMs: number
@@ -112,7 +112,7 @@ export async function startCloudIntegration(): Promise<void> {
 
   config = {
     cloudUrl: (process.env.REFLECTT_CLOUD_URL || 'https://api.reflectt.ai').replace(/\/+$/, ''),
-    token: process.env.REFLECTT_HOST_TOKEN!,
+    token: process.env.REFLECTT_HOST_TOKEN,
     hostName: process.env.REFLECTT_HOST_NAME || 'unnamed-host',
     hostType: process.env.REFLECTT_HOST_TYPE || 'openclaw',
     heartbeatIntervalMs: Number(process.env.REFLECTT_HEARTBEAT_MS) || DEFAULT_HEARTBEAT_MS,
@@ -285,8 +285,10 @@ async function cloudPost<T = unknown>(path: string, body: unknown): Promise<Clou
     // Use credential if registered, otherwise join token for enrollment
     if (state.credential) {
       headers['Authorization'] = `Bearer ${state.credential}`
-    } else {
+    } else if (config.token) {
       headers['Authorization'] = `Bearer ${config.token}`
+    } else {
+      return { success: false, error: 'Missing cloud credential/token' }
     }
 
     const response = await fetch(url, {
