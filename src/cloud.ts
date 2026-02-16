@@ -235,6 +235,7 @@ async function sendHeartbeat(): Promise<void> {
     : 'online'
 
   const result = await cloudPost(`/api/hosts/${state.hostId}/heartbeat`, {
+    contractVersion: 'host-heartbeat.v1',
     status: hostStatus,
     agents: agents.map(a => ({
       name: a.name,
