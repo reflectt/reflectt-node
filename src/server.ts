@@ -1406,6 +1406,13 @@ export async function createServer(): Promise<FastifyInstance> {
       })
     }
 
+    // Fire-and-forget: index chat message for semantic search
+    if (message.id && data.content && data.content.trim().length >= 10) {
+      import('./vector-store.js')
+        .then(({ indexChatMessage }) => indexChatMessage(message.id, data.content))
+        .catch(() => {})
+    }
+
     return {
       success: true,
       message,
@@ -1726,6 +1733,101 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const tasks = taskManager.searchTasks(q).slice(0, limit)
     return { tasks: tasks.map(enrichTaskWithComments), count: tasks.length }
+  })
+
+  // Semantic search across tasks and chat messages
+  app.get('/search/semantic', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const q = (query.q || '').trim()
+    if (!q) {
+      reply.code(400)
+      return { error: 'Query parameter q is required', code: 'BAD_REQUEST' }
+    }
+
+    const limit = Math.min(Math.max(parseInt(query.limit || '10', 10) || 10, 1), 50)
+    const type = query.type // optional: 'task' | 'chat'
+
+    try {
+      const { isVectorSearchAvailable } = await import('./db.js')
+      if (!isVectorSearchAvailable()) {
+        reply.code(503)
+        return {
+          error: 'Semantic search not available (sqlite-vec extension not loaded)',
+          code: 'VEC_NOT_AVAILABLE',
+        }
+      }
+
+      const { semanticSearch } = await import('./vector-store.js')
+      const results = await semanticSearch(q, { limit, type })
+
+      return {
+        query: q,
+        results,
+        count: results.length,
+      }
+    } catch (err: any) {
+      reply.code(500)
+      return { error: err?.message || 'Semantic search failed', code: 'SEARCH_ERROR' }
+    }
+  })
+
+  // Vector index status
+  app.get('/search/semantic/status', async () => {
+    try {
+      const { isVectorSearchAvailable } = await import('./db.js')
+      if (!isVectorSearchAvailable()) {
+        return { available: false, reason: 'sqlite-vec extension not loaded' }
+      }
+
+      const { vectorCount } = await import('./vector-store.js')
+      const { getDb } = await import('./db.js')
+      const db = getDb()
+
+      return {
+        available: true,
+        indexed: {
+          total: vectorCount(db),
+          tasks: vectorCount(db, 'task'),
+          chat: vectorCount(db, 'chat'),
+        },
+      }
+    } catch (err: any) {
+      return { available: false, reason: err?.message }
+    }
+  })
+
+  // Manually trigger indexing of existing tasks
+  app.post('/search/semantic/reindex', async (request, reply) => {
+    try {
+      const { isVectorSearchAvailable } = await import('./db.js')
+      if (!isVectorSearchAvailable()) {
+        reply.code(503)
+        return { error: 'Semantic search not available', code: 'VEC_NOT_AVAILABLE' }
+      }
+
+      const { indexTask } = await import('./vector-store.js')
+      const allTasks = taskManager.listTasks({})
+      let indexed = 0
+
+      for (const task of allTasks) {
+        try {
+          await indexTask(
+            task.id,
+            task.title,
+            (task as any).description,
+            task.done_criteria,
+          )
+          indexed++
+        } catch {
+          // skip individual failures
+        }
+      }
+
+      return { indexed, total: allTasks.length }
+    } catch (err: any) {
+      reply.code(500)
+      return { error: err?.message || 'Reindex failed', code: 'REINDEX_ERROR' }
+    }
   })
 
   // List recurring task definitions
@@ -2135,6 +2237,13 @@ export async function createServer(): Promise<FastifyInstance> {
       // Auto-update presence: creating tasks = working
       if (data.createdBy) {
         presenceManager.updatePresence(data.createdBy, 'working')
+      }
+
+      // Fire-and-forget: index task for semantic search
+      if (!data.title.startsWith('TEST:')) {
+        import('./vector-store.js')
+          .then(({ indexTask }) => indexTask(task.id, task.title, undefined, data.done_criteria))
+          .catch(() => {})
       }
       
       return { success: true, task: enrichTaskWithComments(task) }
