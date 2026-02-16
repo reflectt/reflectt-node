@@ -1,0 +1,181 @@
+name: pr-merge-delegation
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted]
+  check_suite:
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  assign-rotating-reviewer:
+    if: >-
+      github.event_name == 'pull_request_target' &&
+      (github.event.action == 'opened' || github.event.action == 'reopened' || github.event.action == 'ready_for_review')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Request rotating reviewer
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            if (!pr || pr.draft) return;
+
+            const configuredPool = `${{ vars.PR_REVIEWER_POOL || '' }}`
+              .split(',')
+              .map((s) => s.trim().replace(/^@/, ''))
+              .filter(Boolean);
+
+            // Primary path: use PR_REVIEWER_POOL for true rotation (2+ members).
+            // Fallback keeps CI green for repos that haven't set the variable yet.
+            const fallbackPool = ['ryancampbell'];
+            const pool = (configuredPool.length > 0 ? configuredPool : fallbackPool)
+              .filter((login) => login.toLowerCase() !== pr.user.login.toLowerCase());
+
+            if (!pool.length) {
+              core.info('No eligible reviewers in rotation pool after filtering PR author.');
+              return;
+            }
+
+            const existing = new Set((pr.requested_reviewers || []).map((r) => r.login.toLowerCase()));
+            const candidates = pool.filter((login) => !existing.has(login.toLowerCase()));
+            const effective = candidates.length ? candidates : pool;
+            const selected = effective[pr.number % effective.length];
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                reviewers: [selected],
+              });
+              core.info(`Requested rotating reviewer: ${selected}`);
+            } catch (error) {
+              core.warning(`Failed to request reviewer ${selected}: ${error.message}`);
+            }
+
+  merge-when-green:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      statuses: read
+    steps:
+      - name: Merge PR when approved + green
+        uses: actions/github-script@v7
+        with:
+          script: |
+            async function resolvePullNumber() {
+              if (context.payload.pull_request?.number) return context.payload.pull_request.number;
+              if (context.payload.review?.pull_request_url) {
+                return Number(context.payload.review.pull_request_url.split('/').pop());
+              }
+              const prs = context.payload.check_suite?.pull_requests || [];
+              if (prs.length > 0) return prs[0].number;
+              return null;
+            }
+
+            const pull_number = await resolvePullNumber();
+            if (!pull_number) {
+              core.info('No pull request context found for this event.');
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number,
+            });
+
+            if (pr.state !== 'open' || pr.draft) {
+              core.info(`PR #${pull_number} not mergeable (state=${pr.state}, draft=${pr.draft}).`);
+              return;
+            }
+
+            const labels = new Set((pr.labels || []).map((l) => l.name));
+            if (!labels.has('automerge')) {
+              core.info(`PR #${pull_number} missing automerge label; skipping.`);
+              return;
+            }
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number,
+              per_page: 100,
+            });
+
+            const decisionByUser = new Map();
+            for (const review of reviews) {
+              if (!review.user?.login) continue;
+              decisionByUser.set(review.user.login.toLowerCase(), review.state);
+            }
+
+            const approvals = [...decisionByUser.entries()]
+              .filter(([login, state]) => state === 'APPROVED' && login !== pr.user.login.toLowerCase());
+
+            if (approvals.length === 0) {
+              core.info(`PR #${pull_number} has no valid approval yet.`);
+              return;
+            }
+
+            const blockingChangesRequested = [...decisionByUser.values()].some((state) => state === 'CHANGES_REQUESTED');
+            if (blockingChangesRequested) {
+              core.info(`PR #${pull_number} still has CHANGES_REQUESTED.`);
+              return;
+            }
+
+            const headSha = pr.head.sha;
+
+            const { data: combinedStatus } = await github.rest.repos.getCombinedStatusForRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: headSha,
+            });
+
+            if (!['success', 'neutral'].includes(combinedStatus.state)) {
+              core.info(`Combined status not green (${combinedStatus.state}) for ${headSha}.`);
+              return;
+            }
+
+            const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: headSha,
+              per_page: 100,
+            });
+
+            const allowed = new Set(['success', 'neutral', 'skipped']);
+            const nonTerminal = checkRuns.filter((run) => run.status !== 'completed');
+            if (nonTerminal.length > 0) {
+              core.info(`Checks still running for ${headSha}.`);
+              return;
+            }
+
+            const failed = checkRuns.filter((run) => !allowed.has(run.conclusion || ''));
+            if (failed.length > 0) {
+              core.info(`Checks not green for ${headSha}: ${failed.map((r) => `${r.name}:${r.conclusion}`).join(', ')}`);
+              return;
+            }
+
+            try {
+              await github.rest.pulls.merge({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number,
+                merge_method: 'squash',
+              });
+              core.info(`Merged PR #${pull_number} (approved + green).`);
+            } catch (error) {
+              core.warning(`Merge attempt for PR #${pull_number} failed: ${error.message}`);
+            }
