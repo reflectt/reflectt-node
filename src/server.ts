@@ -3151,6 +3151,140 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ============ CLOUD INTEGRATION (see docs/CLOUD_ENDPOINTS.md) ============
 
+  // ============ SETTINGS ENDPOINTS ============
+
+  app.get('/settings', async () => {
+    const { readFileSync, existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { homedir } = await import('node:os')
+    const reflecttHome = process.env.REFLECTT_HOME || join(homedir(), '.reflectt')
+    const configPath = join(reflecttHome, 'config.json')
+
+    let fileConfig: Record<string, unknown> = {}
+    if (existsSync(configPath)) {
+      try { fileConfig = JSON.parse(readFileSync(configPath, 'utf-8')) } catch {}
+    }
+
+    return {
+      config: fileConfig,
+      watchdog: {
+        quietHours: {
+          enabled: process.env.WATCHDOG_QUIET_HOURS_ENABLED !== 'false',
+          startHour: Number(process.env.WATCHDOG_QUIET_HOURS_START_HOUR || 23),
+          endHour: Number(process.env.WATCHDOG_QUIET_HOURS_END_HOUR || 8),
+          tz: process.env.WATCHDOG_QUIET_HOURS_TZ || 'America/Vancouver',
+        },
+        idleNudge: {
+          enabled: process.env.IDLE_NUDGE_ENABLED !== 'false',
+          warnMin: Number(process.env.IDLE_NUDGE_WARN_MIN || 45),
+          escalateMin: Number(process.env.IDLE_NUDGE_ESCALATE_MIN || 60),
+          cooldownMin: Number(process.env.IDLE_NUDGE_COOLDOWN_MIN || 20),
+          suppressRecentMin: Number(process.env.IDLE_NUDGE_SUPPRESS_RECENT_MIN || 20),
+          shipCooldownMin: Number(process.env.IDLE_NUDGE_SHIP_COOLDOWN_MIN || 30),
+          excluded: (process.env.IDLE_NUDGE_EXCLUDE || 'ryan,system,diag').split(',').map(s => s.trim()),
+        },
+        cadence: {
+          enabled: process.env.CADENCE_WATCHDOG_ENABLED !== 'false',
+          silenceMin: Number(process.env.CADENCE_SILENCE_MIN || 60),
+          workingStaleMin: Number(process.env.CADENCE_WORKING_STALE_MIN || 45),
+          alertCooldownMin: Number(process.env.CADENCE_ALERT_COOLDOWN_MIN || 30),
+        },
+        mentionRescue: {
+          enabled: process.env.MENTION_RESCUE_ENABLED !== 'false',
+          delayMin: Number(process.env.MENTION_RESCUE_DELAY_MIN || 0),
+          cooldownMin: Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10),
+        },
+      },
+      cloud: fileConfig.cloud || null,
+      focus: presenceManager.getAllPresence()
+        .filter(p => p.focus?.active)
+        .map(p => ({ agent: p.agent, level: p.focus!.level, reason: p.focus!.reason })),
+    }
+  })
+
+  app.patch('/settings', async (request) => {
+    const { readFileSync, writeFileSync, existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const { homedir } = await import('node:os')
+    const reflecttHome = process.env.REFLECTT_HOME || join(homedir(), '.reflectt')
+    const configPath = join(reflecttHome, 'config.json')
+
+    const updates = request.body as Record<string, unknown>
+    if (!updates || typeof updates !== 'object') {
+      return { success: false, message: 'Request body must be an object' }
+    }
+
+    // Load existing config
+    let config: Record<string, unknown> = {}
+    if (existsSync(configPath)) {
+      try { config = JSON.parse(readFileSync(configPath, 'utf-8')) } catch {}
+    }
+
+    // Apply env var updates for watchdog settings (runtime only)
+    const watchdog = updates.watchdog as Record<string, unknown> | undefined
+    if (watchdog) {
+      const qh = watchdog.quietHours as Record<string, unknown> | undefined
+      if (qh) {
+        if (typeof qh.enabled === 'boolean') process.env.WATCHDOG_QUIET_HOURS_ENABLED = String(qh.enabled)
+        if (typeof qh.startHour === 'number') process.env.WATCHDOG_QUIET_HOURS_START_HOUR = String(qh.startHour)
+        if (typeof qh.endHour === 'number') process.env.WATCHDOG_QUIET_HOURS_END_HOUR = String(qh.endHour)
+        if (typeof qh.tz === 'string') process.env.WATCHDOG_QUIET_HOURS_TZ = qh.tz
+      }
+      const idle = watchdog.idleNudge as Record<string, unknown> | undefined
+      if (idle) {
+        if (typeof idle.enabled === 'boolean') process.env.IDLE_NUDGE_ENABLED = String(idle.enabled)
+        if (typeof idle.warnMin === 'number') process.env.IDLE_NUDGE_WARN_MIN = String(idle.warnMin)
+        if (typeof idle.escalateMin === 'number') process.env.IDLE_NUDGE_ESCALATE_MIN = String(idle.escalateMin)
+        if (typeof idle.cooldownMin === 'number') process.env.IDLE_NUDGE_COOLDOWN_MIN = String(idle.cooldownMin)
+      }
+      const cadence = watchdog.cadence as Record<string, unknown> | undefined
+      if (cadence) {
+        if (typeof cadence.enabled === 'boolean') process.env.CADENCE_WATCHDOG_ENABLED = String(cadence.enabled)
+        if (typeof cadence.silenceMin === 'number') process.env.CADENCE_SILENCE_MIN = String(cadence.silenceMin)
+      }
+      const rescue = watchdog.mentionRescue as Record<string, unknown> | undefined
+      if (rescue) {
+        if (typeof rescue.enabled === 'boolean') process.env.MENTION_RESCUE_ENABLED = String(rescue.enabled)
+        if (typeof rescue.cooldownMin === 'number') process.env.MENTION_RESCUE_COOLDOWN_MIN = String(rescue.cooldownMin)
+      }
+    }
+
+    // Apply cloud config updates (persisted to config.json)
+    const cloud = updates.cloud as Record<string, unknown> | undefined
+    if (cloud) {
+      config.cloud = { ...(config.cloud as Record<string, unknown> || {}), ...cloud }
+    }
+
+    // Persist config.json
+    try {
+      writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+    } catch (err: any) {
+      return { success: false, message: `Failed to write config: ${err?.message}` }
+    }
+
+    // Trigger cloud reload if cloud config changed
+    if (cloud) {
+      try {
+        const { stopCloudIntegration, startCloudIntegration } = await import('./cloud.js')
+        stopCloudIntegration()
+        // Update env vars
+        const c = config.cloud as Record<string, string>
+        if (c.cloudUrl) process.env.REFLECTT_CLOUD_URL = c.cloudUrl
+        if (c.hostName) process.env.REFLECTT_HOST_NAME = c.hostName
+        if (c.hostId) process.env.REFLECTT_HOST_ID = c.hostId
+        if (c.credential) {
+          process.env.REFLECTT_HOST_CREDENTIAL = c.credential
+          process.env.REFLECTT_HOST_TOKEN = c.credential
+        }
+        await startCloudIntegration()
+      } catch {}
+    }
+
+    return { success: true, message: 'Settings updated' }
+  })
+
+  // ============ CLOUD INTEGRATION (see docs/CLOUD_ENDPOINTS.md) ============
+
   app.get('/cloud/status', async () => {
     const { getCloudStatus } = await import('./cloud.js')
     return getCloudStatus()

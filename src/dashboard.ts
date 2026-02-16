@@ -819,6 +819,28 @@ export function getDashboardHTML(): string {
     <div class="panel-body" id="compliance-body"></div>
   </div>
 
+  <div class="panel" id="settings-panel">
+    <div class="panel-header">⚙️ Team Settings</div>
+    <div class="panel-body" id="settings-body">
+      <div id="settings-status" style="color:var(--text-muted);margin-bottom:12px">Loading…</div>
+      <div id="settings-error" style="display:none;padding:8px 12px;background:var(--red-dim);border:1px solid var(--red);border-radius:var(--radius-sm);color:var(--red);font-size:12px;margin-bottom:12px"></div>
+      <div id="settings-content"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">☁️ Cloud Host</div>
+    <div class="panel-body" id="cloud-host-body">
+      <div id="cloud-host-status" style="margin-bottom:12px;color:var(--text-muted)">Loading…</div>
+      <div id="cloud-host-error" style="display:none;padding:8px 12px;background:var(--red-dim);border:1px solid var(--red);border-radius:var(--radius-sm);color:var(--red);font-size:12px;margin-bottom:12px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="btn-restart-sync" onclick="hostAction('restart-sync')" style="padding:6px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--surface-raised);color:var(--text);cursor:pointer;font-size:12px">🔄 Restart Sync</button>
+        <button id="btn-re-enroll" onclick="hostAction('re-enroll')" style="padding:6px 14px;border-radius:var(--radius-sm);border:1px solid var(--yellow);background:var(--yellow-dim);color:var(--yellow);cursor:pointer;font-size:12px">🔑 Force Re-Enroll</button>
+        <button id="btn-remove-host" onclick="hostAction('remove')" style="padding:6px 14px;border-radius:var(--radius-sm);border:1px solid var(--red);background:var(--red-dim);color:var(--red);cursor:pointer;font-size:12px">🗑️ Remove Host</button>
+      </div>
+    </div>
+  </div>
+
   <div class="panel">
     <div class="panel-header">🧭 Promotion SSOT <span class="count" id="ssot-count"></span></div>
     <div class="panel-body" id="ssot-body"></div>

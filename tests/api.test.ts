@@ -1439,6 +1439,50 @@ describe('Cloud Integration', () => {
   })
 })
 
+describe('Team Settings', () => {
+  it('GET /settings returns watchdog and cloud config', async () => {
+    const { status, body } = await req('GET', '/settings')
+    expect(status).toBe(200)
+    expect(body.watchdog).toBeDefined()
+    expect(typeof body.watchdog.quietHours.enabled).toBe('boolean')
+    expect(typeof body.watchdog.quietHours.startHour).toBe('number')
+    expect(typeof body.watchdog.idleNudge.enabled).toBe('boolean')
+    expect(typeof body.watchdog.idleNudge.warnMin).toBe('number')
+    expect(typeof body.watchdog.cadence.enabled).toBe('boolean')
+    expect(typeof body.watchdog.mentionRescue.enabled).toBe('boolean')
+    expect(body.config).toBeDefined()
+    expect(Array.isArray(body.focus)).toBe(true)
+  })
+
+  it('PATCH /settings updates watchdog env vars', async () => {
+    const { status, body } = await req('PATCH', '/settings', {
+      watchdog: {
+        quietHours: { startHour: 22, endHour: 7 },
+        idleNudge: { warnMin: 30 },
+      },
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+
+    // Verify the settings took effect
+    const { body: settings } = await req('GET', '/settings')
+    expect(settings.watchdog.quietHours.startHour).toBe(22)
+    expect(settings.watchdog.quietHours.endHour).toBe(7)
+    expect(settings.watchdog.idleNudge.warnMin).toBe(30)
+  })
+
+  it('PATCH /settings with invalid body returns error', async () => {
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/settings',
+      payload: 'not json',
+      headers: { 'content-type': 'application/json' },
+    })
+    // Fastify will reject malformed JSON before the handler
+    expect(res.statusCode).toBeGreaterThanOrEqual(400)
+  })
+})
+
 describe('Docs', () => {
   it('GET /docs returns markdown', async () => {
     const res = await app.inject({ method: 'GET', url: '/docs' })
