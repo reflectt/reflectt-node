@@ -243,7 +243,9 @@ class TeamHealthMonitor {
   private readonly mentionRescueEnabled = process.env.MENTION_RESCUE_ENABLED !== 'false'
   private readonly mentionRescueDelayMin = Number(process.env.MENTION_RESCUE_DELAY_MIN || 0)
   private readonly mentionRescueCooldownMin = Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10)
+  private readonly mentionRescueGlobalCooldownMin = Number(process.env.MENTION_RESCUE_GLOBAL_COOLDOWN_MIN || 5)
   private mentionRescueState = new Map<string, number>()
+  private mentionRescueLastAt = 0
 
   private systemStartTime = Date.now()
   private requestCount = 0
@@ -1177,6 +1179,7 @@ class TeamHealthMonitor {
     const trioSet = new Set(this.trioAgents)
     const delayMs = this.mentionRescueDelayMin * 60_000
     const cooldownMs = this.mentionRescueCooldownMin * 60_000
+    const globalCooldownMs = this.mentionRescueGlobalCooldownMin * 60_000
 
     for (const mention of mentions) {
       const mentionId = String(mention.id || mention.timestamp || '')
@@ -1184,6 +1187,9 @@ class TeamHealthMonitor {
 
       const mentionAt = Number(mention.timestamp || 0)
       if (!mentionAt || now - mentionAt < delayMs) continue
+
+      // Global cooldown to avoid duplicate fallback nudges across near-identical mentions.
+      if (now - this.mentionRescueLastAt < globalCooldownMs) continue
 
       const replied = messages.some((m: any) => {
         const from = (m.from || '').toLowerCase()
@@ -1197,19 +1203,18 @@ class TeamHealthMonitor {
       const lastRescueAt = this.mentionRescueState.get(mentionId) || 0
       if (now - lastRescueAt < cooldownMs) continue
 
-      // Check if ALL mentioned trio agents are in focus mode — if so, suppress the nudge
-      const allInFocus = this.trioAgents.every(a => presenceManager.isInFocus(a) !== null)
-      if (allInFocus) continue
+      // Focus mode is a hard suppressor for fallback nudges.
+      const anyFocused = this.trioAgents.some(a => presenceManager.isInFocus(a) !== null)
+      if (anyFocused) continue
 
-      // Filter out focused agents from the nudge message
-      const activeAgents = this.trioAgents.filter(a => presenceManager.isInFocus(a) === null)
-      const mentionList = activeAgents.map(a => `@${a}`).join(' ')
-      const content = `[[reply_to:${mentionId}]] system fallback: mention received. ${mentionList} ${activeAgents.length === 1 ? 'is' : 'are'} being nudged to respond.`
+      const mentionList = this.trioAgents.map(a => `@${a}`).join(' ')
+      const content = `[[reply_to:${mentionId}]] system fallback: mention received. ${mentionList} are being nudged to respond.`
       rescued.push(content)
 
       if (!dryRun) {
         await chatManager.sendMessage({ from: 'system', channel: 'general', content })
         this.mentionRescueState.set(mentionId, now)
+        this.mentionRescueLastAt = now
       }
     }
 
