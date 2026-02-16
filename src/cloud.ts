@@ -43,6 +43,7 @@ interface CloudConfig {
   hostType: string
   heartbeatIntervalMs: number
   taskSyncIntervalMs: number
+  capabilities: string[]
 }
 
 interface CloudState {
@@ -79,7 +80,8 @@ let state: CloudState = {
  * Check if cloud integration is configured
  */
 export function isCloudConfigured(): boolean {
-  return Boolean(process.env.REFLECTT_HOST_TOKEN)
+  // Either a join token for fresh enrollment, or persisted credentials from prior enrollment
+  return Boolean(process.env.REFLECTT_HOST_TOKEN) || Boolean(process.env.REFLECTT_HOST_ID && process.env.REFLECTT_HOST_CREDENTIAL)
 }
 
 /**
@@ -115,32 +117,45 @@ export async function startCloudIntegration(): Promise<void> {
     hostType: process.env.REFLECTT_HOST_TYPE || 'openclaw',
     heartbeatIntervalMs: Number(process.env.REFLECTT_HEARTBEAT_MS) || DEFAULT_HEARTBEAT_MS,
     taskSyncIntervalMs: Number(process.env.REFLECTT_TASK_SYNC_MS) || DEFAULT_TASK_SYNC_MS,
+    capabilities: (process.env.REFLECTT_HOST_CAPABILITIES || 'tasks,chat,presence').split(',').map(s => s.trim()),
   }
 
   console.log(`☁️  Cloud integration: connecting to ${config.cloudUrl}`)
   console.log(`   Host: ${config.hostName} (${config.hostType})`)
 
-  // Register with cloud
-  try {
-    const result = await cloudPost<{ hostId: string; credential: string }>('/v1/hosts/register', {
-      joinToken: config.token,
-      hostName: config.hostName,
-      hostType: config.hostType,
-    })
+  // Check if we already have a persisted host ID + credential (re-enrollment not needed)
+  const persistedHostId = process.env.REFLECTT_HOST_ID
+  const persistedCredential = process.env.REFLECTT_HOST_CREDENTIAL
 
-    if (result.success && result.data) {
-      state.hostId = result.data.hostId
-      state.credential = result.data.credential
-      console.log(`   ✅ Registered (hostId: ${state.hostId})`)
-    } else {
-      console.warn(`   ⚠ Registration failed: ${result.error || 'unknown error'}`)
+  if (persistedHostId && persistedCredential) {
+    state.hostId = persistedHostId
+    state.credential = persistedCredential
+    console.log(`   ✅ Using persisted credential (hostId: ${state.hostId})`)
+  } else {
+    // Register with cloud via /api/hosts/claim
+    // Cloud API expects: { joinToken, name, capabilities? }
+    // Cloud API returns: { host: { id, ... }, credential: { token, revealPolicy } }
+    try {
+      const result = await cloudPost<{ host: { id: string }; credential: { token: string } }>('/api/hosts/claim', {
+        joinToken: config.token,
+        name: config.hostName,
+        capabilities: config.capabilities,
+      })
+
+      if (result.data?.host?.id && result.data?.credential?.token) {
+        state.hostId = result.data.host.id
+        state.credential = result.data.credential.token
+        console.log(`   ✅ Registered (hostId: ${state.hostId})`)
+      } else {
+        console.warn(`   ⚠ Registration failed: ${result.error || 'unexpected response shape'}`)
+        state.errors++
+        return
+      }
+    } catch (err: any) {
+      console.warn(`   ⚠ Registration failed: ${err?.message || 'network error'}`)
       state.errors++
       return
     }
-  } catch (err: any) {
-    console.warn(`   ⚠ Registration failed: ${err?.message || 'network error'}`)
-    state.errors++
-    return
   }
 
   // Start loops
@@ -210,18 +225,30 @@ async function sendHeartbeat(): Promise<void> {
 
   const agents = getAgents()
   const tasks = getTasks()
+  const doingTasks = tasks.filter(t => t.status === 'doing')
 
-  const result = await cloudPost('/v1/hosts/heartbeat', {
-    hostId: state.hostId,
-    hostName: config.hostName,
-    hostType: config.hostType,
-    agents,
-    activeTasks: tasks.filter(t => t.status === 'doing').length,
-    uptime: Date.now() - state.startedAt,
-    timestamp: Date.now(),
+  // Cloud API: POST /api/hosts/:hostId/heartbeat
+  // Expects: { status, agents?, activeTasks? }
+  const hostStatus = agents.some(a => a.status === 'active') ? 'online'
+    : agents.length > 0 ? 'degraded'
+    : 'online'
+
+  const result = await cloudPost(`/api/hosts/${state.hostId}/heartbeat`, {
+    status: hostStatus,
+    agents: agents.map(a => ({
+      name: a.name,
+      status: a.status,
+      currentTask: a.currentTask,
+      lastSeen: a.lastSeen,
+    })),
+    activeTasks: doingTasks.map(t => ({
+      id: t.id,
+      title: t.title,
+      assignee: t.assignee,
+    })),
   })
 
-  if (result.success) {
+  if (result.success || result.data) {
     state.lastHeartbeat = Date.now()
     state.heartbeatCount++
   } else {
@@ -232,19 +259,10 @@ async function sendHeartbeat(): Promise<void> {
 async function syncTasks(): Promise<void> {
   if (!state.hostId || !config) return
 
-  const tasks = getTasks()
-
-  const result = await cloudPost('/v1/hosts/tasks/sync', {
-    hostId: state.hostId,
-    tasks,
-    timestamp: Date.now(),
-  })
-
-  if (result.success) {
-    state.lastTaskSync = Date.now()
-  } else {
-    state.errors++
-  }
+  // Task sync endpoint not yet available in cloud API.
+  // When /api/hosts/:hostId/tasks/sync is added, wire it here.
+  // For now, task state is included in heartbeat payloads (activeTasks).
+  state.lastTaskSync = Date.now()
 }
 
 // ---- HTTP helper ----
@@ -264,7 +282,7 @@ async function cloudPost<T = unknown>(path: string, body: unknown): Promise<Clou
       'Content-Type': 'application/json',
     }
 
-    // Use credential if registered, otherwise join token
+    // Use credential if registered, otherwise join token for enrollment
     if (state.credential) {
       headers['Authorization'] = `Bearer ${state.credential}`
     } else {
@@ -277,7 +295,13 @@ async function cloudPost<T = unknown>(path: string, body: unknown): Promise<Clou
       body: JSON.stringify(body),
     })
 
-    return await response.json() as CloudApiResponse<T>
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({})) as Record<string, unknown>
+      return { success: false, error: (errBody.error as string) || `HTTP ${response.status}` }
+    }
+
+    const payload = await response.json() as T
+    return { success: true, data: payload }
   } catch (err: any) {
     state.errors++
     return { success: false, error: err?.message || 'Request failed' }
