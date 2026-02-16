@@ -1446,3 +1446,81 @@ describe('Docs', () => {
     expect(res.body).toContain('reflectt-node API')
   })
 })
+
+describe('Branch tracking on doing transition', () => {
+  it('auto-populates metadata.branch when task moves to doing', async () => {
+    const agentName = `branch-agent-${Date.now()}`
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: branch auto-populate',
+      assignee: agentName,
+      reviewer: 'kai',
+      done_criteria: ['Branch auto-populated'],
+      createdBy: 'test',
+      eta: '1h',
+      priority: 'P2',
+    })
+    expect(created.success).toBe(true)
+    const taskId = created.task.id
+
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.metadata.branch).toBeDefined()
+
+    // Branch should follow convention: {assignee}/task-{shortId}
+    const shortId = taskId.replace(/^task-\d+-/, '')
+    expect(body.task.metadata.branch).toBe(`${agentName}/task-${shortId}`)
+
+    // Cleanup
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('does not overwrite explicit branch in metadata', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: explicit branch',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['Explicit branch preserved'],
+      createdBy: 'test',
+      eta: '1h',
+      priority: 'P2',
+    })
+    const taskId = created.task.id
+
+    const { body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: { branch: 'custom/my-branch' },
+    })
+    expect(body.task.metadata.branch).toBe('custom/my-branch')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('auto-populates branch on claim endpoint', async () => {
+    const agentName = `claim-agent-${Date.now()}`
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: claim branch',
+      assignee: agentName,
+      reviewer: 'kai',
+      done_criteria: ['Branch set on claim'],
+      createdBy: 'test',
+      eta: '1h',
+      priority: 'P3',
+    })
+    const taskId = created.task.id
+
+    // Unassign so we can claim
+    await req('PATCH', `/tasks/${taskId}`, { assignee: '' })
+
+    const { body } = await req('POST', `/tasks/${taskId}/claim`, {
+      agent: agentName,
+    })
+    expect(body.success).toBe(true)
+    const shortId = taskId.replace(/^task-\d+-/, '')
+    expect(body.task.metadata.branch).toBe(`${agentName}/task-${shortId}`)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+})

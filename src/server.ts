@@ -2361,6 +2361,25 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       // ── End task-close gate ──
 
+      // ── Branch tracking: auto-populate on doing transition ──
+      if (parsed.status === 'doing' && existing.status !== 'doing') {
+        const assignee = parsed.assignee || existing.assignee || 'unknown'
+        const shortId = lookup.resolvedId.replace(/^task-\d+-/, '')
+        const branch = `${assignee}/task-${shortId}`
+        if (!mergedMeta.branch) {
+          mergedMeta.branch = branch
+        }
+
+        // Prevent branch stacking: warn if agent already has a doing task
+        const agentDoingTasks = taskManager.listTasks({ status: 'doing' })
+          .filter(t => (t.assignee || '').toLowerCase() === assignee.toLowerCase() && t.id !== lookup.resolvedId)
+        if (agentDoingTasks.length > 0) {
+          const existingIds = agentDoingTasks.map(t => t.id.slice(0, 20)).join(', ')
+          mergedMeta.branch_warning = `Agent "${assignee}" already has ${agentDoingTasks.length} doing task(s): ${existingIds}. Ensure one branch per task.`
+        }
+      }
+      // ── End branch tracking ──
+
       const { actor, ...rest } = parsed
 
       const nextMetadata: Record<string, unknown> = {
@@ -2489,12 +2508,15 @@ export async function createServer(): Promise<FastifyInstance> {
     if (task.assignee) {
       return { success: false, error: `Task already assigned to ${task.assignee}` }
     }
+    const shortId = lookup.resolvedId.replace(/^task-\d+-/, '')
+    const branch = `${body.agent}/task-${shortId}`
     const updated = await taskManager.updateTask(lookup.resolvedId, {
       assignee: body.agent,
       status: 'doing',
       metadata: {
         ...(task.metadata || {}),
         actor: body.agent,
+        branch,
       },
     })
     return { success: true, task: updated ? enrichTaskWithComments(updated) : null, resolvedId: lookup.resolvedId }
