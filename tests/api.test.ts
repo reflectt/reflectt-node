@@ -1906,6 +1906,15 @@ describe('Agent roles config', () => {
     expect(body.config.count).toBeGreaterThan(0)
   })
 
+  it('GET /team/roles returns team-scoped role registry payload', async () => {
+    const { status, body } = await req('GET', '/team/roles')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.agents)).toBe(true)
+    expect(body.roleRegistry?.format).toBe('TEAM-ROLES.yaml')
+    expect(body.roleRegistry?.count).toBeGreaterThan(0)
+  })
+
   it('each agent has required fields', async () => {
     const { body } = await req('GET', '/agents/roles')
     for (const agent of body.agents) {
@@ -1915,6 +1924,9 @@ describe('Agent roles config', () => {
       expect(typeof agent.wipCap).toBe('number')
       expect(typeof agent.wipCount).toBe('number')
       expect(typeof agent.overCap).toBe('boolean')
+      if (agent.description !== undefined) expect(typeof agent.description).toBe('string')
+      if (agent.alwaysRoute !== undefined) expect(Array.isArray(agent.alwaysRoute)).toBe(true)
+      if (agent.neverRoute !== undefined) expect(Array.isArray(agent.neverRoute)).toBe(true)
     }
   })
 })
