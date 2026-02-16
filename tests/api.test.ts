@@ -1194,7 +1194,7 @@ describe('Idle Nudge shipped cooldown', () => {
     await postShippedUpdate(agent)
 
     const staleNowMs = Date.now() + (4 * 60 * 60_000)
-    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&nowMs=${staleNowMs}`)
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true&nowMs=${staleNowMs}`)
     expect(status).toBe(200)
 
     const decision = (body.decisions || []).find((d: any) => d.agent === agent)
