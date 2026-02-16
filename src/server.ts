@@ -2510,14 +2510,17 @@ export async function createServer(): Promise<FastifyInstance> {
     }
     const shortId = lookup.resolvedId.replace(/^task-\d+-/, '')
     const branch = `${body.agent}/task-${shortId}`
+    const claimMeta: Record<string, unknown> = {
+      ...(task.metadata || {}),
+      actor: body.agent,
+    }
+    if (!claimMeta.branch) {
+      claimMeta.branch = branch
+    }
     const updated = await taskManager.updateTask(lookup.resolvedId, {
       assignee: body.agent,
       status: 'doing',
-      metadata: {
-        ...(task.metadata || {}),
-        actor: body.agent,
-        branch,
-      },
+      metadata: claimMeta,
     })
     return { success: true, task: updated ? enrichTaskWithComments(updated) : null, resolvedId: lookup.resolvedId }
   })
