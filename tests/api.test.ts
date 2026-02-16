@@ -1234,6 +1234,66 @@ describe('Idle Nudge shipped cooldown', () => {
 
     await req('DELETE', `/tasks/${taskId}`)
   })
+
+  it('suppresses nudges when task comment posted recently', async () => {
+    const agent = 'lane-comment-suppress'
+    await cleanupAgentTasks(agent)
+    const taskId = await createDoingTask(agent, 'TEST: comment suppression')
+
+    await req('POST', `/presence/${agent}`, {
+      status: 'working',
+      task: taskId,
+      since: Date.now() - (50 * 60_000),
+    })
+
+    // Post a task comment
+    await req('POST', `/tasks/${taskId}/comments`, {
+      author: agent,
+      content: 'Working on the implementation, making progress',
+    })
+
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true`)
+    expect(status).toBe(200)
+
+    const decision = (body.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    expect(decision.reason).toBe('recent-task-comment')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('starts task focus window on doing transition', async () => {
+    const agent = 'lane-focus-window'
+    await cleanupAgentTasks(agent)
+
+    // Create task and move to doing — should start focus window
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: focus window task',
+      createdBy: 'test-runner',
+      assignee: agent,
+      reviewer: 'test-reviewer',
+      done_criteria: ['Focus tested'],
+      eta: '45m',
+      priority: 'P3',
+    })
+    const taskId = body.task.id
+    await req('PATCH', `/tasks/${taskId}`, { status: 'doing' })
+
+    await req('POST', `/presence/${agent}`, {
+      status: 'working',
+      task: taskId,
+      since: Date.now() - (50 * 60_000),
+    })
+
+    const { status: s, body: b } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true`)
+    expect(s).toBe(200)
+
+    const decision = (b.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    expect(decision.reason).toBe('task-focus-window')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
 })
 
 describe('SSE Event Filtering', () => {

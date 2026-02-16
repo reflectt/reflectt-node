@@ -2581,6 +2581,14 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       // ── End branch tracking ──
 
+      // Start per-task focus window on doing transition (45m deep work suppression)
+      if (parsed.status === 'doing' && existing.status !== 'doing') {
+        const focusAgent = (parsed.assignee || existing.assignee || '').toLowerCase()
+        if (focusAgent) {
+          healthMonitor.startTaskFocusWindow(focusAgent, lookup.resolvedId, 45)
+        }
+      }
+
       const { actor, ...rest } = parsed
 
       const nextMetadata: Record<string, unknown> = {
