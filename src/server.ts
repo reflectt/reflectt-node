@@ -210,6 +210,17 @@ const QaBundleSchema = z.object({
   reviewer_notes: z.string().trim().min(1).optional(),
 })
 
+const ReviewHandoffSchema = z.object({
+  task_id: z.string().trim().regex(/^task-[a-zA-Z0-9-]+$/),
+  repo: z.string().trim().min(1),
+  artifact_path: z.string().trim().regex(/^process\//),
+  test_proof: z.string().trim().min(1),
+  known_caveats: z.string().trim().min(1),
+  doc_only: z.boolean().optional(),
+  pr_url: z.string().trim().url().optional(),
+  commit_sha: z.string().trim().regex(/^[a-fA-F0-9]{7,40}$/).optional(),
+})
+
 const ChatMessagesQuerySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
@@ -306,6 +317,58 @@ function enforceQaBundleGateForValidating(
       ok: false,
       error: 'QA bundle required: PATCH to status=validating must include metadata.qa_bundle { lane, summary, pr_link, commit_shas[], changed_files[], artifact_links[], checks[], screenshot_proof[] }',
       hint: 'Example: { "status":"validating", "metadata": { "artifact_path":"process/TASK-proof.md", "qa_bundle": { "lane":"docs", "summary":"what changed", "pr_link":"https://github.com/org/repo/pull/123", "commit_shas":["abc1234"], "changed_files":["docs/file.md"], "artifact_links":["process/TASK-proof.md"], "checks":["npm run build"], "screenshot_proof":["docs/screenshot.png"] } } }',
+    }
+  }
+
+  return { ok: true }
+}
+
+function isTaskAutomatedRecurring(metadata: unknown): boolean {
+  const recurringId = (metadata as Record<string, unknown> | null)?.recurring as Record<string, unknown> | undefined
+  return typeof recurringId?.id === 'string' && recurringId.id.trim().length > 0
+}
+
+function enforceReviewHandoffGateForValidating(
+  status: Task['status'] | undefined,
+  taskId: string,
+  metadata: unknown,
+): { ok: true } | { ok: false; error: string; hint: string } {
+  if (status !== 'validating') return { ok: true }
+  if (isTaskAutomatedRecurring(metadata)) return { ok: true }
+
+  const root = (metadata as Record<string, unknown> | null) || {}
+  const parsed = ReviewHandoffSchema.safeParse(root.review_handoff ?? {})
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: 'Review handoff required: metadata.review_handoff must include task_id, repo, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true).',
+      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }',
+    }
+  }
+
+  const handoff = parsed.data
+  if (handoff.task_id !== taskId) {
+    return {
+      ok: false,
+      error: `Review handoff task_id mismatch: expected ${taskId}`,
+      hint: 'Set metadata.review_handoff.task_id to the exact task being transitioned.',
+    }
+  }
+
+  if (!handoff.doc_only) {
+    if (!handoff.pr_url || !parseGitHubPrUrl(handoff.pr_url)) {
+      return {
+        ok: false,
+        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or set review_handoff.doc_only=true for docs-only work).',
+        hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>.',
+      }
+    }
+    if (!handoff.commit_sha) {
+      return {
+        ok: false,
+        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when doc_only is not set.',
+        hint: 'Use 7-40 hex chars, e.g. "a1b2c3d".',
+      }
     }
   }
 
@@ -634,6 +697,56 @@ type MentionWarning = {
   mention: string
   reason: 'unknown_agent' | 'offline_agent'
   message: string
+}
+
+type ActionMessageValidation = {
+  isActionRequired: boolean
+  blockingError?: string
+  hint?: string
+  warnings: string[]
+}
+
+const STRICT_ACTION_CHANNELS = new Set(['reviews', 'blockers'])
+
+function hasTaskIdReference(content: string): boolean {
+  return /\btask-[a-zA-Z0-9-]+\b/.test(content)
+}
+
+function hasOwnerMention(content: string): boolean {
+  return /@([a-zA-Z][a-zA-Z0-9_-]*)/.test(content)
+}
+
+function isLikelyActionRequired(content: string, channel?: string): boolean {
+  const normalizedChannel = (channel || 'general').toLowerCase()
+  if (STRICT_ACTION_CHANNELS.has(normalizedChannel)) return true
+
+  const actionKeyword = /(please|review|approve|unblock|need|must|action required|can you|owner)/i
+  return hasTaskIdReference(content) && actionKeyword.test(content)
+}
+
+function validateActionRequiredMessage(content: string, channel?: string): ActionMessageValidation {
+  const isActionRequired = isLikelyActionRequired(content, channel)
+  if (!isActionRequired) return { isActionRequired: false, warnings: [] }
+
+  const hasOwner = hasOwnerMention(content)
+  const hasTaskId = hasTaskIdReference(content)
+  const normalizedChannel = (channel || 'general').toLowerCase()
+  const strict = STRICT_ACTION_CHANNELS.has(normalizedChannel)
+
+  if (strict && (!hasOwner || !hasTaskId)) {
+    return {
+      isActionRequired,
+      warnings: [],
+      blockingError: 'Action-required message must include both @owner and task-<id> in #reviews/#blockers.',
+      hint: 'Example: "@owner task-1234 ready for review ..."',
+    }
+  }
+
+  const warnings: string[] = []
+  if (!hasOwner) warnings.push('Action-required message is missing @owner mention.')
+  if (!hasTaskId) warnings.push('Action-required message is missing task-<id> reference.')
+
+  return { isActionRequired, warnings }
 }
 
 function extractMentions(content: string): string[] {
@@ -1394,10 +1507,34 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Send message
-  app.post('/chat/messages', async (request) => {
-    const data = SendMessageSchema.parse(request.body)
+  app.post('/chat/messages', async (request, reply) => {
+    const parsedBody = SendMessageSchema.safeParse(request.body ?? {})
+    if (!parsedBody.success) {
+      reply.code(400)
+      return {
+        success: false,
+        error: 'Invalid body: from and content are required',
+        fields: parsedBody.error.issues.map(issue => ({
+          path: issue.path.join('.') || '(root)',
+          message: issue.message,
+        })),
+      }
+    }
+
+    const data = parsedBody.data
+    const actionValidation = validateActionRequiredMessage(data.content, data.channel)
+    if (actionValidation.blockingError) {
+      reply.code(400)
+      return {
+        success: false,
+        error: actionValidation.blockingError,
+        gate: 'action_message_contract',
+        hint: actionValidation.hint,
+      }
+    }
+
     const message = await chatManager.sendMessage(data)
-    const warnings = buildMentionWarnings(data.content)
+    const mentionWarnings = buildMentionWarnings(data.content)
 
     // Auto-update presence: if you're posting, you're active
     if (data.from) {
@@ -1426,7 +1563,8 @@ export async function createServer(): Promise<FastifyInstance> {
     return {
       success: true,
       message,
-      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(mentionWarnings.length > 0 ? { warnings: mentionWarnings } : {}),
+      ...(actionValidation.warnings.length > 0 ? { action_warnings: actionValidation.warnings } : {}),
     }
   })
 
@@ -2512,6 +2650,34 @@ export async function createServer(): Promise<FastifyInstance> {
           error: qaGate.error,
           gate: 'qa_bundle',
           hint: qaGate.hint,
+        }
+      }
+
+      const handoffGate = enforceReviewHandoffGateForValidating(effectiveStatus, lookup.resolvedId, mergedMeta)
+      if (!handoffGate.ok) {
+        reply.code(400)
+        return {
+          success: false,
+          error: handoffGate.error,
+          gate: 'review_handoff',
+          hint: handoffGate.hint,
+        }
+      }
+
+      if (
+        parsed.status === 'validating'
+        && existing.status === 'validating'
+        && !isTaskAutomatedRecurring(mergedMeta)
+      ) {
+        const delta = (mergedMeta.review_delta_note || mergedMeta.re_review_delta || mergedMeta.delta_note) as unknown
+        if (typeof delta !== 'string' || delta.trim().length === 0) {
+          reply.code(400)
+          return {
+            success: false,
+            error: 'Re-review gate: metadata.review_delta_note required when re-requesting validating review.',
+            gate: 'review_delta',
+            hint: 'Add metadata.review_delta_note summarizing what changed since the last reviewed SHA.',
+          }
         }
       }
 

@@ -503,6 +503,15 @@ describe('Task History Changelog', () => {
           artifact_links: ['process/TASK-history-proof.md'],
           checks: ['npm test'],
         },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/123',
+          commit_sha: 'abcdef1',
+          artifact_path: 'process/TASK-history-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
       },
     })
 
@@ -569,6 +578,15 @@ describe('Artifact Path Canonicalization', () => {
           artifact_links: ['process/TASK-test-proof.md'],
           checks: ['npm test'],
         },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/456',
+          commit_sha: 'abcdef2',
+          artifact_path: 'process/TASK-test-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
       },
     })
 
@@ -588,11 +606,152 @@ describe('Artifact Path Canonicalization', () => {
           artifact_links: ['process/TASK-test-proof.md'],
           checks: ['npm test'],
         },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/457',
+          commit_sha: 'abcdef3',
+          artifact_path: 'process/TASK-test-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
       },
     })
 
     expect(status).toBe(200)
     expect(body.task.status).toBe('validating')
+  })
+})
+
+describe('Validating review handoff gate', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: validating review handoff gate',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Handoff contract enforced'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('rejects validating status when review_handoff is missing', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.gate).toBe('review_handoff')
+  })
+
+  it('rejects validating when PR URL/commit SHA missing unless doc_only=true', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toContain('open PR URL required')
+  })
+
+  it('accepts validating with doc_only handoff and enforces delta note on re-review', async () => {
+    const first = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+          doc_only: true,
+        },
+      },
+    })
+
+    expect(first.status).toBe(200)
+
+    const second = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test rerun',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+          doc_only: true,
+        },
+      },
+    })
+
+    expect(second.status).toBe(400)
+    expect(second.body.gate).toBe('review_delta')
+
+    const third = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: {
+          summary: 'handoff gate test rerun',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+          doc_only: true,
+        },
+        review_delta_note: 'Updated test proof wording and summary for re-review.',
+      },
+    })
+
+    expect(third.status).toBe(200)
   })
 })
 
@@ -1141,7 +1300,7 @@ describe('Chat Messages', () => {
   it('POST /chat/messages supports reviews and blockers channels', async () => {
     const { status: reviewStatus, body: reviewBody } = await req('POST', '/chat/messages', {
       from: 'test-runner',
-      content: 'review requested for task-123',
+      content: '@harmony review requested for task-123',
       channel: 'reviews',
     })
     expect(reviewStatus).toBe(200)
@@ -1149,11 +1308,36 @@ describe('Chat Messages', () => {
 
     const { status: blockerStatus, body: blockerBody } = await req('POST', '/chat/messages', {
       from: 'test-runner',
-      content: 'blocked on migration dependency',
+      content: '@kai blocked on task-123 migration dependency',
       channel: 'blockers',
     })
     expect(blockerStatus).toBe(200)
     expect(blockerBody.message.channel).toBe('blockers')
+  })
+
+  it('POST /chat/messages blocks action-required reviews/blockers messages without @owner + task-id', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'please review this soon',
+      channel: 'reviews',
+    })
+
+    expect(status).toBe(400)
+    expect(body.gate).toBe('action_message_contract')
+    expect(body.error).toContain('@owner')
+  })
+
+  it('POST /chat/messages warns (but allows) likely action-required messages in general missing @owner/task-id', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'Please review task-123 when you can',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.action_warnings)).toBe(true)
+    expect(body.action_warnings.length).toBeGreaterThan(0)
   })
 })
 
@@ -1556,6 +1740,14 @@ describe('Task review bundle', () => {
           summary: 'test summary',
           artifact_links: [artifactRelPath],
           checks: ['npm test'],
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: artifactRelPath,
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'No PR expected for this doc-only review-bundle test fixture.',
+          doc_only: true,
         },
         artifacts: [artifactRelPath],
       },
