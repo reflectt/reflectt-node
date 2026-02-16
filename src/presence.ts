@@ -12,6 +12,18 @@ import { eventBus } from './events.js'
 
 export type PresenceStatus = 'idle' | 'working' | 'reviewing' | 'blocked' | 'offline'
 
+export type FocusLevel = 'soft' | 'deep'
+// soft: suppress system fallback nudges, idle-nudge; allow direct @mentions
+// deep: suppress everything except blocker/review pings with task IDs
+
+export interface FocusState {
+  active: boolean
+  level: FocusLevel
+  startedAt: number
+  expiresAt?: number // optional auto-expire
+  reason?: string    // what they're focusing on
+}
+
 export interface AgentPresence {
   agent: string
   status: PresenceStatus
@@ -19,6 +31,7 @@ export interface AgentPresence {
   since: number
   lastUpdate: number
   last_active?: number // Last real activity (message, task action, etc.)
+  focus?: FocusState
 }
 
 export interface AgentActivity {
@@ -143,7 +156,57 @@ class PresenceManager {
 
     return presence
   }
-  
+
+  /**
+   * Set focus mode for an agent
+   */
+  setFocus(agent: string, active: boolean, options?: { level?: FocusLevel; durationMin?: number; reason?: string }): FocusState {
+    const presence = this.presence.get(agent)
+    const now = Date.now()
+
+    const focus: FocusState = {
+      active,
+      level: options?.level || 'soft',
+      startedAt: active ? now : 0,
+      expiresAt: active && options?.durationMin ? now + options.durationMin * 60_000 : undefined,
+      reason: options?.reason,
+    }
+
+    if (presence) {
+      presence.focus = focus
+      presence.lastUpdate = now
+    } else {
+      // Create minimal presence if agent hasn't checked in
+      this.presence.set(agent, {
+        agent,
+        status: 'working',
+        since: now,
+        lastUpdate: now,
+        focus,
+      })
+    }
+
+    console.log(`[Focus] ${agent} → ${active ? `ON (${focus.level})` : 'OFF'}${focus.reason ? ` — ${focus.reason}` : ''}`)
+    return focus
+  }
+
+  /**
+   * Check if agent is in focus mode (respects auto-expiry)
+   */
+  isInFocus(agent: string): FocusState | null {
+    const presence = this.presence.get(agent)
+    if (!presence?.focus?.active) return null
+
+    // Check auto-expiry
+    if (presence.focus.expiresAt && Date.now() > presence.focus.expiresAt) {
+      presence.focus.active = false
+      console.log(`[Focus] ${agent} → OFF (expired)`)
+      return null
+    }
+
+    return presence.focus
+  }
+
   /**
    * Record real activity (message, task action, etc.)
    */

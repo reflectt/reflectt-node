@@ -23,7 +23,7 @@ import { memoryManager } from './memory.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import { mentionAckTracker } from './mention-ack.js'
-import type { PresenceStatus } from './presence.js'
+import type { PresenceStatus, FocusLevel } from './presence.js'
 import { analyticsManager } from './analytics.js'
 import { getDashboardHTML } from './dashboard.js'
 import { healthMonitor } from './health.js'
@@ -2624,6 +2624,26 @@ export async function createServer(): Promise<FastifyInstance> {
       return { presence: null, message: 'No presence data for this agent' }
     }
     return { presence }
+  })
+
+  // Set agent focus mode
+  app.post<{ Params: { agent: string } }>('/presence/:agent/focus', async (request) => {
+    const agent = request.params.agent
+    const data = request.body as { active?: boolean; level?: string; durationMin?: number; reason?: string } | undefined
+
+    const active = data?.active !== false // default true
+    const level = (data?.level === 'deep' ? 'deep' : 'soft') as FocusLevel
+    const durationMin = typeof data?.durationMin === 'number' ? data.durationMin : undefined
+    const reason = typeof data?.reason === 'string' ? data.reason : undefined
+
+    const focus = presenceManager.setFocus(agent, active, { level, durationMin, reason })
+    return { success: true, agent, focus }
+  })
+
+  // Get agent focus state
+  app.get<{ Params: { agent: string } }>('/presence/:agent/focus', async (request) => {
+    const focus = presenceManager.isInFocus(request.params.agent)
+    return { agent: request.params.agent, focus }
   })
 
   // Get all agent activity metrics
