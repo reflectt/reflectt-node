@@ -1,0 +1,38 @@
+# CODEOWNERS — reflectt-node
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Purpose: prevent merge conflicts by declaring ownership zones.
+# When a PR touches files in a zone, the listed owner(s) are auto-requested for review.
+#
+# Owners use GitHub usernames. Team agents map via their GitHub accounts.
+# Ryan (@ryancampbell) and Kai (@itskai-dev) are global reviewers.
+
+# ---- Global fallback ----
+*                           @ryancampbell @itskai-dev
+
+# ---- Core server ----
+src/server.ts               @ryancampbell @itskai-dev
+src/index.ts                @ryancampbell @itskai-dev
+src/config.ts               @ryancampbell @itskai-dev
+
+# ---- Cloud integration ----
+src/cloud.ts                @ryancampbell @itskai-dev
+
+# ---- CLI ----
+src/cli.ts                  @ryancampbell @itskai-dev
+
+# ---- Task engine ----
+src/tasks.ts                @ryancampbell @itskai-dev
+
+# ---- Presence + chat ----
+src/presence.ts             @ryancampbell @itskai-dev
+src/chat.ts                 @ryancampbell @itskai-dev
+
+# ---- API docs contract ----
+public/docs.md              @ryancampbell @itskai-dev
+
+# ---- CI / workflows ----
+.github/                    @ryancampbell @itskai-dev
+
+# ---- Tests ----
+tests/                      @ryancampbell @itskai-dev

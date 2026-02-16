@@ -17,6 +17,11 @@
 - [ ] This PR does **not** change API behavior/routes, so no docs update is needed
 - [ ] If docs were updated, links/examples were verified
 
+## File ownership
+
+- [ ] Checked `doing` tasks for overlapping `files_touched` before coding
+- [ ] No other in-flight PR touches the same core files (or coordinated in #general)
+
 ## Checklist
 
 - [ ] Scope is limited and reviewer-ready
