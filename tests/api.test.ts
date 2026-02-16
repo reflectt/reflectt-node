@@ -1046,6 +1046,16 @@ describe('Chat Messages', () => {
   })
 })
 
+// Clean up all tasks for a given agent to prevent cross-test pollution.
+// Previous test failures can leak doing tasks that corrupt lane-state assertions.
+async function cleanupAgentTasks(agent: string) {
+  const { body } = await req('GET', `/tasks?assignee=${agent}&limit=200`)
+  const tasks = body?.tasks || []
+  for (const task of tasks) {
+    await req('DELETE', `/tasks/${task.id}`)
+  }
+}
+
 describe('Idle Nudge lane-state transitions', () => {
   async function createDoingTask(agent: string, title: string): Promise<string> {
     const { status, body } = await req('POST', '/tasks', {
@@ -1073,6 +1083,7 @@ describe('Idle Nudge lane-state transitions', () => {
 
   it('shows no-active-lane when agent has no doing task', async () => {
     const agent = 'lane-no-active'
+    await cleanupAgentTasks(agent)
     await req('POST', `/presence/${agent}`, { status: 'working' })
 
     const decision = await getDecision(agent)
@@ -1082,6 +1093,7 @@ describe('Idle Nudge lane-state transitions', () => {
 
   it('shows ambiguous-lane when agent has multiple fresh doing tasks', async () => {
     const agent = 'lane-ambiguous'
+    await cleanupAgentTasks(agent)
     const taskA = await createDoingTask(agent, 'TEST: lane ambiguous A')
     const taskB = await createDoingTask(agent, 'TEST: lane ambiguous B')
     await req('POST', `/presence/${agent}`, { status: 'working' })
@@ -1096,6 +1108,7 @@ describe('Idle Nudge lane-state transitions', () => {
 
   it('shows presence-task-mismatch when presence.task differs from selected doing task', async () => {
     const agent = 'lane-mismatch'
+    await cleanupAgentTasks(agent)
     const activeTask = await createDoingTask(agent, 'TEST: lane mismatch active')
     const { body: todoBody } = await req('POST', '/tasks', {
       title: 'TEST: lane mismatch presence task',
@@ -1122,6 +1135,7 @@ describe('Idle Nudge lane-state transitions', () => {
 
   it('shows ok when presence.task matches single doing task', async () => {
     const agent = 'lane-ok'
+    await cleanupAgentTasks(agent)
     const taskId = await createDoingTask(agent, 'TEST: lane ok task')
     await req('POST', `/presence/${agent}`, { status: 'working', task: taskId })
 
@@ -1161,6 +1175,7 @@ describe('Idle Nudge shipped cooldown', () => {
 
   it('suppresses nudges after recent shipped signal', async () => {
     const agent = 'lane-ship-cooldown'
+    await cleanupAgentTasks(agent)
     const taskId = await createDoingTask(agent, 'TEST: ship cooldown suppression')
 
     await req('POST', `/presence/${agent}`, {
@@ -1184,6 +1199,7 @@ describe('Idle Nudge shipped cooldown', () => {
 
   it('does not apply shipped cooldown when doing lane is stale', async () => {
     const agent = 'lane-ship-stale'
+    await cleanupAgentTasks(agent)
     const taskId = await createDoingTask(agent, 'TEST: ship cooldown stale exemption')
 
     await req('POST', `/presence/${agent}`, {
