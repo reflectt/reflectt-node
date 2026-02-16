@@ -4,12 +4,14 @@ Use this exact format when moving a task to `validating`.
 
 ## Required fields
 
+- Lane (`docs`, `api`, `ux`, `ops`, etc.)
 - Task ID
 - PR link
 - Commit hash(es)
 - Changed files
 - Test/verification notes
 - Proof artifact path/link
+- Screenshot/proof links (UI/API evidence)
 - Done criteria → evidence mapping
 - Reviewer ask (PASS/FAIL)
 
@@ -17,6 +19,7 @@ Use this exact format when moving a task to `validating`.
 
 ```md
 ### QA Handoff Bundle
+- **Lane:** docs | api | ux | ops | ...
 - **Task:** task-...
 - **PR:** https://github.com/reflectt/reflectt-node/pull/...
 - **Branch:** ...
@@ -28,6 +31,8 @@ Use this exact format when moving a task to `validating`.
   - [x] docs render check
   - [x] endpoint smoke test
 - **Proof artifact:** process/...md (or PR link)
+- **Screenshot/proof links:**
+  - path/or/url
 - **Done criteria → evidence:**
   1) criteria A → evidence A
   2) criteria B → evidence B
@@ -39,6 +44,7 @@ Use this exact format when moving a task to `validating`.
 
 ```md
 ### QA Handoff Bundle
+- **Lane:** docs
 - **Task:** task-1771117933679-oowenr85u
 - **PR:** https://github.com/reflectt/reflectt-node/pull/14
 - **Branch:** echo/tasks-api-quickstart-doc
@@ -50,6 +56,8 @@ Use this exact format when moving a task to `validating`.
   - [x] markdown renders
   - [x] docs index link added
 - **Proof artifact:** https://github.com/reflectt/reflectt-node/pull/14
+- **Screenshot/proof links:**
+  - docs/images/tasks-api-quickstart-render.png
 - **Done criteria → evidence:**
   1) status table added → TASKS_API_QUICKSTART.md section 2
   2) curl flow included → sections 1-5

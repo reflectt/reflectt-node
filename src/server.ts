@@ -199,9 +199,14 @@ const CreateResearchHandoffSchema = z.object({
 })
 
 const QaBundleSchema = z.object({
+  lane: z.string().trim().min(1),
   summary: z.string().trim().min(1),
+  pr_link: z.string().trim().min(1),
+  commit_shas: z.array(z.string().trim().min(1)).min(1),
+  changed_files: z.array(z.string().trim().min(1)).min(1),
   artifact_links: z.array(z.string().trim().min(1)).min(1),
   checks: z.array(z.string().trim().min(1)).min(1),
+  screenshot_proof: z.array(z.string().trim().min(1)).min(1),
   reviewer_notes: z.string().trim().min(1).optional(),
 })
 
@@ -299,8 +304,8 @@ function enforceQaBundleGateForValidating(
   if (!parsed.success) {
     return {
       ok: false,
-      error: 'QA bundle required: PATCH to status=validating must include metadata.qa_bundle { summary, artifact_links[], checks[] }',
-      hint: 'Example: { "status":"validating", "metadata": { "artifact_path":"...", "qa_bundle": { "summary":"what changed", "artifact_links": ["PR/link"], "checks": ["npm run build"] } } }',
+      error: 'QA bundle required: PATCH to status=validating must include metadata.qa_bundle { lane, summary, pr_link, commit_shas[], changed_files[], artifact_links[], checks[], screenshot_proof[] }',
+      hint: 'Example: { "status":"validating", "metadata": { "artifact_path":"process/TASK-proof.md", "qa_bundle": { "lane":"docs", "summary":"what changed", "pr_link":"https://github.com/org/repo/pull/123", "commit_shas":["abc1234"], "changed_files":["docs/file.md"], "artifact_links":["process/TASK-proof.md"], "checks":["npm run build"], "screenshot_proof":["docs/screenshot.png"] } } }',
     }
   }
 

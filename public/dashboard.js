@@ -860,7 +860,6 @@ function renderChat() {
   initChatInteractions();
   if (shown.length === 0) { body.innerHTML = '<div class="empty">No messages</div>'; return; }
   body.innerHTML = shown.map(m => {
-    const long = m.content && m.content.length > 200;
     const agent = AGENT_INDEX.get(m.from);
     const roleTag = agent ? `<span class="msg-role">${esc(agent.role)}</span>` : '';
     const mentioned = mentionsRyan(m.content);
@@ -875,7 +874,7 @@ function renderChat() {
         <span class="msg-time">${ago(m.timestamp)}</span>
         ${editedTag}
       </div>
-      <div class="msg-content ${long ? 'collapsed' : ''}" data-collapsible="${long ? 'true' : 'false'}">${renderMessageContentWithTaskLinks(m.content)}</div>
+      <div class="msg-content">${renderMessageContentWithTaskLinks(m.content)}</div>
     </div>`;
   }).join('');
 }
