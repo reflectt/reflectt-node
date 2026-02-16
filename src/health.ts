@@ -167,6 +167,7 @@ export type IdleNudgeDecision = {
   reason:
     | 'disabled'
     | 'excluded'
+    | 'focus-mode-active'
     | 'offline'
     | 'no-last-active'
     | 'below-warn-threshold'
@@ -1196,7 +1197,14 @@ class TeamHealthMonitor {
       const lastRescueAt = this.mentionRescueState.get(mentionId) || 0
       if (now - lastRescueAt < cooldownMs) continue
 
-      const content = `[[reply_to:${mentionId}]] system fallback: mention received. @kai @link @pixel are being nudged to respond.`
+      // Check if ALL mentioned trio agents are in focus mode — if so, suppress the nudge
+      const allInFocus = this.trioAgents.every(a => presenceManager.isInFocus(a) !== null)
+      if (allInFocus) continue
+
+      // Filter out focused agents from the nudge message
+      const activeAgents = this.trioAgents.filter(a => presenceManager.isInFocus(a) === null)
+      const mentionList = activeAgents.map(a => `@${a}`).join(' ')
+      const content = `[[reply_to:${mentionId}]] system fallback: mention received. ${mentionList} ${activeAgents.length === 1 ? 'is' : 'are'} being nudged to respond.`
       rescued.push(content)
 
       if (!dryRun) {
@@ -1250,6 +1258,13 @@ class TeamHealthMonitor {
 
       if (this.idleNudgeExcluded.has(agent)) {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'excluded', renderedMessage: null })
+        continue
+      }
+
+      // Respect focus mode — suppress idle nudges for focused agents
+      const focusState = presenceManager.isInFocus(agent)
+      if (focusState) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'focus-mode-active', renderedMessage: null })
         continue
       }
 

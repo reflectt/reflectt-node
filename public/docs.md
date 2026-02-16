@@ -187,6 +187,8 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/presence` | All agents' presence |
 | GET | `/presence/:agent` | Single agent presence |
 | POST | `/presence/:agent` | Update presence. Body: `{ "status": "working|idle|blocked|reviewing|offline" }` |
+| GET | `/presence/:agent/focus` | Get agent focus state (active, level, expiry) |
+| POST | `/presence/:agent/focus` | Toggle focus mode. Body: `{ "active": true, "level": "soft|deep", "durationMin": 60, "reason": "shipping PR" }`. Soft: suppresses system nudges, allows direct mentions. Deep: suppresses everything except blocker/review pings. |
 
 ## Memory
 
