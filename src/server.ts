@@ -2317,21 +2317,27 @@ export async function createServer(): Promise<FastifyInstance> {
       // Merge incoming metadata with existing for gate checks + persistence
       const mergedMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
 
+      // TEST: prefixed tasks bypass all close gates (QA bundle, artifacts, reviewer sign-off)
+      // to enable end-to-end integration testing of task lifecycle events.
+      const isTestTask = typeof existing.title === 'string' && existing.title.startsWith('TEST:')
+
       // QA bundle gate: validating requires structured review evidence.
       const effectiveStatus = parsed.status ?? existing.status
-      const qaGate = enforceQaBundleGateForValidating(effectiveStatus, mergedMeta)
-      if (!qaGate.ok) {
-        reply.code(400)
-        return {
-          success: false,
-          error: qaGate.error,
-          gate: 'qa_bundle',
-          hint: qaGate.hint,
+      if (!isTestTask) {
+        const qaGate = enforceQaBundleGateForValidating(effectiveStatus, mergedMeta)
+        if (!qaGate.ok) {
+          reply.code(400)
+          return {
+            success: false,
+            error: qaGate.error,
+            gate: 'qa_bundle',
+            hint: qaGate.hint,
+          }
         }
       }
 
       // ── Task-close gate: enforce proof + reviewer sign-off before done ──
-      if (parsed.status === 'done') {
+      if (parsed.status === 'done' && !isTestTask) {
         const artifacts = mergedMeta.artifacts as string[] | undefined
 
         // Gate 1: require artifacts (links, PR URLs, evidence)

@@ -543,7 +543,7 @@ describe('Artifact Path Canonicalization', () => {
 
   beforeAll(async () => {
     const { body } = await req('POST', '/tasks', {
-      title: 'TEST: artifact path canonicalization',
+      title: 'Artifact path canonicalization check',
       createdBy: 'test-runner',
       assignee: 'test-agent',
       reviewer: 'test-reviewer',
@@ -699,7 +699,7 @@ describe('Task Close Gate', () => {
 
   beforeAll(async () => {
     const { body } = await req('POST', '/tasks', {
-      title: 'TEST: close gate task',
+      title: 'Close gate verification task',
       createdBy: 'test-runner',
       assignee: 'test-agent',
       reviewer: 'test-reviewer',
@@ -1522,5 +1522,120 @@ describe('Branch tracking on doing transition', () => {
     expect(body.task.metadata.branch).toBe(`${agentName}/task-${shortId}`)
 
     await req('DELETE', `/tasks/${taskId}`)
+  })
+})
+
+/* ── TEST_MODE: bypass close gates for TEST: prefixed tasks ────────── */
+describe('TEST_MODE close gate bypass', () => {
+  let testTaskId: string
+
+  afterEach(async () => {
+    if (testTaskId) {
+      await req('DELETE', `/tasks/${testTaskId}`)
+    }
+  })
+
+  it('TEST: task can move to validating without qa_bundle', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: gate bypass validating',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Gate bypass tested'],
+      priority: 'P3',
+      eta: '30m',
+    })
+    testTaskId = created.task.id
+
+    const { status, body } = await req('PATCH', `/tasks/${testTaskId}`, {
+      status: 'validating',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('validating')
+  })
+
+  it('TEST: task can move to done without artifacts or reviewer sign-off', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: gate bypass done',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'kai',
+      done_criteria: ['Gate bypass tested'],
+      priority: 'P3',
+      eta: '30m',
+    })
+    testTaskId = created.task.id
+
+    // Move directly to done — no artifacts, no reviewer_approved
+    const { status, body } = await req('PATCH', `/tasks/${testTaskId}`, {
+      status: 'done',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('done')
+  })
+
+  it('non-TEST task still requires qa_bundle for validating', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'Regular task gate check',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Gate enforcement tested'],
+      priority: 'P3',
+      eta: '30m',
+    })
+    testTaskId = created.task.id
+
+    const { status, body } = await req('PATCH', `/tasks/${testTaskId}`, {
+      status: 'validating',
+    })
+    expect(status).toBe(400)
+    expect(body.gate).toBe('qa_bundle')
+  })
+
+  it('non-TEST task still requires artifacts for done', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'Regular task close gate check',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Gate enforcement tested'],
+      priority: 'P3',
+      eta: '30m',
+    })
+    testTaskId = created.task.id
+
+    const { status, body } = await req('PATCH', `/tasks/${testTaskId}`, {
+      status: 'done',
+    })
+    expect(status).toBe(422)
+    expect(body.gate).toBe('artifacts')
+  })
+
+  it('TEST: task lifecycle end-to-end: todo → doing → validating → done', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: full lifecycle e2e',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Full lifecycle tested'],
+      priority: 'P3',
+      eta: '30m',
+    })
+    testTaskId = created.task.id
+
+    // todo → doing
+    const step1 = await req('PATCH', `/tasks/${testTaskId}`, { status: 'doing' })
+    expect(step1.body.task.status).toBe('doing')
+
+    // doing → validating (no qa_bundle needed)
+    const step2 = await req('PATCH', `/tasks/${testTaskId}`, { status: 'validating' })
+    expect(step2.body.task.status).toBe('validating')
+
+    // validating → done (no artifacts/reviewer needed)
+    const step3 = await req('PATCH', `/tasks/${testTaskId}`, { status: 'done' })
+    expect(step3.body.task.status).toBe('done')
   })
 })
