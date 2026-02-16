@@ -36,6 +36,7 @@ import { getBuildInfo } from './buildInfo.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, checkWipCap } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { getTeamConfigHealth } from './team-config.js'
+import { SecretVault } from './secrets.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -998,6 +999,16 @@ export async function createServer(): Promise<FastifyInstance> {
   // Load agent roles from YAML config (or fall back to built-in defaults)
   loadAgentRoles()
   startConfigWatch()
+
+  // Initialize secret vault
+  const hostId = process.env.REFLECTT_HOST_ID || process.env.HOSTNAME || 'unknown'
+  const vault = new SecretVault(REFLECTT_HOME, hostId)
+  try {
+    vault.init()
+    console.log(`[Vault] Initialized (${vault.getStats().secretCount} secrets)`)
+  } catch (err) {
+    console.error('[Vault] Failed to initialize:', (err as Error).message)
+  }
 
   // Initialize telemetry (opt-in via REFLECTT_TELEMETRY=true)
   initTelemetry({
@@ -3562,6 +3573,76 @@ export async function createServer(): Promise<FastifyInstance> {
       return
     }
     return payload
+  })
+
+  // ============ SECRET VAULT ENDPOINTS ============
+
+  // List secrets (metadata only — no plaintext)
+  app.get('/secrets', async () => {
+    return { success: true, secrets: vault.list(), stats: vault.getStats() }
+  })
+
+  // Create/update a secret
+  app.post('/secrets', async (request, reply) => {
+    const body = request.body as { name?: string; value?: string; scope?: string; actor?: string; metadata?: Record<string, unknown> }
+    if (!body?.name || typeof body.name !== 'string' || !body.name.trim()) {
+      reply.status(400)
+      return { success: false, message: 'name is required' }
+    }
+    if (!body?.value || typeof body.value !== 'string') {
+      reply.status(400)
+      return { success: false, message: 'value is required' }
+    }
+    const scope = (body.scope === 'project' || body.scope === 'agent') ? body.scope : 'host'
+    const actor = typeof body.actor === 'string' ? body.actor : 'api'
+
+    const meta = vault.create(body.name.trim(), body.value, scope as 'host' | 'project' | 'agent', actor, body.metadata)
+    return { success: true, secret: meta }
+  })
+
+  // Read/decrypt a secret
+  app.get<{ Params: { name: string } }>('/secrets/:name', async (request, reply) => {
+    const actor = (request.query as Record<string, string>)?.actor || 'api'
+    const value = vault.read(request.params.name, actor)
+    if (value === null) {
+      reply.status(404)
+      return { success: false, message: 'Secret not found or decryption failed' }
+    }
+    return { success: true, name: request.params.name, value }
+  })
+
+  // Delete a secret
+  app.delete<{ Params: { name: string } }>('/secrets/:name', async (request, reply) => {
+    const actor = (request.body as Record<string, string>)?.actor || 'api'
+    const deleted = vault.delete(request.params.name, actor)
+    if (!deleted) {
+      reply.status(404)
+      return { success: false, message: 'Secret not found' }
+    }
+    return { success: true, deleted: request.params.name }
+  })
+
+  // Rotate a secret's encryption key
+  app.post<{ Params: { name: string } }>('/secrets/:name/rotate', async (request, reply) => {
+    const actor = (request.body as Record<string, string>)?.actor || 'api'
+    const meta = vault.rotate(request.params.name, actor)
+    if (!meta) {
+      reply.status(404)
+      return { success: false, message: 'Secret not found or rotation failed' }
+    }
+    return { success: true, secret: meta }
+  })
+
+  // Export all secrets (encrypted bundle)
+  app.get('/secrets/export', async () => {
+    const bundle = vault.export('api')
+    return { success: true, bundle }
+  })
+
+  // Audit log
+  app.get('/secrets/audit', async (request) => {
+    const limit = parseInt((request.query as Record<string, string>)?.limit || '100', 10)
+    return { success: true, entries: vault.getAuditLog(limit) }
   })
 
   // ============ ANALYTICS ENDPOINTS ============

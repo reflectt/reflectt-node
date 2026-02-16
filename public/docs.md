@@ -304,6 +304,13 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/dashboard` | HTML dashboard UI |
 | GET | `/docs` | This API reference |
 | GET | `/openclaw/status` | OpenClaw connection status |
+| GET | `/secrets` | List all secrets (metadata only — no plaintext values) |
+| POST | `/secrets` | Create/update a secret (encrypts locally, stores ciphertext) |
+| GET | `/secrets/export` | Export all secrets as encrypted bundle for portability |
+| GET | `/secrets/audit` | Secret access audit log |
+| GET | `/secrets/:name` | Decrypt and return a secret value (audit logged) |
+| DELETE | `/secrets/:name` | Revoke/delete a secret |
+| POST | `/secrets/:name/rotate` | Rotate a secret's encryption key |
 | GET | `/analytics/models` | Model performance analytics — tasks per model, avg cycle time, review pass rate |
 | GET | `/analytics/agents` | Per-agent analytics — model used, performance stats |
 
