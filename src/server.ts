@@ -312,6 +312,63 @@ function enforceQaBundleGateForValidating(
   return { ok: true }
 }
 
+function applyReviewStateMetadata(
+  existing: Task,
+  parsed: z.infer<typeof UpdateTaskSchema>,
+  mergedMeta: Record<string, unknown>,
+  now: number,
+): Record<string, unknown> {
+  const metadata = { ...mergedMeta }
+  const previousStatus = existing.status
+  const nextStatus = parsed.status ?? existing.status
+  const incomingMeta = parsed.metadata ?? {}
+  const incomingReviewState = typeof incomingMeta.review_state === 'string'
+    ? incomingMeta.review_state.trim().toLowerCase()
+    : ''
+
+  if (nextStatus === 'validating' && previousStatus !== 'validating') {
+    metadata.entered_validating_at = now
+    if (!incomingReviewState) {
+      metadata.review_state = 'queued'
+    }
+    metadata.review_last_activity_at = now
+  }
+
+  if (previousStatus === 'validating' && nextStatus === 'doing' && !incomingReviewState) {
+    metadata.review_state = 'needs_author'
+    metadata.review_last_activity_at = now
+  }
+
+  const actor = parsed.actor?.trim()
+  if (
+    nextStatus === 'validating'
+    && actor
+    && existing.reviewer
+    && actor.toLowerCase() === existing.reviewer.toLowerCase()
+    && !incomingReviewState
+  ) {
+    metadata.review_state = 'in_progress'
+    metadata.review_last_activity_at = now
+  }
+
+  const touchedReviewFields =
+    Object.prototype.hasOwnProperty.call(incomingMeta, 'review_state')
+    || Object.prototype.hasOwnProperty.call(incomingMeta, 'reviewer_approved')
+    || Object.prototype.hasOwnProperty.call(incomingMeta, 'review_notes')
+    || Object.prototype.hasOwnProperty.call(incomingMeta, 'review_last_activity_at')
+
+  if (touchedReviewFields) {
+    metadata.review_last_activity_at = now
+  }
+
+  if (metadata.reviewer_approved === true) {
+    metadata.review_state = 'approved'
+    metadata.review_last_activity_at = now
+  }
+
+  return metadata
+}
+
 const DEFAULT_LIMITS = {
   chatMessages: 50,
   chatSearch: 25,
@@ -2496,8 +2553,10 @@ export async function createServer(): Promise<FastifyInstance> {
         return { success: false, error: 'Task not found', input: request.params.id, suggestions: lookup.suggestions }
       }
 
-      // Merge incoming metadata with existing for gate checks + persistence
-      const mergedMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
+      // Merge incoming metadata with existing for gate checks + persistence.
+      // Normalize review-state metadata for state-aware SLA tracking.
+      const mergedRawMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
+      const mergedMeta = applyReviewStateMetadata(existing, parsed, mergedRawMeta, Date.now())
 
       // TEST: prefixed tasks bypass gates (WIP cap, etc.)
       const isTestTask = typeof existing.title === 'string' && existing.title.startsWith('TEST:')

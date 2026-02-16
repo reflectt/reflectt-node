@@ -865,6 +865,79 @@ describe('Lane-state transition lock', () => {
   })
 })
 
+describe('Review State Tracking Metadata', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: review state transitions',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Review flow tracked'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('sets queued review metadata when entering validating', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/test-review-state-artifact.md',
+        qa_bundle: {
+          lane: 'test-lane',
+          summary: 'test review bundle',
+          pr_link: 'https://github.com/reflectt/reflectt-node/pull/99999',
+          commit_shas: ['deadbeef'],
+          changed_files: ['src/server.ts'],
+          artifact_links: ['test://artifact'],
+          checks: ['npm test'],
+          screenshot_proof: ['test://screenshot'],
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.metadata.entered_validating_at).toBeTypeOf('number')
+    expect(body.task.metadata.review_state).toBe('queued')
+    expect(body.task.metadata.review_last_activity_at).toBeTypeOf('number')
+  })
+
+  it('moves review_state to in_progress when reviewer updates in validating', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      actor: 'test-reviewer',
+      metadata: {
+        review_notes: 'review in progress',
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.metadata.review_state).toBe('in_progress')
+    expect(body.task.metadata.review_last_activity_at).toBeTypeOf('number')
+  })
+
+  it('marks approved when reviewer_approved=true', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      metadata: {
+        reviewer_approved: true,
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.metadata.review_state).toBe('approved')
+    expect(body.task.metadata.review_last_activity_at).toBeTypeOf('number')
+  })
+})
+
 describe('Chat Messages', () => {
   let authorMessageId: string
 
