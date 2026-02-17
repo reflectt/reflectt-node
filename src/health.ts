@@ -1336,6 +1336,13 @@ class TeamHealthMonitor {
         continue
       }
 
+      // Also suppress first-time alerts if agent posted ANY #general message recently
+      const agentLastGeneralAt = this.getLatestGeneralMessageAt(messages, agent)
+      if (agentLastGeneralAt > 0) {
+        const sinceGeneralMin = Math.floor((now - agentLastGeneralAt) / 60_000)
+        if (sinceGeneralMin < this.cadenceWorkingStaleMin) continue
+      }
+
       const content = `@${agent} @kai @pixel system watchdog: status=working with no #general update for ${staleMin}m on ${task.id}. Post required status now: 1) shipped 2) blocker 3) next+ETA.`
       alerts.push(content)
 

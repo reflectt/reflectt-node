@@ -98,27 +98,30 @@ agents:
     wipCap: 1
 
   - name: harmony
-    role: reviewer
-    description: Quality gate and audit owner.
+    role: agent-health
+    description: Agent health and team culture owner (coordination quality, risk flags, role fit, communication hygiene).
     affinityTags:
-      - qa
-      - review
-      - validation
-      - audit
-      - security
-      - compliance
-      - testing
-      - quality
+      - agent-health
+      - team-health
+      - coordination
+      - communication
+      - culture
+      - conflict-prevention
+      - workload-balance
+      - burnout-risk
+      - operating-rhythm
     alwaysRoute:
-      - qa
-      - audit
-      - security-review
+      - agent-health
+      - team-health
+      - coordination
     neverRoute:
-      - feature-spec
+      - backend
+      - security-review
+      - code-review
     protectedDomains:
-      - security
-      - audit
-    wipCap: 2
+      - agent-health
+      - team-health
+    wipCap: 1
 
   - name: scout
     role: analyst
@@ -138,4 +141,25 @@ agents:
       - sla
     neverRoute:
       - frontend-polish
+    wipCap: 1
+
+  - name: spark
+    role: growth
+    description: Growth and activation execution owner across funnel, onboarding, and distribution experiments.
+    affinityTags:
+      - growth
+      - activation
+      - funnel
+      - onboarding
+      - distribution
+      - experiment
+      - telemetry
+      - dashboard
+      - conversion
+    alwaysRoute:
+      - growth
+      - activation
+      - experiment
+    neverRoute:
+      - security-review
     wipCap: 1
