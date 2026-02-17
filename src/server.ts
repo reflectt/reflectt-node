@@ -44,6 +44,7 @@ import { getNotificationManager } from './notifications.js'
 import { getConnectivityManager } from './connectivity.js'
 import { boardHealthWorker } from './boardHealthWorker.js'
 import { buildAgentFeed, type FeedEventKind } from './changeFeed.js'
+import { policyManager } from './policy.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -886,28 +887,29 @@ function defaultHintForStatus(status: number): string | undefined {
   return undefined
 }
 
-const QUIET_HOURS_ENABLED = process.env.WATCHDOG_QUIET_HOURS_ENABLED !== 'false'
-const QUIET_HOURS_START_HOUR = Number(process.env.WATCHDOG_QUIET_HOURS_START_HOUR || 23)
-const QUIET_HOURS_END_HOUR = Number(process.env.WATCHDOG_QUIET_HOURS_END_HOUR || 8)
-const QUIET_HOURS_TZ = process.env.WATCHDOG_QUIET_HOURS_TZ || 'America/Vancouver'
-
+// Quiet hours — now driven by unified policy config
 function getHourInTimezone(nowMs: number, timeZone: string): number {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: '2-digit',
-    hour12: false,
-  })
-  const part = formatter.formatToParts(new Date(nowMs)).find(p => p.type === 'hour')
-  const hour = Number(part?.value ?? '0')
-  return Number.isFinite(hour) ? hour : 0
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: '2-digit',
+      hour12: false,
+    })
+    const part = formatter.formatToParts(new Date(nowMs)).find(p => p.type === 'hour')
+    const hour = Number(part?.value ?? '0')
+    return Number.isFinite(hour) ? hour : 0
+  } catch {
+    return new Date(nowMs).getHours()
+  }
 }
 
 function isQuietHours(nowMs: number): boolean {
-  if (!QUIET_HOURS_ENABLED) return false
+  const qh = policyManager.get().quietHours
+  if (!qh.enabled) return false
 
-  const start = Math.max(0, Math.min(23, QUIET_HOURS_START_HOUR))
-  const end = Math.max(0, Math.min(23, QUIET_HOURS_END_HOUR))
-  const hour = getHourInTimezone(nowMs, QUIET_HOURS_TZ)
+  const start = Math.max(0, Math.min(23, qh.startHour))
+  const end = Math.max(0, Math.min(23, qh.endHour))
+  const hour = getHourInTimezone(nowMs, qh.timezone)
 
   if (start === end) return false
   if (start < end) return hour >= start && hour < end
@@ -1046,7 +1048,11 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 30 * 1000)
   mentionRescueTimer.unref()
 
-  // Board health execution worker (auto-block stale, suggest close, digest)
+  // Load unified policy config (file + env overrides)
+  const policy = policyManager.load()
+
+  // Board health execution worker — config from policy
+  boardHealthWorker.updateConfig(policy.boardHealth)
   boardHealthWorker.start()
 
   app.addHook('onClose', async () => {
@@ -1255,10 +1261,10 @@ export async function createServer(): Promise<FastifyInstance> {
         suppressed: true,
         reason: 'quiet-hours',
         quietHours: {
-          enabled: QUIET_HOURS_ENABLED,
-          startHour: QUIET_HOURS_START_HOUR,
-          endHour: QUIET_HOURS_END_HOUR,
-          tz: QUIET_HOURS_TZ,
+          enabled: policyManager.get().quietHours.enabled,
+          startHour: policyManager.get().quietHours.startHour,
+          endHour: policyManager.get().quietHours.endHour,
+          tz: policyManager.get().quietHours.timezone,
         },
         nudged: [],
         decisions: [],
@@ -1301,10 +1307,10 @@ export async function createServer(): Promise<FastifyInstance> {
         suppressed: true,
         reason: 'quiet-hours',
         quietHours: {
-          enabled: QUIET_HOURS_ENABLED,
-          startHour: QUIET_HOURS_START_HOUR,
-          endHour: QUIET_HOURS_END_HOUR,
-          tz: QUIET_HOURS_TZ,
+          enabled: policyManager.get().quietHours.enabled,
+          startHour: policyManager.get().quietHours.startHour,
+          endHour: policyManager.get().quietHours.endHour,
+          tz: policyManager.get().quietHours.timezone,
         },
         alerts: [],
         timestamp: now,
@@ -1346,10 +1352,10 @@ export async function createServer(): Promise<FastifyInstance> {
         suppressed: true,
         reason: 'quiet-hours',
         quietHours: {
-          enabled: QUIET_HOURS_ENABLED,
-          startHour: QUIET_HOURS_START_HOUR,
-          endHour: QUIET_HOURS_END_HOUR,
-          tz: QUIET_HOURS_TZ,
+          enabled: policyManager.get().quietHours.enabled,
+          startHour: policyManager.get().quietHours.startHour,
+          endHour: policyManager.get().quietHours.endHour,
+          tz: policyManager.get().quietHours.timezone,
         },
         rescued: [],
         timestamp: now,
@@ -2836,6 +2842,32 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: true, ...result }
     },
   )
+
+  // ── Unified policy config endpoints ─────────────────────────────────
+
+  app.get('/policy', async () => {
+    return {
+      success: true,
+      policy: policyManager.get(),
+      filePath: policyManager.getFilePath(),
+    }
+  })
+
+  app.patch('/policy', async (request) => {
+    const patch = request.body as Record<string, unknown>
+    const updated = policyManager.patch(patch as any)
+
+    // Propagate board-health config changes to the running worker
+    boardHealthWorker.updateConfig(updated.boardHealth)
+
+    return { success: true, policy: updated }
+  })
+
+  app.post('/policy/reset', async () => {
+    const reset = policyManager.reset()
+    boardHealthWorker.updateConfig(reset.boardHealth)
+    return { success: true, policy: reset }
+  })
 
   // Update task
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
