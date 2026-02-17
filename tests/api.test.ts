@@ -61,6 +61,14 @@ function validQaBundle(overrides: Record<string, unknown> = {}) {
     artifact_links: ['process/TASK-test-proof.md'],
     checks: ['npm test'],
     screenshot_proof: ['process/TASK-test-proof.md'],
+    review_packet: {
+      task_id: 'task-0000000000000-default',
+      pr_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+      commit: 'abc1234',
+      changed_files: ['src/server.ts'],
+      artifact_path: 'process/TASK-test-proof.md',
+      caveats: 'none',
+    },
     ...overrides,
   }
 }
@@ -590,7 +598,18 @@ describe('Task History Changelog', () => {
       actor: 'test-agent',
       metadata: {
         artifact_path: 'process/TASK-history-proof.md',
-        qa_bundle: validQaBundle({ summary: 'history test', artifact_links: ['process/TASK-history-proof.md'] }),
+        qa_bundle: validQaBundle({
+          summary: 'history test',
+          artifact_links: ['process/TASK-history-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/123',
+            commit: 'abcdef1',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-history-proof.md',
+            caveats: 'none',
+          },
+        }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -661,7 +680,17 @@ describe('Artifact Path Canonicalization', () => {
       metadata: {
         eta: '1h',
         artifact_path: '/tmp/TASK-proof.md',
-        qa_bundle: validQaBundle({ summary: 'test bundle' }),
+        qa_bundle: validQaBundle({
+          summary: 'test bundle',
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/456',
+            commit: 'abcdef2',
+            changed_files: ['src/tasks.ts'],
+            artifact_path: '/tmp/TASK-proof.md',
+            caveats: 'none',
+          },
+        }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -685,7 +714,17 @@ describe('Artifact Path Canonicalization', () => {
       metadata: {
         eta: '1h',
         artifact_path: 'process/TASK-test-proof.md',
-        qa_bundle: validQaBundle({ summary: 'test bundle' }),
+        qa_bundle: validQaBundle({
+          summary: 'test bundle',
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/457',
+            commit: 'abcdef3',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-test-proof.md',
+            caveats: 'none',
+          },
+        }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -700,6 +739,99 @@ describe('Artifact Path Canonicalization', () => {
 
     expect(status).toBe(200)
     expect(body.task.status).toBe('validating')
+  })
+})
+
+describe('Review packet gate', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: review packet gate',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Review packet required'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('blocks transition to validating when review packet fields are missing', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-gate-proof.md',
+        qa_bundle: {
+          lane: 'test',
+          summary: 'missing packet fields',
+          pr_link: 'https://github.com/reflectt/reflectt-node/pull/5',
+          commit_shas: ['abcd123'],
+          changed_files: ['src/server.ts'],
+          artifact_links: ['process/TASK-gate-proof.md'],
+          checks: ['npm test'],
+          screenshot_proof: ['process/TASK-gate-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/5',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-gate-proof.md',
+            caveats: 'none',
+          },
+        },
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/5',
+          commit_sha: 'abcd123',
+          artifact_path: 'process/TASK-gate-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toContain('Review packet required before validating')
+    expect(body.error).toContain('metadata.qa_bundle.review_packet.commit')
+  })
+
+  it('returns clear mismatch error when review packet task_id does not match', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-gate-proof.md',
+        qa_bundle: validQaBundle({
+          summary: 'bad task id',
+          artifact_links: ['process/TASK-gate-proof.md'],
+          review_packet: {
+            task_id: 'task-0000000000000-mismatch',
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/5',
+            commit: 'abcd123',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-gate-proof.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/5',
+          commit_sha: 'abcd123',
+          artifact_path: 'process/TASK-gate-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toContain('Review packet task mismatch')
   })
 })
 
@@ -728,7 +860,18 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: validQaBundle({ summary: 'handoff gate test', artifact_links: ['process/TASK-handoff-proof.md'] }),
+        qa_bundle: validQaBundle({
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/500',
+            commit: 'abc5000',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-handoff-proof.md',
+            caveats: 'none',
+          },
+        }),
       },
     })
 
@@ -741,7 +884,18 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: validQaBundle({ summary: 'handoff gate test', artifact_links: ['process/TASK-handoff-proof.md'] }),
+        qa_bundle: validQaBundle({
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/501',
+            commit: 'abc5001',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-handoff-proof.md',
+            caveats: 'none',
+          },
+        }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -761,7 +915,18 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: validQaBundle({ summary: 'handoff gate test', artifact_links: ['process/TASK-handoff-proof.md'] }),
+        qa_bundle: validQaBundle({
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/502',
+            commit: 'abc5002',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-handoff-proof.md',
+            caveats: 'none',
+          },
+        }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -779,7 +944,18 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: validQaBundle({ summary: 'handoff gate test rerun', artifact_links: ['process/TASK-handoff-proof.md'] }),
+        qa_bundle: validQaBundle({
+          summary: 'handoff gate test rerun',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/503',
+            commit: 'abc5003',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-handoff-proof.md',
+            caveats: 'none',
+          },
+        }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -798,7 +974,18 @@ describe('Validating review handoff gate', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-handoff-proof.md',
-        qa_bundle: validQaBundle({ summary: 'handoff gate test rerun', artifact_links: ['process/TASK-handoff-proof.md'] }),
+        qa_bundle: validQaBundle({
+          summary: 'handoff gate test rerun',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/504',
+            commit: 'abc5004',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-handoff-proof.md',
+            caveats: 'none',
+          },
+        }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -1059,6 +1246,115 @@ describe('Task Close Gate', () => {
   })
 })
 
+describe('Task close follow-on linkage gate', () => {
+  it('rejects done for spec tasks without follow_on_task_id or follow_on_na_reason', async () => {
+    const created = await req('POST', '/tasks', {
+      title: 'TEST: spec close gate missing follow-on',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Spec close requires linkage'],
+      eta: '1h',
+      metadata: {
+        task_type: 'spec',
+      },
+    })
+
+    const specTaskId = created.body.task.id
+
+    const result = await req('PATCH', `/tasks/${specTaskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['process/TASK-spec-proof.md'],
+        reviewer_approved: true,
+      },
+    })
+
+    expect(result.status).toBe(422)
+    expect(result.body.gate).toBe('follow_on_linkage')
+
+    await req('DELETE', `/tasks/${specTaskId}`)
+  })
+
+  it('accepts done for spec tasks when follow_on_task_id points to existing task', async () => {
+    const followOn = await req('POST', '/tasks', {
+      title: 'TEST: follow-on implementation task',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Exists for linkage'],
+      eta: '1h',
+    })
+
+    const spec = await req('POST', '/tasks', {
+      title: 'TEST: spec close gate with follow-on link',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Spec close requires linkage'],
+      eta: '1h',
+      metadata: {
+        task_type: 'spec',
+      },
+    })
+
+    const followOnId = followOn.body.task.id
+    const specTaskId = spec.body.task.id
+
+    const result = await req('PATCH', `/tasks/${specTaskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['process/TASK-spec-proof.md'],
+        reviewer_approved: true,
+        follow_on_task_id: followOnId,
+      },
+    })
+
+    expect(result.status).toBe(200)
+    expect(result.body.task.status).toBe('done')
+    expect(result.body.task.metadata.follow_on_task_id).toBe(followOnId)
+
+    await req('DELETE', `/tasks/${specTaskId}`)
+    await req('DELETE', `/tasks/${followOnId}`)
+  })
+
+  it('accepts done for research tasks with explicit follow_on_na rationale', async () => {
+    const research = await req('POST', '/tasks', {
+      title: 'TEST: research close gate with explicit NA',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Research close requires rationale'],
+      eta: '1h',
+      metadata: {
+        task_type: 'research',
+      },
+    })
+
+    const taskId = research.body.task.id
+
+    const result = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['process/TASK-research-proof.md'],
+        reviewer_approved: true,
+        follow_on_na: true,
+        follow_on_na_reason: 'Investigation-only result; no implementation work required.',
+      },
+    })
+
+    expect(result.status).toBe(200)
+    expect(result.body.task.status).toBe('done')
+    expect(result.body.task.metadata.follow_on_na).toBe(true)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+})
+
 describe('Task review endpoint', () => {
   let taskId: string
 
@@ -1206,6 +1502,14 @@ describe('Review State Tracking Metadata', () => {
         qa_bundle: validQaBundle({
           summary: 'test review bundle',
           artifact_links: ['test://artifact'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/99999',
+            commit: 'deadbeef',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/test-review-state-artifact.md',
+            caveats: 'none',
+          },
         }),
         review_handoff: {
           task_id: taskId,
@@ -1868,7 +2172,18 @@ describe('Task review bundle', () => {
       status: 'validating',
       metadata: {
         artifact_path: artifactRelPath,
-        qa_bundle: validQaBundle({ summary: 'test summary', artifact_links: [artifactRelPath] }),
+        qa_bundle: validQaBundle({
+          summary: 'test summary',
+          artifact_links: [artifactRelPath],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/4',
+            commit: '1234abc',
+            changed_files: ['process/TASK-test-review-bundle.md'],
+            artifact_path: artifactRelPath,
+            caveats: 'none',
+          },
+        }),
         review_handoff: {
           task_id: taskId,
           repo: 'reflectt/reflectt-node',
@@ -1902,6 +2217,53 @@ describe('Task review bundle', () => {
     expect(body.bundle.artifacts.length).toBeGreaterThan(0)
     expect(body.bundle.artifacts[0].path).toBe(artifactRelPath)
     expect(body.bundle.artifacts[0].exists).toBe(true)
+    expect(body.bundle.evidence.follow_on.required).toBe(false)
+  })
+
+  it('review bundle surfaces follow-on evidence for spec tasks', async () => {
+    const followOn = await req('POST', '/tasks', {
+      title: 'TEST: follow-on task for review bundle evidence',
+      description: 'Used to validate follow-on evidence rendering',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Exists for linkage'],
+      eta: '1h',
+    })
+    const followOnId = followOn.body.task.id
+
+    const specTask = await req('POST', '/tasks', {
+      title: 'TEST: review bundle follow-on evidence spec task',
+      description: 'Spec task for follow-on evidence',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Follow-on evidence appears in bundle'],
+      eta: '1h',
+      metadata: {
+        task_type: 'spec',
+        artifact_path: artifactRelPath,
+        artifacts: [artifactRelPath],
+        follow_on_task_id: followOnId,
+      },
+    })
+    const specTaskId = specTask.body.task.id
+
+    const { status, body } = await req('POST', `/tasks/${specTaskId}/review-bundle`, {
+      author: 'test-reviewer',
+      strict: false,
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.bundle.evidence.follow_on.required).toBe(true)
+    expect(body.bundle.evidence.follow_on.state).toBe('linked')
+    expect(body.bundle.evidence.follow_on.followOnTaskId).toBe(followOnId)
+
+    await req('DELETE', `/tasks/${specTaskId}`)
+    await req('DELETE', `/tasks/${followOnId}`)
   })
 })
 
@@ -2701,7 +3063,16 @@ describe('Auto-queue notification', () => {
       status: 'validating',
       metadata: {
         artifact_path: 'process/TASK-test-proof.md',
-        qa_bundle: validQaBundle(),
+        qa_bundle: validQaBundle({
+          review_packet: {
+            task_id: doingTaskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/1',
+            commit: 'abc1234',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-test-proof.md',
+            caveats: 'none',
+          },
+        }),
         review_handoff: {
           task_id: doingTaskId,
           artifact_path: 'process/TASK-test-proof.md',
