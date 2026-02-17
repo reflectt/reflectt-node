@@ -301,25 +301,27 @@ const ReviewPacketSchema = z.object({
 const QaBundleSchema = z.object({
   lane: z.string().trim().min(1),
   summary: z.string().trim().min(1),
-  pr_link: z.string().trim().min(1).optional(),        // optional for config_only tasks
-  commit_shas: z.array(z.string().trim().min(1)).optional(),  // optional for config_only tasks
+  pr_link: z.string().trim().min(1).optional(),        // optional for config_only/doc_only/non_code tasks
+  commit_shas: z.array(z.string().trim().min(1)).optional(),  // optional for config_only/doc_only/non_code tasks
   changed_files: z.array(z.string().trim().min(1)).min(1),
   artifact_links: z.array(z.string().trim().min(1)).min(1),
   checks: z.array(z.string().trim().min(1)).min(1),
   screenshot_proof: z.array(z.string().trim().min(1)).min(1),
   reviewer_notes: z.string().trim().min(1).optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
-  review_packet: ReviewPacketSchema,
+  review_packet: ReviewPacketSchema.optional(),
+  non_code: z.boolean().optional(),     // true for design/docs artifact validation without PR/commit
 })
 
 const ReviewHandoffSchema = z.object({
   task_id: z.string().trim().regex(/^task-[a-zA-Z0-9-]+$/),
-  repo: z.string().trim().min(1).optional(),  // optional for config_only tasks
+  repo: z.string().trim().min(1).optional(),  // optional for config_only/non_code tasks
   artifact_path: z.string().trim().min(1),    // relaxed: accepts any path (process/, ~/.reflectt/, etc.)
   test_proof: z.string().trim().min(1),
   known_caveats: z.string().trim().min(1),
   doc_only: z.boolean().optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
+  non_code: z.boolean().optional(),     // true for design/docs artifact validation without PR/commit
   pr_url: z.string().trim().url().optional(),
   commit_sha: z.string().trim().regex(/^[a-fA-F0-9]{7,40}$/).optional(),
 })
@@ -426,27 +428,29 @@ function enforceQaBundleGateForValidating(
     const detail = missing.length > 0 ? ` Missing/invalid: ${missing.join(', ')}.` : ''
     return {
       ok: false,
-      error: `Review packet required before validating.${detail}`,
-      hint: 'Include metadata.qa_bundle.review_packet with: task_id, pr_url, commit, changed_files[], artifact_path, caveats (plus summary/artifact_links/checks).',
+      error: `QA bundle required before validating.${detail}`,
+      hint: 'Include metadata.qa_bundle with lane, summary, changed_files[], artifact_links[], checks[], screenshot_proof[] (plus optional review_packet or non_code/config_only flags).',
     }
   }
 
   const reviewPacket = parsed.data.qa_bundle.review_packet
-  if (expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
-    return {
-      ok: false,
-      error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
-      hint: 'Set review_packet.task_id to the current task ID before moving to validating.',
+  if (reviewPacket) {
+    if (expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
+      return {
+        ok: false,
+        error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
+        hint: 'Set review_packet.task_id to the current task ID before moving to validating.',
+      }
     }
-  }
 
-  const metadataObj = (metadata ?? {}) as Record<string, unknown>
-  const artifactPath = typeof metadataObj.artifact_path === 'string' ? metadataObj.artifact_path.trim() : ''
-  if (artifactPath && artifactPath !== reviewPacket.artifact_path) {
-    return {
-      ok: false,
-      error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
-      hint: 'Use the same canonical process/... artifact path in both fields.',
+    const metadataObj = (metadata ?? {}) as Record<string, unknown>
+    const artifactPath = typeof metadataObj.artifact_path === 'string' ? metadataObj.artifact_path.trim() : ''
+    if (artifactPath && artifactPath !== reviewPacket.artifact_path) {
+      return {
+        ok: false,
+        error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
+        hint: 'Use the same canonical process/... artifact path in both fields.',
+      }
     }
   }
 
@@ -515,6 +519,24 @@ function isTaskAutomatedRecurring(metadata: unknown): boolean {
   return typeof recurringId?.id === 'string' && recurringId.id.trim().length > 0
 }
 
+function normalizeLaneValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function isDesignOrDocsLane(metadata: Record<string, unknown>): boolean {
+  const lane = normalizeLaneValue(metadata.lane)
+  if (lane.includes('design') || lane.includes('docs') || lane.includes('documentation')) return true
+
+  const supports = normalizeLaneValue(metadata.supports)
+  if (supports.includes('design') || supports.includes('docs') || supports.includes('documentation')) return true
+
+  const qaBundle = (metadata.qa_bundle as Record<string, unknown> | undefined) || {}
+  const qaLane = normalizeLaneValue(qaBundle.lane)
+  if (qaLane.includes('design') || qaLane.includes('docs') || qaLane.includes('documentation')) return true
+
+  return false
+}
+
 function enforceReviewHandoffGateForValidating(
   status: Task['status'] | undefined,
   taskId: string,
@@ -528,8 +550,8 @@ function enforceReviewHandoffGateForValidating(
   if (!parsed.success) {
     return {
       ok: false,
-      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true or config_only=true).',
-      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For config tasks: set config_only=true.',
+      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true, non_code=true, design/docs lane, or config_only=true).',
+      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For design/docs artifacts: set non_code=true (or doc_only=true). For config tasks: set config_only=true.',
     }
   }
 
@@ -542,20 +564,24 @@ function enforceReviewHandoffGateForValidating(
     }
   }
 
+  const nonCodeViaLane = isDesignOrDocsLane(root)
+  const nonCodeViaBundle = ((root.qa_bundle as Record<string, unknown> | undefined)?.non_code) === true
+  const nonCodeContract = handoff.doc_only || handoff.config_only || handoff.non_code || nonCodeViaBundle || nonCodeViaLane
+
   // config_only: artifacts live in ~/.reflectt/, no repo/PR required
-  // doc_only: docs-only work, no PR/commit required
-  if (!handoff.doc_only && !handoff.config_only) {
+  // doc_only/non_code: design/docs artifact validation, no PR/commit required
+  if (!nonCodeContract) {
     if (!handoff.pr_url || !parseGitHubPrUrl(handoff.pr_url)) {
       return {
         ok: false,
-        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or set doc_only=true for docs-only, config_only=true for ~/.reflectt/ config tasks).',
-        hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>.',
+        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or use non-code contract: doc_only=true, non_code=true, design/docs lane, or config_only=true for ~/.reflectt/ config tasks).',
+        hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>, or mark non-code validation for design/docs artifacts.',
       }
     }
     if (!handoff.commit_sha) {
       return {
         ok: false,
-        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when doc_only/config_only is not set.',
+        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when non-code/config-only contract is not set.',
         hint: 'Use 7-40 hex chars, e.g. "a1b2c3d".',
       }
     }

@@ -1002,6 +1002,61 @@ describe('Validating review handoff gate', () => {
   })
 })
 
+describe('Non-code validating contract (design/docs)', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: non-code validating contract',
+      createdBy: 'test-runner',
+      assignee: 'pixel',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Non-code validating accepted without PR/commit'],
+      eta: '1h',
+      metadata: {
+        lane: 'design',
+      },
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('accepts validating for design lane without PR URL/commit SHA when non-code proof bundle is provided', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        lane: 'design',
+        artifact_path: 'process/TASK-non-code-proof.md',
+        qa_bundle: validQaBundle({
+          lane: 'design',
+          summary: 'design handoff evidence package',
+          non_code: true,
+          changed_files: ['process/TASK-non-code-proof.md'],
+          artifact_links: ['process/TASK-non-code-proof.md'],
+          screenshot_proof: ['process/TASK-non-code-proof.md'],
+          checks: ['design acceptance checklist complete'],
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-non-code-proof.md',
+          test_proof: 'Design/doc checklist reviewed with acceptance criteria mapping.',
+          known_caveats: 'No code changes in this lane.',
+          non_code: true,
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('validating')
+  })
+})
+
 describe('Backlog', () => {
   let taskId: string
 
