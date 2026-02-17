@@ -333,6 +333,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/routing/stats` | Message routing stats: total routed, by channel/category/severity, general vs ops count. |
 | GET | `/routing/log` | Recent routing decisions. Query: `?limit=50&since=timestamp&category=watchdog-alert&severity=warning`. |
 | POST | `/routing/resolve` | Dry-run route resolution. Body: `{ from, content, severity?, category?, taskId?, mentions? }`. Returns where message would go. |
+| POST | `/tasks/:id/precheck` | Precheck task transition. Body: `{ targetStatus }`. Returns required fields, auto-defaults, and a PATCH template. |
 | GET | `/health/watchdog/suppression` | Watchdog de-noise config: show all suppression rules, thresholds, and what activity types prevent re-firing. | Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
