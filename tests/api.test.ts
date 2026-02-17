@@ -995,6 +995,60 @@ describe('Task Close Gate', () => {
   })
 })
 
+describe('Design handoff auto-notification', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: design handoff source task',
+      description: 'Design-ready task should auto-notify implementation handoff to @link',
+      createdBy: 'test-runner',
+      assignee: 'pixel',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['implement chat page polish', 'verify with design QA'],
+      eta: '1h',
+      metadata: {
+        lane: 'design',
+      },
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('posts a @link review-channel handoff message when design task becomes ready', async () => {
+    const done = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      metadata: {
+        lane: 'design',
+        artifact_path: 'process/TASK-design-ready-proof.md',
+        artifacts: ['process/TASK-design-ready-proof.md'],
+        reviewer_approved: true,
+      },
+    })
+
+    expect(done.status).toBe(200)
+    expect(done.body.success).toBe(true)
+
+    const { status, body } = await req('GET', '/chat/messages?channel=reviews&limit=200')
+    expect(status).toBe(200)
+    expect(Array.isArray(body.messages)).toBe(true)
+
+    const handoff = body.messages.find((m: any) => {
+      const content = String(m.content || '')
+      return content.includes(taskId)
+        && content.includes('@link')
+        && content.includes('process/TASK-design-ready-proof.md')
+        && content.includes('Acceptance criteria')
+    })
+
+    expect(handoff).toBeDefined()
+  })
+})
+
 describe('Task review endpoint', () => {
   let taskId: string
 
