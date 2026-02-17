@@ -58,8 +58,13 @@ const SendMessageSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 })
 
+// Task type determines required fields beyond the base schema
+const TASK_TYPES = ['bug', 'feature', 'process', 'docs', 'chore'] as const
+type TaskType = typeof TASK_TYPES[number]
+
 const CreateTaskSchema = z.object({
   title: z.string().min(1),
+  type: z.enum(TASK_TYPES).optional(), // optional for backward compat, validated when present
   description: z.string().optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).default('todo'),
   assignee: z.string().trim().min(1),
@@ -67,12 +72,65 @@ const CreateTaskSchema = z.object({
   done_criteria: z.array(z.string().trim().min(1)).min(1),
   eta: z.string().trim().min(1),
   createdBy: z.string().min(1),
-  priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+  priority: z.enum(['P0', 'P1', 'P2', 'P3']).default('P3'),
   blocked_by: z.array(z.string()).optional(),
   epic_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
 })
+
+/**
+ * Definition-of-ready check: validates task quality at creation time.
+ * Returns array of problems (empty = ready).
+ */
+function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[] {
+  const problems: string[] = []
+
+  // Title quality: reject vague/generic titles
+  const vaguePatterns = [
+    /^fix\s*$/i,
+    /^update\s*$/i,
+    /^todo\s*$/i,
+    /^task\s*$/i,
+    /^do\s+the\s+thing/i,
+    /^implement\s*$/i,
+    /^work\s+on/i,
+    /^stuff/i,
+  ]
+  if (vaguePatterns.some(p => p.test(data.title.trim()))) {
+    problems.push(`Title "${data.title}" is too vague. Include what/where/why.`)
+  }
+
+  // Title minimum length (at least a subject + verb)
+  if (data.title.trim().length < 10) {
+    problems.push(`Title must be at least 10 characters (got ${data.title.trim().length}). Be specific about what needs to happen.`)
+  }
+
+  // Done criteria quality: reject single-word criteria
+  for (const criterion of data.done_criteria) {
+    if (criterion.split(/\s+/).length < 3) {
+      problems.push(`Done criterion "${criterion}" is too vague. Use a full sentence describing the verifiable outcome.`)
+    }
+  }
+
+  // Type-specific checks
+  if (data.type === 'bug') {
+    // Bugs should reference what's broken
+    const hasImpactWord = /break|broken|fail|error|crash|stuck|wrong|missing|block/i.test(data.title + ' ' + (data.description || ''))
+    if (!hasImpactWord && !data.metadata?.source) {
+      problems.push('Bug tasks should describe the impact (what\'s broken) in the title or description, or include metadata.source.')
+    }
+  }
+
+  if (data.type === 'feature') {
+    // Features should have at least 2 done criteria
+    if (data.done_criteria.length < 2) {
+      problems.push('Feature tasks should have at least 2 done criteria (user-facing outcome + verification).')
+    }
+  }
+
+  return problems
+}
 
 const UpdateTaskSchema = z.object({
   title: z.string().min(1).optional(),
@@ -2545,6 +2603,30 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Task intake schema (discovery endpoint)
+  app.get('/tasks/intake-schema', async () => {
+    return {
+      required: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority'],
+      optional: ['type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'metadata'],
+      types: TASK_TYPES,
+      type_requirements: {
+        bug: { notes: 'Title or description should describe impact (what is broken). Include metadata.source if available.' },
+        feature: { notes: 'At least 2 done criteria required (user-facing outcome + verification).' },
+        process: { notes: 'Standard requirements only.' },
+        docs: { notes: 'Standard requirements only.' },
+        chore: { notes: 'Standard requirements only.' },
+      },
+      definition_of_ready: [
+        'Title must be at least 10 characters and specific (no vague words like "fix", "update", "todo")',
+        'Each done criterion must be a full sentence (at least 3 words) describing a verifiable outcome',
+        'Priority (P0-P3) is required',
+        'Reviewer must be assigned at creation time',
+        'done_criteria must have at least 1 entry (features require 2+)',
+      ],
+      priorities: { P0: 'Critical/blocking', P1: 'High — ship this sprint', P2: 'Medium — next sprint', P3: 'Low — backlog' },
+    }
+  })
+
   // Create task
   app.post('/tasks', async (request, reply) => {
     try {
@@ -2556,12 +2638,29 @@ export async function createServer(): Promise<FastifyInstance> {
         return { success: false, error: 'TEST: prefixed tasks are not allowed in production', code: 'TEST_TASK_REJECTED' }
       }
 
-      const { eta, ...rest } = data
+      // Definition-of-ready check (skip for TEST: tasks and test environment)
+      const skipDoR = data.title.startsWith('TEST:') || process.env.NODE_ENV === 'test'
+      if (!skipDoR) {
+        const readinessProblems = checkDefinitionOfReady(data)
+        if (readinessProblems.length > 0) {
+          reply.code(400)
+          return {
+            success: false,
+            error: 'Task does not meet definition of ready',
+            code: 'DEFINITION_OF_READY',
+            problems: readinessProblems,
+            hint: 'Fix the listed problems and retry. Tasks must have specific titles, verifiable done criteria, priority, and reviewer.',
+          }
+        }
+      }
+
+      const { eta, type, ...rest } = data
       const task = await taskManager.createTask({
         ...rest,
         metadata: {
           ...(rest.metadata || {}),
           eta,
+          ...(type ? { type } : {}),
         },
       })
       
@@ -2656,18 +2755,28 @@ export async function createServer(): Promise<FastifyInstance> {
             }
           }
 
+          // Definition-of-ready check (skip for TEST: tasks and test environment)
+          if (!taskData.title.startsWith('TEST:') && process.env.NODE_ENV !== 'test') {
+            const readinessProblems = checkDefinitionOfReady(taskData)
+            if (readinessProblems.length > 0) {
+              results.push({ title: taskData.title, status: 'error', error: `Definition of ready: ${readinessProblems.join('; ')}` })
+              continue
+            }
+          }
+
           if (data.dryRun) {
             results.push({ title: taskData.title, status: 'created' })
             continue
           }
 
-          const { eta, ...rest } = taskData
+          const { eta, type, ...rest } = taskData
           const task = await taskManager.createTask({
             ...rest,
             createdBy: taskData.createdBy || data.createdBy,
             metadata: {
               ...(rest.metadata || {}),
               eta,
+              ...(type ? { type } : {}),
               batch_created: true,
             },
           })
