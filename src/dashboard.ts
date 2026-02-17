@@ -837,6 +837,36 @@ export function getDashboardHTML(): string {
   .qa-contract .qa-value.missing { color: var(--yellow); font-style: italic; }
   .qa-contract .qa-value.has-artifact { color: var(--green); }
 
+  /* Feedback Cards */
+  .feedback-card {
+    padding: 10px 12px; border-bottom: 1px solid var(--border-subtle);
+  }
+  .feedback-card:last-child { border-bottom: none; }
+  .feedback-card .fb-header {
+    display: flex; align-items: center; gap: 6px; font-size: 11px;
+  }
+  .feedback-card .fb-category { font-weight: 600; }
+  .feedback-card .fb-category.bug { color: var(--red); }
+  .feedback-card .fb-category.feature { color: var(--accent); }
+  .feedback-card .fb-category.general { color: var(--text-muted); }
+  .feedback-card .fb-source { color: var(--text-dim); }
+  .feedback-card .fb-time { color: var(--text-dim); margin-left: auto; }
+  .feedback-card .fb-message {
+    font-size: 12px; color: var(--text-bright); margin-top: 4px; line-height: 1.4;
+  }
+  .feedback-card .fb-footer {
+    display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 10px;
+  }
+  .feedback-card .fb-email { color: var(--text-dim); }
+  .feedback-card .fb-votes { color: var(--text-muted); cursor: pointer; }
+  .feedback-card .fb-votes:hover { color: var(--accent); }
+  .feedback-card .fb-actions { margin-left: auto; display: flex; gap: 4px; }
+  .feedback-card .fb-actions button {
+    font-size: 10px; padding: 2px 8px; border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--border-subtle); background: none; color: var(--text-muted);
+  }
+  .feedback-card .fb-actions button:hover { background: var(--surface-raised); color: var(--text-bright); }
+
   /* Approval Queue */
   .approval-card {
     padding: 10px 12px; margin-bottom: 6px; border-radius: var(--radius-sm);
@@ -1045,6 +1075,11 @@ export function getDashboardHTML(): string {
   </div>
 
   <div class="panel focus-collapse">
+    <div class="panel-header">💬 Feedback <span class="count" id="feedback-count"></span></div>
+    <div class="panel-body" id="feedback-body" style="max-height:350px;overflow-y:auto"></div>
+  </div>
+
+  <div class="panel">
     <div class="panel-header">🔍 Research Intake <span class="count" id="research-count"></span></div>
     <div class="panel-body" id="research-body" style="max-height:260px;overflow-y:auto"></div>
   </div>

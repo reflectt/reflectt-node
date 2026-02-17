@@ -2790,3 +2790,91 @@ describe('Routing Policy', () => {
     expect(body.error).toContain('agents')
   })
 })
+
+// Feedback Collection
+describe('Feedback Collection', () => {
+  it('POST /feedback creates feedback with valid data', async () => {
+    const { status, body } = await req('POST', '/feedback', {
+      category: 'bug',
+      message: 'The widget does not close when clicking outside.',
+      email: 'user@example.com',
+      siteToken: 'test-token',
+      url: 'https://chat.reflectt.ai',
+    })
+    expect(status).toBe(201)
+    expect(body.success).toBe(true)
+    expect(body.id).toMatch(/^fb-/)
+    expect(body.message).toBe('Feedback received.')
+  })
+
+  it('POST /feedback rejects short messages', async () => {
+    const { status, body } = await req('POST', '/feedback', {
+      category: 'bug',
+      message: 'short',
+      siteToken: 'test',
+    })
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.message).toContain('10 characters')
+  })
+
+  it('POST /feedback rejects invalid category', async () => {
+    const { status, body } = await req('POST', '/feedback', {
+      category: 'invalid',
+      message: 'This is a valid length message for testing.',
+      siteToken: 'test',
+    })
+    expect(status).toBe(400)
+    expect(body.message).toContain('bug, feature, or general')
+  })
+
+  it('GET /feedback returns feedback list', async () => {
+    const { status, body } = await req('GET', '/feedback?status=all')
+    expect(status).toBe(200)
+    expect(Array.isArray(body.items)).toBe(true)
+    expect(body).toHaveProperty('total')
+    expect(body).toHaveProperty('newCount')
+  })
+
+  it('PATCH /feedback/:id updates feedback status', async () => {
+    // Create feedback first
+    const { body: created } = await req('POST', '/feedback', {
+      category: 'feature',
+      message: 'Would love dark mode on the chat interface please.',
+      siteToken: 'test',
+    })
+    const fbId = created.id
+
+    const { status, body } = await req('PATCH', `/feedback/${fbId}`, {
+      status: 'triaged',
+      notes: 'Confirmed, assign to link',
+      assignedTo: 'link',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.feedback.status).toBe('triaged')
+    expect(body.feedback.assignedTo).toBe('link')
+  })
+
+  it('POST /feedback/:id/vote increments votes', async () => {
+    const { body: created } = await req('POST', '/feedback', {
+      category: 'general',
+      message: 'General feedback about the product experience overall.',
+      siteToken: 'test',
+    })
+
+    const { status, body } = await req('POST', `/feedback/${created.id}/vote`)
+    expect(status).toBe(200)
+    expect(body.votes).toBe(1)
+
+    const { body: body2 } = await req('POST', `/feedback/${created.id}/vote`)
+    expect(body2.votes).toBe(2)
+  })
+
+  it('GET /widget/feedback.js serves the widget', async () => {
+    const res = await app.inject({ method: 'GET', url: '/widget/feedback.js' })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('javascript')
+    expect(res.body).toContain('reflectt-feedback-widget')
+  })
+})
