@@ -2654,6 +2654,47 @@ describe('Board health', () => {
     expect(typeof body.board.replenishNeeded).toBe('boolean')
     expect(Array.isArray(body.agents)).toBe(true)
   })
+
+  it('flags echo out-of-lane ops work unless explicit reassignment exists', async () => {
+    const created = await req('POST', '/tasks', {
+      title: 'TEST: echo CI pipeline guardrail hotfix',
+      description: 'ops/system work in voice lane without reassignment',
+      createdBy: 'test-runner',
+      assignee: 'echo',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Guardrail catches out-of-lane assignment'],
+      eta: '30m',
+      status: 'doing',
+      metadata: {
+        lane: 'ops',
+      },
+    })
+
+    expect(created.status).toBe(200)
+    const taskId = created.body.task.id as string
+
+    const flagged = await req('GET', '/tasks/board-health')
+    expect(flagged.status).toBe(200)
+    expect(Array.isArray(flagged.body.outOfLaneFlags)).toBe(true)
+    expect(flagged.body.outOfLaneFlags.some((f: any) => f.taskId === taskId)).toBe(true)
+
+    const patched = await req('PATCH', `/tasks/${taskId}`, {
+      metadata: {
+        lane: 'ops',
+        reassigned: true,
+        reassigned_by: 'kai',
+        reassignment: 'temporary incident response assignment',
+      },
+    })
+    expect(patched.status).toBe(200)
+
+    const cleared = await req('GET', '/tasks/board-health')
+    expect(cleared.status).toBe(200)
+    expect(cleared.body.outOfLaneFlags.some((f: any) => f.taskId === taskId)).toBe(false)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
 })
 
 /* ── Role-based assignment engine ──────────────────────────────────── */
