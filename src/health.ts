@@ -541,6 +541,22 @@ class TeamHealthMonitor {
     return lastAt
   }
 
+  /**
+   * Get the latest message timestamp from an agent across ALL channels.
+   * Used for activity suppression — if an agent is posting anywhere, they're not idle.
+   */
+  private getLatestAnyMessageAt(messages: any[], author: string): number {
+    let lastAt = 0
+
+    for (const m of messages) {
+      if ((m.from || '').toLowerCase() !== author) continue
+      const ts = this.parseTimestamp(m.timestamp)
+      if (ts > lastAt) lastAt = ts
+    }
+
+    return lastAt
+  }
+
   private findLastValidStatusAt(messages: any[], agent: string): number | null {
     let lastAt: number | null = null
 
@@ -574,7 +590,10 @@ class TeamHealthMonitor {
     let lastAt = 0
 
     for (const agent of trioSet) {
-      const agentLast = this.getLatestGeneralMessageAt(messages, agent)
+      // Consider both #general and any-channel activity
+      const generalLast = this.getLatestGeneralMessageAt(messages, agent)
+      const anyLast = this.getLatestAnyMessageAt(messages, agent)
+      const agentLast = Math.max(generalLast, anyLast)
       if (agentLast > lastAt) lastAt = agentLast
     }
 
@@ -1291,10 +1310,22 @@ class TeamHealthMonitor {
 
     for (const task of workingTasks) {
       const agent = (task.assignee || '').toLowerCase()
-      const lastAt = this.getLatestGeneralMessageAt(messages, agent)
+
+      // Re-check task status at nudge time (guards against race between list and nudge)
+      const freshTask = tasks.find(t => t.id === task.id)
+      if (freshTask && freshTask.status !== 'doing') continue
+
+      const lastGeneralAt = this.getLatestGeneralMessageAt(messages, agent)
+      const lastAnyAt = this.getLatestAnyMessageAt(messages, agent)
+      // Use the more recent of #general or any-channel activity
+      const lastAt = Math.max(lastGeneralAt, lastAnyAt)
       const staleMin = lastAt > 0 ? Math.floor((now - lastAt) / 60_000) : 9999
 
       if (staleMin < this.cadenceWorkingStaleMin) continue
+
+      // Also check task comments as activity signal
+      const taskCommentAge = this.getTaskCommentAgeForAgent(task.id, agent, now)
+      if (taskCommentAge !== null && taskCommentAge < this.cadenceWorkingStaleMin) continue
 
       const key = `stale_working:${agent}:${task.id}`
       if (!this.shouldEmitCadenceAlert(key, now)) continue
@@ -1303,13 +1334,6 @@ class TeamHealthMonitor {
       if (this.hasRecentActivitySinceLastAlert(agent, key, now)) {
         this.markCadenceAlert(key, now)
         continue
-      }
-
-      // Also suppress first-time alerts if agent posted ANY #general message recently
-      const agentLastGeneralAt = this.getLatestGeneralMessageAt(messages, agent)
-      if (agentLastGeneralAt > 0) {
-        const sinceGeneralMin = Math.floor((now - agentLastGeneralAt) / 60_000)
-        if (sinceGeneralMin < this.cadenceWorkingStaleMin) continue
       }
 
       const content = `@${agent} @kai @pixel system watchdog: status=working with no #general update for ${staleMin}m on ${task.id}. Post required status now: 1) shipped 2) blocker 3) next+ETA.`
@@ -1502,11 +1526,11 @@ class TeamHealthMonitor {
         continue
       }
 
-      // Suppress if agent posted ANY message in #general recently (not just strict status format)
-      const lastGeneralMsgAt = this.getLatestGeneralMessageAt(messages, agent)
-      if (lastGeneralMsgAt) {
-        const sinceLastGeneralMsgMin = Math.floor((now - lastGeneralMsgAt) / 60_000)
-        if (sinceLastGeneralMsgMin < this.idleNudgeSuppressRecentMin) {
+      // Suppress if agent posted ANY message recently (any channel, not just #general)
+      const lastAnyMsgAt = this.getLatestAnyMessageAt(messages, agent)
+      if (lastAnyMsgAt) {
+        const sinceLastMsgMin = Math.floor((now - lastAnyMsgAt) / 60_000)
+        if (sinceLastMsgMin < this.idleNudgeSuppressRecentMin) {
           decisions.push({ ...baseDecision, decision: 'none', reason: 'recent-activity-suppressed', renderedMessage: null })
           continue
         }
@@ -1567,7 +1591,7 @@ class TeamHealthMonitor {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'blocked-task-suppressed', renderedMessage: null })
         continue
       }
-      if (selectedTask?.status === 'done' || selectedTask?.status === 'cancelled') {
+      if (selectedTask && selectedTask.status !== 'doing') {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'done-task-suppressed', renderedMessage: null })
         continue
       }
