@@ -101,6 +101,8 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | DELETE | `/tasks/:id` | Delete task |
 | GET | `/tasks/next` | Pull-based assignment. Query: `agent` |
 | GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action |
+| GET | `/tasks/intake-schema` | Task intake schema discovery — returns required/optional fields and per-type templates |
+| GET | `/tasks/templates/:type` | Get task creation template for a specific type (e.g. `feature`, `bug`, `chore`) |
 | GET | `/tasks/search` | Keyword search across task `title` + `description` (case-insensitive). Query: `q`, optional `limit` |
 | GET | `/tasks/analytics` | Task completion analytics and velocity |
 | GET | `/tasks/instrumentation/lifecycle` | Reviewer/done-criteria gates + status-contract violations (`doing` missing ETA, `validating` missing artifact path) |
