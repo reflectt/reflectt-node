@@ -36,15 +36,15 @@ describe('suggestReviewer', () => {
     expect(result.scores.every(s => s.agent !== 'pixel')).toBe(true)
   })
 
-  it('prefers reviewer-role agents', () => {
+  it('prefers ops/reviewer-role agents for generic tasks', () => {
     const result = suggestReviewer(
       { title: 'Generic task with no domain keywords', assignee: 'link' },
       [],
     )
-    // harmony is role=reviewer, should score highest for generic tasks
-    const harmonyScore = result.scores.find(s => s.agent === 'harmony')
-    expect(harmonyScore).toBeTruthy()
-    expect(harmonyScore!.score).toBeGreaterThanOrEqual(0.5) // reviewer role bonus
+    // sage is role=ops (0.3 bonus), should score well for generic tasks
+    const sageScore = result.scores.find(s => s.agent === 'sage')
+    expect(sageScore).toBeTruthy()
+    expect(sageScore!.score).toBeGreaterThanOrEqual(0.3) // ops role bonus
   })
 
   it('penalizes agents with high validating load', () => {
