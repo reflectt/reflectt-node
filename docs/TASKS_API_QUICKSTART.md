@@ -14,7 +14,7 @@ BASE="http://localhost:4445"
 |---|---|
 | `todo` | `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria[]`, `eta` |
 | `doing` | `reviewer` + `metadata.eta` |
-| `validating` | `metadata.artifact_path` + `metadata.qa_bundle { lane, summary, pr_link, commit_shas[], changed_files[], artifact_links[], checks[], screenshot_proof[] }` |
+| `validating` | `metadata.artifact_path` + `metadata.qa_bundle { lane, summary, pr_link, commit_shas[], changed_files[], artifact_links[], checks[], screenshot_proof[] }`. For code lanes, include `metadata.qa_bundle.review_packet { task_id, pr_url, commit, changed_files[], artifact_path, caveats? }`. For design/docs/non-code validations, set `metadata.qa_bundle.non_code=true` and review-packet path checks are skipped. |
 | `done` | No extra required field (recommended: reviewer sign-off comment) |
 
 ## 1) Create a task
