@@ -129,6 +129,22 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
     }
   }
 
+  // Type-specific: docs tasks should reference what docs are needed
+  if (data.type === 'docs') {
+    const hasDocContext = /doc|guide|readme|spec|architecture|api|reference/i.test(data.title + ' ' + (data.description || ''))
+    if (!hasDocContext) {
+      problems.push('Docs tasks should mention what documentation is needed (guide, spec, API reference, etc.).')
+    }
+  }
+
+  // Type-specific: process tasks should describe what changes
+  if (data.type === 'process') {
+    const hasProcessContext = /enforce|automate|improve|change|add|remove|update|track|monitor|alert|gate|check|validate/i.test(data.title + ' ' + (data.description || ''))
+    if (!hasProcessContext) {
+      problems.push('Process tasks should describe what process is being changed or improved.')
+    }
+  }
+
   return problems
 }
 
@@ -2603,18 +2619,110 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Task creation templates by type
+  const TASK_TEMPLATES: Record<string, {
+    required_fields: string[]
+    recommended_fields: string[]
+    min_done_criteria: number
+    title_hint: string
+    example: Record<string, unknown>
+  }> = {
+    bug: {
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      recommended_fields: ['description', 'metadata.source', 'metadata.steps_to_reproduce'],
+      min_done_criteria: 1,
+      title_hint: 'Describe what is broken: "Bug: [component] — [symptom] when [action]"',
+      example: {
+        title: 'Bug: dashboard login — 500 error when SSO callback missing state param',
+        type: 'bug',
+        assignee: 'link',
+        reviewer: 'kai',
+        done_criteria: ['SSO callback handles missing state param gracefully (redirect to /auth with error)', 'No 500 in production logs for this code path'],
+        eta: '~2h',
+        priority: 'P1',
+        createdBy: 'kai',
+        metadata: { source: 'Ryan dogfooding Feb 16' },
+      },
+    },
+    feature: {
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      recommended_fields: ['description', 'metadata.spec_link'],
+      min_done_criteria: 2,
+      title_hint: 'Describe the user-facing outcome: "Feature: [what] — [user benefit]"',
+      example: {
+        title: 'Feature: host activity feed — show last 10 events per host on dashboard',
+        type: 'feature',
+        assignee: 'link',
+        reviewer: 'kai',
+        done_criteria: ['Dashboard shows last 10 activity events per host', 'Events include heartbeats, claims, syncs with timestamps'],
+        eta: '~4h',
+        priority: 'P2',
+        createdBy: 'kai',
+      },
+    },
+    process: {
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      recommended_fields: ['description'],
+      min_done_criteria: 1,
+      title_hint: 'Describe the process change: "Process: [what changes] — [why]"',
+      example: {
+        title: 'Process: enforce task intake schema — reject vague tasks at creation',
+        type: 'process',
+        assignee: 'link',
+        reviewer: 'kai',
+        done_criteria: ['Task creation rejects without required fields', 'Templates available per type'],
+        eta: '~2h',
+        priority: 'P2',
+        createdBy: 'kai',
+      },
+    },
+    docs: {
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      recommended_fields: ['description', 'metadata.doc_path'],
+      min_done_criteria: 1,
+      title_hint: 'Describe what docs need: "Docs: [topic] — [what is missing/wrong]"',
+      example: {
+        title: 'Docs: enrollment handshake — document connect flow for agents',
+        type: 'docs',
+        assignee: 'sage',
+        reviewer: 'kai',
+        done_criteria: ['Connect flow documented with steps and code examples', 'Published at docs.reflectt.ai'],
+        eta: '~2h',
+        priority: 'P3',
+        createdBy: 'kai',
+      },
+    },
+    chore: {
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority'],
+      recommended_fields: ['description'],
+      min_done_criteria: 1,
+      title_hint: 'Describe the maintenance task: "Chore: [what] — [why now]"',
+      example: {
+        title: 'Chore: clean up stale branches — 15+ unmerged branches from last sprint',
+        type: 'chore',
+        assignee: 'link',
+        reviewer: 'kai',
+        done_criteria: ['All branches older than 2 weeks merged or deleted'],
+        eta: '~1h',
+        priority: 'P4',
+        createdBy: 'kai',
+      },
+    },
+  }
+
   // Task intake schema (discovery endpoint)
   app.get('/tasks/intake-schema', async () => {
     return {
       required: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority'],
       optional: ['type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'metadata'],
       types: TASK_TYPES,
+      templates: TASK_TEMPLATES,
       type_requirements: {
-        bug: { notes: 'Title or description should describe impact (what is broken). Include metadata.source if available.' },
-        feature: { notes: 'At least 2 done criteria required (user-facing outcome + verification).' },
-        process: { notes: 'Standard requirements only.' },
-        docs: { notes: 'Standard requirements only.' },
-        chore: { notes: 'Standard requirements only.' },
+        bug: { notes: 'Title or description should describe impact (what is broken). Include metadata.source if available.', min_done_criteria: 1 },
+        feature: { notes: 'At least 2 done criteria required (user-facing outcome + verification).', min_done_criteria: 2 },
+        process: { notes: 'Standard requirements only.', min_done_criteria: 1 },
+        docs: { notes: 'Standard requirements only.', min_done_criteria: 1 },
+        chore: { notes: 'Standard requirements only.', min_done_criteria: 1 },
       },
       definition_of_ready: [
         'Title must be at least 10 characters and specific (no vague words like "fix", "update", "todo")',
@@ -2625,6 +2733,17 @@ export async function createServer(): Promise<FastifyInstance> {
       ],
       priorities: { P0: 'Critical/blocking', P1: 'High — ship this sprint', P2: 'Medium — next sprint', P3: 'Low — backlog' },
     }
+  })
+
+  // Task template endpoint — returns template for a specific type
+  app.get<{ Params: { type: string } }>('/tasks/templates/:type', async (request, reply) => {
+    const taskType = request.params.type
+    const template = TASK_TEMPLATES[taskType]
+    if (!template) {
+      reply.code(404)
+      return { error: `Unknown task type: ${taskType}`, available_types: Object.keys(TASK_TEMPLATES) }
+    }
+    return { type: taskType, template }
   })
 
   // Create task

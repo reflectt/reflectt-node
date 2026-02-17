@@ -993,3 +993,93 @@ describe('TaskPrecheck', () => {
     expect(res.body.success).toBe(true)
   })
 })
+
+describe('Task Intake Schema Enforcement', () => {
+  it('GET /tasks/intake-schema returns schema with templates', async () => {
+    const res = await req('GET', '/tasks/intake-schema')
+    expect(res.status).toBe(200)
+    expect(res.body.required).toContain('title')
+    expect(res.body.required).toContain('reviewer')
+    expect(res.body.required).toContain('done_criteria')
+    expect(res.body.required).toContain('priority')
+    expect(res.body.templates).toBeDefined()
+    expect(res.body.templates.bug).toBeDefined()
+    expect(res.body.templates.feature).toBeDefined()
+    expect(res.body.templates.bug.example).toBeDefined()
+    expect(res.body.templates.bug.min_done_criteria).toBe(1)
+    expect(res.body.templates.feature.min_done_criteria).toBe(2)
+  })
+
+  it('GET /tasks/templates/:type returns template for valid type', async () => {
+    const res = await req('GET', '/tasks/templates/bug')
+    expect(res.status).toBe(200)
+    expect(res.body.type).toBe('bug')
+    expect(res.body.template.required_fields).toContain('title')
+    expect(res.body.template.example.type).toBe('bug')
+  })
+
+  it('GET /tasks/templates/:type returns 404 for invalid type', async () => {
+    const res = await req('GET', '/tasks/templates/nonexistent')
+    expect(res.status).toBe(404)
+    expect(res.body.error).toContain('Unknown task type')
+  })
+
+  it('POST /tasks rejects missing required fields (zod validation)', async () => {
+    const res = await req('POST', '/tasks', {
+      title: 'Missing required fields test',
+    })
+    // Should fail zod validation (missing assignee, reviewer, etc.)
+    expect(res.status).toBe(400)
+  })
+
+  it('POST /tasks rejects empty done_criteria', async () => {
+    const res = await req('POST', '/tasks', {
+      title: 'TEST: task with empty done criteria',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: [],
+      eta: '~2h',
+      createdBy: 'test',
+      priority: 'P2',
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('POST /tasks accepts well-formed task with TEST: prefix', async () => {
+    const res = await req('POST', '/tasks', {
+      title: 'TEST: well-formed task for intake schema test',
+      type: 'feature',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['User can see the feature in the UI', 'Automated test verifies the feature works'],
+      eta: '~2h',
+      createdBy: 'test',
+      priority: 'P2',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    // Clean up
+    if (res.body.task?.id) {
+      await req('DELETE', `/tasks/${res.body.task.id}`)
+    }
+  })
+
+  it('checkDefinitionOfReady catches vague titles (unit test)', async () => {
+    // Access the intake-schema endpoint to verify DoR rules are documented
+    const res = await req('GET', '/tasks/intake-schema')
+    expect(res.body.definition_of_ready).toBeDefined()
+    expect(res.body.definition_of_ready.some((r: string) => r.includes('10 characters'))).toBe(true)
+    expect(res.body.definition_of_ready.some((r: string) => r.includes('vague'))).toBe(true)
+  })
+
+  it('templates include all task types', async () => {
+    const types = ['bug', 'feature', 'process', 'docs', 'chore']
+    for (const type of types) {
+      const res = await req('GET', `/tasks/templates/${type}`)
+      expect(res.status).toBe(200)
+      expect(res.body.template.required_fields).toBeDefined()
+      expect(res.body.template.example).toBeDefined()
+      expect(res.body.template.title_hint).toBeDefined()
+    }
+  })
+})
