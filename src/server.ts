@@ -33,7 +33,7 @@ import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
-import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment } from './assignment.js'
+import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
@@ -301,25 +301,27 @@ const ReviewPacketSchema = z.object({
 const QaBundleSchema = z.object({
   lane: z.string().trim().min(1),
   summary: z.string().trim().min(1),
-  pr_link: z.string().trim().min(1).optional(),        // optional for config_only tasks
-  commit_shas: z.array(z.string().trim().min(1)).optional(),  // optional for config_only tasks
+  pr_link: z.string().trim().min(1).optional(),        // optional for config_only/doc_only/non_code tasks
+  commit_shas: z.array(z.string().trim().min(1)).optional(),  // optional for config_only/doc_only/non_code tasks
   changed_files: z.array(z.string().trim().min(1)).min(1),
   artifact_links: z.array(z.string().trim().min(1)).min(1),
   checks: z.array(z.string().trim().min(1)).min(1),
   screenshot_proof: z.array(z.string().trim().min(1)).min(1),
   reviewer_notes: z.string().trim().min(1).optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
-  review_packet: ReviewPacketSchema,
+  review_packet: ReviewPacketSchema.optional(),
+  non_code: z.boolean().optional(),     // true for design/docs artifact validation without PR/commit
 })
 
 const ReviewHandoffSchema = z.object({
   task_id: z.string().trim().regex(/^task-[a-zA-Z0-9-]+$/),
-  repo: z.string().trim().min(1).optional(),  // optional for config_only tasks
+  repo: z.string().trim().min(1).optional(),  // optional for config_only/non_code tasks
   artifact_path: z.string().trim().min(1),    // relaxed: accepts any path (process/, ~/.reflectt/, etc.)
   test_proof: z.string().trim().min(1),
   known_caveats: z.string().trim().min(1),
   doc_only: z.boolean().optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
+  non_code: z.boolean().optional(),     // true for design/docs artifact validation without PR/commit
   pr_url: z.string().trim().url().optional(),
   commit_sha: z.string().trim().regex(/^[a-fA-F0-9]{7,40}$/).optional(),
 })
@@ -427,26 +429,29 @@ function enforceQaBundleGateForValidating(
     return {
       ok: false,
       error: `Review packet required before validating.${detail}`,
-      hint: 'Include metadata.qa_bundle.review_packet with: task_id, pr_url, commit, changed_files[], artifact_path, caveats (plus summary/artifact_links/checks).',
+      hint: 'Include metadata.qa_bundle.review_packet with: task_id, pr_url, commit, changed_files[], artifact_path, caveats (or use non_code=true/config_only=true with artifact evidence).',
     }
   }
 
+  const nonCodeBundle = parsed.data.qa_bundle.non_code === true
   const reviewPacket = parsed.data.qa_bundle.review_packet
-  if (expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
-    return {
-      ok: false,
-      error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
-      hint: 'Set review_packet.task_id to the current task ID before moving to validating.',
+  if (reviewPacket && !nonCodeBundle) {
+    if (expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
+      return {
+        ok: false,
+        error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
+        hint: 'Set review_packet.task_id to the current task ID before moving to validating.',
+      }
     }
-  }
 
-  const metadataObj = (metadata ?? {}) as Record<string, unknown>
-  const artifactPath = typeof metadataObj.artifact_path === 'string' ? metadataObj.artifact_path.trim() : ''
-  if (artifactPath && artifactPath !== reviewPacket.artifact_path) {
-    return {
-      ok: false,
-      error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
-      hint: 'Use the same canonical process/... artifact path in both fields.',
+    const metadataObj = (metadata ?? {}) as Record<string, unknown>
+    const artifactPath = typeof metadataObj.artifact_path === 'string' ? metadataObj.artifact_path.trim() : ''
+    if (artifactPath && artifactPath !== reviewPacket.artifact_path) {
+      return {
+        ok: false,
+        error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
+        hint: 'Use the same canonical process/... artifact path in both fields.',
+      }
     }
   }
 
@@ -515,6 +520,82 @@ function isTaskAutomatedRecurring(metadata: unknown): boolean {
   return typeof recurringId?.id === 'string' && recurringId.id.trim().length > 0
 }
 
+function normalizeLaneValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function isDesignOrDocsLane(metadata: Record<string, unknown>): boolean {
+  const lane = normalizeLaneValue(metadata.lane)
+  if (lane.includes('design') || lane.includes('docs') || lane.includes('documentation')) return true
+
+  const supports = normalizeLaneValue(metadata.supports)
+  if (supports.includes('design') || supports.includes('docs') || supports.includes('documentation')) return true
+
+  const qaBundle = (metadata.qa_bundle as Record<string, unknown> | undefined) || {}
+  const qaLane = normalizeLaneValue(qaBundle.lane)
+  if (qaLane.includes('design') || qaLane.includes('docs') || qaLane.includes('documentation')) return true
+
+  return false
+}
+
+function hasExplicitReassignment(metadata: Record<string, unknown>): boolean {
+  const directBoolean = [
+    metadata.reassigned,
+    metadata.manual_reassignment,
+    metadata.owner_override,
+    metadata.assignment_override,
+  ].some((value) => value === true)
+  if (directBoolean) return true
+
+  const directText = [
+    metadata.reassignment,
+    metadata.reassign_reason,
+    metadata.reassigned_by,
+    metadata.assignment_reason,
+    metadata.assignment_override_reason,
+    metadata.owner_override_reason,
+    metadata.reviewer_reassign_reason,
+  ]
+
+  return directText.some((value) => typeof value === 'string' && value.trim().length > 0)
+}
+
+function inferTaskWorkDomain(task: Task): 'ops' | 'content' | 'design' | 'qa' | 'analysis' | 'backend' | 'unknown' {
+  const metadata = (task.metadata || {}) as Record<string, unknown>
+  const pieces = [
+    task.title || '',
+    task.description || '',
+    typeof metadata.lane === 'string' ? metadata.lane : '',
+    typeof metadata.supports === 'string' ? metadata.supports : '',
+    Array.isArray(task.tags) ? task.tags.join(' ') : '',
+    Array.isArray(metadata.tags) ? metadata.tags.filter((v): v is string => typeof v === 'string').join(' ') : '',
+  ].join(' ').toLowerCase()
+
+  if (/(content|copy|messaging|marketing|landing|docs|documentation|blog|social|brand)/i.test(pieces)) return 'content'
+  if (/(design|ux|ui|visual|polish|layout|figma)/i.test(pieces)) return 'design'
+  if (/(qa|review|validation|audit|compliance|security)/i.test(pieces)) return 'qa'
+  if (/(analysis|analytics|research|insight|metrics|reporting)/i.test(pieces)) return 'analysis'
+  if (/(backend|api|database|migration|fastify|server|typescript)/i.test(pieces)) return 'backend'
+  if (/(ops|infra|ci|deploy|release|pipeline|watchdog|system)/i.test(pieces)) return 'ops'
+  return 'unknown'
+}
+
+function isEchoOutOfLaneTask(task: Task): boolean {
+  const assignee = (task.assignee || '').trim().toLowerCase()
+  if (assignee !== 'echo') return false
+  const role = getAgentRole('echo')
+  if (!role) return false
+
+  const domain = inferTaskWorkDomain(task)
+  if (domain === 'unknown' || domain === 'content') return false
+
+  const metadata = (task.metadata || {}) as Record<string, unknown>
+  if (hasExplicitReassignment(metadata)) return false
+
+  // For Echo, anything classified outside content/docs voice lane gets flagged unless reassigned.
+  return true
+}
+
 function enforceReviewHandoffGateForValidating(
   status: Task['status'] | undefined,
   taskId: string,
@@ -528,8 +609,8 @@ function enforceReviewHandoffGateForValidating(
   if (!parsed.success) {
     return {
       ok: false,
-      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true or config_only=true).',
-      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For config tasks: set config_only=true.',
+      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true, non_code=true, design/docs lane, or config_only=true).',
+      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For design/docs artifacts: set non_code=true (or doc_only=true). For config tasks: set config_only=true.',
     }
   }
 
@@ -542,20 +623,24 @@ function enforceReviewHandoffGateForValidating(
     }
   }
 
+  const nonCodeViaLane = isDesignOrDocsLane(root)
+  const nonCodeViaBundle = ((root.qa_bundle as Record<string, unknown> | undefined)?.non_code) === true
+  const nonCodeContract = handoff.doc_only || handoff.config_only || handoff.non_code || nonCodeViaBundle || nonCodeViaLane
+
   // config_only: artifacts live in ~/.reflectt/, no repo/PR required
-  // doc_only: docs-only work, no PR/commit required
-  if (!handoff.doc_only && !handoff.config_only) {
+  // doc_only/non_code: design/docs artifact validation, no PR/commit required
+  if (!nonCodeContract) {
     if (!handoff.pr_url || !parseGitHubPrUrl(handoff.pr_url)) {
       return {
         ok: false,
-        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or set doc_only=true for docs-only, config_only=true for ~/.reflectt/ config tasks).',
-        hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>.',
+        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or use non-code contract: doc_only=true, non_code=true, design/docs lane, or config_only=true for ~/.reflectt/ config tasks).',
+        hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>, or mark non-code validation for design/docs artifacts.',
       }
     }
     if (!handoff.commit_sha) {
       return {
         ok: false,
-        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when doc_only/config_only is not set.',
+        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when non-code/config-only contract is not set.',
         hint: 'Use 7-40 hex chars, e.g. "a1b2c3d".',
       }
     }
@@ -3402,12 +3487,36 @@ export async function createServer(): Promise<FastifyInstance> {
     const allTasks = taskManager.listTasks({})
     const agents = [...new Set(allTasks.map(t => t.assignee).filter(Boolean))] as string[]
 
+    const outOfLaneFlags = allTasks
+      .filter((task) => task.status === 'doing' || task.status === 'validating')
+      .filter((task) => isEchoOutOfLaneTask(task))
+      .map((task) => {
+        const metadata = (task.metadata || {}) as Record<string, unknown>
+        return {
+          taskId: task.id,
+          assignee: task.assignee,
+          status: task.status,
+          inferredDomain: inferTaskWorkDomain(task),
+          reason: 'echo_out_of_lane_without_reassignment',
+          rerouteHint: 'Reassign to lane owner or add explicit reassignment metadata with reason.',
+          branch: typeof metadata.branch === 'string' ? metadata.branch : undefined,
+        }
+      })
+
+    const flaggedByAgent = new Map<string, number>()
+    for (const flag of outOfLaneFlags) {
+      const key = String(flag.assignee || '').toLowerCase()
+      if (!key) continue
+      flaggedByAgent.set(key, (flaggedByAgent.get(key) || 0) + 1)
+    }
+
     const agentHealth = agents.map(agent => {
       const agentTasks = allTasks.filter(t => (t.assignee || '').toLowerCase() === agent.toLowerCase())
       const doing = agentTasks.filter(t => t.status === 'doing').length
       const validating = agentTasks.filter(t => t.status === 'validating').length
       const todo = agentTasks.filter(t => t.status === 'todo').length
       const active = doing + validating
+      const outOfLaneCount = flaggedByAgent.get(agent.toLowerCase()) || 0
 
       return {
         agent,
@@ -3415,6 +3524,7 @@ export async function createServer(): Promise<FastifyInstance> {
         validating,
         todo,
         active,
+        outOfLaneCount,
         needsWork: active === 0 && todo === 0,
         lowWatermark: active < 1,
       }
@@ -3442,10 +3552,12 @@ export async function createServer(): Promise<FastifyInstance> {
             ? `${agentsNeedingWork.length} agents have no work: ${agentsNeedingWork.join(', ')}`
             : `Only ${totalTodo} tasks in backlog (threshold: 3)`
           : null,
+        outOfLaneFlags: outOfLaneFlags.length,
       },
       agents: agentHealth,
       agentsNeedingWork,
       agentsLowWatermark,
+      outOfLaneFlags,
     }
   })
 

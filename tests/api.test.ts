@@ -1002,6 +1002,61 @@ describe('Validating review handoff gate', () => {
   })
 })
 
+describe('Non-code validating contract (design/docs)', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: non-code validating contract',
+      createdBy: 'test-runner',
+      assignee: 'pixel',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Non-code validating accepted without PR/commit'],
+      eta: '1h',
+      metadata: {
+        lane: 'design',
+      },
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('accepts validating for design lane without PR URL/commit SHA when non-code proof bundle is provided', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        lane: 'design',
+        artifact_path: 'process/TASK-non-code-proof.md',
+        qa_bundle: validQaBundle({
+          lane: 'design',
+          summary: 'design handoff evidence package',
+          non_code: true,
+          changed_files: ['process/TASK-non-code-proof.md'],
+          artifact_links: ['process/TASK-non-code-proof.md'],
+          screenshot_proof: ['process/TASK-non-code-proof.md'],
+          checks: ['design acceptance checklist complete'],
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-non-code-proof.md',
+          test_proof: 'Design/doc checklist reviewed with acceptance criteria mapping.',
+          known_caveats: 'No code changes in this lane.',
+          non_code: true,
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('validating')
+  })
+})
+
 describe('Backlog', () => {
   let taskId: string
 
@@ -2605,6 +2660,47 @@ describe('Board health', () => {
     expect(typeof body.board.totalDoing).toBe('number')
     expect(typeof body.board.replenishNeeded).toBe('boolean')
     expect(Array.isArray(body.agents)).toBe(true)
+  })
+
+  it('flags echo out-of-lane ops work unless explicit reassignment exists', async () => {
+    const created = await req('POST', '/tasks', {
+      title: 'TEST: echo CI pipeline guardrail hotfix',
+      description: 'ops/system work in voice lane without reassignment',
+      createdBy: 'test-runner',
+      assignee: 'echo',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Guardrail catches out-of-lane assignment'],
+      eta: '30m',
+      status: 'doing',
+      metadata: {
+        lane: 'ops',
+      },
+    })
+
+    expect(created.status).toBe(200)
+    const taskId = created.body.task.id as string
+
+    const flagged = await req('GET', '/tasks/board-health')
+    expect(flagged.status).toBe(200)
+    expect(Array.isArray(flagged.body.outOfLaneFlags)).toBe(true)
+    expect(flagged.body.outOfLaneFlags.some((f: any) => f.taskId === taskId)).toBe(true)
+
+    const patched = await req('PATCH', `/tasks/${taskId}`, {
+      metadata: {
+        lane: 'ops',
+        reassigned: true,
+        reassigned_by: 'kai',
+        reassignment: 'temporary incident response assignment',
+      },
+    })
+    expect(patched.status).toBe(200)
+
+    const cleared = await req('GET', '/tasks/board-health')
+    expect(cleared.status).toBe(200)
+    expect(cleared.body.outOfLaneFlags.some((f: any) => f.taskId === taskId)).toBe(false)
+
+    await req('DELETE', `/tasks/${taskId}`)
   })
 })
 
