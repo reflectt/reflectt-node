@@ -3577,3 +3577,60 @@ describe('Reviewer approval identity gate', () => {
     await req('DELETE', `/tasks/${caseId}`)
   })
 })
+
+/* ── Stale SLA alert guardrails (integration) ──────────────────────── */
+describe('Stale SLA alert guardrails (integration)', () => {
+  it('verifyTaskExists returns null after hard DELETE (full API flow)', async () => {
+    const { verifyTaskExists } = await import('../src/health.js')
+
+    // Create a task then delete it (simulates the hard-DELETE scenario that caused stale alerts)
+    const createRes = await req('POST', '/tasks', {
+      title: 'TEST: SLA guardrail delete-task check',
+      assignee: 'test-agent',
+      done_criteria: ['Verify deleted tasks are filtered from alerts'],
+      eta: '~1h',
+      createdBy: 'test',
+      priority: 'P3',
+      reviewer: 'kai',
+    })
+    const taskId = createRes.body.task.id
+
+    // Verify it exists first
+    const beforeDelete = verifyTaskExists(taskId)
+    expect(beforeDelete).not.toBeNull()
+
+    // Hard delete — this is what triggers the stale alert bug
+    await req('DELETE', `/tasks/${taskId}`)
+
+    // Should now return null — alert pipeline will skip it
+    const afterDelete = verifyTaskExists(taskId)
+    expect(afterDelete).toBeNull()
+  })
+
+  it('/health/team staleDoing only contains tasks that still exist', async () => {
+    const { status, body } = await req('GET', '/health/team')
+    expect(status).toBe(200)
+
+    // All tasks in staleDoing list must be real, existing tasks
+    if (body.staleDoing?.tasks?.length > 0) {
+      const { verifyTaskExists } = await import('../src/health.js')
+      for (const staleTask of body.staleDoing.tasks) {
+        const exists = verifyTaskExists(staleTask.task_id)
+        expect(exists).not.toBeNull()
+      }
+    }
+  })
+
+  it('staleDoing stale_minutes are bounded (no impossible durations)', async () => {
+    const { status, body } = await req('GET', '/health/team')
+    expect(status).toBe(200)
+
+    if (body.staleDoing?.tasks?.length > 0) {
+      const MAX_STALE_DISPLAY_MIN = 24 * 60 // 1 day cap
+      for (const staleTask of body.staleDoing.tasks) {
+        expect(staleTask.stale_minutes).toBeLessThanOrEqual(MAX_STALE_DISPLAY_MIN)
+        expect(staleTask.stale_minutes).toBeGreaterThanOrEqual(0)
+      }
+    }
+  })
+})

@@ -20,6 +20,37 @@ import { routeMessage } from './messageRouter.js'
 import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
 
+/**
+ * Validate a task timestamp is within reasonable bounds.
+ * Rejects: 0, negative, NaN, future timestamps (>1h ahead), impossibly old (>1 year).
+ * Returns the validated timestamp or null if invalid.
+ */
+export function validateTaskTimestamp(ts: unknown, now?: number): number | null {
+  const n = Number(ts)
+  if (!n || !Number.isFinite(n) || n <= 0) return null
+  const currentTime = now ?? Date.now()
+  const ONE_HOUR_MS = 60 * 60 * 1000
+  const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000
+  if (n > currentTime + ONE_HOUR_MS) return null
+  if (n < currentTime - ONE_YEAR_MS) return null
+  return n
+}
+
+/**
+ * Verify a task still exists and is in an active (non-deleted, non-done) state.
+ * Returns the fresh task if valid, null otherwise.
+ */
+export function verifyTaskExists(taskId: string): Task | null {
+  try {
+    const task = taskManager.getTask(taskId)
+    if (!task) return null
+    if (task.status === 'done') return null
+    return task as Task
+  } catch {
+    return null
+  }
+}
+
 export interface StaleDoingTask {
   task_id: string
   assignee: string
@@ -366,13 +397,18 @@ class TeamHealthMonitor {
   private getStaleDoingSnapshot(now = Date.now()): { thresholdMinutes: number; count: number; tasks: StaleDoingTask[] } {
     const doing = taskManager.listTasks({ status: 'doing' })
 
+    const MAX_STALE_DISPLAY_MIN = 24 * 60
     const staleTasks: StaleDoingTask[] = doing
       .filter(task => Boolean(task.assignee))
+      // Verify task still exists (guards against stale cache / deleted tasks)
+      .filter(task => verifyTaskExists(task.id) !== null)
       .map((task) => {
         const lastActivityAt = this.getTaskLastActivityAt(task.id, this.parseTimestamp(task.updatedAt))
-        const staleMinutes = lastActivityAt > 0
-          ? Math.max(0, Math.floor((now - lastActivityAt) / 60_000))
-          : 9999
+        // Validate timestamp bounds — cap impossible ages
+        const validatedAt = validateTaskTimestamp(lastActivityAt, now)
+        const staleMinutes = validatedAt
+          ? Math.min(Math.max(0, Math.floor((now - validatedAt) / 60_000)), MAX_STALE_DISPLAY_MIN)
+          : MAX_STALE_DISPLAY_MIN
 
         return {
           task_id: task.id,
@@ -763,15 +799,45 @@ class TeamHealthMonitor {
     return []
   }
 
+  /** Maximum reasonable incident age (7 days). Anything older is stale/impossible. */
+  private static readonly MAX_INCIDENT_AGE_MS = 7 * 24 * 60 * 60 * 1000
+
+  /**
+   * Clamp minutesOver to a reasonable bound and reject impossible durations.
+   * Returns null if the calculated age exceeds MAX_INCIDENT_AGE_MS (impossible/stale).
+   */
+  private clampIncidentAge(now: number, reference: number, thresholdMin: number): number | null {
+    if (reference <= 0 || reference > now) return null // invalid timestamp
+    const ageMs = now - reference
+    if (ageMs > TeamHealthMonitor.MAX_INCIDENT_AGE_MS) return null // impossible duration
+    return Math.max(0, Math.floor(ageMs / 60_000) - thresholdMin)
+  }
+
+  /**
+   * Validate that a task referenced by an incident still exists and is in a
+   * monitored status. Returns false for deleted or closed/done/cancelled tasks.
+   */
+  private isTaskStillActive(taskId: string | null): boolean {
+    if (!taskId) return true // no task reference — allow (e.g. trio silence)
+    const task = taskManager.getTask(taskId)
+    if (!task) return false // deleted (hard DELETE)
+    const closedStatuses = new Set(['done', 'cancelled'])
+    return !closedStatuses.has(task.status)
+  }
+
   private mapWatchdogIncident(entry: WatchdogIncidentLog, idx: number, now: number): ComplianceIncident | null {
     const openedAt = entry.at || now
     const taskId = entry.taskId ?? null
     const rawType = entry.type || ''
 
+    // Skip incidents for tasks that no longer exist (hard-deleted) or are closed
+    if (taskId && !this.isTaskStillActive(taskId)) return null
+
     if (rawType === 'trio_general_silence') {
       const thresholdMin = Math.floor((entry.thresholdMs || this.trioSilenceMaxMin * 60_000) / 60_000)
       const reference = entry.lastUpdateAt || openedAt
-      const minutesOver = Math.max(0, Math.floor((now - reference) / 60_000) - thresholdMin)
+      const minutesOver = this.clampIncidentAge(now, reference, thresholdMin)
+      if (minutesOver === null) return null // impossible duration — skip
       return {
         id: `inc-watchdog-trio-${openedAt}-${idx}`,
         agent: 'trio',
@@ -787,7 +853,8 @@ class TeamHealthMonitor {
       const agent = entry.agent || 'unknown'
       const thresholdMin = Math.floor((entry.thresholdMs || this.workerCadenceMaxMin * 60_000) / 60_000)
       const reference = entry.lastUpdateAt || openedAt
-      const minutesOver = Math.max(0, Math.floor((now - reference) / 60_000) - thresholdMin)
+      const minutesOver = this.clampIncidentAge(now, reference, thresholdMin)
+      if (minutesOver === null) return null // impossible duration — skip
       return {
         id: `inc-watchdog-stale-${agent}-${openedAt}-${idx}`,
         agent,
@@ -803,7 +870,8 @@ class TeamHealthMonitor {
       const agent = entry.agent || 'unknown'
       const thresholdMin = Math.floor((entry.thresholdMs || this.blockedEscalationMin * 60_000) / 60_000)
       const reference = entry.lastUpdateAt || entry.blockedSinceAt || openedAt
-      const minutesOver = Math.max(0, Math.floor((now - reference) / 60_000) - thresholdMin)
+      const minutesOver = this.clampIncidentAge(now, reference, thresholdMin)
+      if (minutesOver === null) return null // impossible duration — skip
       return {
         id: `inc-watchdog-blocked-${agent}-${openedAt}-${idx}`,
         agent,
@@ -1312,14 +1380,19 @@ class TeamHealthMonitor {
       const agent = (task.assignee || '').toLowerCase()
 
       // Re-check task status at nudge time (guards against race between list and nudge)
-      const freshTask = tasks.find(t => t.id === task.id)
-      if (freshTask && freshTask.status !== 'doing') continue
+      // Also handles deleted tasks: if getTask returns null, the task was hard-deleted
+      const freshTask = taskManager.getTask(task.id)
+      if (!freshTask) continue // task was deleted — skip alert
+      if (freshTask.status !== 'doing') continue // task moved to done/cancelled/blocked — skip
 
       const lastGeneralAt = this.getLatestGeneralMessageAt(messages, agent)
       const lastAnyAt = this.getLatestAnyMessageAt(messages, agent)
       // Use the more recent of #general or any-channel activity
       const lastAt = Math.max(lastGeneralAt, lastAnyAt)
-      const staleMin = lastAt > 0 ? Math.floor((now - lastAt) / 60_000) : 9999
+      const rawStaleMin = lastAt > 0 ? Math.floor((now - lastAt) / 60_000) : 9999
+      // Cap at MAX_INCIDENT_AGE to prevent impossible durations (e.g. from stale cache)
+      const maxStaleMin = Math.floor(TeamHealthMonitor.MAX_INCIDENT_AGE_MS / 60_000)
+      const staleMin = Math.min(rawStaleMin, maxStaleMin)
 
       if (staleMin < this.cadenceWorkingStaleMin) continue
 
