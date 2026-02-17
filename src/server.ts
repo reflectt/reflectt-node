@@ -752,6 +752,98 @@ function parseGitHubPrUrl(prUrl: string): { owner: string; repo: string; pullNum
   }
 }
 
+const FOLLOW_ON_REQUIRED_TASK_TYPES = new Set(['spec', 'design', 'research'])
+
+type FollowOnEvidence = {
+  required: boolean
+  state: 'linked' | 'na' | 'missing' | 'not_required'
+  taskType?: string
+  followOnTaskId?: string
+  followOnNaReason?: string
+}
+
+function normalizeTaskType(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const normalized = value.trim().toLowerCase()
+  return normalized.length > 0 ? normalized : null
+}
+
+function inferFollowOnPolicy(task: Task, mergedMeta?: Record<string, unknown>): { required: boolean; taskType?: string } {
+  const taskMeta = (task.metadata || {}) as Record<string, unknown>
+  const candidates: unknown[] = [
+    (task as any).type,
+    mergedMeta?.task_type,
+    taskMeta.task_type,
+    mergedMeta?.work_type,
+    taskMeta.work_type,
+    mergedMeta?.type,
+  ]
+
+  for (const candidate of candidates) {
+    const normalized = normalizeTaskType(candidate)
+    if (normalized && FOLLOW_ON_REQUIRED_TASK_TYPES.has(normalized)) {
+      return { required: true, taskType: normalized }
+    }
+  }
+
+  const tags = new Set<string>()
+  const addTag = (value: unknown) => {
+    if (typeof value !== 'string') return
+    const normalized = value.trim().toLowerCase()
+    if (normalized.length > 0) tags.add(normalized)
+  }
+
+  const tagArrays: unknown[] = [task.tags, taskMeta.tags, mergedMeta?.tags]
+  for (const arr of tagArrays) {
+    if (!Array.isArray(arr)) continue
+    for (const tag of arr) addTag(tag)
+  }
+
+  for (const tag of tags) {
+    if (FOLLOW_ON_REQUIRED_TASK_TYPES.has(tag)) {
+      return { required: true, taskType: tag }
+    }
+  }
+
+  return { required: false }
+}
+
+function getFollowOnEvidence(task: Task): FollowOnEvidence {
+  const meta = (task.metadata || {}) as Record<string, unknown>
+  const policy = inferFollowOnPolicy(task)
+  if (!policy.required) {
+    return { required: false, state: 'not_required' }
+  }
+
+  const followOnTaskId = typeof meta.follow_on_task_id === 'string' ? meta.follow_on_task_id.trim() : ''
+  const followOnNa = meta.follow_on_na === true
+  const followOnNaReason = typeof meta.follow_on_na_reason === 'string' ? meta.follow_on_na_reason.trim() : ''
+
+  if (followOnTaskId.length > 0) {
+    return {
+      required: true,
+      state: 'linked',
+      taskType: policy.taskType,
+      followOnTaskId,
+    }
+  }
+
+  if (followOnNa && followOnNaReason.length > 0) {
+    return {
+      required: true,
+      state: 'na',
+      taskType: policy.taskType,
+      followOnNaReason,
+    }
+  }
+
+  return {
+    required: true,
+    state: 'missing',
+    taskType: policy.taskType,
+  }
+}
+
 async function fileExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath)
@@ -2806,12 +2898,17 @@ export async function createServer(): Promise<FastifyInstance> {
           },
         }
 
+    const followOnEvidence = getFollowOnEvidence(task)
+
     const reasons: string[] = []
     if (!prUrl) reasons.push('no_pr_url_resolved')
     if (strict && prCi.ci.state !== 'success') reasons.push(`ci_not_success:${prCi.ci.state}`)
     if (artifactEvidence.length === 0) reasons.push('no_artifact_paths_resolved')
     if (artifactEvidence.length > 0 && !artifactEvidence.some(item => item.exists)) {
       reasons.push('artifact_paths_missing')
+    }
+    if (followOnEvidence.required && followOnEvidence.state === 'missing') {
+      reasons.push('follow_on_missing')
     }
 
     const verdict = reasons.length === 0 ? 'pass' : 'fail'
@@ -2828,6 +2925,7 @@ export async function createServer(): Promise<FastifyInstance> {
       evidence: {
         taskStatus: task.status,
         reviewer: task.reviewer,
+        follow_on: followOnEvidence,
       },
     }
 
@@ -3606,6 +3704,55 @@ export async function createServer(): Promise<FastifyInstance> {
               gate: 'reviewer_signoff',
               hint: `Reviewer "${existing.reviewer}" must approve via: PATCH with metadata.reviewer_approved: true`,
             }
+          }
+        }
+
+        // Gate 3: spec/design/research closes must link follow-on implementation task,
+        // or explicitly explain N/A.
+        const followOnPolicy = inferFollowOnPolicy(existing, mergedMeta)
+        if (followOnPolicy.required) {
+          const followOnTaskId = typeof mergedMeta.follow_on_task_id === 'string' ? mergedMeta.follow_on_task_id.trim() : ''
+          const followOnNa = mergedMeta.follow_on_na === true
+          const followOnNaReason = typeof mergedMeta.follow_on_na_reason === 'string' ? mergedMeta.follow_on_na_reason.trim() : ''
+
+          const hasFollowOnLink = followOnTaskId.length > 0
+          const hasExplicitNa = followOnNa && followOnNaReason.length > 0
+
+          if (!hasFollowOnLink && !hasExplicitNa) {
+            reply.code(422)
+            return {
+              success: false,
+              error: `Task-close gate: ${followOnPolicy.taskType || 'spec/design/research'} tasks require metadata.follow_on_task_id or (metadata.follow_on_na=true + metadata.follow_on_na_reason).`,
+              gate: 'follow_on_linkage',
+              hint: 'Link a concrete implementation task via follow_on_task_id, or include explicit N/A rationale.',
+            }
+          }
+
+          if (hasFollowOnLink) {
+            const followLookup = taskManager.resolveTaskId(followOnTaskId)
+            if (!followLookup.task || !followLookup.resolvedId) {
+              reply.code(422)
+              return {
+                success: false,
+                error: 'Task-close gate: metadata.follow_on_task_id must reference an existing task.',
+                gate: 'follow_on_linkage',
+                hint: `No task found for follow_on_task_id="${followOnTaskId}". Use a valid task id/prefix.`,
+              }
+            }
+            if (followLookup.resolvedId === lookup.resolvedId) {
+              reply.code(422)
+              return {
+                success: false,
+                error: 'Task-close gate: metadata.follow_on_task_id cannot point to the same task.',
+                gate: 'follow_on_linkage',
+                hint: 'Link the actual implementation follow-on task id.',
+              }
+            }
+            mergedMeta.follow_on_task_id = followLookup.resolvedId
+          }
+
+          if (hasExplicitNa) {
+            mergedMeta.follow_on_na_reason = followOnNaReason
           }
         }
       }
