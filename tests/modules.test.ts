@@ -648,3 +648,88 @@ describe('BoardHealthWorker', () => {
     expect(res.body.config.unknownField).toBeUndefined()
   })
 })
+
+// ── ChangeFeed Tests ──
+
+describe('ChangeFeed', () => {
+  it('GET /feed/:agent requires since parameter', async () => {
+    const res = await req('GET', '/feed/link')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(false)
+    expect(res.body.message).toContain('since')
+  })
+
+  it('GET /feed/:agent returns feed with valid since', async () => {
+    const since = Date.now() - 60 * 60 * 1000 // 1h ago
+    const res = await req('GET', `/feed/link?since=${since}`)
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.agent).toBe('link')
+    expect(typeof res.body.since).toBe('number')
+    expect(typeof res.body.until).toBe('number')
+    expect(Array.isArray(res.body.events)).toBe(true)
+    expect(typeof res.body.count).toBe('number')
+    expect(typeof res.body.hasMore).toBe('boolean')
+  })
+
+  it('GET /feed/:agent supports limit parameter', async () => {
+    const since = Date.now() - 24 * 60 * 60 * 1000
+    const res = await req('GET', `/feed/link?since=${since}&limit=5`)
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.events.length).toBeLessThanOrEqual(5)
+  })
+
+  it('GET /feed/:agent supports kinds filter', async () => {
+    const since = Date.now() - 24 * 60 * 60 * 1000
+    const res = await req('GET', `/feed/link?since=${since}&kinds=mention,task_completed`)
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    // All returned events should match the requested kinds
+    for (const event of res.body.events) {
+      expect(['mention', 'task_completed']).toContain(event.kind)
+    }
+  })
+
+  it('GET /feed/:agent events have required fields', async () => {
+    // Create a task to ensure there's history
+    const taskRes = await req('POST', '/tasks', {
+      title: 'TEST: feed test task',
+      assignee: 'feedtest',
+      reviewer: 'link',
+      done_criteria: ['test'],
+      eta: '1h',
+      createdBy: 'test',
+    })
+    expect([200, 201]).toContain(taskRes.status)
+
+    const since = Date.now() - 5000
+    const res = await req('GET', `/feed/link?since=${since}`)
+    expect(res.status).toBe(200)
+
+    for (const event of res.body.events) {
+      expect(event).toHaveProperty('id')
+      expect(event).toHaveProperty('kind')
+      expect(event).toHaveProperty('timestamp')
+      expect(event).toHaveProperty('actor')
+      expect(event).toHaveProperty('summary')
+      expect(typeof event.timestamp).toBe('number')
+    }
+
+    // Cleanup
+    if (taskRes.body.task?.id) {
+      await req('DELETE', `/tasks/${taskRes.body.task.id}`)
+    }
+  })
+
+  it('GET /feed/:agent excludes global events when includeGlobal=false', async () => {
+    const since = Date.now() - 24 * 60 * 60 * 1000
+    const res = await req('GET', `/feed/link?since=${since}&includeGlobal=false`)
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    // All events should be specifically relevant to link
+    for (const event of res.body.events) {
+      expect(event.relevantTo).toBe('link')
+    }
+  })
+})

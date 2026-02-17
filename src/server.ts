@@ -43,6 +43,7 @@ import { exportBundle, importBundle } from './portability.js'
 import { getNotificationManager } from './notifications.js'
 import { getConnectivityManager } from './connectivity.js'
 import { boardHealthWorker } from './boardHealthWorker.js'
+import { buildAgentFeed, type FeedEventKind } from './changeFeed.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -2812,6 +2813,27 @@ export async function createServer(): Promise<FastifyInstance> {
       const maxAgeDays = Number(request.query.maxAgeDays || 7)
       const pruned = boardHealthWorker.pruneAuditLog(maxAgeDays)
       return { success: true, pruned }
+    },
+  )
+
+  // ── Agent change feed ─────────────────────────────────────────────────
+
+  app.get<{ Params: { agent: string }; Querystring: { since?: string; limit?: string; kinds?: string; includeGlobal?: string } }>(
+    '/feed/:agent',
+    async (request) => {
+      const { agent } = request.params
+      const since = Number(request.query.since || 0)
+      if (!since) {
+        return { success: false, message: 'since parameter required (unix timestamp ms)' }
+      }
+      const limit = request.query.limit ? Number(request.query.limit) : 100
+      const kinds = request.query.kinds
+        ? (request.query.kinds.split(',') as FeedEventKind[])
+        : undefined
+      const includeGlobal = request.query.includeGlobal !== 'false'
+
+      const result = buildAgentFeed(agent, { since, limit, kinds, includeGlobal })
+      return { success: true, ...result }
     },
   )
 
