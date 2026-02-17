@@ -314,7 +314,12 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | DELETE | `/notifications/preferences/:agent` | Reset preferences to defaults. |
 | POST | `/notifications/preferences/:agent/mute` | Mute notifications. Body: `{ durationMs? }` or `{ until? }`. Default: 1 hour. |
 | POST | `/notifications/preferences/:agent/unmute` | Unmute notifications. |
-| POST | `/notifications/route` | Check if notification should be delivered. Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
+| POST | `/notifications/route` | Check if notification should be delivered.
+| GET | `/connectivity/status` | Cloud connectivity state: mode (connected/degraded/offline), failure counts, queue depth, transition history. |
+| PATCH | `/connectivity/thresholds` | Update connectivity thresholds (degradedAfterFailures, offlineAfterMs, recoveryAfterSuccesses). |
+| POST | `/connectivity/simulate-failure` | Simulate cloud failure for outage drill. Body: `{ reason?, count? }`. |
+| POST | `/connectivity/simulate-success` | Simulate cloud success for recovery testing. Body: `{ count? }`. |
+| POST | `/connectivity/reset` | Reset connectivity state to connected. | Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
 ## Team
