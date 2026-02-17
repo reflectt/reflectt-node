@@ -1246,6 +1246,115 @@ describe('Task Close Gate', () => {
   })
 })
 
+describe('Task close follow-on linkage gate', () => {
+  it('rejects done for spec tasks without follow_on_task_id or follow_on_na_reason', async () => {
+    const created = await req('POST', '/tasks', {
+      title: 'TEST: spec close gate missing follow-on',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Spec close requires linkage'],
+      eta: '1h',
+      metadata: {
+        task_type: 'spec',
+      },
+    })
+
+    const specTaskId = created.body.task.id
+
+    const result = await req('PATCH', `/tasks/${specTaskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['process/TASK-spec-proof.md'],
+        reviewer_approved: true,
+      },
+    })
+
+    expect(result.status).toBe(422)
+    expect(result.body.gate).toBe('follow_on_linkage')
+
+    await req('DELETE', `/tasks/${specTaskId}`)
+  })
+
+  it('accepts done for spec tasks when follow_on_task_id points to existing task', async () => {
+    const followOn = await req('POST', '/tasks', {
+      title: 'TEST: follow-on implementation task',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Exists for linkage'],
+      eta: '1h',
+    })
+
+    const spec = await req('POST', '/tasks', {
+      title: 'TEST: spec close gate with follow-on link',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Spec close requires linkage'],
+      eta: '1h',
+      metadata: {
+        task_type: 'spec',
+      },
+    })
+
+    const followOnId = followOn.body.task.id
+    const specTaskId = spec.body.task.id
+
+    const result = await req('PATCH', `/tasks/${specTaskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['process/TASK-spec-proof.md'],
+        reviewer_approved: true,
+        follow_on_task_id: followOnId,
+      },
+    })
+
+    expect(result.status).toBe(200)
+    expect(result.body.task.status).toBe('done')
+    expect(result.body.task.metadata.follow_on_task_id).toBe(followOnId)
+
+    await req('DELETE', `/tasks/${specTaskId}`)
+    await req('DELETE', `/tasks/${followOnId}`)
+  })
+
+  it('accepts done for research tasks with explicit follow_on_na rationale', async () => {
+    const research = await req('POST', '/tasks', {
+      title: 'TEST: research close gate with explicit NA',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Research close requires rationale'],
+      eta: '1h',
+      metadata: {
+        task_type: 'research',
+      },
+    })
+
+    const taskId = research.body.task.id
+
+    const result = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      metadata: {
+        artifacts: ['process/TASK-research-proof.md'],
+        reviewer_approved: true,
+        follow_on_na: true,
+        follow_on_na_reason: 'Investigation-only result; no implementation work required.',
+      },
+    })
+
+    expect(result.status).toBe(200)
+    expect(result.body.task.status).toBe('done')
+    expect(result.body.task.metadata.follow_on_na).toBe(true)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+})
+
 describe('Task review endpoint', () => {
   let taskId: string
 
@@ -2108,6 +2217,53 @@ describe('Task review bundle', () => {
     expect(body.bundle.artifacts.length).toBeGreaterThan(0)
     expect(body.bundle.artifacts[0].path).toBe(artifactRelPath)
     expect(body.bundle.artifacts[0].exists).toBe(true)
+    expect(body.bundle.evidence.follow_on.required).toBe(false)
+  })
+
+  it('review bundle surfaces follow-on evidence for spec tasks', async () => {
+    const followOn = await req('POST', '/tasks', {
+      title: 'TEST: follow-on task for review bundle evidence',
+      description: 'Used to validate follow-on evidence rendering',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Exists for linkage'],
+      eta: '1h',
+    })
+    const followOnId = followOn.body.task.id
+
+    const specTask = await req('POST', '/tasks', {
+      title: 'TEST: review bundle follow-on evidence spec task',
+      description: 'Spec task for follow-on evidence',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Follow-on evidence appears in bundle'],
+      eta: '1h',
+      metadata: {
+        task_type: 'spec',
+        artifact_path: artifactRelPath,
+        artifacts: [artifactRelPath],
+        follow_on_task_id: followOnId,
+      },
+    })
+    const specTaskId = specTask.body.task.id
+
+    const { status, body } = await req('POST', `/tasks/${specTaskId}/review-bundle`, {
+      author: 'test-reviewer',
+      strict: false,
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.bundle.evidence.follow_on.required).toBe(true)
+    expect(body.bundle.evidence.follow_on.state).toBe('linked')
+    expect(body.bundle.evidence.follow_on.followOnTaskId).toBe(followOnId)
+
+    await req('DELETE', `/tasks/${specTaskId}`)
+    await req('DELETE', `/tasks/${followOnId}`)
   })
 })
 
