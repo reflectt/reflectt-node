@@ -41,6 +41,7 @@ import { getProvisioningManager } from './provisioning.js'
 import { getWebhookDeliveryManager } from './webhooks.js'
 import { exportBundle, importBundle } from './portability.js'
 import { getNotificationManager } from './notifications.js'
+import { getConnectivityManager } from './connectivity.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -4560,6 +4561,57 @@ export async function createServer(): Promise<FastifyInstance> {
     })
 
     return { success: true, routing: result }
+  })
+
+  // ============ CLOUD CONNECTIVITY STATE ============
+
+  const connectivity = getConnectivityManager()
+
+  // Get cloud connectivity state (mode, failures, queue depth, thresholds)
+  app.get('/connectivity/status', async () => {
+    return {
+      success: true,
+      connectivity: connectivity.getState(),
+      thresholds: connectivity.getThresholds(),
+    }
+  })
+
+  // Update thresholds (for testing/tuning)
+  app.patch('/connectivity/thresholds', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const patch: Record<string, unknown> = {}
+    if (typeof body?.degradedAfterFailures === 'number') patch.degradedAfterFailures = body.degradedAfterFailures
+    if (typeof body?.offlineAfterMs === 'number') patch.offlineAfterMs = body.offlineAfterMs
+    if (typeof body?.recoveryAfterSuccesses === 'number') patch.recoveryAfterSuccesses = body.recoveryAfterSuccesses
+    connectivity.setThresholds(patch as any)
+    return { success: true, thresholds: connectivity.getThresholds() }
+  })
+
+  // Simulate failure (for outage drill testing)
+  app.post('/connectivity/simulate-failure', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const reason = (body?.reason as string) || 'simulated_outage'
+    const count = (body?.count as number) || 1
+    for (let i = 0; i < count; i++) {
+      connectivity.recordFailure(reason)
+    }
+    return { success: true, state: connectivity.getState() }
+  })
+
+  // Simulate success (for outage drill testing)
+  app.post('/connectivity/simulate-success', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const count = (body?.count as number) || 1
+    for (let i = 0; i < count; i++) {
+      connectivity.recordSuccess()
+    }
+    return { success: true, state: connectivity.getState() }
+  })
+
+  // Reset connectivity state
+  app.post('/connectivity/reset', async () => {
+    connectivity.reset()
+    return { success: true, state: connectivity.getState() }
   })
 
   app.get('/runtime/truth', async () => {
