@@ -47,7 +47,7 @@ import { buildAgentFeed, type FeedEventKind } from './changeFeed.js'
 import { policyManager } from './policy.js'
 import { runPrecheck, applyAutoDefaults } from './taskPrecheck.js'
 import { resolveRoute, getRoutingLog, getRoutingStats, type MessageSeverity, type MessageCategory } from './messageRouter.js'
-import { submitFeedback, listFeedback, getFeedback, updateFeedback, voteFeedback, checkRateLimit, type FeedbackQuery } from './feedback.js'
+import { submitFeedback, listFeedback, getFeedback, updateFeedback, voteFeedback, checkRateLimit, buildTriageTask, markTriaged, getTriageQueue, type FeedbackQuery, type FeedbackSeverity, type FeedbackReporterType } from './feedback.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
@@ -4458,6 +4458,8 @@ export async function createServer(): Promise<FastifyInstance> {
   // ── Feedback Collection ─────────────────────────────────────────────
 
   const VALID_CATEGORIES = new Set(['bug', 'feature', 'general'])
+  const VALID_SEVERITIES = new Set(['critical', 'high', 'medium', 'low'])
+  const VALID_REPORTER_TYPES = new Set(['human', 'agent'])
 
   app.post('/feedback', async (request, reply) => {
     const ip = request.ip || '0.0.0.0'
@@ -4485,6 +4487,16 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, message: 'Message must be at most 1000 characters.', field: 'message' }
     }
 
+    // Validate optional severity
+    const severity = typeof body.severity === 'string' && VALID_SEVERITIES.has(body.severity)
+      ? body.severity as FeedbackSeverity
+      : undefined
+
+    // Validate optional reporter type
+    const reporterType = typeof body.reporterType === 'string' && VALID_REPORTER_TYPES.has(body.reporterType)
+      ? body.reporterType as FeedbackReporterType
+      : undefined
+
     const record = submitFeedback({
       category: category as 'bug' | 'feature' | 'general',
       message,
@@ -4494,10 +4506,13 @@ export async function createServer(): Promise<FastifyInstance> {
       sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
       siteToken,
       timestamp: Date.now(),
+      severity,
+      reporterType,
+      reporterAgent: typeof body.reporterAgent === 'string' ? body.reporterAgent : undefined,
     })
 
     reply.code(201)
-    return { success: true, id: record.id, message: 'Feedback received.' }
+    return { success: true, id: record.id, severity: record.severity, reporterType: record.reporterType, message: 'Feedback received.' }
   })
 
   app.get('/feedback', async (request) => {
@@ -4505,6 +4520,8 @@ export async function createServer(): Promise<FastifyInstance> {
     const query: FeedbackQuery = {
       status: (q.status as any) || 'new',
       category: (q.category as any) || 'all',
+      severity: (q.severity as any) || 'all',
+      reporterType: (q.reporterType as any) || 'all',
       sort: (q.sort as any) || 'date',
       order: (q.order as any) || 'desc',
       limit: q.limit ? Number(q.limit) : 25,
@@ -4528,6 +4545,8 @@ export async function createServer(): Promise<FastifyInstance> {
       status: body.status as any,
       notes: typeof body.notes === 'string' ? body.notes : undefined,
       assignedTo: typeof body.assignedTo === 'string' ? body.assignedTo : undefined,
+      severity: typeof body.severity === 'string' && VALID_SEVERITIES.has(body.severity)
+        ? body.severity as FeedbackSeverity : undefined,
     })
     if (!updated) {
       reply.code(404)
@@ -4543,6 +4562,59 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, error: 'Feedback not found' }
     }
     return { success: true, votes: updated.votes }
+  })
+
+  // ── Triage Pipeline ──────────────────────────────────────────────────
+
+  // GET /triage — view the triage queue (untriaged feedback sorted by severity)
+  app.get('/triage', async () => {
+    return getTriageQueue()
+  })
+
+  // POST /feedback/:id/triage — convert feedback into a task
+  app.post<{ Params: { id: string } }>('/feedback/:id/triage', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const triageAgent = typeof body.triageAgent === 'string' ? body.triageAgent : 'system'
+
+    const payload = buildTriageTask({
+      feedbackId: request.params.id,
+      triageAgent,
+      priority: typeof body.priority === 'string' ? body.priority : undefined,
+      assignee: typeof body.assignee === 'string' ? body.assignee : undefined,
+      lane: typeof body.lane === 'string' ? body.lane : undefined,
+      title: typeof body.title === 'string' ? body.title : undefined,
+    })
+
+    if ('error' in payload) {
+      reply.code(payload.error.includes('not found') ? 404 : 409)
+      return { success: false, error: payload.error }
+    }
+
+    // Create the task via task manager
+    const taskMeta = payload.lane
+      ? { ...payload.metadata, lane: payload.lane }
+      : payload.metadata
+    const task = await taskManager.createTask({
+      title: payload.title,
+      description: payload.description,
+      status: 'todo',
+      priority: (payload.priority as 'P0' | 'P1' | 'P2' | 'P3') || undefined,
+      assignee: payload.assignee,
+      createdBy: triageAgent,
+      metadata: taskMeta,
+    })
+
+    // Mark feedback as triaged
+    markTriaged(request.params.id, task.id, triageAgent, payload.priority, payload.assignee)
+
+    reply.code(201)
+    return {
+      success: true,
+      taskId: task.id,
+      feedbackId: request.params.id,
+      priority: payload.priority,
+      message: 'Feedback triaged into task.',
+    }
   })
 
   // Get next task (pull-based assignment)

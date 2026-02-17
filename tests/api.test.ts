@@ -10,6 +10,7 @@ import { join } from 'path'
 import { createServer } from '../src/server.js'
 import { DATA_DIR, REFLECTT_HOME } from '../src/config.js'
 import { getDb } from '../src/db.js'
+import { _clearFeedbackStore } from '../src/feedback.js'
 import type { FastifyInstance } from 'fastify'
 
 let app: FastifyInstance
@@ -3362,6 +3363,127 @@ describe('Feedback Collection', () => {
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain('javascript')
     expect(res.body).toContain('reflectt-feedback-widget')
+  })
+})
+
+/* ── Triage pipeline ───────────────────────────────────────────────── */
+describe('Triage pipeline', () => {
+  beforeAll(() => {
+    _clearFeedbackStore()
+  })
+
+  it('POST /feedback accepts severity and reporterType', async () => {
+    const { status, body } = await req('POST', '/feedback', {
+      category: 'bug',
+      message: 'Authentication is broken — users cannot login at all.',
+      siteToken: 'test',
+      severity: 'critical',
+      reporterType: 'agent',
+      reporterAgent: 'watchdog',
+    })
+    expect(status).toBe(201)
+    expect(body.severity).toBe('critical')
+    expect(body.reporterType).toBe('agent')
+  })
+
+  it('POST /feedback auto-infers severity when not provided', async () => {
+    const { body } = await req('POST', '/feedback', {
+      category: 'bug',
+      message: 'The save button fails with an error on the settings page.',
+      siteToken: 'test',
+    })
+    expect(body.severity).toBe('high') // matches 'fails' + 'error' patterns
+    expect(body.reporterType).toBe('human') // default
+  })
+
+  it('GET /triage returns untriaged feedback sorted by severity', async () => {
+    const { status, body } = await req('GET', '/triage')
+    expect(status).toBe(200)
+    expect(Array.isArray(body.items)).toBe(true)
+    expect(body).toHaveProperty('total')
+    // Items should include severity and suggestedPriority
+    if (body.items.length > 0) {
+      expect(body.items[0]).toHaveProperty('severity')
+      expect(body.items[0]).toHaveProperty('suggestedPriority')
+      expect(body.items[0]).toHaveProperty('reporterType')
+    }
+  })
+
+  it('POST /feedback/:id/triage creates a task from feedback', async () => {
+    // Create feedback
+    const { body: fb } = await req('POST', '/feedback', {
+      category: 'bug',
+      message: 'Dashboard crashes when loading more than 50 tasks in the view.',
+      siteToken: 'test',
+      severity: 'high',
+      reporterType: 'human',
+      email: 'user@example.com',
+    })
+
+    // Triage it
+    const { status, body } = await req('POST', `/feedback/${fb.id}/triage`, {
+      triageAgent: 'kai',
+      assignee: 'link',
+      lane: 'frontend',
+    })
+    expect(status).toBe(201)
+    expect(body.success).toBe(true)
+    expect(body.taskId).toBeTruthy()
+    expect(body.feedbackId).toBe(fb.id)
+    expect(body.priority).toBe('P1') // high → P1
+
+    // Verify task was created
+    const { body: taskBody } = await req('GET', `/tasks/${body.taskId}`)
+    expect(taskBody.task.title).toContain('Bug')
+    expect(taskBody.task.metadata.source).toBe('feedback')
+    expect(taskBody.task.metadata.feedbackId).toBe(fb.id)
+    expect(taskBody.task.metadata.severity).toBe('high')
+    expect(taskBody.task.metadata.reporterType).toBe('human')
+
+    // Verify feedback is now triaged
+    const { body: fbBody } = await req('GET', `/feedback/${fb.id}`)
+    expect(fbBody.feedback.status).toBe('triaged')
+    expect(fbBody.feedback.triageResult.taskId).toBe(body.taskId)
+  })
+
+  it('POST /feedback/:id/triage rejects already-triaged feedback', async () => {
+    // Create and triage
+    const { body: fb } = await req('POST', '/feedback', {
+      category: 'feature',
+      message: 'Add keyboard shortcuts for common task actions in the dashboard.',
+      siteToken: 'test',
+    })
+    await req('POST', `/feedback/${fb.id}/triage`, { triageAgent: 'kai' })
+
+    // Try again
+    const { status, body } = await req('POST', `/feedback/${fb.id}/triage`, { triageAgent: 'kai' })
+    expect(status).toBe(409)
+    expect(body.error).toContain('Already triaged')
+  })
+
+  it('POST /feedback/:id/triage allows priority override', async () => {
+    const { body: fb } = await req('POST', '/feedback', {
+      category: 'general',
+      message: 'The onboarding flow could be more intuitive for new users.',
+      siteToken: 'test',
+    })
+
+    const { status, body } = await req('POST', `/feedback/${fb.id}/triage`, {
+      triageAgent: 'sage',
+      priority: 'P1', // Override from auto P3
+    })
+    expect(status).toBe(201)
+    expect(body.priority).toBe('P1')
+  })
+
+  it('GET /feedback supports severity and reporterType filters', async () => {
+    const { status, body } = await req('GET', '/feedback?status=all&severity=critical&reporterType=agent')
+    expect(status).toBe(200)
+    // All returned items should match filters
+    for (const item of body.items) {
+      expect(item.severity).toBe('critical')
+      expect(item.reporterType).toBe('agent')
+    }
   })
 })
 
