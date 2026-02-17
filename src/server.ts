@@ -47,7 +47,7 @@ import { buildAgentFeed, type FeedEventKind } from './changeFeed.js'
 import { policyManager } from './policy.js'
 import { runPrecheck, applyAutoDefaults } from './taskPrecheck.js'
 import { resolveRoute, getRoutingLog, getRoutingStats, type MessageSeverity, type MessageCategory } from './messageRouter.js'
-import { submitFeedback, listFeedback, getFeedback, updateFeedback, voteFeedback, checkRateLimit, buildTriageTask, markTriaged, getTriageQueue, type FeedbackQuery, type FeedbackSeverity, type FeedbackReporterType } from './feedback.js'
+import { submitFeedback, listFeedback, getFeedback, updateFeedback, voteFeedback, checkRateLimit, type FeedbackQuery } from './feedback.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
@@ -150,6 +150,40 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
   }
 
   return problems
+}
+
+const MODEL_ALIASES: Record<string, string> = {
+  gpt: 'openai-codex/gpt-5.3',
+  'gpt-codex': 'openai-codex/gpt-5.3-codex',
+  opus: 'anthropic/claude-opus-4-6',
+  sonnet: 'anthropic/claude-sonnet-4-5',
+}
+
+const DEFAULT_MODEL_ALIAS = 'gpt-codex'
+const PROVIDER_MODEL_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/i
+
+function normalizeConfiguredModel(value: unknown): { ok: boolean; value?: string; resolved?: string; error?: string } {
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'Model must be a string' }
+  }
+  const raw = value.trim()
+  if (!raw) {
+    return { ok: false, error: 'Model cannot be empty' }
+  }
+
+  const alias = raw.toLowerCase()
+  if (MODEL_ALIASES[alias]) {
+    return { ok: true, value: raw, resolved: MODEL_ALIASES[alias] }
+  }
+
+  if (PROVIDER_MODEL_PATTERN.test(raw)) {
+    return { ok: true, value: raw, resolved: raw }
+  }
+
+  return {
+    ok: false,
+    error: `Unknown model identifier "${raw}". Allowed aliases: ${Object.keys(MODEL_ALIASES).join(', ')} or provider/model format.`,
+  }
 }
 
 const UpdateTaskSchema = z.object({
@@ -301,27 +335,25 @@ const ReviewPacketSchema = z.object({
 const QaBundleSchema = z.object({
   lane: z.string().trim().min(1),
   summary: z.string().trim().min(1),
-  pr_link: z.string().trim().min(1).optional(),        // optional for config_only/doc_only/non_code tasks
-  commit_shas: z.array(z.string().trim().min(1)).optional(),  // optional for config_only/doc_only/non_code tasks
+  pr_link: z.string().trim().min(1).optional(),        // optional for config_only tasks
+  commit_shas: z.array(z.string().trim().min(1)).optional(),  // optional for config_only tasks
   changed_files: z.array(z.string().trim().min(1)).min(1),
   artifact_links: z.array(z.string().trim().min(1)).min(1),
   checks: z.array(z.string().trim().min(1)).min(1),
   screenshot_proof: z.array(z.string().trim().min(1)).min(1),
   reviewer_notes: z.string().trim().min(1).optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
-  review_packet: ReviewPacketSchema.optional(),
-  non_code: z.boolean().optional(),     // true for design/docs artifact validation without PR/commit
+  review_packet: ReviewPacketSchema,
 })
 
 const ReviewHandoffSchema = z.object({
   task_id: z.string().trim().regex(/^task-[a-zA-Z0-9-]+$/),
-  repo: z.string().trim().min(1).optional(),  // optional for config_only/non_code tasks
+  repo: z.string().trim().min(1).optional(),  // optional for config_only tasks
   artifact_path: z.string().trim().min(1),    // relaxed: accepts any path (process/, ~/.reflectt/, etc.)
   test_proof: z.string().trim().min(1),
   known_caveats: z.string().trim().min(1),
   doc_only: z.boolean().optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
-  non_code: z.boolean().optional(),     // true for design/docs artifact validation without PR/commit
   pr_url: z.string().trim().url().optional(),
   commit_sha: z.string().trim().regex(/^[a-fA-F0-9]{7,40}$/).optional(),
 })
@@ -429,29 +461,26 @@ function enforceQaBundleGateForValidating(
     return {
       ok: false,
       error: `Review packet required before validating.${detail}`,
-      hint: 'Include metadata.qa_bundle.review_packet with: task_id, pr_url, commit, changed_files[], artifact_path, caveats (or use non_code=true/config_only=true with artifact evidence).',
+      hint: 'Include metadata.qa_bundle.review_packet with: task_id, pr_url, commit, changed_files[], artifact_path, caveats (plus summary/artifact_links/checks).',
     }
   }
 
-  const nonCodeBundle = parsed.data.qa_bundle.non_code === true
   const reviewPacket = parsed.data.qa_bundle.review_packet
-  if (reviewPacket && !nonCodeBundle) {
-    if (expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
-      return {
-        ok: false,
-        error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
-        hint: 'Set review_packet.task_id to the current task ID before moving to validating.',
-      }
+  if (expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
+    return {
+      ok: false,
+      error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
+      hint: 'Set review_packet.task_id to the current task ID before moving to validating.',
     }
+  }
 
-    const metadataObj = (metadata ?? {}) as Record<string, unknown>
-    const artifactPath = typeof metadataObj.artifact_path === 'string' ? metadataObj.artifact_path.trim() : ''
-    if (artifactPath && artifactPath !== reviewPacket.artifact_path) {
-      return {
-        ok: false,
-        error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
-        hint: 'Use the same canonical process/... artifact path in both fields.',
-      }
+  const metadataObj = (metadata ?? {}) as Record<string, unknown>
+  const artifactPath = typeof metadataObj.artifact_path === 'string' ? metadataObj.artifact_path.trim() : ''
+  if (artifactPath && artifactPath !== reviewPacket.artifact_path) {
+    return {
+      ok: false,
+      error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
+      hint: 'Use the same canonical process/... artifact path in both fields.',
     }
   }
 
@@ -609,8 +638,8 @@ function enforceReviewHandoffGateForValidating(
   if (!parsed.success) {
     return {
       ok: false,
-      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true, non_code=true, design/docs lane, or config_only=true).',
-      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For design/docs artifacts: set non_code=true (or doc_only=true). For config tasks: set config_only=true.',
+      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true or config_only=true).',
+      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For config tasks: set config_only=true.',
     }
   }
 
@@ -623,24 +652,20 @@ function enforceReviewHandoffGateForValidating(
     }
   }
 
-  const nonCodeViaLane = isDesignOrDocsLane(root)
-  const nonCodeViaBundle = ((root.qa_bundle as Record<string, unknown> | undefined)?.non_code) === true
-  const nonCodeContract = handoff.doc_only || handoff.config_only || handoff.non_code || nonCodeViaBundle || nonCodeViaLane
-
   // config_only: artifacts live in ~/.reflectt/, no repo/PR required
-  // doc_only/non_code: design/docs artifact validation, no PR/commit required
-  if (!nonCodeContract) {
+  // doc_only: docs-only work, no PR/commit required
+  if (!handoff.doc_only && !handoff.config_only) {
     if (!handoff.pr_url || !parseGitHubPrUrl(handoff.pr_url)) {
       return {
         ok: false,
-        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or use non-code contract: doc_only=true, non_code=true, design/docs lane, or config_only=true for ~/.reflectt/ config tasks).',
-        hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>, or mark non-code validation for design/docs artifacts.',
+        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or set doc_only=true for docs-only, config_only=true for ~/.reflectt/ config tasks).',
+        hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>.',
       }
     }
     if (!handoff.commit_sha) {
       return {
         ok: false,
-        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when non-code/config-only contract is not set.',
+        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when doc_only/config_only is not set.',
         hint: 'Use 7-40 hex chars, e.g. "a1b2c3d".',
       }
     }
@@ -3761,51 +3786,34 @@ export async function createServer(): Promise<FastifyInstance> {
       // Normalize review-state metadata for state-aware SLA tracking.
       const mergedMeta = applyReviewStateMetadata(existing, parsed, mergedRawMeta, Date.now())
 
-      // TEST: prefixed tasks bypass gates (WIP cap, reviewer identity, etc.)
-      const isTestTask = typeof existing.title === 'string' && existing.title.startsWith('TEST:')
-
-      // ── Reviewer-approval identity gate ──────────────────────────────
-      // When reviewer_approved=true is set via PATCH, only the assigned
-      // reviewer (matched by actor field) can perform the approval.
-      // This prevents non-reviewer agents from bypassing the review process.
-      const incomingApproval = incomingMeta.reviewer_approved
-      if (incomingApproval === true && existing.reviewer && !isTestTask) {
-        const approvalActor = (parsed.actor || '').trim().toLowerCase()
-        const assignedReviewer = existing.reviewer.trim().toLowerCase()
-
-        if (!approvalActor) {
-          reply.code(400)
-          return {
-            success: false,
-            error: 'Reviewer approval requires actor field identifying the approver',
-            gate: 'reviewer_identity',
-            hint: `Include "actor": "${existing.reviewer}" in the PATCH body to approve as the assigned reviewer.`,
+      // Model validation gate on start: reject unknown model ids and auto-default when missing.
+      if (parsed.status === 'doing' && existing.status !== 'doing') {
+        const requestedModel = mergedMeta.model
+        if (requestedModel === undefined || requestedModel === null || `${requestedModel}`.trim().length === 0) {
+          const fallback = MODEL_ALIASES[DEFAULT_MODEL_ALIAS]
+          mergedMeta.model = DEFAULT_MODEL_ALIAS
+          mergedMeta.model_resolved = fallback
+          mergedMeta.model_defaulted = true
+          mergedMeta.model_default_reason = 'No model configured at task start; default alias applied.'
+        } else {
+          const validatedModel = normalizeConfiguredModel(requestedModel)
+          if (!validatedModel.ok) {
+            reply.code(400)
+            return {
+              success: false,
+              error: validatedModel.error,
+              gate: 'model_validation',
+              hint: `Use one of aliases (${Object.keys(MODEL_ALIASES).join(', ')}) or provider/model (e.g., anthropic/claude-sonnet-4-5).`,
+            }
           }
+          mergedMeta.model = validatedModel.value
+          mergedMeta.model_resolved = validatedModel.resolved
+          mergedMeta.model_defaulted = false
         }
-
-        if (approvalActor !== assignedReviewer) {
-          // Strip the invalid approval and record the attempt
-          mergedMeta.reviewer_approved = false
-          mergedMeta.review_state = (existing.metadata as Record<string, unknown>)?.review_state ?? mergedMeta.review_state
-          mergedMeta.approval_rejected = {
-            attempted_by: parsed.actor,
-            assigned_reviewer: existing.reviewer,
-            rejected_at: Date.now(),
-            reason: 'non-assigned reviewer cannot approve',
-          }
-          reply.code(403)
-          return {
-            success: false,
-            error: `Only assigned reviewer "${existing.reviewer}" can approve this task. Actor "${parsed.actor}" is not the assigned reviewer.`,
-            gate: 'reviewer_identity',
-            hint: `The assigned reviewer "${existing.reviewer}" must submit the approval via: PATCH with actor: "${existing.reviewer}" and metadata.reviewer_approved: true`,
-          }
-        }
-
-        // Record who approved for audit trail
-        mergedMeta.approved_by = parsed.actor
-        mergedMeta.approved_at = Date.now()
       }
+
+      // TEST: prefixed tasks bypass gates (WIP cap, etc.)
+      const isTestTask = typeof existing.title === 'string' && existing.title.startsWith('TEST:')
 
       // QA bundle gate: validating requires structured review evidence.
       const effectiveStatus = parsed.status ?? existing.status
@@ -3873,19 +3881,6 @@ export async function createServer(): Promise<FastifyInstance> {
               error: `Task-close gate: reviewer sign-off required from "${existing.reviewer}"`,
               gate: 'reviewer_signoff',
               hint: `Reviewer "${existing.reviewer}" must approve via: PATCH with metadata.reviewer_approved: true`,
-            }
-          }
-
-          // Defense-in-depth: verify the approval came from the assigned reviewer
-          const approvedBy = (mergedMeta.approved_by as string || '').trim().toLowerCase()
-          const assignedReviewer = existing.reviewer.trim().toLowerCase()
-          if (approvedBy && approvedBy !== assignedReviewer) {
-            reply.code(403)
-            return {
-              success: false,
-              error: `Task-close gate: approval by "${mergedMeta.approved_by}" rejected — only "${existing.reviewer}" can approve`,
-              gate: 'reviewer_signoff',
-              hint: `Reviewer "${existing.reviewer}" must approve. Approval from "${mergedMeta.approved_by}" does not satisfy the gate.`,
             }
           }
         }
@@ -4570,8 +4565,6 @@ export async function createServer(): Promise<FastifyInstance> {
   // ── Feedback Collection ─────────────────────────────────────────────
 
   const VALID_CATEGORIES = new Set(['bug', 'feature', 'general'])
-  const VALID_SEVERITIES = new Set(['critical', 'high', 'medium', 'low'])
-  const VALID_REPORTER_TYPES = new Set(['human', 'agent'])
 
   app.post('/feedback', async (request, reply) => {
     const ip = request.ip || '0.0.0.0'
@@ -4599,16 +4592,6 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, message: 'Message must be at most 1000 characters.', field: 'message' }
     }
 
-    // Validate optional severity
-    const severity = typeof body.severity === 'string' && VALID_SEVERITIES.has(body.severity)
-      ? body.severity as FeedbackSeverity
-      : undefined
-
-    // Validate optional reporter type
-    const reporterType = typeof body.reporterType === 'string' && VALID_REPORTER_TYPES.has(body.reporterType)
-      ? body.reporterType as FeedbackReporterType
-      : undefined
-
     const record = submitFeedback({
       category: category as 'bug' | 'feature' | 'general',
       message,
@@ -4618,13 +4601,10 @@ export async function createServer(): Promise<FastifyInstance> {
       sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
       siteToken,
       timestamp: Date.now(),
-      severity,
-      reporterType,
-      reporterAgent: typeof body.reporterAgent === 'string' ? body.reporterAgent : undefined,
     })
 
     reply.code(201)
-    return { success: true, id: record.id, severity: record.severity, reporterType: record.reporterType, message: 'Feedback received.' }
+    return { success: true, id: record.id, message: 'Feedback received.' }
   })
 
   app.get('/feedback', async (request) => {
@@ -4632,8 +4612,6 @@ export async function createServer(): Promise<FastifyInstance> {
     const query: FeedbackQuery = {
       status: (q.status as any) || 'new',
       category: (q.category as any) || 'all',
-      severity: (q.severity as any) || 'all',
-      reporterType: (q.reporterType as any) || 'all',
       sort: (q.sort as any) || 'date',
       order: (q.order as any) || 'desc',
       limit: q.limit ? Number(q.limit) : 25,
@@ -4657,8 +4635,6 @@ export async function createServer(): Promise<FastifyInstance> {
       status: body.status as any,
       notes: typeof body.notes === 'string' ? body.notes : undefined,
       assignedTo: typeof body.assignedTo === 'string' ? body.assignedTo : undefined,
-      severity: typeof body.severity === 'string' && VALID_SEVERITIES.has(body.severity)
-        ? body.severity as FeedbackSeverity : undefined,
     })
     if (!updated) {
       reply.code(404)
@@ -4674,59 +4650,6 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, error: 'Feedback not found' }
     }
     return { success: true, votes: updated.votes }
-  })
-
-  // ── Triage Pipeline ──────────────────────────────────────────────────
-
-  // GET /triage — view the triage queue (untriaged feedback sorted by severity)
-  app.get('/triage', async () => {
-    return getTriageQueue()
-  })
-
-  // POST /feedback/:id/triage — convert feedback into a task
-  app.post<{ Params: { id: string } }>('/feedback/:id/triage', async (request, reply) => {
-    const body = request.body as Record<string, unknown>
-    const triageAgent = typeof body.triageAgent === 'string' ? body.triageAgent : 'system'
-
-    const payload = buildTriageTask({
-      feedbackId: request.params.id,
-      triageAgent,
-      priority: typeof body.priority === 'string' ? body.priority : undefined,
-      assignee: typeof body.assignee === 'string' ? body.assignee : undefined,
-      lane: typeof body.lane === 'string' ? body.lane : undefined,
-      title: typeof body.title === 'string' ? body.title : undefined,
-    })
-
-    if ('error' in payload) {
-      reply.code(payload.error.includes('not found') ? 404 : 409)
-      return { success: false, error: payload.error }
-    }
-
-    // Create the task via task manager
-    const taskMeta = payload.lane
-      ? { ...payload.metadata, lane: payload.lane }
-      : payload.metadata
-    const task = await taskManager.createTask({
-      title: payload.title,
-      description: payload.description,
-      status: 'todo',
-      priority: (payload.priority as 'P0' | 'P1' | 'P2' | 'P3') || undefined,
-      assignee: payload.assignee,
-      createdBy: triageAgent,
-      metadata: taskMeta,
-    })
-
-    // Mark feedback as triaged
-    markTriaged(request.params.id, task.id, triageAgent, payload.priority, payload.assignee)
-
-    reply.code(201)
-    return {
-      success: true,
-      taskId: task.id,
-      feedbackId: request.params.id,
-      priority: payload.priority,
-      message: 'Feedback triaged into task.',
-    }
   })
 
   // Get next task (pull-based assignment)
