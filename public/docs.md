@@ -326,6 +326,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | POST | `/board-health/rollback/:actionId` | Rollback an automated action within the rollback window. Body: `{ by? }`. |
 | PATCH | `/board-health/config` | Update worker config at runtime. Fields: enabled, intervalMs, staleDoingThresholdMin, suggestCloseThresholdMin, rollbackWindowMs, digestIntervalMs, digestChannel, quietHoursStart, quietHoursEnd, dryRun, maxActionsPerTick. |
 | POST | `/board-health/prune` | Prune old audit log entries. Query: `?maxAgeDays=7`. |
+| GET | `/feed/:agent` | Since-last-seen change feed. Query: `?since=timestamp&limit=100&kinds=task_status_changed,mention&includeGlobal=true`. Returns unified timeline of task changes, comments, mentions, PRs, deploys relevant to agent. |
 | GET | `/health/watchdog/suppression` | Watchdog de-noise config: show all suppression rules, thresholds, and what activity types prevent re-firing. | Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
