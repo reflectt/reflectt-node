@@ -67,20 +67,23 @@ async function main() {
     console.log(`   - Health: http://${serverConfig.host}:${serverConfig.port}/health`)
     console.log(`   - PID: ${process.pid}`)
 
-    // Cloud integration (optional — requires REFLECTT_HOST_TOKEN)
+    // Cloud integration (checks env vars + config.json for credentials)
     if (isCloudConfigured()) {
       // Non-blocking: don't prevent server from starting if cloud is down
       startCloudIntegration().catch(err => {
         console.warn(`☁️  Cloud integration error: ${err?.message || err}`)
       })
     } else {
-      console.log('☁️  Cloud integration: disabled (set REFLECTT_HOST_TOKEN to enable)')
+      console.log('☁️  Cloud integration: disabled (run `reflectt host connect` to enable)')
+      // Watch config.json so we auto-connect when agent enrolls
+      watchConfigForCloudChanges()
     }
     
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       console.log(`\n${signal} received, shutting down...`)
       stopConfigWatch()
+      stopConfigWatcher()
       stopCloudIntegration()
       stopTeamConfigLinter()
       closeDb()
