@@ -1268,7 +1268,9 @@ class TeamHealthMonitor {
     const doingByAgent = new Map<string, typeof tasks[number]>()
 
     for (const task of tasks) {
-      if (task.status !== 'doing' || !task.assignee) continue
+      if (!task.assignee) continue
+      // Only monitor actively-doing tasks; skip done/cancelled/blocked
+      if (task.status !== 'doing') continue
       const agent = (task.assignee || '').toLowerCase()
       if (!trioSet.has(agent as typeof this.trioAgents[number])) continue
 
@@ -1298,7 +1300,17 @@ class TeamHealthMonitor {
       if (!this.shouldEmitCadenceAlert(key, now)) continue
 
       // Enhanced suppression: skip if agent has had ANY activity since last alert
-      if (this.hasRecentActivitySinceLastAlert(agent, key, now)) continue
+      if (this.hasRecentActivitySinceLastAlert(agent, key, now)) {
+        this.markCadenceAlert(key, now)
+        continue
+      }
+
+      // Also suppress first-time alerts if agent posted ANY #general message recently
+      const agentLastGeneralAt = this.getLatestGeneralMessageAt(messages, agent)
+      if (agentLastGeneralAt > 0) {
+        const sinceGeneralMin = Math.floor((now - agentLastGeneralAt) / 60_000)
+        if (sinceGeneralMin < this.cadenceWorkingStaleMin) continue
+      }
 
       const content = `@${agent} @kai @pixel system watchdog: status=working with no #general update for ${staleMin}m on ${task.id}. Post required status now: 1) shipped 2) blocker 3) next+ETA.`
       alerts.push(content)
@@ -1490,6 +1502,16 @@ class TeamHealthMonitor {
         continue
       }
 
+      // Suppress if agent posted ANY message in #general recently (not just strict status format)
+      const lastGeneralMsgAt = this.getLatestGeneralMessageAt(messages, agent)
+      if (lastGeneralMsgAt) {
+        const sinceLastGeneralMsgMin = Math.floor((now - lastGeneralMsgAt) / 60_000)
+        if (sinceLastGeneralMsgMin < this.idleNudgeSuppressRecentMin) {
+          decisions.push({ ...baseDecision, decision: 'none', reason: 'recent-activity-suppressed', renderedMessage: null })
+          continue
+        }
+      }
+
       const lastValidStatusAt = this.findLastValidStatusAt(messages, agent)
       if (lastValidStatusAt) {
         const sinceLastStatusMin = Math.floor((now - lastValidStatusAt) / 60_000)
@@ -1545,7 +1567,7 @@ class TeamHealthMonitor {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'blocked-task-suppressed', renderedMessage: null })
         continue
       }
-      if (selectedTask?.status === 'done') {
+      if (selectedTask?.status === 'done' || selectedTask?.status === 'cancelled') {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'done-task-suppressed', renderedMessage: null })
         continue
       }
