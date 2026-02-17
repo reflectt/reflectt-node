@@ -3479,6 +3479,9 @@ describe('Reviewer approval identity gate', () => {
     expect(status).toBe(200)
 
     await req('DELETE', `/tasks/${caseId}`)
+  })
+})
+
 /* ── Stale SLA alert guardrails (integration) ──────────────────────── */
 describe('Stale SLA alert guardrails (integration)', () => {
   it('verifyTaskExists returns null after hard DELETE (full API flow)', async () => {
