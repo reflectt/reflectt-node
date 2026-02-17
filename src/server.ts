@@ -3863,7 +3863,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const reviewedBy = (body.reviewedBy as string) || 'system'
 
     const lookup = taskManager.resolveTaskId(taskId)
-    if (lookup.matchType === 'none') {
+    if (lookup.matchType === 'not_found') {
       reply.code(404)
       return { success: false, error: 'Task not found' }
     }
@@ -3885,7 +3885,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const reviewedBy = (body.reviewedBy as string) || 'system'
 
     const lookup = taskManager.resolveTaskId(taskId)
-    if (lookup.matchType === 'none') {
+    if (lookup.matchType === 'not_found') {
       reply.code(404)
       return { success: false, error: 'Task not found' }
     }
@@ -3912,7 +3912,7 @@ export async function createServer(): Promise<FastifyInstance> {
     for (const taskId of taskIds) {
       try {
         const lookup = taskManager.resolveTaskId(taskId)
-        if (lookup.matchType === 'none') {
+        if (lookup.matchType === 'not_found') {
           results.push({ taskId, success: false, error: 'Not found' })
           continue
         }
