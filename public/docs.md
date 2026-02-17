@@ -92,6 +92,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/:id/history` | Status changelog for task lifecycle transitions. Returns `history[]` entries shaped as `{ status, changedBy, changedAt, metadata }` for each status transition. |
 | GET | `/tasks/:id/comments` | List task discussion comments. Returns `{ comments, count }` |
 | POST | `/tasks/:id/comments` | Add task comment. Body: `{ "author": "agent", "content": "text" }` |
+| GET | `/tasks/:id/pr-review` | PR review quality panel data. Returns diff scope, CI checks, done criteria alignment. Requires PR URL in task metadata (`pr_url`, `qa_bundle.pr_link`, or in `artifacts`). |
 | POST | `/tasks/:id/outcome` | Capture 48h checkpoint verdict for completed tasks. Body: `verdict` (`PASS`\|`NO-CHANGE`\|`REGRESSION`), optional `author`, `notes` |
 | POST | `/tasks/:id/review-bundle` | Auto-build reviewer packet by resolving PR URL + CI + artifact evidence from task metadata. Returns normalized `verdict` (`pass`/`fail`) and reasons. Optional body: `author`, `strict` (default `true`, requires CI=`success`). |
 | POST | `/tasks/:id/review` | Reviewer decision endpoint. Body: `{ "reviewer": "agent", "decision": "approve|reject", "comment": "..." }`. Only the assigned reviewer may submit. Updates task metadata with reviewer decision + approval flag. |
