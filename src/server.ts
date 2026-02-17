@@ -33,7 +33,7 @@ import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
-import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment } from './assignment.js'
+import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
@@ -513,6 +513,82 @@ function applyReviewStateMetadata(
 function isTaskAutomatedRecurring(metadata: unknown): boolean {
   const recurringId = (metadata as Record<string, unknown> | null)?.recurring as Record<string, unknown> | undefined
   return typeof recurringId?.id === 'string' && recurringId.id.trim().length > 0
+}
+
+function normalizeLaneValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function isDesignOrDocsLane(metadata: Record<string, unknown>): boolean {
+  const lane = normalizeLaneValue(metadata.lane)
+  if (lane.includes('design') || lane.includes('docs') || lane.includes('documentation')) return true
+
+  const supports = normalizeLaneValue(metadata.supports)
+  if (supports.includes('design') || supports.includes('docs') || supports.includes('documentation')) return true
+
+  const qaBundle = (metadata.qa_bundle as Record<string, unknown> | undefined) || {}
+  const qaLane = normalizeLaneValue(qaBundle.lane)
+  if (qaLane.includes('design') || qaLane.includes('docs') || qaLane.includes('documentation')) return true
+
+  return false
+}
+
+function hasExplicitReassignment(metadata: Record<string, unknown>): boolean {
+  const directBoolean = [
+    metadata.reassigned,
+    metadata.manual_reassignment,
+    metadata.owner_override,
+    metadata.assignment_override,
+  ].some((value) => value === true)
+  if (directBoolean) return true
+
+  const directText = [
+    metadata.reassignment,
+    metadata.reassign_reason,
+    metadata.reassigned_by,
+    metadata.assignment_reason,
+    metadata.assignment_override_reason,
+    metadata.owner_override_reason,
+    metadata.reviewer_reassign_reason,
+  ]
+
+  return directText.some((value) => typeof value === 'string' && value.trim().length > 0)
+}
+
+function inferTaskWorkDomain(task: Task): 'ops' | 'content' | 'design' | 'qa' | 'analysis' | 'backend' | 'unknown' {
+  const metadata = (task.metadata || {}) as Record<string, unknown>
+  const pieces = [
+    task.title || '',
+    task.description || '',
+    typeof metadata.lane === 'string' ? metadata.lane : '',
+    typeof metadata.supports === 'string' ? metadata.supports : '',
+    Array.isArray(task.tags) ? task.tags.join(' ') : '',
+    Array.isArray(metadata.tags) ? metadata.tags.filter((v): v is string => typeof v === 'string').join(' ') : '',
+  ].join(' ').toLowerCase()
+
+  if (/(content|copy|messaging|marketing|landing|docs|documentation|blog|social|brand)/i.test(pieces)) return 'content'
+  if (/(design|ux|ui|visual|polish|layout|figma)/i.test(pieces)) return 'design'
+  if (/(qa|review|validation|audit|compliance|security)/i.test(pieces)) return 'qa'
+  if (/(analysis|analytics|research|insight|metrics|reporting)/i.test(pieces)) return 'analysis'
+  if (/(backend|api|database|migration|fastify|server|typescript)/i.test(pieces)) return 'backend'
+  if (/(ops|infra|ci|deploy|release|pipeline|watchdog|system)/i.test(pieces)) return 'ops'
+  return 'unknown'
+}
+
+function isEchoOutOfLaneTask(task: Task): boolean {
+  const assignee = (task.assignee || '').trim().toLowerCase()
+  if (assignee !== 'echo') return false
+  const role = getAgentRole('echo')
+  if (!role) return false
+
+  const domain = inferTaskWorkDomain(task)
+  if (domain === 'unknown' || domain === 'content') return false
+
+  const metadata = (task.metadata || {}) as Record<string, unknown>
+  if (hasExplicitReassignment(metadata)) return false
+
+  // For Echo, anything classified outside content/docs voice lane gets flagged unless reassigned.
+  return true
 }
 
 function enforceReviewHandoffGateForValidating(
@@ -3402,12 +3478,36 @@ export async function createServer(): Promise<FastifyInstance> {
     const allTasks = taskManager.listTasks({})
     const agents = [...new Set(allTasks.map(t => t.assignee).filter(Boolean))] as string[]
 
+    const outOfLaneFlags = allTasks
+      .filter((task) => task.status === 'doing' || task.status === 'validating')
+      .filter((task) => isEchoOutOfLaneTask(task))
+      .map((task) => {
+        const metadata = (task.metadata || {}) as Record<string, unknown>
+        return {
+          taskId: task.id,
+          assignee: task.assignee,
+          status: task.status,
+          inferredDomain: inferTaskWorkDomain(task),
+          reason: 'echo_out_of_lane_without_reassignment',
+          rerouteHint: 'Reassign to lane owner or add explicit reassignment metadata with reason.',
+          branch: typeof metadata.branch === 'string' ? metadata.branch : undefined,
+        }
+      })
+
+    const flaggedByAgent = new Map<string, number>()
+    for (const flag of outOfLaneFlags) {
+      const key = String(flag.assignee || '').toLowerCase()
+      if (!key) continue
+      flaggedByAgent.set(key, (flaggedByAgent.get(key) || 0) + 1)
+    }
+
     const agentHealth = agents.map(agent => {
       const agentTasks = allTasks.filter(t => (t.assignee || '').toLowerCase() === agent.toLowerCase())
       const doing = agentTasks.filter(t => t.status === 'doing').length
       const validating = agentTasks.filter(t => t.status === 'validating').length
       const todo = agentTasks.filter(t => t.status === 'todo').length
       const active = doing + validating
+      const outOfLaneCount = flaggedByAgent.get(agent.toLowerCase()) || 0
 
       return {
         agent,
@@ -3415,6 +3515,7 @@ export async function createServer(): Promise<FastifyInstance> {
         validating,
         todo,
         active,
+        outOfLaneCount,
         needsWork: active === 0 && todo === 0,
         lowWatermark: active < 1,
       }
@@ -3442,10 +3543,12 @@ export async function createServer(): Promise<FastifyInstance> {
             ? `${agentsNeedingWork.length} agents have no work: ${agentsNeedingWork.join(', ')}`
             : `Only ${totalTodo} tasks in backlog (threshold: 3)`
           : null,
+        outOfLaneFlags: outOfLaneFlags.length,
       },
       agents: agentHealth,
       agentsNeedingWork,
       agentsLowWatermark,
+      outOfLaneFlags,
     }
   })
 
