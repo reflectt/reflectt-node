@@ -363,8 +363,16 @@ async function sendHeartbeat(): Promise<void> {
   if (result.success || result.data) {
     state.lastHeartbeat = Date.now()
     state.heartbeatCount++
+    // Reset consecutive error count on success
+    if (state.errors > 0) {
+      console.log(`☁️  Heartbeat recovered after ${state.errors} errors`)
+      state.errors = 0
+    }
   } else {
     state.errors++
+    if (state.errors <= 5 || state.errors % 20 === 0) {
+      console.warn(`☁️  Heartbeat failed (${state.errors} consecutive): ${result.error}`)
+    }
   }
 }
 
@@ -554,6 +562,7 @@ async function syncTasks(): Promise<void> {
 
 /** Timestamp of last chat sync — only send messages newer than this */
 let chatSyncCursor: number = Date.now() - 60_000 // Start with last minute of history
+let chatSyncErrors = 0
 
 async function syncChat(): Promise<void> {
   if (!state.hostId || !config) return
@@ -586,6 +595,10 @@ async function syncChat(): Promise<void> {
 
   if (result.success && result.data) {
     state.lastChatSync = Date.now()
+    if (chatSyncErrors > 0) {
+      console.log(`☁️  [Chat] Sync recovered after ${chatSyncErrors} errors`)
+      chatSyncErrors = 0
+    }
 
     // Update cursor to now
     if (recentMessages.length > 0) {
@@ -610,10 +623,10 @@ async function syncChat(): Promise<void> {
       }
     }
   } else {
-    // Don't increment global error count for chat sync failures — it's non-critical
-    if (state.errors < 3) {
-      // Only log first few errors
-      console.warn(`☁️  [Chat] Sync failed: ${result.error}`)
+    chatSyncErrors++
+    // Log first few, then every 20th to avoid spam
+    if (chatSyncErrors <= 3 || chatSyncErrors % 20 === 0) {
+      console.warn(`☁️  [Chat] Sync failed (${chatSyncErrors}): ${result.error}`)
     }
   }
 }
@@ -656,7 +669,7 @@ async function cloudPost<T = unknown>(path: string, body: unknown): Promise<Clou
     const payload = await response.json() as T
     return { success: true, data: payload }
   } catch (err: any) {
-    state.errors++
+    // Don't increment errors here — callers handle error counting
     return { success: false, error: err?.message || 'Request failed' }
   }
 }
