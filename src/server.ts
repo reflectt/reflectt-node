@@ -26,7 +26,7 @@ import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus, FocusLevel } from './presence.js'
 import { analyticsManager } from './analytics.js'
 import { getDashboardHTML } from './dashboard.js'
-import { healthMonitor } from './health.js'
+import { healthMonitor, computeActiveLane } from './health.js'
 import { contentManager } from './content.js'
 import { experimentsManager } from './experiments.js'
 import { releaseManager } from './release.js'
@@ -2414,23 +2414,24 @@ export async function createServer(): Promise<FastifyInstance> {
     const additions = prData?.additions ?? 0
     const deletions = prData?.deletions ?? 0
     const changedFiles = prData?.changed_files ?? prFiles.length
-    const netChange = additions - deletions
+    const totalChurn = additions + deletions
     const commits = prData?.commits ?? 0
 
-    // Group files by directory prefix
+    // Group files by directory prefix (2-level for monorepo paths)
     const dirGroups: Record<string, { files: number; additions: number; deletions: number }> = {}
     for (const f of prFiles) {
-      const dir = (f.filename || '').split('/')[0] || '(root)'
+      const parts = (f.filename || '').split('/')
+      const dir = parts.length >= 3 ? `${parts[0]}/${parts[1]}` : parts[0] || '(root)'
       if (!dirGroups[dir]) dirGroups[dir] = { files: 0, additions: 0, deletions: 0 }
       dirGroups[dir].files++
       dirGroups[dir].additions += f.additions || 0
       dirGroups[dir].deletions += f.deletions || 0
     }
 
-    // Risk indicator
+    // Risk indicator (use total churn, not net — pure deletions are still large changes)
     let riskLevel: 'small' | 'medium' | 'large' = 'small'
-    if (netChange > 500 || changedFiles > 15) riskLevel = 'large'
-    else if (netChange > 100 || changedFiles > 5) riskLevel = 'medium'
+    if (totalChurn > 500 || changedFiles > 15) riskLevel = 'large'
+    else if (totalChurn > 100 || changedFiles > 5) riskLevel = 'medium'
 
     // Build CI check results
     const ciChecks = checkRuns.map((cr: any) => ({
@@ -2518,7 +2519,7 @@ export async function createServer(): Promise<FastifyInstance> {
         changedFiles,
         additions,
         deletions,
-        netChange,
+        totalChurn,
         commits,
         riskLevel,
         directories: Object.entries(dirGroups)
@@ -3557,6 +3558,55 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      // ── Auto-queue: on task completion, recommend next tasks to assignee ──
+      if (parsed.status === 'done' && existing.status !== 'done' && task.assignee) {
+        const assignee = task.assignee.toLowerCase()
+        const allTasks = taskManager.listTasks({})
+        const availableTasks = allTasks
+          .filter(t => t.status === 'todo' && (!t.assignee || t.assignee.toLowerCase() === assignee))
+          .sort((a, b) => {
+            // Priority ordering: P0 > P1 > P2 > P3
+            const priorityOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
+            const pa = priorityOrder[a.priority || 'P3'] ?? 3
+            const pb = priorityOrder[b.priority || 'P3'] ?? 3
+            if (pa !== pb) return pa - pb
+            // Older tasks first (tiebreaker)
+            return (a.createdAt || 0) - (b.createdAt || 0)
+          })
+
+        // Use suggest-assignee for smarter recommendations when available
+        const top2 = availableTasks.slice(0, 2)
+
+        if (top2.length > 0) {
+          const taskLines = top2.map((t, i) => {
+            const dc = Array.isArray(t.done_criteria) ? t.done_criteria.slice(0, 2).join(', ') : ''
+            return `${i + 1}. [${t.priority || 'P3'}] ${t.id}: ${t.title}\n   Done: ${dc}\n   → Claim: PATCH /tasks/${t.id} { "status": "doing", "assignee": "${assignee}" }`
+          }).join('\n\n')
+
+          chatManager.sendMessage({
+            from: 'system',
+            content: `@${assignee} great work on ${task.id} (${task.title}) ✅\n\nReady for your next lane:\n\n${taskLines}\n\nReply with task ID to claim, or run /tasks/next to pull manually.`,
+            channel: 'task-notifications',
+            metadata: {
+              kind: 'auto-queue',
+              completedTaskId: task.id,
+              suggestedTaskIds: top2.map(t => t.id),
+            },
+          }).catch(() => {}) // Non-blocking
+        } else {
+          chatManager.sendMessage({
+            from: 'system',
+            content: `@${assignee} great work on ${task.id} (${task.title}) ✅\n\nQueue clear — no unassigned tasks available. Great work staying ahead!`,
+            channel: 'task-notifications',
+            metadata: {
+              kind: 'auto-queue',
+              completedTaskId: task.id,
+              suggestedTaskIds: [],
+            },
+          }).catch(() => {}) // Non-blocking
+        }
+      }
+
       // Route status-change notifications through agent preferences
       const notifMgr = getNotificationManager()
       const statusNotifTargets: Array<{ agent: string; type: 'taskAssigned' | 'taskCompleted' | 'reviewRequested' | 'statusChange' }> = []
@@ -3789,9 +3839,17 @@ export async function createServer(): Promise<FastifyInstance> {
           ? `Advance ${activeTask.id} and post artifact/PR checkpoint.`
           : 'Pull next task with /tasks/next and move it to doing.'
 
+    const activeLane = computeActiveLane(
+      agent,
+      tasks,
+      presence?.status,
+      presence?.lastUpdate,
+    )
+
     return {
       agent,
       timestamp: now,
+      active_lane: activeLane,
       activeTask,
       assignedTasks: assignedTasks.slice(0, 20),
       pendingReviews: pendingReviews.slice(0, 20),

@@ -1767,7 +1767,7 @@ function renderPrReviewPanel(data) {
     html += '<div class="pr-review-section-title">' + coverageIcon + ' Done Criteria (' + (summary.total - summary.none) + '/' + summary.total + ' aligned)</div>';
 
     alignment.criteria.forEach(function(c, i) {
-      const icon = c.confidence === 'high' ? '✅' : c.confidence === 'medium' ? '✅' : c.confidence === 'low' ? '⚠️' : '❌';
+      const icon = c.confidence === 'high' ? '✅' : c.confidence === 'medium' ? '🟡' : c.confidence === 'low' ? '⚠️' : '❌';
       html += '<div class="criterion-row">';
       html += '<div class="criterion-text"><span>' + icon + '</span> <span>' + esc(c.criterion) + '</span></div>';
       html += '<div class="criterion-evidence">';
