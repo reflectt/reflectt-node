@@ -428,13 +428,14 @@ function enforceQaBundleGateForValidating(
     const detail = missing.length > 0 ? ` Missing/invalid: ${missing.join(', ')}.` : ''
     return {
       ok: false,
-      error: `QA bundle required before validating.${detail}`,
-      hint: 'Include metadata.qa_bundle with lane, summary, changed_files[], artifact_links[], checks[], screenshot_proof[] (plus optional review_packet or non_code/config_only flags).',
+      error: `Review packet required before validating.${detail}`,
+      hint: 'Include metadata.qa_bundle.review_packet with: task_id, pr_url, commit, changed_files[], artifact_path, caveats (or use non_code=true/config_only=true with artifact evidence).',
     }
   }
 
+  const nonCodeBundle = parsed.data.qa_bundle.non_code === true
   const reviewPacket = parsed.data.qa_bundle.review_packet
-  if (reviewPacket) {
+  if (reviewPacket && !nonCodeBundle) {
     if (expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
       return {
         ok: false,
