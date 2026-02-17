@@ -38,6 +38,7 @@ import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as tra
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import { getProvisioningManager } from './provisioning.js'
+import { getWebhookDeliveryManager } from './webhooks.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -4185,6 +4186,121 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, message: 'Webhook not found' }
     }
     return { success: true, message: 'Webhook removed' }
+  })
+
+  // ============ WEBHOOK DELIVERY ENGINE ============
+
+  const webhookDelivery = getWebhookDeliveryManager()
+  webhookDelivery.init()
+
+  app.addHook('onClose', async () => {
+    webhookDelivery.stop()
+  })
+
+  // Enqueue a webhook for delivery
+  app.post('/webhooks/deliver', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const provider = body?.provider as string
+    const eventType = body?.eventType as string
+    const payload = body?.payload
+    const targetUrl = body?.targetUrl as string
+    const idempotencyKey = body?.idempotencyKey as string | undefined
+    const metadata = body?.metadata as Record<string, unknown> | undefined
+
+    if (!provider || !eventType || !payload || !targetUrl) {
+      reply.code(400)
+      return { success: false, message: 'provider, eventType, payload, and targetUrl are required' }
+    }
+
+    const event = webhookDelivery.enqueue({
+      provider,
+      eventType,
+      payload,
+      targetUrl,
+      idempotencyKey,
+      metadata,
+    })
+
+    reply.code(201)
+    return { success: true, event }
+  })
+
+  // Get webhook event by ID
+  app.get<{ Params: { id: string } }>('/webhooks/events/:id', async (request, reply) => {
+    const event = webhookDelivery.get(request.params.id)
+    if (!event) {
+      reply.code(404)
+      return { success: false, message: 'Webhook event not found' }
+    }
+    return { success: true, event }
+  })
+
+  // List webhook events with filters
+  app.get('/webhooks/events', async (request) => {
+    const query = request.query as Record<string, string>
+    const events = webhookDelivery.list({
+      status: query.status as any,
+      provider: query.provider,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      offset: query.offset ? parseInt(query.offset, 10) : undefined,
+    })
+    return { success: true, events, count: events.length }
+  })
+
+  // Dead letter queue
+  app.get('/webhooks/dlq', async (request) => {
+    const query = request.query as Record<string, string>
+    const limit = query.limit ? parseInt(query.limit, 10) : 50
+    const events = webhookDelivery.getDeadLetterQueue(limit)
+    return { success: true, events, count: events.length }
+  })
+
+  // Replay a webhook (resend from audit trail)
+  app.post<{ Params: { id: string } }>('/webhooks/events/:id/replay', async (request, reply) => {
+    const event = webhookDelivery.replay(request.params.id)
+    if (!event) {
+      reply.code(404)
+      return { success: false, message: 'Webhook event not found' }
+    }
+    reply.code(201)
+    return { success: true, event, message: 'Webhook replayed with new idempotency key' }
+  })
+
+  // Webhook delivery stats
+  app.get('/webhooks/stats', async () => {
+    return {
+      success: true,
+      stats: webhookDelivery.getStats(),
+      config: webhookDelivery.getConfig(),
+    }
+  })
+
+  // Get/update webhook delivery config
+  app.patch('/webhooks/config', async (request) => {
+    const body = request.body as Partial<Record<string, unknown>>
+    const patch: Record<string, unknown> = {}
+
+    if (typeof body?.maxAttempts === 'number') patch.maxAttempts = body.maxAttempts
+    if (typeof body?.initialBackoffMs === 'number') patch.initialBackoffMs = body.initialBackoffMs
+    if (typeof body?.maxBackoffMs === 'number') patch.maxBackoffMs = body.maxBackoffMs
+    if (typeof body?.backoffMultiplier === 'number') patch.backoffMultiplier = body.backoffMultiplier
+    if (typeof body?.retentionMs === 'number') patch.retentionMs = body.retentionMs
+    if (typeof body?.deliveryTimeoutMs === 'number') patch.deliveryTimeoutMs = body.deliveryTimeoutMs
+    if (typeof body?.maxConcurrent === 'number') patch.maxConcurrent = body.maxConcurrent
+
+    const config = webhookDelivery.updateConfig(patch as any)
+    return { success: true, config }
+  })
+
+  // Lookup by idempotency key
+  app.get('/webhooks/idempotency/:key', async (request, reply) => {
+    const params = request.params as { key: string }
+    const event = webhookDelivery.getByIdempotencyKey(params.key)
+    if (!event) {
+      reply.code(404)
+      return { success: false, message: 'No webhook found for this idempotency key' }
+    }
+    return { success: true, event }
   })
 
   app.get('/runtime/truth', async () => {

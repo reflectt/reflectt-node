@@ -295,6 +295,14 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/provisioning/webhooks` | List configured webhook routes for this host. |
 | POST | `/provisioning/webhooks` | Add a webhook route. Body: `{ provider, path?, events?, active? }`. |
 | DELETE | `/provisioning/webhooks/:id` | Remove a webhook route by ID. |
+| POST | `/webhooks/deliver` | Enqueue a webhook for durable delivery. Body: `{ provider, eventType, payload, targetUrl, idempotencyKey?, metadata? }`. Returns event with idempotency key. |
+| GET | `/webhooks/events` | List webhook events. Query: `status`, `provider`, `limit`, `offset`. |
+| GET | `/webhooks/events/:id` | Get a webhook event by ID. |
+| POST | `/webhooks/events/:id/replay` | Replay a webhook: re-enqueue with new idempotency key. Original preserved in audit trail. |
+| GET | `/webhooks/dlq` | Dead letter queue: list permanently failed webhook deliveries. Query: `limit`. |
+| GET | `/webhooks/stats` | Webhook delivery statistics: counts by status, config, oldest pending. |
+| PATCH | `/webhooks/config` | Update webhook delivery config (maxAttempts, backoff, retention, timeout, concurrency). |
+| GET | `/webhooks/idempotency/:key` | Lookup webhook event by idempotency key. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
 ## Team
