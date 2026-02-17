@@ -2973,8 +2973,9 @@ export async function createServer(): Promise<FastifyInstance> {
   // Task intake schema (discovery endpoint)
   app.get('/tasks/intake-schema', async () => {
     return {
-      required: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority'],
-      optional: ['type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'teamId', 'metadata'],
+      required: ['title', 'assignee', 'done_criteria', 'eta', 'createdBy', 'priority'],
+      optional: ['type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'teamId', 'metadata', 'reviewer'],
+      notes: { reviewer: 'Defaults to "auto" — load-balanced assignment based on role, affinity, and SLA risk. Set explicitly to override.' },
       types: TASK_TYPES,
       templates: TASK_TEMPLATES,
       type_requirements: {
@@ -3044,7 +3045,7 @@ export async function createServer(): Promise<FastifyInstance> {
           const allTasks = taskManager.listTasks({})
           const reviewerSuggestion = suggestReviewer(
             { title: rest.title, assignee: rest.assignee, tags: (rest.metadata as Record<string, unknown> | undefined)?.tags as string[] | undefined, done_criteria: rest.done_criteria },
-            allTasks.map(t => ({ id: t.id, title: t.title, status: t.status, assignee: t.assignee, tags: t.metadata?.tags as string[] | undefined, metadata: t.metadata })),
+            allTasks.map(t => ({ id: t.id, title: t.title, status: t.status, assignee: t.assignee, reviewer: t.reviewer, tags: t.metadata?.tags as string[] | undefined, metadata: t.metadata })),
           )
           reviewerScores = reviewerSuggestion.scores
           if (reviewerSuggestion.suggested) {

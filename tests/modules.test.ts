@@ -999,7 +999,7 @@ describe('Task Intake Schema Enforcement', () => {
     const res = await req('GET', '/tasks/intake-schema')
     expect(res.status).toBe(200)
     expect(res.body.required).toContain('title')
-    expect(res.body.required).toContain('reviewer')
+    expect(res.body.optional).toContain('reviewer') // auto-assigned when omitted
     expect(res.body.required).toContain('done_criteria')
     expect(res.body.required).toContain('priority')
     expect(res.body.templates).toBeDefined()
