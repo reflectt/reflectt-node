@@ -45,6 +45,7 @@ import { getConnectivityManager } from './connectivity.js'
 import { boardHealthWorker } from './boardHealthWorker.js'
 import { buildAgentFeed, type FeedEventKind } from './changeFeed.js'
 import { policyManager } from './policy.js'
+import { resolveRoute, getRoutingLog, getRoutingStats, type MessageSeverity, type MessageCategory } from './messageRouter.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -2867,6 +2868,43 @@ export async function createServer(): Promise<FastifyInstance> {
     const reset = policyManager.reset()
     boardHealthWorker.updateConfig(reset.boardHealth)
     return { success: true, policy: reset }
+  })
+
+  // ── Message routing endpoints ───────────────────────────────────────
+
+  // Routing stats (channel hygiene observability)
+  app.get('/routing/stats', async () => {
+    return { success: true, ...getRoutingStats() }
+  })
+
+  // Routing log (recent routing decisions)
+  app.get<{ Querystring: { limit?: string; since?: string; category?: string; severity?: string } }>(
+    '/routing/log',
+    async (request) => {
+      const { limit, since, category, severity } = request.query
+      const log = getRoutingLog({
+        limit: limit ? Number(limit) : 50,
+        since: since ? Number(since) : undefined,
+        category: category as MessageCategory | undefined,
+        severity: severity as MessageSeverity | undefined,
+      })
+      return { success: true, count: log.length, entries: log }
+    },
+  )
+
+  // Dry-run route resolution (preview where a message would go)
+  app.post('/routing/resolve', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const decision = resolveRoute({
+      from: (body.from as string) || 'system',
+      content: (body.content as string) || '',
+      severity: body.severity as MessageSeverity | undefined,
+      category: body.category as MessageCategory | undefined,
+      taskId: body.taskId as string | undefined,
+      forceChannel: body.forceChannel as string | undefined,
+      mentions: body.mentions as string[] | undefined,
+    })
+    return { success: true, decision }
   })
 
   // Update task

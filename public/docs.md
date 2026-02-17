@@ -330,6 +330,9 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/policy` | Get unified policy config (quiet hours, idle nudge, cadence watchdog, board health, escalation thresholds). |
 | PATCH | `/policy` | Update policy config at runtime (deep-merged, persisted to ~/.reflectt/policy.json). Propagates to running workers. |
 | POST | `/policy/reset` | Reset policy to defaults + env overrides. |
+| GET | `/routing/stats` | Message routing stats: total routed, by channel/category/severity, general vs ops count. |
+| GET | `/routing/log` | Recent routing decisions. Query: `?limit=50&since=timestamp&category=watchdog-alert&severity=warning`. |
+| POST | `/routing/resolve` | Dry-run route resolution. Body: `{ from, content, severity?, category?, taskId?, mentions? }`. Returns where message would go. |
 | GET | `/health/watchdog/suppression` | Watchdog de-noise config: show all suppression rules, thresholds, and what activity types prevent re-firing. | Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 

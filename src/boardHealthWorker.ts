@@ -14,6 +14,7 @@
 
 import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
+import { routeMessage } from './messageRouter.js'
 import type { Task } from './types.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -258,10 +259,13 @@ export class BoardHealthWorker {
 
         // Notify the assignee
         if (task.assignee) {
-          await chatManager.sendMessage({
+          await routeMessage({
             from: 'system',
-            channel: this.config.digestChannel,
             content: `⚠️ Board health: auto-blocked **${task.id}** (${task.title}) — ${staleMinutes}m with no activity. @${task.assignee} update status or rollback via \`POST /board-health/rollback/${action.id}\`.`,
+            category: 'watchdog-alert',
+            severity: 'warning',
+            taskId: task.id,
+            mentions: [task.assignee],
           })
         }
       } catch {
@@ -401,10 +405,11 @@ export class BoardHealthWorker {
     }
 
     if (!dryRun) {
-      await chatManager.sendMessage({
+      await routeMessage({
         from: 'system',
-        channel: this.config.digestChannel,
         content: summary,
+        category: 'digest',
+        severity: 'info',
       }).catch(() => {})
 
       // Log digest as audit action
@@ -467,10 +472,12 @@ export class BoardHealthWorker {
         action.rolledBackAt = now
         action.rollbackBy = rolledBackBy
 
-        await chatManager.sendMessage({
+        await routeMessage({
           from: 'system',
-          channel: this.config.digestChannel,
           content: `↩️ Board health rollback: **${action.taskId}** restored to \`${prev.status}\` (action ${actionId} reversed by ${rolledBackBy}).`,
+          category: 'system-info',
+          severity: 'info',
+          taskId: action.taskId || undefined,
         }).catch(() => {})
 
         return { success: true, message: `Rolled back action ${actionId}`, action }

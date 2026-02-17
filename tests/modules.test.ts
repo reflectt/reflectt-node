@@ -799,3 +799,113 @@ describe('PolicyConfig', () => {
     expect(typeof p.escalation.defaultChannel).toBe('string')
   })
 })
+
+// ── Message Router Tests ──
+
+describe('MessageRouter', () => {
+  it('GET /routing/stats returns routing statistics', async () => {
+    const res = await req('GET', '/routing/stats')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(typeof res.body.totalRouted).toBe('number')
+    expect(typeof res.body.generalCount).toBe('number')
+    expect(typeof res.body.opsCount).toBe('number')
+    expect(typeof res.body.byChannel).toBe('object')
+    expect(typeof res.body.byCategory).toBe('object')
+    expect(typeof res.body.bySeverity).toBe('object')
+  })
+
+  it('GET /routing/log returns recent routing decisions', async () => {
+    const res = await req('GET', '/routing/log')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(Array.isArray(res.body.entries)).toBe(true)
+    expect(typeof res.body.count).toBe('number')
+  })
+
+  it('POST /routing/resolve routes escalation to general', async () => {
+    const res = await req('POST', '/routing/resolve', {
+      from: 'system',
+      content: 'escalation: agent idle for 90m',
+      category: 'escalation',
+      severity: 'warning',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.decision.channel).toBe('general')
+  })
+
+  it('POST /routing/resolve routes watchdog to ops', async () => {
+    const res = await req('POST', '/routing/resolve', {
+      from: 'system',
+      content: 'system watchdog: stale working',
+      category: 'watchdog-alert',
+      severity: 'info',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.decision.channel).toBe('ops')
+  })
+
+  it('POST /routing/resolve routes digest to configured channel', async () => {
+    const res = await req('POST', '/routing/resolve', {
+      from: 'system',
+      content: 'Board health digest',
+      category: 'digest',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.decision).toBeDefined()
+  })
+
+  it('POST /routing/resolve routes mention-rescue to general', async () => {
+    const res = await req('POST', '/routing/resolve', {
+      from: 'system',
+      content: 'system fallback: mention received',
+      category: 'mention-rescue',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.decision.channel).toBe('general')
+  })
+
+  it('POST /routing/resolve routes ship notices to shipping', async () => {
+    const res = await req('POST', '/routing/resolve', {
+      from: 'link',
+      content: 'Shipped: new feature',
+      category: 'ship-notice',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.decision.channel).toBe('shipping')
+  })
+
+  it('POST /routing/resolve adds task comment when taskId present', async () => {
+    const res = await req('POST', '/routing/resolve', {
+      from: 'system',
+      content: 'status update on task',
+      category: 'status-update',
+      taskId: 'task-123',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.decision.alsoComment).toBe(true)
+  })
+
+  it('POST /routing/resolve respects forceChannel', async () => {
+    const res = await req('POST', '/routing/resolve', {
+      from: 'system',
+      content: 'custom routed message',
+      forceChannel: 'dev',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.decision.channel).toBe('dev')
+    expect(res.body.decision.reason).toBe('force-channel')
+  })
+
+  it('POST /routing/resolve critical severity always goes to general', async () => {
+    const res = await req('POST', '/routing/resolve', {
+      from: 'system',
+      content: 'some info message',
+      category: 'system-info',
+      severity: 'critical',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.decision.channel).toBe('general')
+  })
+})

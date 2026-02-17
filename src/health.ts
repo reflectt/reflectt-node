@@ -16,6 +16,7 @@ import { dirname, resolve } from 'node:path'
 import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
+import { routeMessage } from './messageRouter.js'
 import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
 
@@ -1215,7 +1216,7 @@ class TeamHealthMonitor {
           alerts.push(content)
 
           if (!dryRun) {
-            await chatManager.sendMessage({ from: 'system', channel: 'general', content })
+            await routeMessage({ from: 'system', content, category: 'escalation', severity: 'warning', mentions: ['kai', 'link', 'pixel'] })
             await this.logWatchdogIncident({
               type: 'trio_general_silence',
               at: now,
@@ -1268,7 +1269,7 @@ class TeamHealthMonitor {
       alerts.push(content)
 
       if (!dryRun) {
-        await chatManager.sendMessage({ from: 'system', channel: 'general', content })
+        await routeMessage({ from: 'system', content, category: 'watchdog-alert', severity: 'info', taskId: task.id, mentions: [agent, 'kai', 'pixel'] })
         await this.logWatchdogIncident({
           type: 'stale_working',
           at: now,
@@ -1338,7 +1339,7 @@ class TeamHealthMonitor {
       rescued.push(content)
 
       if (!dryRun) {
-        await chatManager.sendMessage({ from: 'system', channel: 'general', content })
+        await routeMessage({ from: 'system', content, category: 'mention-rescue', severity: 'warning' })
         this.mentionRescueState.set(mentionId, now)
         this.mentionRescueLastAt = now
       }
@@ -1550,10 +1551,13 @@ class TeamHealthMonitor {
         continue
       }
 
-      await chatManager.sendMessage({
+      await routeMessage({
         from: 'system',
-        channel: 'general',
         content: renderedMessage,
+        category: 'watchdog-alert',
+        severity: tier === 2 ? 'warning' : 'info',
+        taskId: taskId || undefined,
+        mentions: tier === 2 ? [agent, 'kai'] : [agent],
       })
 
       const unchangedNudgeCount = state && state.lastSignature === signature

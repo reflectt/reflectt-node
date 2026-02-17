@@ -7,6 +7,7 @@ export const CHANNEL_DEFINITIONS = [
   { id: 'shipping', name: 'Shipping' },
   { id: 'reviews', name: 'Reviews' },
   { id: 'blockers', name: 'Blockers' },
+  { id: 'ops', name: 'Ops' },
   // Legacy channels retained for compatibility with historical workflows.
   { id: 'problems', name: 'Problems & Ideas' },
   { id: 'dev', name: 'Development' },
