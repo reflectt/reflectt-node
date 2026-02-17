@@ -4614,6 +4614,40 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, state: connectivity.getState() }
   })
 
+  // ============ WATCHDOG DE-NOISE ============
+
+  // Watchdog suppression status: show what's being suppressed and why
+  app.get('/health/watchdog/suppression', async () => {
+    const suppressionConfig = {
+      idleNudge: {
+        enabled: process.env.IDLE_NUDGE_ENABLED !== 'false',
+        warnMin: Number(process.env.IDLE_NUDGE_WARN_MIN || 45),
+        escalateMin: Number(process.env.IDLE_NUDGE_ESCALATE_MIN || 60),
+        cooldownMin: Number(process.env.IDLE_NUDGE_COOLDOWN_MIN || 20),
+        suppressRecentMin: Number(process.env.IDLE_NUDGE_SUPPRESS_RECENT_MIN || 20),
+        shipCooldownMin: Number(process.env.IDLE_NUDGE_SHIP_COOLDOWN_MIN || 30),
+      },
+      cadence: {
+        enabled: process.env.CADENCE_WATCHDOG_ENABLED !== 'false',
+        silenceMin: Number(process.env.CADENCE_SILENCE_MIN || 60),
+        workingStaleMin: Number(process.env.CADENCE_WORKING_STALE_MIN || 45),
+        alertCooldownMin: Number(process.env.CADENCE_ALERT_COOLDOWN_MIN || 30),
+      },
+      mentionRescue: {
+        enabled: process.env.MENTION_RESCUE_ENABLED !== 'false',
+        delayMin: Number(process.env.MENTION_RESCUE_DELAY_MIN || 0),
+        cooldownMin: Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10),
+        globalCooldownMin: Number(process.env.MENTION_RESCUE_GLOBAL_COOLDOWN_MIN || 5),
+      },
+      deNoise: {
+        description: 'Enhanced suppression: checks for any agent activity (messages, task comments, status changes) since last alert before re-firing',
+        activityTypes: ['chat messages', 'task comments', 'task status changes'],
+      },
+    }
+
+    return { success: true, config: suppressionConfig }
+  })
+
   app.get('/runtime/truth', async () => {
     const build = getBuildInfo()
     const deploy = await releaseManager.getDeployStatus()
