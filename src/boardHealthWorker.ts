@@ -15,6 +15,7 @@
 import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import { routeMessage } from './messageRouter.js'
+import { validateTaskTimestamp, verifyTaskExists } from './health.js'
 import type { Task } from './types.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -206,9 +207,14 @@ export class BoardHealthWorker {
     const doingTasks = taskManager.listTasks({ status: 'doing' })
 
     return doingTasks.filter(task => {
+      // Verify task still exists (guards against stale cache entries)
+      if (!verifyTaskExists(task.id)) return false
       const lastActivity = this.getTaskLastActivityAt(task)
       if (!lastActivity) return false
-      return now - lastActivity > thresholdMs
+      // Validate timestamp is within reasonable bounds
+      const validatedTs = validateTaskTimestamp(lastActivity, now)
+      if (!validatedTs) return false
+      return now - validatedTs > thresholdMs
     })
   }
 
@@ -286,13 +292,17 @@ export class BoardHealthWorker {
     )
 
     return candidates.filter(task => {
+      // Verify task still exists (guards against stale cache)
+      if (!verifyTaskExists(task.id)) return false
       const lastActivity = this.getTaskLastActivityAt(task)
       if (!lastActivity) {
-        // If no activity at all, check createdAt
-        const createdAt = typeof task.createdAt === 'number' ? task.createdAt : 0
-        return createdAt > 0 && now - createdAt > thresholdMs
+        // If no activity at all, check createdAt with validation
+        const createdAt = validateTaskTimestamp(task.createdAt, now)
+        return createdAt !== null && now - createdAt > thresholdMs
       }
-      return now - lastActivity > thresholdMs
+      const validatedTs = validateTaskTimestamp(lastActivity, now)
+      if (!validatedTs) return false
+      return now - validatedTs > thresholdMs
     })
   }
 
