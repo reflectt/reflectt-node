@@ -1,6 +1,6 @@
 # Task: Fix stale review-SLA alerts for deleted/closed tasks
 **ID:** task-1771362882812-c9rozxv2i  
-**Branch:** link/fix-stale-sla-alerts
+**Branch:** link/task-c9rozxv2i-v2
 
 ## Root Cause
 The watchdog cadence system and board health worker used raw timestamps without validation. When tasks were deleted (hard DELETE) between poll intervals, cached task lists could reference stale entries. Additionally, timestamps of 0 or impossibly old values produced alert ages like `9999m` or `Number.MAX_SAFE_INTEGER`.
@@ -18,14 +18,19 @@ The watchdog cadence system and board health worker used raw timestamps without 
 2. **`findAbandonedTasks()`** — Added `verifyTaskExists()` guard and `validateTaskTimestamp()` for both last-activity and createdAt timestamps.
 
 ### `tests/stale-sla-guards.test.ts`
-- 14 tests covering `validateTaskTimestamp` (bounds, edge cases, type coercion) and `verifyTaskExists` (nonexistent tasks).
+- 14 unit tests covering `validateTaskTimestamp` (bounds, edge cases, type coercion) and `verifyTaskExists` (nonexistent tasks).
+
+### `tests/api.test.ts` — Integration tests
+- `verifyTaskExists` returns null after hard DELETE (full API create → delete → verify flow)
+- `/health/team` staleDoing only contains tasks that still exist
+- staleDoing `stale_minutes` are bounded (no impossible durations > 24h)
 
 ## Done Criteria Verification
 | Criterion | Evidence |
 |-----------|----------|
 | SLA alert pipeline skips deleted tasks and validates current task existence | `verifyTaskExists()` called before every alert in both health.ts and boardHealthWorker.ts |
 | Alert age calculation uses valid timestamp bounds and avoids impossible durations | `validateTaskTimestamp()` rejects 0/NaN/negative/future/impossibly-old; staleMin capped at 24h |
-| Regression proof: stale/deleted task simulation does not emit reviewer alert | 14 unit tests pass including nonexistent task ID returning null |
+| Regression proof: stale/deleted task simulation does not emit reviewer alert | 14 unit tests + 3 integration tests pass; hard-DELETE flow verified end-to-end |
 
 ## Files Changed
 - `src/health.ts` — Added 2 exported functions + applied guards in 3 locations
