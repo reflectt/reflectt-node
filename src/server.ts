@@ -742,6 +742,21 @@ function extractArtifactPathsFromTask(task: Task): string[] {
   return Array.from(out)
 }
 
+function getDesignHandoffArtifactPath(metadata: Record<string, unknown>): string | undefined {
+  const artifactPath = metadata.artifact_path
+  if (typeof artifactPath === 'string' && artifactPath.trim().length > 0) {
+    return artifactPath.trim()
+  }
+
+  const artifacts = metadata.artifacts
+  if (Array.isArray(artifacts)) {
+    const firstPath = artifacts.find((item) => typeof item === 'string' && item.trim().length > 0)
+    if (typeof firstPath === 'string') return firstPath.trim()
+  }
+
+  return undefined
+}
+
 function parseGitHubPrUrl(prUrl: string): { owner: string; repo: string; pullNumber: number } | null {
   const match = prUrl.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:$|[/?#])/i)
   if (!match) return null
@@ -3813,6 +3828,37 @@ export async function createServer(): Promise<FastifyInstance> {
         ...(actor ? { actor } : {}),
       }
 
+      // ── Design→Implementation handoff detection ──
+      const previousStatus = existing.status
+      const nextStatus = parsed.status ?? existing.status
+      const laneHint = String((mergedMeta.lane || mergedMeta.supports || '')).toLowerCase()
+      const titleHint = `${existing.title || ''} ${(existing.description || '')}`.toLowerCase()
+      const isDesignLaneTask = laneHint.includes('design') || /\bdesign\b/.test(titleHint)
+      const isReadyTransition =
+        (nextStatus === 'validating' && previousStatus !== 'validating')
+        || (nextStatus === 'done' && previousStatus !== 'done')
+      const designHandoffArtifactPath = getDesignHandoffArtifactPath(mergedMeta)
+      const existingHandoffMeta = ((existing.metadata as Record<string, unknown> | undefined)?.design_handoff || {}) as Record<string, unknown>
+      const hasPriorDesignHandoff = typeof existingHandoffMeta.notifiedAt === 'number'
+      const shouldSendDesignHandoff = Boolean(
+        isDesignLaneTask
+        && isReadyTransition
+        && designHandoffArtifactPath
+        && !hasPriorDesignHandoff,
+      )
+
+      if (shouldSendDesignHandoff) {
+        nextMetadata.design_handoff = {
+          ...existingHandoffMeta,
+          notifiedAt: Date.now(),
+          notifiedForStatus: nextStatus,
+          notifiedTo: 'link',
+          sourceTaskId: lookup.resolvedId,
+          artifactPath: designHandoffArtifactPath,
+        }
+      }
+      // ── End design handoff detection ──
+
       if (parsed.status === 'done' && existing.status !== 'done') {
         const completedAt = Date.now()
         const outcomeMeta = ((nextMetadata.outcome_checkpoint as Record<string, unknown>) || {})
@@ -3833,7 +3879,31 @@ export async function createServer(): Promise<FastifyInstance> {
         reply.code(404)
         return { success: false, error: 'Task not found' }
       }
-      
+
+      // ── Send design→implementation handoff notification ──
+      if (shouldSendDesignHandoff && designHandoffArtifactPath) {
+        const acceptanceCriteria = (task.done_criteria || []).join(' | ')
+        const handoffMessage = [
+          `@link ${task.id} design-ready handoff from ${task.assignee || 'design-owner'}.`,
+          `Artifact: ${designHandoffArtifactPath}`,
+          `Acceptance criteria: ${acceptanceCriteria || 'Use task done_criteria from source task.'}`,
+          'Please claim implementation handoff and post execution plan.',
+        ].join(' ')
+
+        await chatManager.sendMessage({
+          from: 'system',
+          channel: 'reviews',
+          content: handoffMessage,
+          metadata: {
+            kind: 'design_implementation_handoff',
+            sourceTaskId: task.id,
+            artifactPath: designHandoffArtifactPath,
+            to: 'link',
+          },
+        }).catch(() => {})
+      }
+      // ── End design handoff notification ──
+
       // Auto-update presence on task activity
       if (task.assignee) {
         if (parsed.status === 'done') {
