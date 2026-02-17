@@ -1645,6 +1645,153 @@ function openTaskModal(taskId) {
   });
 
   document.getElementById('task-modal').classList.add('show');
+
+  // Load PR review quality panel
+  loadPrReviewPanel(currentTask);
+}
+
+function formatDuration(sec) {
+  if (sec == null) return '';
+  if (sec < 60) return sec + 's';
+  return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
+}
+
+async function loadPrReviewPanel(task) {
+  const panel = document.getElementById('pr-review-panel');
+  const loading = document.getElementById('pr-review-loading');
+  const content = document.getElementById('pr-review-content');
+  if (!panel || !loading || !content) return;
+
+  // Check if task might have PR data
+  const prUrl = extractTaskPrLink(task);
+  const isReviewable = task && (task.status === 'validating' || task.status === 'done' || prUrl);
+  if (!isReviewable) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+  loading.style.display = '';
+  content.style.display = 'none';
+
+  try {
+    const res = await fetch(BASE + '/tasks/' + encodeURIComponent(task.id) + '/pr-review');
+    const data = await res.json();
+
+    if (!data.available) {
+      panel.style.display = 'none';
+      return;
+    }
+
+    loading.style.display = 'none';
+    content.style.display = '';
+    content.innerHTML = renderPrReviewPanel(data);
+  } catch (e) {
+    panel.style.display = 'none';
+  }
+}
+
+function renderPrReviewPanel(data) {
+  const pr = data.pr || {};
+  const diff = data.diffScope || {};
+  const ci = data.ci || {};
+  const alignment = data.doneCriteriaAlignment || {};
+
+  let html = '';
+
+  // PR Header
+  html += '<div class="pr-review-header">';
+  html += '<div class="pr-title">' + esc(pr.title || 'PR #' + pr.number) + '</div>';
+  html += '<div class="pr-meta">';
+  html += (pr.state === 'closed' && pr.merged ? '🟣 Merged' : pr.state === 'closed' ? '🔴 Closed' : '🟢 Open');
+  html += ' · ' + esc(pr.author || 'unknown');
+  if (pr.updatedAt) html += ' · Updated ' + ago(new Date(pr.updatedAt).getTime());
+  html += ' · <a href="' + esc(pr.url) + '" target="_blank">View on GitHub ↗</a>';
+  html += '</div></div>';
+
+  // Diff Scope
+  html += '<div class="pr-review-section">';
+  html += '<div class="pr-review-section-title">📊 Diff Scope <span class="risk-badge ' + esc(diff.riskLevel || 'small') + '">' + esc(diff.riskLevel || 'small') + ' change</span></div>';
+  html += '<div class="diff-scope-grid">';
+  html += '<div class="diff-stat-card"><div class="stat-value">' + (diff.changedFiles || 0) + '</div><div class="stat-label">Files</div></div>';
+  html += '<div class="diff-stat-card"><div class="stat-value" style="color:var(--green)">+' + (diff.additions || 0) + '</div><div class="stat-label">Added</div></div>';
+  html += '<div class="diff-stat-card"><div class="stat-value" style="color:var(--red)">-' + (diff.deletions || 0) + '</div><div class="stat-label">Deleted</div></div>';
+  html += '<div class="diff-stat-card"><div class="stat-value">' + (diff.commits || 0) + '</div><div class="stat-label">Commits</div></div>';
+  html += '</div>';
+
+  // Directory breakdown
+  if (diff.directories && diff.directories.length > 0) {
+    html += '<div style="margin-top:6px">';
+    diff.directories.slice(0, 8).forEach(function(d) {
+      html += '<div class="dir-row">';
+      html += '<span class="dir-name">' + esc(d.dir) + '/</span>';
+      html += '<span class="dir-stats">' + d.files + ' file' + (d.files !== 1 ? 's' : '') + '  <span style="color:var(--green)">+' + d.additions + '</span> / <span style="color:var(--red)">-' + d.deletions + '</span></span>';
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // CI Checks
+  if (ci.total > 0 || (ci.qaBundleChecks && ci.qaBundleChecks.length > 0)) {
+    html += '<div class="pr-review-section">';
+    const allPass = ci.failed === 0 && ci.total > 0;
+    html += '<div class="pr-review-section-title">' + (allPass ? '✅' : '❌') + ' CI Checks (' + ci.passed + '/' + ci.total + ' passed)</div>';
+
+    ci.checks.forEach(function(c) {
+      const icon = c.conclusion === 'success' ? '✅' : c.conclusion === 'failure' ? '❌' : c.conclusion === 'skipped' ? '⏭️' : '⏳';
+      html += '<div class="ci-check-row">';
+      html += '<span class="check-icon">' + icon + '</span>';
+      html += '<span class="check-name">' + esc(c.name) + '</span>';
+      if (c.durationSec != null) html += '<span class="check-duration">' + formatDuration(c.durationSec) + '</span>';
+      if (c.detailsUrl) html += '<a href="' + esc(c.detailsUrl) + '" target="_blank">logs</a>';
+      html += '</div>';
+    });
+
+    // QA bundle manual checks
+    if (ci.qaBundleChecks && ci.qaBundleChecks.length > 0) {
+      html += '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);font-weight:600">Manual QA</div>';
+      ci.qaBundleChecks.forEach(function(c) {
+        html += '<div class="ci-check-row"><span class="check-icon">✓</span><span class="check-name" style="color:var(--text-muted)">' + esc(c) + '</span></div>';
+      });
+    }
+
+    html += '</div>';
+  }
+
+  // Done Criteria Alignment
+  if (alignment.criteria && alignment.criteria.length > 0) {
+    const summary = alignment.summary || {};
+    const coverageIcon = summary.none === 0 ? '✅' : summary.none <= 1 ? '⚠️' : '❌';
+    html += '<div class="pr-review-section">';
+    html += '<div class="pr-review-section-title">' + coverageIcon + ' Done Criteria (' + (summary.total - summary.none) + '/' + summary.total + ' aligned)</div>';
+
+    alignment.criteria.forEach(function(c, i) {
+      const icon = c.confidence === 'high' ? '✅' : c.confidence === 'medium' ? '🟡' : c.confidence === 'low' ? '⚠️' : '❌';
+      html += '<div class="criterion-row">';
+      html += '<div class="criterion-text"><span>' + icon + '</span> <span>' + esc(c.criterion) + '</span></div>';
+      html += '<div class="criterion-evidence">';
+      html += '<span class="confidence-badge ' + esc(c.confidence) + '">' + esc(c.confidence) + '</span>';
+      if (c.fileMatches && c.fileMatches.length > 0) {
+        html += '<div class="evidence-item">Files: ' + c.fileMatches.map(function(f) { return '<code style="font-size:10px">' + esc(f) + '</code>'; }).join(', ') + '</div>';
+      }
+      if (c.testMatches && c.testMatches.length > 0) {
+        html += '<div class="evidence-item">Tests: ' + c.testMatches.map(function(t) { return esc(t); }).join(', ') + '</div>';
+      }
+      if (c.hasArtifact) {
+        html += '<div class="evidence-item">Artifact: present</div>';
+      }
+      if (c.confidence === 'none') {
+        html += '<div class="evidence-item" style="color:var(--red)">⚠ No matching evidence — manual review needed</div>';
+      }
+      html += '</div></div>';
+    });
+
+    html += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px">Confidence: ' + summary.high + ' high, ' + summary.medium + ' medium, ' + summary.low + ' low, ' + summary.none + ' none</div>';
+    html += '</div>';
+  }
+
+  return html;
 }
 
 async function copyTaskId() {

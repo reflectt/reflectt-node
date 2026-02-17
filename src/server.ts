@@ -26,7 +26,7 @@ import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus, FocusLevel } from './presence.js'
 import { analyticsManager } from './analytics.js'
 import { getDashboardHTML } from './dashboard.js'
-import { healthMonitor } from './health.js'
+import { healthMonitor, computeActiveLane } from './health.js'
 import { contentManager } from './content.js'
 import { experimentsManager } from './experiments.js'
 import { releaseManager } from './release.js'
@@ -734,6 +734,13 @@ async function resolveArtifactEvidence(paths: string[]): Promise<Array<{ path: s
   return results
 }
 
+function githubHeaders(): Record<string, string> {
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN
+  const h: Record<string, string> = { Accept: 'application/vnd.github+json' }
+  if (token) h.Authorization = `Bearer ${token}`
+  return h
+}
+
 async function resolvePrAndCi(prUrl: string): Promise<{
   pr: {
     url: string
@@ -764,7 +771,7 @@ async function resolvePrAndCi(prUrl: string): Promise<{
 
   try {
     const prRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.pullNumber}`, {
-      headers: { Accept: 'application/vnd.github+json' },
+      headers: githubHeaders(),
     })
 
     if (!prRes.ok) {
@@ -794,7 +801,7 @@ async function resolvePrAndCi(prUrl: string): Promise<{
 
     if (headSha) {
       const statusRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits/${headSha}/status`, {
-        headers: { Accept: 'application/vnd.github+json' },
+        headers: githubHeaders(),
       })
       if (statusRes.ok) {
         const statusJson = await statusRes.json() as any
@@ -2345,6 +2352,206 @@ export async function createServer(): Promise<FastifyInstance> {
     return { comments, count: comments.length, resolvedId: resolved.resolvedId }
   })
 
+  // PR review quality panel data
+  app.get<{ Params: { id: string } }>('/tasks/:id/pr-review', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) return
+
+    const task = resolved.task as any
+    const meta = task.metadata || {}
+
+    // Extract PR URL from metadata (same logic as dashboard.js extractTaskPrLink)
+    const candidates: string[] = []
+    if (typeof meta.pr_url === 'string') candidates.push(meta.pr_url)
+    if (typeof meta.pr_link === 'string') candidates.push(meta.pr_link)
+    if (Array.isArray(meta.artifacts)) meta.artifacts.forEach((a: unknown) => { if (typeof a === 'string') candidates.push(a) })
+    if (meta.qa_bundle && Array.isArray(meta.qa_bundle.pr_link)) candidates.push(meta.qa_bundle.pr_link)
+    else if (typeof meta.qa_bundle?.pr_link === 'string') candidates.push(meta.qa_bundle.pr_link)
+    if (meta.qa_bundle && Array.isArray(meta.qa_bundle.artifact_links)) {
+      meta.qa_bundle.artifact_links.forEach((a: unknown) => { if (typeof a === 'string') candidates.push(a) })
+    }
+
+    const prUrlMatch = candidates.find(c => /https?:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/i.test(c)) || null
+    if (!prUrlMatch) {
+      return { available: false, message: 'No PR URL found in task metadata', taskId: resolved.resolvedId }
+    }
+
+    const parsed = parseGitHubPrUrl(prUrlMatch)
+    if (!parsed) {
+      return { available: false, message: 'Invalid PR URL format', taskId: resolved.resolvedId }
+    }
+
+    const hdrs = githubHeaders()
+
+    // Fetch PR details (including files changed)
+    let prData: any = null
+    let prFiles: any[] = []
+    let checkRuns: any[] = []
+
+    try {
+      const [prRes, filesRes] = await Promise.all([
+        fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.pullNumber}`, { headers: hdrs }),
+        fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.pullNumber}/files?per_page=100`, { headers: hdrs }),
+      ])
+
+      if (prRes.ok) prData = await prRes.json()
+      if (filesRes.ok) prFiles = (await filesRes.json()) as any[]
+    } catch { /* GitHub API unavailable — degrade gracefully */ }
+
+    // Fetch CI check runs
+    const headSha = prData?.head?.sha
+    if (headSha) {
+      try {
+        const checksRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits/${headSha}/check-runs?per_page=100`, { headers: hdrs })
+        if (checksRes.ok) {
+          const checksJson = await checksRes.json() as any
+          checkRuns = checksJson.check_runs || []
+        }
+      } catch { /* CI data unavailable */ }
+    }
+
+    // Build diff scope summary
+    const additions = prData?.additions ?? 0
+    const deletions = prData?.deletions ?? 0
+    const changedFiles = prData?.changed_files ?? prFiles.length
+    const totalChurn = additions + deletions
+    const commits = prData?.commits ?? 0
+
+    // Group files by directory prefix (2-level for monorepo paths)
+    const dirGroups: Record<string, { files: number; additions: number; deletions: number }> = {}
+    for (const f of prFiles) {
+      const parts = (f.filename || '').split('/')
+      const dir = parts.length >= 3 ? `${parts[0]}/${parts[1]}` : parts[0] || '(root)'
+      if (!dirGroups[dir]) dirGroups[dir] = { files: 0, additions: 0, deletions: 0 }
+      dirGroups[dir].files++
+      dirGroups[dir].additions += f.additions || 0
+      dirGroups[dir].deletions += f.deletions || 0
+    }
+
+    // Risk indicator (use total churn, not net — pure deletions are still large changes)
+    let riskLevel: 'small' | 'medium' | 'large' = 'small'
+    if (totalChurn > 500 || changedFiles > 15) riskLevel = 'large'
+    else if (totalChurn > 100 || changedFiles > 5) riskLevel = 'medium'
+
+    // Build CI check results
+    const ciChecks = checkRuns.map((cr: any) => ({
+      name: cr.name || 'unknown',
+      status: cr.status || 'unknown',
+      conclusion: cr.conclusion || null,
+      durationSec: cr.started_at && cr.completed_at
+        ? Math.round((new Date(cr.completed_at).getTime() - new Date(cr.started_at).getTime()) / 1000)
+        : null,
+      detailsUrl: cr.html_url || cr.details_url || null,
+    }))
+    const ciPassed = ciChecks.filter((c: any) => c.conclusion === 'success').length
+    const ciFailed = ciChecks.filter((c: any) => c.conclusion === 'failure').length
+    const ciTotal = ciChecks.length
+
+    // Also include QA bundle checks if present
+    const qaBundleChecks: string[] = Array.isArray(meta.qa_bundle?.checks) ? meta.qa_bundle.checks : []
+
+    // Done criteria alignment
+    const doneCriteria: string[] = Array.isArray(task.done_criteria) ? task.done_criteria : []
+    const fileNames = prFiles.map((f: any) => (f.filename || '').toLowerCase())
+    const allFileContent = prFiles.map((f: any) => (f.filename || '').toLowerCase()).join(' ')
+
+    const criteriaAlignment = doneCriteria.map((criterion: string) => {
+      // Extract keywords from criterion (words 4+ chars, skip common ones)
+      const stopWords = new Set(['should', 'shows', 'with', 'that', 'have', 'from', 'when', 'this', 'each', 'must', 'without', 'after', 'before', 'during', 'between', 'other', 'than', 'also', 'into', 'more', 'some', 'such', 'only', 'very', 'will', 'does', 'done', 'been', 'being', 'would', 'could', 'make', 'like', 'just', 'over', 'through'])
+      const keywords = criterion.toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 4 && !stopWords.has(w))
+
+      // Check if keywords appear in changed file paths
+      const fileMatches = keywords.filter(kw => allFileContent.includes(kw))
+
+      // Check if keywords appear in test/check names
+      const testMatches = keywords.filter(kw =>
+        ciChecks.some((c: any) => (c.name || '').toLowerCase().includes(kw)) ||
+        qaBundleChecks.some(c => c.toLowerCase().includes(kw))
+      )
+
+      // Check for artifact evidence
+      const hasArtifact = Array.isArray(meta.qa_bundle?.artifact_links) && meta.qa_bundle.artifact_links.length > 0
+
+      // Compute confidence
+      let confidence: 'high' | 'medium' | 'low' | 'none' = 'none'
+      if (fileMatches.length > 0 && (testMatches.length > 0 || hasArtifact)) confidence = 'high'
+      else if (fileMatches.length > 0) confidence = 'medium'
+      else if (testMatches.length > 0 || hasArtifact) confidence = 'low'
+
+      // Find specific matching files
+      const matchingFiles = fileNames.filter(fn => keywords.some(kw => fn.includes(kw)))
+
+      return {
+        criterion,
+        confidence,
+        keywords: keywords.slice(0, 8),
+        fileMatches: matchingFiles.slice(0, 5),
+        testMatches: testMatches.slice(0, 3),
+        hasArtifact,
+      }
+    })
+
+    const highCount = criteriaAlignment.filter(c => c.confidence === 'high').length
+    const mediumCount = criteriaAlignment.filter(c => c.confidence === 'medium').length
+    const lowCount = criteriaAlignment.filter(c => c.confidence === 'low').length
+    const noneCount = criteriaAlignment.filter(c => c.confidence === 'none').length
+
+    return {
+      available: true,
+      taskId: resolved.resolvedId,
+      pr: {
+        url: prUrlMatch,
+        number: parsed.pullNumber,
+        owner: parsed.owner,
+        repo: parsed.repo,
+        title: prData?.title || null,
+        state: prData?.state || null,
+        merged: Boolean(prData?.merged_at),
+        author: prData?.user?.login || null,
+        createdAt: prData?.created_at || null,
+        updatedAt: prData?.updated_at || null,
+        headSha: headSha || null,
+      },
+      diffScope: {
+        changedFiles,
+        additions,
+        deletions,
+        totalChurn,
+        commits,
+        riskLevel,
+        directories: Object.entries(dirGroups)
+          .sort((a, b) => b[1].files - a[1].files)
+          .map(([dir, stats]) => ({ dir, ...stats })),
+        files: prFiles.map((f: any) => ({
+          filename: f.filename,
+          additions: f.additions || 0,
+          deletions: f.deletions || 0,
+          status: f.status || 'modified',
+        })),
+      },
+      ci: {
+        total: ciTotal,
+        passed: ciPassed,
+        failed: ciFailed,
+        checks: ciChecks,
+        qaBundleChecks,
+      },
+      doneCriteriaAlignment: {
+        criteria: criteriaAlignment,
+        summary: {
+          total: doneCriteria.length,
+          high: highCount,
+          medium: mediumCount,
+          low: lowCount,
+          none: noneCount,
+        },
+      },
+    }
+  })
+
   // Add task comment
   app.post<{ Params: { id: string } }>('/tasks/:id/comments', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
@@ -3351,6 +3558,55 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      // ── Auto-queue: on task completion, recommend next tasks to assignee ──
+      if (parsed.status === 'done' && existing.status !== 'done' && task.assignee) {
+        const assignee = task.assignee.toLowerCase()
+        const allTasks = taskManager.listTasks({})
+        const availableTasks = allTasks
+          .filter(t => t.status === 'todo' && (!t.assignee || t.assignee.toLowerCase() === assignee))
+          .sort((a, b) => {
+            // Priority ordering: P0 > P1 > P2 > P3
+            const priorityOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
+            const pa = priorityOrder[a.priority || 'P3'] ?? 3
+            const pb = priorityOrder[b.priority || 'P3'] ?? 3
+            if (pa !== pb) return pa - pb
+            // Older tasks first (tiebreaker)
+            return (a.createdAt || 0) - (b.createdAt || 0)
+          })
+
+        // Use suggest-assignee for smarter recommendations when available
+        const top2 = availableTasks.slice(0, 2)
+
+        if (top2.length > 0) {
+          const taskLines = top2.map((t, i) => {
+            const dc = Array.isArray(t.done_criteria) ? t.done_criteria.slice(0, 2).join(', ') : ''
+            return `${i + 1}. [${t.priority || 'P3'}] ${t.id}: ${t.title}\n   Done: ${dc}\n   → Claim: PATCH /tasks/${t.id} { "status": "doing", "assignee": "${assignee}" }`
+          }).join('\n\n')
+
+          chatManager.sendMessage({
+            from: 'system',
+            content: `@${assignee} great work on ${task.id} (${task.title}) ✅\n\nReady for your next lane:\n\n${taskLines}\n\nReply with task ID to claim, or run /tasks/next to pull manually.`,
+            channel: 'task-notifications',
+            metadata: {
+              kind: 'auto-queue',
+              completedTaskId: task.id,
+              suggestedTaskIds: top2.map(t => t.id),
+            },
+          }).catch(() => {}) // Non-blocking
+        } else {
+          chatManager.sendMessage({
+            from: 'system',
+            content: `@${assignee} great work on ${task.id} (${task.title}) ✅\n\nQueue clear — no unassigned tasks available. Great work staying ahead!`,
+            channel: 'task-notifications',
+            metadata: {
+              kind: 'auto-queue',
+              completedTaskId: task.id,
+              suggestedTaskIds: [],
+            },
+          }).catch(() => {}) // Non-blocking
+        }
+      }
+
       // Route status-change notifications through agent preferences
       const notifMgr = getNotificationManager()
       const statusNotifTargets: Array<{ agent: string; type: 'taskAssigned' | 'taskCompleted' | 'reviewRequested' | 'statusChange' }> = []
@@ -3583,9 +3839,17 @@ export async function createServer(): Promise<FastifyInstance> {
           ? `Advance ${activeTask.id} and post artifact/PR checkpoint.`
           : 'Pull next task with /tasks/next and move it to doing.'
 
+    const activeLane = computeActiveLane(
+      agent,
+      tasks,
+      presence?.status,
+      presence?.lastUpdate,
+    )
+
     return {
       agent,
       timestamp: now,
+      active_lane: activeLane,
       activeTask,
       assignedTasks: assignedTasks.slice(0, 20),
       pendingReviews: pendingReviews.slice(0, 20),

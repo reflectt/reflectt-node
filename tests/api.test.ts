@@ -2395,3 +2395,100 @@ describe('Definition of Ready enforcement', () => {
     expect(status).toBe(400)
   })
 })
+
+// PR Review Quality Panel
+describe('PR Review Quality Panel', () => {
+  let taskId: string
+
+  it('returns available=false when task has no PR URL', async () => {
+    // Create a task without PR metadata
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: task without PR',
+      createdBy: 'test',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['Some criterion'],
+      eta: '1h',
+      priority: 'P3',
+    })
+    taskId = created.task.id
+
+    const { status, body } = await req('GET', `/tasks/${taskId}/pr-review`)
+    expect(status).toBe(200)
+    expect(body.available).toBe(false)
+    expect(body.taskId).toBe(taskId)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('returns available=true with PR data when task has pr_url', async () => {
+    // Create a task with a GitHub PR URL
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: task with PR',
+      createdBy: 'test',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['Dashboard shows diff summary', 'Test results inline'],
+      eta: '2h',
+      priority: 'P2',
+      metadata: {
+        pr_url: 'https://github.com/octocat/hello-world/pull/1',
+      },
+    })
+    taskId = created.task.id
+
+    const { status, body } = await req('GET', `/tasks/${taskId}/pr-review`)
+    expect(status).toBe(200)
+    expect(body.available).toBe(true)
+    expect(body.taskId).toBe(taskId)
+    expect(body.pr).toBeDefined()
+    expect(body.pr.number).toBe(1)
+    expect(body.pr.owner).toBe('octocat')
+    expect(body.pr.repo).toBe('hello-world')
+    expect(body.diffScope).toBeDefined()
+    expect(body.diffScope).toHaveProperty('riskLevel')
+    expect(body.ci).toBeDefined()
+    expect(body.doneCriteriaAlignment).toBeDefined()
+    expect(body.doneCriteriaAlignment.summary.total).toBe(2)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('extracts PR URL from qa_bundle.pr_link', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: task with qa_bundle PR',
+      createdBy: 'test',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['Feature works'],
+      eta: '1h',
+      priority: 'P3',
+      metadata: {
+        qa_bundle: {
+          lane: 'feature',
+          summary: 'test',
+          pr_link: 'https://github.com/octocat/hello-world/pull/2',
+          commit_shas: ['abc'],
+          changed_files: ['src/index.ts'],
+          artifact_links: [],
+          checks: ['npm test passed'],
+          screenshot_proof: ['proof.png'],
+        },
+      },
+    })
+    taskId = created.task.id
+
+    const { status, body } = await req('GET', `/tasks/${taskId}/pr-review`)
+    expect(status).toBe(200)
+    expect(body.available).toBe(true)
+    expect(body.pr.number).toBe(2)
+    expect(body.ci.qaBundleChecks).toContain('npm test passed')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('returns 404 for non-existent task', async () => {
+    const res = await app.inject({ method: 'GET', url: '/tasks/task-nonexistent-99999/pr-review' })
+    expect(res.statusCode).toBe(404)
+  })
+})

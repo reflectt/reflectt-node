@@ -43,6 +43,34 @@ export interface TeamHealthMetrics {
   }
 }
 
+export type ActiveLane = 'doing' | 'blocked' | 'validating' | 'queue-clear' | 'offline'
+
+/**
+ * Compute per-agent active lane from task board + presence data.
+ * Priority: doing > blocked > validating > offline > queue-clear
+ */
+export function computeActiveLane(
+  agentName: string,
+  tasks: Pick<Task, 'assignee' | 'status'>[],
+  presenceStatus?: string,
+  lastSeenMs?: number,
+  offlineThresholdMs = 15 * 60 * 1000,
+  now = Date.now(),
+): ActiveLane {
+  const agent = agentName.toLowerCase()
+  const agentTasks = tasks.filter(t => (t.assignee || '').toLowerCase() === agent)
+
+  if (agentTasks.some(t => t.status === 'doing')) return 'doing'
+  if (agentTasks.some(t => t.status === 'blocked')) return 'blocked'
+  if (agentTasks.some(t => t.status === 'validating')) return 'validating'
+
+  // Check if offline via presence
+  if (presenceStatus === 'offline') return 'offline'
+  if (lastSeenMs !== undefined && lastSeenMs > 0 && (now - lastSeenMs) >= offlineThresholdMs) return 'offline'
+
+  return 'queue-clear'
+}
+
 export interface AgentHealthSummaryRow {
   agent: string
   last_seen: number
@@ -53,6 +81,7 @@ export interface AgentHealthSummaryRow {
   stale_reason: string | null
   idle_with_active_task: boolean
   state: 'healthy' | 'idle' | 'stuck' | 'offline'
+  active_lane: ActiveLane
 }
 
 export interface ActionableReasonBlock {
@@ -185,6 +214,7 @@ export type IdleNudgeDecision = {
     | 'presence-task-mismatch'
     | 'recent-task-comment'
     | 'task-focus-window'
+    | 'queue-clear'
     | 'eligible'
   lane: IdleNudgeLaneState
   renderedMessage: string | null
@@ -364,6 +394,7 @@ class TeamHealthMonitor {
 
   async getAgentHealthSummary(now = Date.now()): Promise<{ agents: AgentHealthSummaryRow[]; thresholds: { healthyMaxMs: number; stuckMinMs: number; offlineMinMs: number }; timestamp: number }> {
     const agents = await this.getAgentHealthStatuses(now)
+    const allTasks = taskManager.listTasks({})
 
     const healthyMaxMs = 45 * 60 * 1000
     const stuckMinMs = 60 * 60 * 1000
@@ -385,6 +416,9 @@ class TeamHealthMonitor {
         staleReason = 'heartbeat-age-over-45m'
       }
 
+      const presenceStatus = state === 'offline' ? 'offline' : undefined
+      const activeLane = computeActiveLane(agent.agent, allTasks, presenceStatus, agent.lastSeen, offlineMinMs, now)
+
       return {
         agent: agent.agent,
         last_seen: agent.lastSeen,
@@ -395,6 +429,7 @@ class TeamHealthMonitor {
         stale_reason: staleReason,
         idle_with_active_task: agent.idleWithActiveTask,
         state,
+        active_lane: activeLane,
       }
     })
 
@@ -1402,6 +1437,13 @@ class TeamHealthMonitor {
 
       if (presence.status === 'offline') {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'offline', renderedMessage: null })
+        continue
+      }
+
+      // Suppress nudges for agents with no assigned work (queue-clear)
+      const activeLane = computeActiveLane(agent, tasks, presence.status, undefined, undefined, now)
+      if (activeLane === 'queue-clear') {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'queue-clear', renderedMessage: null })
         continue
       }
 

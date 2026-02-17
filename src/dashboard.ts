@@ -837,6 +837,68 @@ export function getDashboardHTML(): string {
   .qa-contract .qa-value.missing { color: var(--yellow); font-style: italic; }
   .qa-contract .qa-value.has-artifact { color: var(--green); }
 
+  /* PR Review Quality Panel */
+  .pr-review-section { margin-bottom: 14px; }
+  .pr-review-section-title {
+    font-size: 12px; font-weight: 600; color: var(--text-bright);
+    margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
+  }
+  .pr-review-header {
+    padding: 10px 12px; background: var(--surface-raised); border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle); margin-bottom: 10px;
+  }
+  .pr-review-header .pr-title { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+  .pr-review-header .pr-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .pr-review-header a { color: var(--accent); text-decoration: none; }
+  .pr-review-header a:hover { text-decoration: underline; }
+  .diff-scope-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px;
+    margin-bottom: 8px;
+  }
+  .diff-stat-card {
+    padding: 8px 10px; background: var(--surface-raised); border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle); text-align: center;
+  }
+  .diff-stat-card .stat-value { font-size: 16px; font-weight: 700; color: var(--text-bright); }
+  .diff-stat-card .stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.3px; }
+  .risk-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 600;
+  }
+  .risk-badge.small { background: rgba(76,175,80,0.15); color: var(--green); }
+  .risk-badge.medium { background: rgba(255,193,7,0.15); color: var(--yellow); }
+  .risk-badge.large { background: rgba(244,67,54,0.15); color: var(--red); }
+  .dir-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 3px 0; font-size: 11px; border-bottom: 1px solid var(--border-subtle);
+  }
+  .dir-row:last-child { border-bottom: none; }
+  .dir-name { color: var(--text-bright); font-family: monospace; font-size: 11px; }
+  .dir-stats { color: var(--text-muted); font-size: 10px; }
+  .ci-check-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 0; font-size: 11px;
+  }
+  .ci-check-row .check-icon { font-size: 13px; flex-shrink: 0; }
+  .ci-check-row .check-name { color: var(--text-bright); flex: 1; }
+  .ci-check-row .check-duration { color: var(--text-dim); font-size: 10px; }
+  .ci-check-row a { color: var(--accent); text-decoration: none; font-size: 10px; }
+  .criterion-row {
+    padding: 6px 8px; margin-bottom: 4px; border-radius: var(--radius-sm);
+    background: var(--surface-raised); border: 1px solid var(--border-subtle);
+  }
+  .criterion-row .criterion-text { font-size: 12px; color: var(--text-bright); margin-bottom: 4px; display: flex; align-items: flex-start; gap: 6px; }
+  .criterion-row .criterion-evidence { font-size: 10px; color: var(--text-muted); padding-left: 20px; }
+  .criterion-row .criterion-evidence .evidence-item { margin-top: 2px; }
+  .confidence-badge {
+    display: inline-block; padding: 1px 6px; border-radius: 8px;
+    font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .confidence-badge.high { background: rgba(76,175,80,0.15); color: var(--green); }
+  .confidence-badge.medium { background: rgba(255,193,7,0.15); color: var(--yellow); }
+  .confidence-badge.low { background: rgba(255,152,0,0.15); color: #ff9800; }
+  .confidence-badge.none { background: rgba(244,67,54,0.15); color: var(--red); }
+
   /* Focus mode: dim agent cards not working on active tasks */
   body.focus-mode .agent-card:not(.active) {
     opacity: 0.25;
@@ -1019,6 +1081,14 @@ export function getDashboardHTML(): string {
       <div class="modal-section">
         <div class="modal-label">Blocked by</div>
         <div class="modal-value" id="modal-task-blockers"></div>
+      </div>
+
+      <!-- PR Review Quality Panel -->
+      <div id="pr-review-panel" style="display:none">
+        <div style="border-top:1px solid var(--border-subtle);margin-top:16px;padding-top:16px">
+          <div id="pr-review-loading" style="color:var(--text-dim);font-size:12px">Loading PR review data…</div>
+          <div id="pr-review-content" style="display:none"></div>
+        </div>
       </div>
     </div>
   </div>
