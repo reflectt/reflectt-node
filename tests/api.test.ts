@@ -1232,9 +1232,10 @@ describe('Task Close Gate', () => {
     expect(body.gate).toBe('reviewer_signoff')
   })
 
-  it('accepts done with artifacts + reviewer sign-off', async () => {
+  it('accepts done with artifacts + reviewer sign-off from assigned reviewer', async () => {
     const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
       status: 'done',
+      actor: 'test-reviewer',
       metadata: {
         artifacts: ['test-evidence'],
         reviewer_approved: true,
@@ -1265,6 +1266,7 @@ describe('Task close follow-on linkage gate', () => {
 
     const result = await req('PATCH', `/tasks/${specTaskId}`, {
       status: 'done',
+      actor: 'test-reviewer',
       metadata: {
         artifacts: ['process/TASK-spec-proof.md'],
         reviewer_approved: true,
@@ -1306,6 +1308,7 @@ describe('Task close follow-on linkage gate', () => {
 
     const result = await req('PATCH', `/tasks/${specTaskId}`, {
       status: 'done',
+      actor: 'test-reviewer',
       metadata: {
         artifacts: ['process/TASK-spec-proof.md'],
         reviewer_approved: true,
@@ -1339,6 +1342,7 @@ describe('Task close follow-on linkage gate', () => {
 
     const result = await req('PATCH', `/tasks/${taskId}`, {
       status: 'done',
+      actor: 'test-reviewer',
       metadata: {
         artifacts: ['process/TASK-research-proof.md'],
         reviewer_approved: true,
@@ -1382,6 +1386,7 @@ describe('Design handoff auto-notification', () => {
   it('posts a @link review-channel handoff message when design task becomes ready', async () => {
     const done = await req('PATCH', `/tasks/${taskId}`, {
       status: 'done',
+      actor: 'test-reviewer',
       metadata: {
         lane: 'design',
         artifact_path: 'process/TASK-design-ready-proof.md',
@@ -1598,8 +1603,9 @@ describe('Review State Tracking Metadata', () => {
     expect(body.task.metadata.review_last_activity_at).toBeTypeOf('number')
   })
 
-  it('marks approved when reviewer_approved=true', async () => {
+  it('marks approved when reviewer_approved=true from assigned reviewer', async () => {
     const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      actor: 'test-reviewer',
       metadata: {
         reviewer_approved: true,
       },
@@ -2174,6 +2180,7 @@ describe('Task outcome checkpoint', () => {
 
     await req('PATCH', `/tasks/${taskId}`, {
       status: 'done',
+      actor: 'test-reviewer',
       metadata: {
         artifacts: ['integration-test-evidence'],
         reviewer_approved: true,
@@ -2796,6 +2803,7 @@ describe('Model performance analytics', () => {
     // Model should persist through to done
     const { body: done } = await req('PATCH', `/tasks/${taskId}`, {
       status: 'done',
+      actor: 'kai',
       metadata: {
         artifacts: ['test-evidence'],
         reviewer_approved: true,
@@ -3142,6 +3150,7 @@ describe('Auto-queue notification', () => {
     // Move to done with reviewer approval
     const done = await req('PATCH', `/tasks/${doingTaskId}`, {
       status: 'done',
+      actor: 'test-reviewer',
       metadata: {
         reviewer_approved: true,
         artifacts: ['https://github.com/reflectt/reflectt-node/pull/1'],
@@ -3353,5 +3362,122 @@ describe('Feedback Collection', () => {
     expect(res.statusCode).toBe(200)
     expect(res.headers['content-type']).toContain('javascript')
     expect(res.body).toContain('reflectt-feedback-widget')
+  })
+})
+
+/* ── Reviewer approval identity enforcement ────────────────────────── */
+describe('Reviewer approval identity gate', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'Reviewer identity gate test',
+      createdBy: 'test-runner',
+      assignee: 'agent-a',
+      reviewer: 'agent-reviewer',
+      priority: 'P2',
+      done_criteria: ['Identity gate tested'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('rejects reviewer_approved=true when actor is missing', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      metadata: { reviewer_approved: true },
+    })
+    expect(status).toBe(400)
+    expect(body.gate).toBe('reviewer_identity')
+    expect(body.error).toContain('actor field')
+  })
+
+  it('rejects reviewer_approved=true when actor is not the assigned reviewer', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      actor: 'some-other-agent',
+      metadata: { reviewer_approved: true },
+    })
+    expect(status).toBe(403)
+    expect(body.gate).toBe('reviewer_identity')
+    expect(body.error).toContain('Only assigned reviewer')
+    expect(body.error).toContain('agent-reviewer')
+  })
+
+  it('accepts reviewer_approved=true when actor matches assigned reviewer', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      actor: 'agent-reviewer',
+      metadata: { reviewer_approved: true },
+    })
+    expect(status).toBe(200)
+    expect(body.task.metadata.reviewer_approved).toBe(true)
+    expect(body.task.metadata.approved_by).toBe('agent-reviewer')
+    expect(body.task.metadata.approved_at).toBeTypeOf('number')
+  })
+
+  it('records approval_rejected metadata when non-reviewer attempts approval', async () => {
+    // Reset approval first
+    await req('PATCH', `/tasks/${taskId}`, {
+      actor: 'agent-reviewer',
+      metadata: { reviewer_approved: false, review_state: 'in_progress' },
+    })
+
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      actor: 'agent-a',
+      metadata: { reviewer_approved: true },
+    })
+    expect(status).toBe(403)
+    expect(body.gate).toBe('reviewer_identity')
+  })
+
+  it('done transition rejected when approval came from wrong reviewer', async () => {
+    // Create a fresh task for this test
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'Reviewer identity done-gate test',
+      createdBy: 'test-runner',
+      assignee: 'agent-b',
+      reviewer: 'agent-reviewer',
+      priority: 'P2',
+      done_criteria: ['Done gate tested'],
+      eta: '1h',
+    })
+    const freshId = created.task.id
+
+    // Try to approve and move to done in one call — wrong actor
+    const { status, body } = await req('PATCH', `/tasks/${freshId}`, {
+      status: 'done',
+      actor: 'agent-b',
+      metadata: {
+        artifacts: ['test-evidence'],
+        reviewer_approved: true,
+      },
+    })
+    expect(status).toBe(403)
+    expect(body.gate).toBe('reviewer_identity')
+
+    await req('DELETE', `/tasks/${freshId}`)
+  })
+
+  it('case-insensitive reviewer matching', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'Reviewer case test',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'Kai',
+      priority: 'P3',
+      done_criteria: ['Case tested'],
+      eta: '1h',
+    })
+    const caseId = created.task.id
+
+    const { status } = await req('PATCH', `/tasks/${caseId}`, {
+      actor: 'kai',
+      metadata: { reviewer_approved: true },
+    })
+    expect(status).toBe(200)
+
+    await req('DELETE', `/tasks/${caseId}`)
   })
 })
