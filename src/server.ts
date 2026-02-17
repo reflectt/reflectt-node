@@ -152,6 +152,40 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
   return problems
 }
 
+const MODEL_ALIASES: Record<string, string> = {
+  gpt: 'openai-codex/gpt-5.3',
+  'gpt-codex': 'openai-codex/gpt-5.3-codex',
+  opus: 'anthropic/claude-opus-4-6',
+  sonnet: 'anthropic/claude-sonnet-4-5',
+}
+
+const DEFAULT_MODEL_ALIAS = 'gpt-codex'
+const PROVIDER_MODEL_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/i
+
+function normalizeConfiguredModel(value: unknown): { ok: boolean; value?: string; resolved?: string; error?: string } {
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'Model must be a string' }
+  }
+  const raw = value.trim()
+  if (!raw) {
+    return { ok: false, error: 'Model cannot be empty' }
+  }
+
+  const alias = raw.toLowerCase()
+  if (MODEL_ALIASES[alias]) {
+    return { ok: true, value: raw, resolved: MODEL_ALIASES[alias] }
+  }
+
+  if (PROVIDER_MODEL_PATTERN.test(raw)) {
+    return { ok: true, value: raw, resolved: raw }
+  }
+
+  return {
+    ok: false,
+    error: `Unknown model identifier "${raw}". Allowed aliases: ${Object.keys(MODEL_ALIASES).join(', ')} or provider/model format.`,
+  }
+}
+
 const UpdateTaskSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
@@ -3751,6 +3785,32 @@ export async function createServer(): Promise<FastifyInstance> {
       const mergedRawMeta = { ...(existing.metadata || {}), ...autoFilledMeta }
       // Normalize review-state metadata for state-aware SLA tracking.
       const mergedMeta = applyReviewStateMetadata(existing, parsed, mergedRawMeta, Date.now())
+
+      // Model validation gate on start: reject unknown model ids and auto-default when missing.
+      if (parsed.status === 'doing' && existing.status !== 'doing') {
+        const requestedModel = mergedMeta.model
+        if (requestedModel === undefined || requestedModel === null || `${requestedModel}`.trim().length === 0) {
+          const fallback = MODEL_ALIASES[DEFAULT_MODEL_ALIAS]
+          mergedMeta.model = DEFAULT_MODEL_ALIAS
+          mergedMeta.model_resolved = fallback
+          mergedMeta.model_defaulted = true
+          mergedMeta.model_default_reason = 'No model configured at task start; default alias applied.'
+        } else {
+          const validatedModel = normalizeConfiguredModel(requestedModel)
+          if (!validatedModel.ok) {
+            reply.code(400)
+            return {
+              success: false,
+              error: validatedModel.error,
+              gate: 'model_validation',
+              hint: `Use one of aliases (${Object.keys(MODEL_ALIASES).join(', ')}) or provider/model (e.g., anthropic/claude-sonnet-4-5).`,
+            }
+          }
+          mergedMeta.model = validatedModel.value
+          mergedMeta.model_resolved = validatedModel.resolved
+          mergedMeta.model_defaulted = false
+        }
+      }
 
       // TEST: prefixed tasks bypass gates (WIP cap, etc.)
       const isTestTask = typeof existing.title === 'string' && existing.title.startsWith('TEST:')

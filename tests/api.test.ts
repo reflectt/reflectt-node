@@ -2851,6 +2851,54 @@ describe('Model performance analytics', () => {
 
     await req('DELETE', `/tasks/${taskId}`)
   })
+
+  it('rejects unknown model identifier when moving task to doing', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: invalid model id rejected',
+      assignee: 'test-model-agent',
+      reviewer: 'kai',
+      done_criteria: ['Model validation blocks unknown values'],
+      createdBy: 'test',
+      eta: '1h',
+      priority: 'P3',
+    })
+    const taskId = created.task.id
+
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: { model: 'not-a-real-model' },
+    })
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.gate).toBe('model_validation')
+    expect(body.error).toContain('Unknown model identifier')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('auto-defaults model alias when task starts without model configured', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: default model alias on start',
+      assignee: 'test-model-agent',
+      reviewer: 'kai',
+      done_criteria: ['Default model assigned on start'],
+      createdBy: 'test',
+      eta: '1h',
+      priority: 'P3',
+    })
+    const taskId = created.task.id
+
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: {},
+    })
+    expect(status).toBe(200)
+    expect(body.task.metadata.model).toBe('gpt-codex')
+    expect(body.task.metadata.model_resolved).toBe('openai-codex/gpt-5.3-codex')
+    expect(body.task.metadata.model_defaulted).toBe(true)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
 })
 
 // ============ Definition of Ready ============
