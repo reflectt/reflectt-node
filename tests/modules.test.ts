@@ -733,3 +733,69 @@ describe('ChangeFeed', () => {
     }
   })
 })
+
+// ── Policy Config Tests ──
+
+describe('PolicyConfig', () => {
+  it('GET /policy returns unified policy', async () => {
+    const res = await req('GET', '/policy')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.policy).toBeDefined()
+    expect(res.body.policy.quietHours).toBeDefined()
+    expect(res.body.policy.idleNudge).toBeDefined()
+    expect(res.body.policy.cadenceWatchdog).toBeDefined()
+    expect(res.body.policy.boardHealth).toBeDefined()
+    expect(res.body.policy.mentionRescue).toBeDefined()
+    expect(res.body.policy.escalation).toBeDefined()
+    expect(typeof res.body.policy.staleDoingThresholdMin).toBe('number')
+    expect(typeof res.body.filePath).toBe('string')
+  })
+
+  it('PATCH /policy deep-merges updates', async () => {
+    const res = await req('PATCH', '/policy', {
+      quietHours: { startHour: 22 },
+      boardHealth: { dryRun: true },
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.policy.quietHours.startHour).toBe(22)
+    expect(res.body.policy.boardHealth.dryRun).toBe(true)
+    // Other fields preserved
+    expect(res.body.policy.quietHours.enabled).toBeDefined()
+    expect(res.body.policy.boardHealth.intervalMs).toBeGreaterThan(0)
+  })
+
+  it('PATCH /policy propagates boardHealth to worker', async () => {
+    await req('PATCH', '/policy', {
+      boardHealth: { maxActionsPerTick: 2 },
+    })
+    const status = await req('GET', '/board-health/status')
+    expect(status.body.config.maxActionsPerTick).toBe(2)
+  })
+
+  it('POST /policy/reset restores defaults', async () => {
+    // First modify
+    await req('PATCH', '/policy', { staleDoingThresholdMin: 999 })
+    // Then reset
+    const res = await req('POST', '/policy/reset')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.policy.staleDoingThresholdMin).toBe(240)
+  })
+
+  it('policy sections have correct types', async () => {
+    const res = await req('GET', '/policy')
+    const p = res.body.policy
+
+    expect(typeof p.quietHours.enabled).toBe('boolean')
+    expect(typeof p.quietHours.startHour).toBe('number')
+    expect(typeof p.quietHours.timezone).toBe('string')
+    expect(typeof p.idleNudge.enabled).toBe('boolean')
+    expect(typeof p.idleNudge.warnMin).toBe('number')
+    expect(Array.isArray(p.idleNudge.excluded)).toBe(true)
+    expect(typeof p.cadenceWatchdog.silenceMin).toBe('number')
+    expect(typeof p.mentionRescue.cooldownMin).toBe('number')
+    expect(typeof p.escalation.defaultChannel).toBe('string')
+  })
+})
