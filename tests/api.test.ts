@@ -2407,7 +2407,8 @@ describe('Definition of Ready enforcement', () => {
     expect(status).toBe(200)
     expect(body.required).toContain('priority')
     expect(body.required).toContain('done_criteria')
-    expect(body.required).toContain('reviewer')
+    expect(body.optional).toContain('reviewer') // reviewer defaults to 'auto' (load-balanced assignment)
+    expect(body.notes?.reviewer).toBeDefined()
     expect(body.types).toContain('bug')
     expect(body.types).toContain('feature')
     expect(body.definition_of_ready).toBeDefined()
@@ -2442,6 +2443,57 @@ describe('Definition of Ready enforcement', () => {
     })
     expect(status).toBe(200)
     expect(body.task.metadata?.type).toBe('bug')
+    await req('DELETE', `/tasks/${body.task.id}`)
+  })
+
+  it('auto-assigns reviewer when reviewer is "auto"', async () => {
+    const { status, body } = await req('POST', '/tasks', {
+      title: 'TEST: auto reviewer assignment test',
+      createdBy: 'test-runner',
+      assignee: 'link',
+      reviewer: 'auto',
+      done_criteria: ['Reviewer is auto-assigned'],
+      eta: '30m',
+      priority: 'P2',
+    })
+    expect(status).toBe(200)
+    expect(body.task.reviewer).toBeTruthy()
+    expect(body.task.reviewer).not.toBe('link') // not the assignee
+    expect(body.task.reviewer).not.toBe('auto') // resolved to actual agent
+    expect(body.task.metadata?.reviewer_auto_assigned).toBe(true)
+    expect(body.task.metadata?.reviewer_scores).toBeDefined()
+    await req('DELETE', `/tasks/${body.task.id}`)
+  })
+
+  it('auto-assigns reviewer when reviewer is omitted', async () => {
+    const { status, body } = await req('POST', '/tasks', {
+      title: 'TEST: no reviewer specified test',
+      createdBy: 'test-runner',
+      assignee: 'pixel',
+      done_criteria: ['Reviewer is auto-assigned when omitted'],
+      eta: '30m',
+      priority: 'P2',
+    })
+    expect(status).toBe(200)
+    expect(body.task.reviewer).toBeTruthy()
+    expect(body.task.reviewer).not.toBe('pixel')
+    expect(body.task.metadata?.reviewer_auto_assigned).toBe(true)
+    await req('DELETE', `/tasks/${body.task.id}`)
+  })
+
+  it('respects manual reviewer override', async () => {
+    const { status, body } = await req('POST', '/tasks', {
+      title: 'TEST: manual reviewer override test',
+      createdBy: 'test-runner',
+      assignee: 'link',
+      reviewer: 'sage',
+      done_criteria: ['Manual reviewer is preserved'],
+      eta: '30m',
+      priority: 'P2',
+    })
+    expect(status).toBe(200)
+    expect(body.task.reviewer).toBe('sage')
+    expect(body.task.metadata?.reviewer_auto_assigned).toBeUndefined()
     await req('DELETE', `/tasks/${body.task.id}`)
   })
 
