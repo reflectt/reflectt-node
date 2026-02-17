@@ -3649,8 +3649,51 @@ export async function createServer(): Promise<FastifyInstance> {
       // Normalize review-state metadata for state-aware SLA tracking.
       const mergedMeta = applyReviewStateMetadata(existing, parsed, mergedRawMeta, Date.now())
 
-      // TEST: prefixed tasks bypass gates (WIP cap, etc.)
+      // TEST: prefixed tasks bypass gates (WIP cap, reviewer identity, etc.)
       const isTestTask = typeof existing.title === 'string' && existing.title.startsWith('TEST:')
+
+      // ── Reviewer-approval identity gate ──────────────────────────────
+      // When reviewer_approved=true is set via PATCH, only the assigned
+      // reviewer (matched by actor field) can perform the approval.
+      // This prevents non-reviewer agents from bypassing the review process.
+      const incomingApproval = incomingMeta.reviewer_approved
+      if (incomingApproval === true && existing.reviewer && !isTestTask) {
+        const approvalActor = (parsed.actor || '').trim().toLowerCase()
+        const assignedReviewer = existing.reviewer.trim().toLowerCase()
+
+        if (!approvalActor) {
+          reply.code(400)
+          return {
+            success: false,
+            error: 'Reviewer approval requires actor field identifying the approver',
+            gate: 'reviewer_identity',
+            hint: `Include "actor": "${existing.reviewer}" in the PATCH body to approve as the assigned reviewer.`,
+          }
+        }
+
+        if (approvalActor !== assignedReviewer) {
+          // Strip the invalid approval and record the attempt
+          mergedMeta.reviewer_approved = false
+          mergedMeta.review_state = (existing.metadata as Record<string, unknown>)?.review_state ?? mergedMeta.review_state
+          mergedMeta.approval_rejected = {
+            attempted_by: parsed.actor,
+            assigned_reviewer: existing.reviewer,
+            rejected_at: Date.now(),
+            reason: 'non-assigned reviewer cannot approve',
+          }
+          reply.code(403)
+          return {
+            success: false,
+            error: `Only assigned reviewer "${existing.reviewer}" can approve this task. Actor "${parsed.actor}" is not the assigned reviewer.`,
+            gate: 'reviewer_identity',
+            hint: `The assigned reviewer "${existing.reviewer}" must submit the approval via: PATCH with actor: "${existing.reviewer}" and metadata.reviewer_approved: true`,
+          }
+        }
+
+        // Record who approved for audit trail
+        mergedMeta.approved_by = parsed.actor
+        mergedMeta.approved_at = Date.now()
+      }
 
       // QA bundle gate: validating requires structured review evidence.
       const effectiveStatus = parsed.status ?? existing.status
@@ -3718,6 +3761,19 @@ export async function createServer(): Promise<FastifyInstance> {
               error: `Task-close gate: reviewer sign-off required from "${existing.reviewer}"`,
               gate: 'reviewer_signoff',
               hint: `Reviewer "${existing.reviewer}" must approve via: PATCH with metadata.reviewer_approved: true`,
+            }
+          }
+
+          // Defense-in-depth: verify the approval came from the assigned reviewer
+          const approvedBy = (mergedMeta.approved_by as string || '').trim().toLowerCase()
+          const assignedReviewer = existing.reviewer.trim().toLowerCase()
+          if (approvedBy && approvedBy !== assignedReviewer) {
+            reply.code(403)
+            return {
+              success: false,
+              error: `Task-close gate: approval by "${mergedMeta.approved_by}" rejected — only "${existing.reviewer}" can approve`,
+              gate: 'reviewer_signoff',
+              hint: `Reviewer "${existing.reviewer}" must approve. Approval from "${mergedMeta.approved_by}" does not satisfy the gate.`,
             }
           }
         }
