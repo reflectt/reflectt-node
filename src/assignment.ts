@@ -245,6 +245,7 @@ interface TaskForScoring {
   title: string
   status: string
   assignee?: string
+  reviewer?: string
   tags?: string[]
   done_criteria?: string[]
   metadata?: Record<string, unknown>
@@ -355,6 +356,70 @@ export function suggestAssignee(
   const suggested = top && top.score > 0 && !top.overCap ? top.agent : null
 
   return { suggested, scores }
+}
+
+// Suggest best reviewer for a task (load-balanced)
+export function suggestReviewer(
+  task: { title: string; assignee?: string; tags?: string[]; done_criteria?: string[] },
+  allTasks: TaskForScoring[],
+): { suggested: string | null; scores: Array<{ agent: string; score: number; validatingLoad: number; role: string }> } {
+  const roles = getAgentRoles()
+
+  // Exclude the assignee from reviewer candidates
+  const candidates = roles.filter(r => 
+    r.name.toLowerCase() !== (task.assignee || '').toLowerCase()
+  )
+
+  if (candidates.length === 0) {
+    return { suggested: null, scores: [] }
+  }
+
+  // Score each candidate
+  const scored = candidates.map(agent => {
+    const getReviewer = (t: TaskForScoring) => (t.reviewer || (t.metadata?.reviewer as string) || '').toLowerCase()
+
+    // Count tasks currently in validating where this agent is reviewer
+    const validatingLoad = allTasks.filter(t =>
+      t.status === 'validating' && getReviewer(t) === agent.name.toLowerCase()
+    ).length
+
+    // Also count doing tasks where this agent is reviewer (upcoming review load)
+    const pendingLoad = allTasks.filter(t =>
+      t.status === 'doing' && getReviewer(t) === agent.name.toLowerCase()
+    ).length
+
+    // Role bonus: reviewers/ops get priority
+    const roleBonus = agent.role === 'reviewer' ? 0.5
+      : agent.role === 'ops' ? 0.3
+      : 0.1
+
+    // Affinity: does this agent have relevant domain knowledge?
+    const keywords = extractTaskKeywords(task)
+    const matchedTags = agent.affinityTags.filter(tag =>
+      keywords.some(kw => kw.includes(tag) || tag.includes(kw))
+    )
+    const affinityBonus = Math.min(matchedTags.length * 0.1, 0.3)
+
+    // Load penalty: more validating work = lower score
+    const loadPenalty = (validatingLoad * 0.3) + (pendingLoad * 0.1)
+
+    // SLA risk: penalize if agent has high-priority tasks in review queue
+    const highPriorityReviewLoad = allTasks.filter(t =>
+      (t.status === 'validating' || t.status === 'doing') &&
+      getReviewer(t) === agent.name.toLowerCase() &&
+      (t.metadata?.priority === 'P0' || t.metadata?.priority === 'P1')
+    ).length
+    const slaRiskPenalty = highPriorityReviewLoad * 0.2
+
+    const score = Math.round((roleBonus + affinityBonus - loadPenalty - slaRiskPenalty) * 100) / 100
+
+    return { agent: agent.name, score, validatingLoad, role: agent.role }
+  })
+
+  // Sort by score descending
+  scored.sort((a, b) => b.score - a.score)
+
+  return { suggested: scored[0]?.agent || null, scores: scored }
 }
 
 // Check WIP cap for an agent

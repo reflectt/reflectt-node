@@ -33,7 +33,7 @@ import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
-import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, checkWipCap, saveAgentRoles, scoreAssignment } from './assignment.js'
+import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
@@ -71,7 +71,7 @@ const CreateTaskSchema = z.object({
   description: z.string().optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).default('todo'),
   assignee: z.string().trim().min(1),
-  reviewer: z.string().trim().min(1),
+  reviewer: z.string().trim().min(1).or(z.literal('auto')).default('auto'), // 'auto' triggers load-balanced assignment
   done_criteria: z.array(z.string().trim().min(1)).min(1),
   eta: z.string().trim().min(1),
   createdBy: z.string().min(1),
@@ -3034,6 +3034,33 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       const { eta, type, ...rest } = data
+
+      // Auto-assign reviewer when 'auto' or missing
+      const needsAutoReviewer = !rest.reviewer || rest.reviewer === 'auto'
+      let reviewerAutoAssigned = false
+      let reviewerScores: Array<{ agent: string; score: number; validatingLoad: number; role: string }> = []
+      if (needsAutoReviewer) {
+        try {
+          const allTasks = taskManager.listTasks({})
+          const reviewerSuggestion = suggestReviewer(
+            { title: rest.title, assignee: rest.assignee, tags: (rest.metadata as Record<string, unknown> | undefined)?.tags as string[] | undefined, done_criteria: rest.done_criteria },
+            allTasks.map(t => ({ id: t.id, title: t.title, status: t.status, assignee: t.assignee, tags: t.metadata?.tags as string[] | undefined, metadata: t.metadata })),
+          )
+          reviewerScores = reviewerSuggestion.scores
+          if (reviewerSuggestion.suggested) {
+            rest.reviewer = reviewerSuggestion.suggested
+            reviewerAutoAssigned = true
+          } else {
+            // No suggestion available — fall back to kai
+            rest.reviewer = 'kai'
+            reviewerAutoAssigned = true
+          }
+        } catch {
+          rest.reviewer = 'kai'
+          reviewerAutoAssigned = true
+        }
+      }
+
       const normalizedTeamId = normalizeTeamId(data.teamId) || normalizeTeamId((rest.metadata as Record<string, unknown> | undefined)?.teamId)
       const task = await taskManager.createTask({
         ...rest,
@@ -3043,6 +3070,10 @@ export async function createServer(): Promise<FastifyInstance> {
           eta,
           ...(type ? { type } : {}),
           ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
+          ...(reviewerAutoAssigned ? {
+            reviewer_auto_assigned: true,
+            reviewer_scores: reviewerScores.slice(0, 3), // top 3 candidates for transparency
+          } : {}),
         },
       })
       
@@ -3152,6 +3183,21 @@ export async function createServer(): Promise<FastifyInstance> {
           }
 
           const { eta, type, ...rest } = taskData
+
+          // Auto-assign reviewer if not provided
+          if (!rest.reviewer) {
+            try {
+              const allTasks = taskManager.listTasks({})
+              const reviewerSuggestion = suggestReviewer(
+                { title: rest.title, assignee: rest.assignee, tags: (rest.metadata as Record<string, unknown> | undefined)?.tags as string[] | undefined, done_criteria: rest.done_criteria },
+                allTasks.map(t => ({ id: t.id, title: t.title, status: t.status, assignee: t.assignee, metadata: t.metadata })),
+              )
+              if (reviewerSuggestion.suggested) {
+                rest.reviewer = reviewerSuggestion.suggested
+              }
+            } catch { /* silent */ }
+          }
+
           const normalizedTeamId = normalizeTeamId(taskData.teamId) || normalizeTeamId((rest.metadata as Record<string, unknown> | undefined)?.teamId)
           const task = await taskManager.createTask({
             ...rest,
@@ -3163,6 +3209,7 @@ export async function createServer(): Promise<FastifyInstance> {
               ...(type ? { type } : {}),
               ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
               batch_created: true,
+              ...(!taskData.reviewer && rest.reviewer ? { reviewer_auto_assigned: true } : {}),
             },
           })
 
