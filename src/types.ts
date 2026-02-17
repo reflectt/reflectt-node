@@ -34,6 +34,7 @@ export interface Task {
   epic_id?: string
   tags?: string[]
   metadata?: Record<string, unknown>
+  teamId?: string
 }
 
 export type TaskHistoryEventType = 'created' | 'assigned' | 'status_changed' | 'commented' | 'lane_transition'

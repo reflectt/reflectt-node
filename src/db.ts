@@ -269,6 +269,13 @@ function runMigrations(db: Database.Database): void {
         );
       `,
     },
+    {
+      version: 6,
+      sql: `
+        ALTER TABLE tasks ADD COLUMN team_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_tasks_team_id ON tasks(team_id);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')

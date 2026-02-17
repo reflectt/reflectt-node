@@ -76,6 +76,7 @@ const CreateTaskSchema = z.object({
   blocked_by: z.array(z.string()).optional(),
   epic_id: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  teamId: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
 })
 
@@ -1183,7 +1184,26 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Per-agent structured health summary (dashboard v2)
   app.get('/health/agents', async (request, reply) => {
-    const payload = await healthMonitor.getAgentHealthSummary()
+    const query = request.query as Record<string, string>
+    const teamId = normalizeTeamId(query.teamId)
+
+    let payload = await healthMonitor.getAgentHealthSummary()
+
+    if (teamId) {
+      const teamTasks = taskManager.listTasks({ teamId })
+      const teamTaskIds = new Set(teamTasks.map(task => task.id))
+      const teamAgents = new Set(teamTasks.map(task => (task.assignee || '').toLowerCase()).filter(Boolean))
+
+      payload = {
+        ...payload,
+        agents: payload.agents.filter((agent) => {
+          if (teamAgents.has(agent.agent.toLowerCase())) return true
+          if (!agent.active_task) return false
+          return teamTaskIds.has(agent.active_task)
+        }),
+      }
+    }
+
     if (applyConditionalCaching(request, reply, payload, payload.timestamp)) {
       return
     }
@@ -2038,6 +2058,12 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ============ TASK ENDPOINTS ============
 
+  const normalizeTeamId = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
+
   const enrichTaskWithComments = (task: Task) => ({
     ...task,
     commentCount: taskManager.getTaskCommentCount(task.id),
@@ -2057,6 +2083,7 @@ export async function createServer(): Promise<FastifyInstance> {
       status: query.status as Task['status'] | undefined,
       assignee: query.assignee || query.assignedTo, // Support both for backward compatibility
       createdBy: query.createdBy,
+      teamId: normalizeTeamId(query.teamId),
       priority: query.priority as Task['priority'] | undefined,
       tags: tagFilter,
     })
@@ -2921,7 +2948,7 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/tasks/intake-schema', async () => {
     return {
       required: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority'],
-      optional: ['type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'metadata'],
+      optional: ['type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'teamId', 'metadata'],
       types: TASK_TYPES,
       templates: TASK_TEMPLATES,
       type_requirements: {
@@ -2981,12 +3008,15 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       const { eta, type, ...rest } = data
+      const normalizedTeamId = normalizeTeamId(data.teamId) || normalizeTeamId((rest.metadata as Record<string, unknown> | undefined)?.teamId)
       const task = await taskManager.createTask({
         ...rest,
+        ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
         metadata: {
           ...(rest.metadata || {}),
           eta,
           ...(type ? { type } : {}),
+          ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
         },
       })
       
@@ -3096,13 +3126,16 @@ export async function createServer(): Promise<FastifyInstance> {
           }
 
           const { eta, type, ...rest } = taskData
+          const normalizedTeamId = normalizeTeamId(taskData.teamId) || normalizeTeamId((rest.metadata as Record<string, unknown> | undefined)?.teamId)
           const task = await taskManager.createTask({
             ...rest,
+            ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
             createdBy: taskData.createdBy || data.createdBy,
             metadata: {
               ...(rest.metadata || {}),
               eta,
               ...(type ? { type } : {}),
+              ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
               batch_created: true,
             },
           })

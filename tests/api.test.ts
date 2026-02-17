@@ -150,6 +150,47 @@ describe('Health', () => {
 
     await req('DELETE', `/tasks/${taskId}`)
   })
+
+  it('GET /health/agents?teamId filters to team agents', async () => {
+    const teamAgent = `health-team-a-${Date.now()}`
+    const otherAgent = `health-team-b-${Date.now()}`
+
+    const createTeam = await req('POST', '/tasks', {
+      title: 'TEST: health team filter include',
+      status: 'doing',
+      createdBy: 'test-runner',
+      assignee: teamAgent,
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Verify health team filter include'],
+      eta: '1h',
+      teamId: 'team-alpha',
+    })
+
+    const createOther = await req('POST', '/tasks', {
+      title: 'TEST: health team filter exclude',
+      status: 'doing',
+      createdBy: 'test-runner',
+      assignee: otherAgent,
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Verify health team filter exclude'],
+      eta: '1h',
+      teamId: 'team-beta',
+    })
+
+    expect(createTeam.status).toBe(200)
+    expect(createOther.status).toBe(200)
+
+    const res = await req('GET', '/health/agents?teamId=team-alpha')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.agents)).toBe(true)
+    expect(res.body.agents.some((row: any) => row.agent === teamAgent)).toBe(true)
+    expect(res.body.agents.some((row: any) => row.agent === otherAgent)).toBe(false)
+
+    await req('DELETE', `/tasks/${createTeam.body.task.id}`)
+    await req('DELETE', `/tasks/${createOther.body.task.id}`)
+  })
 })
 
 describe('SQLite sync ledger', () => {
@@ -480,6 +521,29 @@ describe('Task CRUD', () => {
     expect(status).toBe(200)
     const found = body.tasks.find((t: any) => t.id === taskId)
     expect(found).toBeDefined()
+  })
+
+  it('GET /tasks?teamId= filters correctly and stores teamId on create', async () => {
+    const create = await req('POST', '/tasks', {
+      title: 'TEST: team scoped task',
+      description: 'Team-scoped test task',
+      createdBy: 'test-runner',
+      assignee: 'team-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Team filter works'],
+      eta: '1h',
+      teamId: 'team-alpha',
+    })
+
+    expect(create.status).toBe(200)
+    expect(create.body.task.teamId).toBe('team-alpha')
+
+    const list = await req('GET', '/tasks?teamId=team-alpha')
+    expect(list.status).toBe(200)
+    expect(list.body.tasks.some((t: any) => t.id === create.body.task.id)).toBe(true)
+
+    await req('DELETE', `/tasks/${create.body.task.id}`)
   })
 
   it('DELETE /tasks/:id deletes the task', async () => {

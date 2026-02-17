@@ -28,8 +28,8 @@ function importTasks(db: Database.Database, records: unknown[]): number {
     INSERT OR REPLACE INTO tasks (
       id, title, description, status, assignee, reviewer, done_criteria,
       created_by, created_at, updated_at, priority, blocked_by, epic_id,
-      tags, metadata, comment_count
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      tags, metadata, team_id, comment_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const insertMany = db.transaction((tasks: unknown[]) => {
@@ -51,6 +51,7 @@ function importTasks(db: Database.Database, records: unknown[]): number {
         task.epic_id ?? null,
         safeJsonStringify(task.tags),
         safeJsonStringify(task.metadata),
+        task.teamId ?? null,
         0 // comment_count will be recalculated when comments are imported
       )
     }
@@ -265,6 +266,7 @@ class TaskManager {
         epic_id: string | null
         tags: string | null
         metadata: string | null
+        team_id: string | null
         comment_count: number
       }>
 
@@ -285,6 +287,7 @@ class TaskManager {
           epic_id: row.epic_id ?? undefined,
           tags: safeJsonParse<string[]>(row.tags),
           metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
+          teamId: row.team_id ?? undefined,
         }
         this.tasks.set(task.id, task)
       }
@@ -721,8 +724,8 @@ class TaskManager {
         INSERT OR REPLACE INTO tasks (
           id, title, description, status, assignee, reviewer, done_criteria,
           created_by, created_at, updated_at, priority, blocked_by, epic_id,
-          tags, metadata, comment_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          tags, metadata, team_id, comment_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
 
       const upsertAll = db.transaction(() => {
@@ -744,6 +747,7 @@ class TaskManager {
             task.epic_id ?? null,
             safeJsonStringify(task.tags),
             safeJsonStringify(task.metadata),
+            task.teamId ?? null,
             commentCount
           )
         }
@@ -785,11 +789,33 @@ class TaskManager {
   }
 
   async createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Promise<Task> {
-    this.validateLifecycleGates(data)
+    let metadata = data.metadata ? { ...data.metadata } : undefined
+    const metadataTeamId = typeof metadata?.teamId === 'string' && metadata.teamId.trim().length > 0
+      ? metadata.teamId.trim()
+      : undefined
+    const explicitTeamId = typeof data.teamId === 'string' && data.teamId.trim().length > 0
+      ? data.teamId.trim()
+      : undefined
+    const normalizedTeamId = explicitTeamId ?? metadataTeamId
+
+    if (normalizedTeamId) {
+      metadata = {
+        ...(metadata || {}),
+        teamId: normalizedTeamId,
+      }
+    }
+
+    const normalizedData: Omit<Task, 'id' | 'createdAt' | 'updatedAt'> = {
+      ...data,
+      ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
+      metadata,
+    }
+
+    this.validateLifecycleGates(normalizedData)
 
     // Validate blocked_by references
-    if (data.blocked_by && data.blocked_by.length > 0) {
-      for (const blockerId of data.blocked_by) {
+    if (normalizedData.blocked_by && normalizedData.blocked_by.length > 0) {
+      for (const blockerId of normalizedData.blocked_by) {
         if (!this.tasks.has(blockerId)) {
           throw new Error(`Invalid blocked_by reference: task ${blockerId} does not exist`)
         }
@@ -797,7 +823,7 @@ class TaskManager {
     }
 
     const task: Task = {
-      ...data,
+      ...normalizedData,
       id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -1013,6 +1039,7 @@ class TaskManager {
     assignee?: string
     assignedTo?: string // Backward compatibility
     createdBy?: string
+    teamId?: string
     priority?: Task['priority']
     tags?: string[]
     includeBlocked?: boolean // If false, filter out blocked tasks (default: true)
@@ -1043,6 +1070,14 @@ class TaskManager {
 
     if (options?.createdBy) {
       tasks = tasks.filter(t => t.createdBy === options.createdBy)
+    }
+
+    if (options?.teamId) {
+      tasks = tasks.filter(t => {
+        if (t.teamId === options.teamId) return true
+        const metadataTeamId = (t.metadata as Record<string, unknown> | undefined)?.teamId
+        return typeof metadataTeamId === 'string' && metadataTeamId === options.teamId
+      })
     }
 
     if (options?.priority) {
