@@ -1,0 +1,559 @@
+/**
+ * Unit tests for new modules:
+ * - SecretVault (create/read/rotate/export/import)
+ * - ProvisioningManager (state machine)
+ * - WebhookDeliveryManager (enqueue/retry/DLQ/replay)
+ * - Portability (export/import)
+ * - NotificationManager (preferences/routing)
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { SecretVault } from '../src/secrets.js'
+import { NotificationManager } from '../src/notifications.js'
+import { createServer } from '../src/server.js'
+import type { FastifyInstance } from 'fastify'
+
+// ── Test helpers ──
+
+let app: FastifyInstance
+
+beforeAll(async () => {
+  app = await createServer()
+  await app.ready()
+})
+
+afterAll(async () => {
+  await app.close()
+})
+
+async function req(method: string, url: string, body?: unknown) {
+  const res = await app.inject({
+    method: method as any,
+    url,
+    payload: body,
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+  })
+  return {
+    status: res.statusCode,
+    body: JSON.parse(res.body),
+  }
+}
+
+// ── SecretVault Tests ──
+
+describe('SecretVault', () => {
+  let vault: SecretVault
+  let tempDir: string
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'vault-test-'))
+    vault = new SecretVault(tempDir, 'test-host')
+    vault.init()
+  })
+
+  it('initializes and generates HMK', () => {
+    expect(vault.isInitialized()).toBe(true)
+    expect(vault.getStats().secretCount).toBe(0)
+    expect(vault.getStats().hostId).toBe('test-host')
+    expect(existsSync(join(tempDir, 'secrets', 'host.key'))).toBe(true)
+  })
+
+  it('creates and reads a secret', () => {
+    const meta = vault.create('API_KEY', 'sk-test-12345', 'host', 'test')
+    expect(meta.name).toBe('API_KEY')
+    expect(meta.scope).toBe('host')
+
+    const value = vault.read('API_KEY', 'test')
+    expect(value).toBe('sk-test-12345')
+  })
+
+  it('returns null for non-existent secret', () => {
+    const value = vault.read('DOES_NOT_EXIST', 'test')
+    expect(value).toBeNull()
+  })
+
+  it('lists secrets without plaintext', () => {
+    vault.create('SECRET_1', 'value1', 'host', 'test')
+    vault.create('SECRET_2', 'value2', 'project', 'test')
+
+    const list = vault.list()
+    expect(list).toHaveLength(2)
+    expect(list[0].name).toBe('SECRET_1')
+    expect(list[1].name).toBe('SECRET_2')
+    // Ensure no plaintext in metadata
+    expect(JSON.stringify(list)).not.toContain('value1')
+    expect(JSON.stringify(list)).not.toContain('value2')
+  })
+
+  it('deletes a secret', () => {
+    vault.create('TO_DELETE', 'temp', 'host', 'test')
+    expect(vault.list()).toHaveLength(1)
+
+    const deleted = vault.delete('TO_DELETE', 'test')
+    expect(deleted).toBe(true)
+    expect(vault.list()).toHaveLength(0)
+    expect(vault.read('TO_DELETE')).toBeNull()
+  })
+
+  it('returns false when deleting non-existent secret', () => {
+    expect(vault.delete('NOPE')).toBe(false)
+  })
+
+  it('rotates a secret DEK', () => {
+    vault.create('ROTATE_ME', 'my-value', 'host', 'test')
+    const before = vault.list()[0]
+
+    // Small delay to ensure rotated_at differs
+    const meta = vault.rotate('ROTATE_ME', 'test')
+    expect(meta).not.toBeNull()
+    expect(meta!.name).toBe('ROTATE_ME')
+    expect(meta!.rotated_at).toBeGreaterThanOrEqual(before.rotated_at)
+
+    // Value should still be readable after rotation
+    expect(vault.read('ROTATE_ME')).toBe('my-value')
+  })
+
+  it('exports encrypted bundle', () => {
+    vault.create('EXPORT_1', 'val1', 'host', 'test')
+    vault.create('EXPORT_2', 'val2', 'agent', 'test')
+
+    const bundle = vault.export('test')
+    expect(bundle.version).toBe('1.0.0')
+    expect(bundle.host_id).toBe('test-host')
+    expect(bundle.secrets).toHaveLength(2)
+
+    // Ensure exported data is encrypted (no plaintext)
+    const bundleStr = JSON.stringify(bundle)
+    expect(bundleStr).not.toContain('val1')
+    expect(bundleStr).not.toContain('val2')
+  })
+
+  it('imports secrets from another vault', () => {
+    // Create source vault
+    vault.create('IMPORT_ME', 'secret-data', 'host', 'test')
+    const bundle = vault.export('test')
+
+    // Read source HMK
+    const sourceHmk = Buffer.from(
+      readFileSync(join(tempDir, 'secrets', 'host.key'), 'utf8').trim(),
+      'base64'
+    )
+
+    // Create target vault
+    const targetDir = mkdtempSync(join(tmpdir(), 'vault-target-'))
+    const targetVault = new SecretVault(targetDir, 'target-host')
+    targetVault.init()
+
+    const imported = targetVault.import(bundle, sourceHmk, 'test')
+    expect(imported).toBe(1)
+
+    // Read imported secret
+    const value = targetVault.read('IMPORT_ME', 'test')
+    expect(value).toBe('secret-data')
+
+    rmSync(targetDir, { recursive: true, force: true })
+  })
+
+  it('records audit log entries', () => {
+    vault.create('AUDITED', 'val', 'host', 'test-actor')
+    vault.read('AUDITED', 'test-actor')
+    vault.rotate('AUDITED', 'test-actor')
+    vault.delete('AUDITED', 'test-actor')
+
+    const log = vault.getAuditLog()
+    expect(log.length).toBeGreaterThanOrEqual(4)
+    expect(log.map(e => e.action)).toEqual(
+      expect.arrayContaining(['create', 'read', 'rotate', 'delete'])
+    )
+    expect(log.every(e => e.hostId === 'test-host')).toBe(true)
+  })
+
+  it('persists secrets across vault reloads', () => {
+    vault.create('PERSIST', 'persistent-value', 'host', 'test')
+
+    // Create new vault instance pointing to same directory
+    const vault2 = new SecretVault(tempDir, 'test-host')
+    vault2.init()
+
+    expect(vault2.getStats().secretCount).toBe(1)
+    expect(vault2.read('PERSIST')).toBe('persistent-value')
+  })
+})
+
+// ── NotificationManager Tests ──
+
+describe('NotificationManager', () => {
+  it('returns default preferences for unconfigured agent', async () => {
+    const res = await req('GET', '/notifications/preferences/test-agent-xyz')
+    expect(res.status).toBe(200)
+    expect(res.body.preferences.agent).toBe('test-agent-xyz')
+    expect(res.body.preferences.enabled).toBe(true)
+    expect(res.body.preferences.deliveryMethod).toBe('both')
+  })
+
+  it('updates preferences', async () => {
+    const res = await req('PATCH', '/notifications/preferences/notif-test-1', {
+      enabled: false,
+      deliveryMethod: 'inbox',
+      priorityThreshold: 'P1',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.preferences.enabled).toBe(false)
+    expect(res.body.preferences.deliveryMethod).toBe('inbox')
+    expect(res.body.preferences.priorityThreshold).toBe('P1')
+  })
+
+  it('resets preferences to defaults', async () => {
+    // Set custom prefs
+    await req('PATCH', '/notifications/preferences/notif-reset-test', {
+      enabled: false,
+    })
+
+    // Reset
+    const res = await req('DELETE', '/notifications/preferences/notif-reset-test')
+    expect(res.status).toBe(200)
+
+    // Verify defaults
+    const check = await req('GET', '/notifications/preferences/notif-reset-test')
+    expect(check.body.preferences.enabled).toBe(true)
+  })
+
+  it('mutes and unmutes agent', async () => {
+    const mute = await req('POST', '/notifications/preferences/mute-test/mute', {
+      durationMs: 60000,
+    })
+    expect(mute.status).toBe(200)
+    expect(mute.body.preferences.mutedUntil).toBeGreaterThan(Date.now())
+
+    const unmute = await req('POST', '/notifications/preferences/mute-test/unmute')
+    expect(unmute.status).toBe(200)
+    expect(unmute.body.preferences.mutedUntil).toBeNull()
+  })
+
+  it('routes notifications based on preferences', async () => {
+    // Enable only P1 notifications
+    await req('PATCH', '/notifications/preferences/route-test', {
+      enabled: true,
+      priorityThreshold: 'P1',
+    })
+
+    // P1 should notify
+    const p1 = await req('POST', '/notifications/route', {
+      agent: 'route-test',
+      type: 'taskAssigned',
+      priority: 'P1',
+    })
+    expect(p1.body.routing.shouldNotify).toBe(true)
+
+    // P3 should NOT notify (below threshold)
+    const p3 = await req('POST', '/notifications/route', {
+      agent: 'route-test',
+      type: 'taskAssigned',
+      priority: 'P3',
+    })
+    expect(p3.body.routing.shouldNotify).toBe(false)
+    expect(p3.body.routing.reason).toBe('below_priority_threshold')
+  })
+
+  it('respects disabled event filters', async () => {
+    await req('PATCH', '/notifications/preferences/filter-test', {
+      enabled: true,
+      eventFilters: { taskComment: false },
+    })
+
+    const res = await req('POST', '/notifications/route', {
+      agent: 'filter-test',
+      type: 'taskComment',
+    })
+    expect(res.body.routing.shouldNotify).toBe(false)
+    expect(res.body.routing.reason).toBe('event_type_taskComment_disabled')
+  })
+
+  it('blocks notifications when disabled', async () => {
+    await req('PATCH', '/notifications/preferences/disabled-test', {
+      enabled: false,
+    })
+
+    const res = await req('POST', '/notifications/route', {
+      agent: 'disabled-test',
+      type: 'taskAssigned',
+    })
+    expect(res.body.routing.shouldNotify).toBe(false)
+    expect(res.body.routing.reason).toBe('notifications_disabled')
+  })
+
+  it('blocks notifications when muted', async () => {
+    await req('POST', '/notifications/preferences/muted-route-test/mute', {
+      durationMs: 60000,
+    })
+
+    const res = await req('POST', '/notifications/route', {
+      agent: 'muted-route-test',
+      type: 'taskAssigned',
+    })
+    expect(res.body.routing.shouldNotify).toBe(false)
+    expect(res.body.routing.reason).toBe('muted')
+  })
+})
+
+// ── Webhook Delivery Tests (via API) ──
+
+describe('WebhookDeliveryManager', () => {
+  it('returns stats', async () => {
+    const res = await req('GET', '/webhooks/stats')
+    expect(res.status).toBe(200)
+    expect(res.body.stats).toHaveProperty('total')
+    expect(res.body.stats).toHaveProperty('pending')
+    expect(res.body.stats).toHaveProperty('deadLetter')
+    expect(res.body.config).toHaveProperty('maxAttempts')
+  })
+
+  it('enqueues a webhook event', async () => {
+    const res = await req('POST', '/webhooks/deliver', {
+      provider: 'test',
+      eventType: 'test.event',
+      payload: { data: 'test-payload' },
+      targetUrl: 'http://localhost:99999/nonexistent', // will fail delivery
+      idempotencyKey: 'test-idk-001',
+    })
+    expect(res.status).toBe(201)
+    expect(res.body.event.idempotencyKey).toBe('test-idk-001')
+    expect(res.body.event.provider).toBe('test')
+    expect(res.body.event.eventType).toBe('test.event')
+  })
+
+  it('deduplicates by idempotency key', async () => {
+    const key = `dedup-test-${Date.now()}`
+    const first = await req('POST', '/webhooks/deliver', {
+      provider: 'test',
+      eventType: 'dedup.event',
+      payload: { n: 1 },
+      targetUrl: 'http://localhost:99999/nope',
+      idempotencyKey: key,
+    })
+
+    const second = await req('POST', '/webhooks/deliver', {
+      provider: 'test',
+      eventType: 'dedup.event',
+      payload: { n: 2 },
+      targetUrl: 'http://localhost:99999/nope',
+      idempotencyKey: key,
+    })
+
+    // Same ID — deduped
+    expect(first.body.event.id).toBe(second.body.event.id)
+  })
+
+  it('retrieves event by ID', async () => {
+    const create = await req('POST', '/webhooks/deliver', {
+      provider: 'test',
+      eventType: 'get.event',
+      payload: { get: true },
+      targetUrl: 'http://localhost:99999/nope',
+    })
+
+    const res = await req('GET', `/webhooks/events/${create.body.event.id}`)
+    expect(res.status).toBe(200)
+    expect(res.body.event.id).toBe(create.body.event.id)
+  })
+
+  it('returns 404 for non-existent event', async () => {
+    const res = await req('GET', '/webhooks/events/whe_nonexistent')
+    expect(res.status).toBe(404)
+  })
+
+  it('lists events with filters', async () => {
+    const res = await req('GET', '/webhooks/events?provider=test&limit=5')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.events)).toBe(true)
+  })
+
+  it('replays a webhook event', async () => {
+    const create = await req('POST', '/webhooks/deliver', {
+      provider: 'test',
+      eventType: 'replay.event',
+      payload: { replay: true },
+      targetUrl: 'http://localhost:99999/nope',
+    })
+
+    const replay = await req('POST', `/webhooks/events/${create.body.event.id}/replay`)
+    expect(replay.status).toBe(201)
+    expect(replay.body.event.id).not.toBe(create.body.event.id) // New ID
+    expect(replay.body.event.idempotencyKey).not.toBe(create.body.event.idempotencyKey)
+  })
+
+  it('returns 404 when replaying non-existent event', async () => {
+    const res = await req('POST', '/webhooks/events/whe_nope/replay')
+    expect(res.status).toBe(404)
+  })
+
+  it('looks up by idempotency key', async () => {
+    const key = `lookup-test-${Date.now()}`
+    await req('POST', '/webhooks/deliver', {
+      provider: 'test',
+      eventType: 'lookup.event',
+      payload: {},
+      targetUrl: 'http://localhost:99999/nope',
+      idempotencyKey: key,
+    })
+
+    const res = await req('GET', `/webhooks/idempotency/${key}`)
+    expect(res.status).toBe(200)
+    expect(res.body.event.idempotencyKey).toBe(key)
+  })
+
+  it('updates delivery config', async () => {
+    const res = await req('PATCH', '/webhooks/config', {
+      maxAttempts: 3,
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.config.maxAttempts).toBe(3)
+
+    // Reset
+    await req('PATCH', '/webhooks/config', { maxAttempts: 5 })
+  })
+
+  it('returns DLQ entries', async () => {
+    const res = await req('GET', '/webhooks/dlq')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.events)).toBe(true)
+  })
+
+  it('validates required fields on enqueue', async () => {
+    const res = await req('POST', '/webhooks/deliver', {
+      provider: 'test',
+      // missing eventType, payload, targetUrl
+    })
+    expect(res.status).toBe(400)
+  })
+})
+
+// ── Provisioning Tests (via API) ──
+
+describe('ProvisioningManager', () => {
+  it('returns provisioning status', async () => {
+    const res = await req('GET', '/provisioning/status')
+    expect(res.status).toBe(200)
+    expect(res.body.provisioning).toHaveProperty('phase')
+    expect(res.body.provisioning).toHaveProperty('hasCredential')
+    // credential should never be exposed
+    expect(res.body.provisioning).not.toHaveProperty('credential')
+  })
+
+  it('returns webhook routes', async () => {
+    const res = await req('GET', '/provisioning/webhooks')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.webhooks)).toBe(true)
+  })
+
+  it('adds and removes webhook route', async () => {
+    const add = await req('POST', '/provisioning/webhooks', {
+      provider: 'test-provider',
+      events: ['push', 'pull_request'],
+      active: true,
+    })
+    expect(add.status).toBe(201)
+    expect(add.body.webhook.provider).toBe('test-provider')
+    expect(add.body.webhook.id).toBeTruthy()
+
+    const remove = await req('DELETE', `/provisioning/webhooks/${add.body.webhook.id}`)
+    expect(remove.status).toBe(200)
+  })
+
+  it('returns 404 when removing non-existent webhook', async () => {
+    const res = await req('DELETE', '/provisioning/webhooks/wh_nonexistent')
+    expect(res.status).toBe(404)
+  })
+
+  it('validates provision request', async () => {
+    // Missing required fields
+    const res = await req('POST', '/provisioning/provision', {
+      cloudUrl: 'https://api.example.com',
+      // missing hostName and joinToken/apiKey
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects refresh when not enrolled', async () => {
+    // Reset first to ensure unprovisioned state
+    await req('POST', '/provisioning/reset')
+    const res = await req('POST', '/provisioning/refresh')
+    expect(res.status).toBe(400)
+    expect(res.body.message).toContain('not enrolled')
+  })
+})
+
+// ── Portability Tests (via API) ──
+
+describe('Portability', () => {
+  it('exports a bundle', async () => {
+    const res = await req('GET', '/portability/export')
+    expect(res.status).toBe(200)
+    expect(res.body.bundle.format).toBe('reflectt-export')
+    expect(res.body.bundle.version).toBe('1.0.0')
+    expect(res.body.bundle).toHaveProperty('teamConfig')
+    expect(res.body.bundle).toHaveProperty('secrets')
+    expect(res.body.bundle).toHaveProperty('webhooks')
+    expect(res.body.bundle).toHaveProperty('provisioning')
+  })
+
+  it('export bundle never contains plaintext credentials', async () => {
+    const res = await req('GET', '/portability/export')
+    const bundleStr = JSON.stringify(res.body.bundle)
+
+    // Check serverConfig credentials are redacted
+    if (res.body.bundle.serverConfig?.cloud) {
+      const cloud = res.body.bundle.serverConfig.cloud
+      if (cloud.credential) {
+        expect(cloud.credential).toBe('[REDACTED]')
+      }
+    }
+
+    // Provisioning should not have credential field
+    expect(res.body.bundle.provisioning).not.toHaveProperty('credential')
+  })
+
+  it('returns export manifest', async () => {
+    const res = await req('GET', '/portability/manifest')
+    expect(res.status).toBe(200)
+    expect(res.body.manifest).toHaveProperty('teamConfig')
+    expect(res.body.manifest).toHaveProperty('secrets')
+    expect(res.body.manifest).toHaveProperty('webhooks')
+    expect(res.body.manifest).toHaveProperty('provisioning')
+  })
+
+  it('downloads export as file', async () => {
+    const res = await app.inject({ method: 'GET', url: '/portability/export/download' })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('application/json')
+    expect(res.headers['content-disposition']).toContain('attachment')
+    expect(res.headers['content-disposition']).toContain('.json')
+
+    // Should be valid JSON
+    const parsed = JSON.parse(res.body)
+    expect(parsed.format).toBe('reflectt-export')
+  })
+
+  it('rejects invalid import bundle', async () => {
+    const res = await req('POST', '/portability/import', {
+      bundle: { invalid: true },
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('imports a valid bundle', async () => {
+    // Export first
+    const exportRes = await req('GET', '/portability/export')
+    const bundle = exportRes.body.bundle
+
+    // Import (with skipConfig to avoid overwriting live config)
+    const importRes = await req('POST', '/portability/import', {
+      bundle,
+      skipConfig: true,
+    })
+    expect(importRes.status).toBe(200)
+    expect(importRes.body.success).toBe(true)
+  })
+})
