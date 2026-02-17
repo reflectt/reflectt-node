@@ -5,6 +5,7 @@
  * - WebhookDeliveryManager (enqueue/retry/DLQ/replay)
  * - Portability (export/import)
  * - NotificationManager (preferences/routing)
+ * - BoardHealthWorker (auto-actions, audit log, rollback, digest)
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -555,5 +556,95 @@ describe('Portability', () => {
     })
     expect(importRes.status).toBe(200)
     expect(importRes.body.success).toBe(true)
+  })
+})
+
+// ── BoardHealthWorker Tests ──
+
+describe('BoardHealthWorker', () => {
+  it('GET /board-health/status returns worker status', async () => {
+    const res = await req('GET', '/board-health/status')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.config).toBeDefined()
+    expect(typeof res.body.running).toBe('boolean')
+    expect(typeof res.body.tickCount).toBe('number')
+    expect(typeof res.body.auditLogSize).toBe('number')
+    expect(Array.isArray(res.body.recentActions)).toBe(true)
+    expect(Array.isArray(res.body.rollbackableActions)).toBe(true)
+  })
+
+  it('GET /board-health/audit-log returns audit entries', async () => {
+    const res = await req('GET', '/board-health/audit-log')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(Array.isArray(res.body.actions)).toBe(true)
+    expect(typeof res.body.count).toBe('number')
+  })
+
+  it('POST /board-health/tick (dry-run) runs without modifying state', async () => {
+    const res = await req('POST', '/board-health/tick?dryRun=true')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.skipped).toBe(false)
+    expect(Array.isArray(res.body.actions)).toBe(true)
+  })
+
+  it('POST /board-health/tick (real) applies policies', async () => {
+    const res = await req('POST', '/board-health/tick')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.skipped).toBe(false)
+  })
+
+  it('PATCH /board-health/config updates config at runtime', async () => {
+    const res = await req('PATCH', '/board-health/config', {
+      dryRun: true,
+      maxActionsPerTick: 3,
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.config.dryRun).toBe(true)
+    expect(res.body.config.maxActionsPerTick).toBe(3)
+
+    // Reset
+    await req('PATCH', '/board-health/config', {
+      dryRun: false,
+      maxActionsPerTick: 5,
+    })
+  })
+
+  it('POST /board-health/rollback with invalid ID returns error', async () => {
+    const res = await req('POST', '/board-health/rollback/nonexistent', { by: 'test' })
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(false)
+    expect(res.body.message).toContain('not found')
+  })
+
+  it('POST /board-health/prune removes old entries', async () => {
+    const res = await req('POST', '/board-health/prune?maxAgeDays=7')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(typeof res.body.pruned).toBe('number')
+  })
+
+  it('GET /board-health/audit-log supports kind filter', async () => {
+    const res = await req('GET', '/board-health/audit-log?kind=digest-emitted')
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    // All returned actions should be digest-emitted (or empty)
+    for (const action of res.body.actions) {
+      expect(action.kind).toBe('digest-emitted')
+    }
+  })
+
+  it('config rejects unknown fields silently', async () => {
+    const res = await req('PATCH', '/board-health/config', {
+      unknownField: 'value',
+      enabled: true,
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.config.unknownField).toBeUndefined()
   })
 })

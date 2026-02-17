@@ -42,6 +42,7 @@ import { getWebhookDeliveryManager } from './webhooks.js'
 import { exportBundle, importBundle } from './portability.js'
 import { getNotificationManager } from './notifications.js'
 import { getConnectivityManager } from './connectivity.js'
+import { boardHealthWorker } from './boardHealthWorker.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -1044,10 +1045,14 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 30 * 1000)
   mentionRescueTimer.unref()
 
+  // Board health execution worker (auto-block stale, suggest close, digest)
+  boardHealthWorker.start()
+
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
     clearInterval(cadenceWatchdogTimer)
     clearInterval(mentionRescueTimer)
+    boardHealthWorker.stop()
     wsHeartbeat.stop()
   })
 
@@ -2742,6 +2747,73 @@ export async function createServer(): Promise<FastifyInstance> {
       agentsLowWatermark,
     }
   })
+
+  // ── Board health execution worker endpoints ─────────────────────────
+
+  // Worker status + config
+  app.get('/board-health/status', async () => {
+    return { success: true, ...boardHealthWorker.getStatus() }
+  })
+
+  // Audit log
+  app.get<{ Querystring: { limit?: string; since?: string; kind?: string } }>(
+    '/board-health/audit-log',
+    async (request) => {
+      const { limit, since, kind } = request.query
+      const log = boardHealthWorker.getAuditLog({
+        limit: limit ? Number(limit) : 50,
+        since: since ? Number(since) : undefined,
+        kind: kind as any,
+      })
+      return { success: true, count: log.length, actions: log }
+    },
+  )
+
+  // Manual tick (dry-run or real)
+  app.post<{ Querystring: { dryRun?: string } }>(
+    '/board-health/tick',
+    async (request) => {
+      const dryRun = request.query.dryRun === 'true'
+      const result = await boardHealthWorker.tick({ dryRun, force: true })
+      return { success: true, ...result }
+    },
+  )
+
+  // Rollback an automated action
+  app.post<{ Params: { actionId: string }; Body: { by?: string } }>(
+    '/board-health/rollback/:actionId',
+    async (request) => {
+      const by = (request.body as any)?.by || 'manual'
+      const result = await boardHealthWorker.rollback(request.params.actionId, by)
+      return result
+    },
+  )
+
+  // Update worker config at runtime
+  app.patch('/board-health/config', async (request) => {
+    const patch = request.body as Record<string, unknown>
+    const allowed = [
+      'enabled', 'intervalMs', 'staleDoingThresholdMin', 'suggestCloseThresholdMin',
+      'rollbackWindowMs', 'digestIntervalMs', 'digestChannel', 'quietHoursStart',
+      'quietHoursEnd', 'dryRun', 'maxActionsPerTick',
+    ]
+    const filtered: Record<string, unknown> = {}
+    for (const key of allowed) {
+      if (key in patch) filtered[key] = patch[key]
+    }
+    boardHealthWorker.updateConfig(filtered as any)
+    return { success: true, config: boardHealthWorker.getConfig() }
+  })
+
+  // Prune old audit log entries
+  app.post<{ Querystring: { maxAgeDays?: string } }>(
+    '/board-health/prune',
+    async (request) => {
+      const maxAgeDays = Number(request.query.maxAgeDays || 7)
+      const pruned = boardHealthWorker.pruneAuditLog(maxAgeDays)
+      return { success: true, pruned }
+    },
+  )
 
   // Update task
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
