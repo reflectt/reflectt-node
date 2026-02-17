@@ -295,6 +295,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/provisioning/webhooks` | List configured webhook routes for this host. |
 | POST | `/provisioning/webhooks` | Add a webhook route. Body: `{ provider, path?, events?, active? }`. |
 | DELETE | `/provisioning/webhooks/:id` | Remove a webhook route by ID. |
+| POST | `/webhooks/incoming/:provider` | Receive incoming webhooks from external providers (GitHub, Stripe, etc.). Auto-routes through delivery engine to configured targets. Returns 202 Accepted. |
 | POST | `/webhooks/deliver` | Enqueue a webhook for durable delivery. Body: `{ provider, eventType, payload, targetUrl, idempotencyKey?, metadata? }`. Returns event with idempotency key. |
 | GET | `/webhooks/events` | List webhook events. Query: `status`, `provider`, `limit`, `offset`. |
 | GET | `/webhooks/events/:id` | Get a webhook event by ID. |

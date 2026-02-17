@@ -2281,6 +2281,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // Task-comments are now primary execution comms:
       // fan out inbox-visible notifications to assignee/reviewer + explicit @mentions.
+      // Notification routing respects per-agent preferences (quiet hours, mute, filters).
       const task = taskManager.getTask(resolved.resolvedId)
       if (task) {
         const targets = new Set<string>()
@@ -2294,29 +2295,49 @@ export async function createServer(): Promise<FastifyInstance> {
         // Keep sender out of forced mention fanout to avoid self-noise.
         targets.delete(data.author)
 
-        const mentionPrefix = Array.from(targets)
-          .map(agent => `@${agent}`)
-          .join(' ')
+        // Filter targets through notification preferences
+        const notifMgr = getNotificationManager()
+        const filteredTargets = new Set<string>()
+        for (const agent of targets) {
+          const routing = notifMgr.shouldNotify({
+            type: 'taskComment',
+            agent,
+            priority: task.priority,
+            channel: 'task-comments',
+            message: data.content,
+          })
+          if (routing.shouldNotify) {
+            filteredTargets.add(agent)
+          }
+        }
 
-        const maxContent = 280
-        const snippet = data.content.length > maxContent
-          ? `${data.content.slice(0, maxContent)}…`
-          : data.content
+        if (filteredTargets.size > 0) {
+          const mentionPrefix = Array.from(filteredTargets)
+            .map(agent => `@${agent}`)
+            .join(' ')
 
-        const inboxNotification = `${mentionPrefix} [task-comment:${task.id}] ${snippet}`.trim()
+          const maxContent = 280
+          const snippet = data.content.length > maxContent
+            ? `${data.content.slice(0, maxContent)}…`
+            : data.content
 
-        // Non-blocking best-effort notification path via chat/inbox routing.
-        // Uses dedicated task-comments channel; mentions still route as high-priority inbox items.
-        await chatManager.sendMessage({
-          from: data.author,
-          content: inboxNotification,
-          channel: 'task-comments',
-          metadata: {
-            kind: 'task_comment',
-            taskId: task.id,
-            commentId: comment.id,
-          },
-        })
+          const inboxNotification = `${mentionPrefix} [task-comment:${task.id}] ${snippet}`.trim()
+
+          // Non-blocking best-effort notification path via chat/inbox routing.
+          // Uses dedicated task-comments channel; mentions still route as high-priority inbox items.
+          await chatManager.sendMessage({
+            from: data.author,
+            content: inboxNotification,
+            channel: 'task-comments',
+            metadata: {
+              kind: 'task_comment',
+              taskId: task.id,
+              commentId: comment.id,
+              notifiedAgents: Array.from(filteredTargets),
+              filteredAgents: Array.from(targets).filter(a => !filteredTargets.has(a)),
+            },
+          })
+        }
       }
 
       presenceManager.recordActivity(data.author, 'message')
@@ -2910,6 +2931,44 @@ export async function createServer(): Promise<FastifyInstance> {
           presenceManager.updatePresence(task.assignee, 'blocked')
         } else if (parsed.status === 'validating') {
           presenceManager.updatePresence(task.assignee, 'reviewing')
+        }
+      }
+
+      // Route status-change notifications through agent preferences
+      const notifMgr = getNotificationManager()
+      const statusNotifTargets: Array<{ agent: string; type: 'taskAssigned' | 'taskCompleted' | 'reviewRequested' | 'statusChange' }> = []
+
+      if (parsed.status === 'doing' && task.assignee) {
+        statusNotifTargets.push({ agent: task.assignee, type: 'taskAssigned' })
+      }
+      if (parsed.status === 'validating' && task.reviewer) {
+        statusNotifTargets.push({ agent: task.reviewer, type: 'reviewRequested' })
+      }
+      if (parsed.status === 'done') {
+        if (task.assignee) statusNotifTargets.push({ agent: task.assignee, type: 'taskCompleted' })
+        if (task.reviewer) statusNotifTargets.push({ agent: task.reviewer, type: 'taskCompleted' })
+      }
+
+      for (const target of statusNotifTargets) {
+        const routing = notifMgr.shouldNotify({
+          type: target.type,
+          agent: target.agent,
+          priority: task.priority,
+          message: `Task ${task.id} → ${parsed.status}`,
+        })
+        if (routing.shouldNotify) {
+          // Route through inbox/chat based on delivery method preference
+          chatManager.sendMessage({
+            from: 'system',
+            content: `@${target.agent} [${target.type}:${task.id}] ${task.title} → ${parsed.status}`,
+            channel: 'task-notifications',
+            metadata: {
+              kind: target.type,
+              taskId: task.id,
+              status: parsed.status,
+              deliveryMethod: routing.deliveryMethod,
+            },
+          }).catch(() => {}) // Non-blocking
         }
       }
       
@@ -4197,6 +4256,66 @@ export async function createServer(): Promise<FastifyInstance> {
 
   app.addHook('onClose', async () => {
     webhookDelivery.stop()
+  })
+
+  // Incoming webhook receiver: accepts webhooks from external providers
+  // and routes them through the delivery engine to configured targets.
+  app.post<{ Params: { provider: string } }>('/webhooks/incoming/:provider', async (request, reply) => {
+    const provider = request.params.provider
+    const body = request.body as Record<string, unknown>
+
+    // Find matching webhook route from provisioning config
+    const routes = provisioning.getWebhooks().filter(w => w.provider === provider && w.active)
+    if (routes.length === 0) {
+      reply.code(404)
+      return { success: false, message: `No active webhook route for provider: ${provider}` }
+    }
+
+    // Extract event type from common provider header patterns
+    const eventType =
+      (request.headers['x-github-event'] as string) ||
+      (request.headers['x-stripe-event'] as string) ||
+      (request.headers['x-event-type'] as string) ||
+      (body?.type as string) ||
+      (body?.event as string) ||
+      'unknown'
+
+    // Create idempotency key from provider delivery ID if available
+    const deliveryId =
+      (request.headers['x-github-delivery'] as string) ||
+      (request.headers['x-request-id'] as string) ||
+      undefined
+
+    const idempotencyKey = deliveryId ? `${provider}_${deliveryId}` : undefined
+
+    // Enqueue through delivery engine for each configured target
+    const events = []
+    for (const route of routes) {
+      // Check event filter
+      if (route.events.length > 0 && !route.events.includes(eventType) && !route.events.includes('*')) {
+        continue
+      }
+
+      const event = webhookDelivery.enqueue({
+        provider,
+        eventType,
+        payload: body,
+        targetUrl: `http://localhost:${serverConfig.port}${route.path}`,
+        idempotencyKey: idempotencyKey ? `${idempotencyKey}_${route.id}` : undefined,
+        metadata: {
+          routeId: route.id,
+          sourceHeaders: {
+            'x-github-event': request.headers['x-github-event'],
+            'x-github-delivery': request.headers['x-github-delivery'],
+            'x-stripe-event': request.headers['x-stripe-event'],
+          },
+        },
+      })
+      events.push(event)
+    }
+
+    reply.code(202)
+    return { success: true, accepted: events.length, events: events.map(e => ({ id: e.id, idempotencyKey: e.idempotencyKey, status: e.status })) }
   })
 
   // Enqueue a webhook for delivery
