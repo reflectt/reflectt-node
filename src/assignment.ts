@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Role-based assignment engine: config-driven from TEAM-ROLES.yaml
 
-import { readFileSync, existsSync, watchFile, unwatchFile, statSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, watchFile, unwatchFile, statSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import { parse as parseYaml } from 'yaml'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { homedir } from 'os'
 
 export interface AgentRole {
@@ -211,6 +211,33 @@ export function getAgentRolesSource(): { source: string; count: number } {
 
 export function getAgentRole(name: string): AgentRole | undefined {
   return loadedRoles.find(a => a.name.toLowerCase() === name.toLowerCase())
+}
+
+/** Save updated agent roles to YAML config file */
+export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: string; version: number } {
+  const targetPath = CONFIG_PATHS[0] // ~/.reflectt/TEAM-ROLES.yaml
+  const dir = targetPath.substring(0, targetPath.lastIndexOf('/'))
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+
+  const data = {
+    agents: roles.map(r => ({
+      name: r.name,
+      role: r.role,
+      ...(r.description ? { description: r.description } : {}),
+      affinityTags: r.affinityTags,
+      ...(r.alwaysRoute?.length ? { alwaysRoute: r.alwaysRoute } : {}),
+      ...(r.neverRoute?.length ? { neverRoute: r.neverRoute } : {}),
+      ...(r.protectedDomains?.length ? { protectedDomains: r.protectedDomains } : {}),
+      wipCap: r.wipCap,
+    })),
+  }
+
+  writeFileSync(targetPath, stringifyYaml(data), 'utf-8')
+  loadedRoles = roles
+  loadedFromPath = targetPath
+  lastMtime = statSync(targetPath).mtimeMs
+
+  return { saved: true, path: targetPath, version: Date.now() }
 }
 
 interface TaskForScoring {

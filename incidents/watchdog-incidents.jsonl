@@ -84,3 +84,8 @@
 {"type":"stale_working","at":1771101921313,"agent":"kai","taskId":"task-1771095292717-cy5m0n2pe","thresholdMs":2700000,"lastUpdateAt":1771097375076,"workingSinceAt":1771096331939}
 {"type":"stale_working","at":1771286027656,"agent":"pixel","taskId":"task-1771255668151-j5n188i8n","thresholdMs":2700000,"lastUpdateAt":1771283305774,"workingSinceAt":1771283294601}
 {"type":"trio_general_silence","at":1771287467706,"thresholdMs":3600000,"lastUpdateAt":1771283821514}
+{"type":"trio_general_silence","at":1771296467983,"thresholdMs":3600000,"lastUpdateAt":1771283821514}
+{"type":"stale_working","at":1771296827972,"agent":"pixel","taskId":"task-1771255668151-j5n188i8n","thresholdMs":2700000,"lastUpdateAt":1771283305774,"workingSinceAt":1771283294601}
+{"type":"trio_general_silence","at":1771298268024,"thresholdMs":3600000,"lastUpdateAt":1771283821514}
+{"type":"trio_general_silence","at":1771300068089,"thresholdMs":3600000,"lastUpdateAt":1771283821514}
+{"type":"trio_general_silence","at":1771301868137,"thresholdMs":3600000,"lastUpdateAt":1771283821514}

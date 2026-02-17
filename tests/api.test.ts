@@ -2686,3 +2686,107 @@ describe('Auto-queue notification', () => {
     await req('DELETE', `/tasks/${candidateId}`)
   })
 })
+
+// Approval Queue + Routing Policy
+describe('Approval Queue', () => {
+  it('GET /approval-queue returns queue data', async () => {
+    const { status, body } = await req('GET', '/approval-queue')
+    expect(status).toBe(200)
+    expect(body).toHaveProperty('items')
+    expect(body).toHaveProperty('total')
+    expect(body).toHaveProperty('highConfidenceCount')
+    expect(body).toHaveProperty('needsReviewCount')
+    expect(Array.isArray(body.items)).toBe(true)
+  })
+
+  it('POST /approval-queue/:id/approve approves a task', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: approval queue approve test',
+      createdBy: 'test',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['Works'],
+      eta: '1h',
+      priority: 'P3',
+    })
+    const taskId = created.task.id
+
+    const { status, body } = await req('POST', `/approval-queue/${taskId}/approve`, {
+      assignedAgent: 'pixel',
+      reviewedBy: 'kai',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('POST /approval-queue/:id/reject rejects a task', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: approval queue reject test',
+      createdBy: 'test',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['Works'],
+      eta: '1h',
+      priority: 'P3',
+    })
+    const taskId = created.task.id
+
+    const { status, body } = await req('POST', `/approval-queue/${taskId}/reject`, {
+      reason: 'Duplicate',
+      reviewedBy: 'kai',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('POST /approval-queue/batch-approve handles multiple tasks', async () => {
+    const tasks: string[] = []
+    for (let i = 0; i < 3; i++) {
+      const { body: created } = await req('POST', '/tasks', {
+        title: `TEST: batch approve ${i}`,
+        createdBy: 'test',
+        assignee: 'link',
+        reviewer: 'kai',
+        done_criteria: ['Works'],
+        eta: '1h',
+        priority: 'P3',
+      })
+      tasks.push(created.task.id)
+    }
+
+    const { status, body } = await req('POST', '/approval-queue/batch-approve', {
+      taskIds: tasks,
+      reviewedBy: 'kai',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.approved).toBe(3)
+
+    for (const id of tasks) await req('DELETE', `/tasks/${id}`)
+  })
+})
+
+describe('Routing Policy', () => {
+  it('GET /routing-policy returns agent affinity data', async () => {
+    const { status, body } = await req('GET', '/routing-policy')
+    expect(status).toBe(200)
+    expect(Array.isArray(body.agents)).toBe(true)
+    expect(body.agents.length).toBeGreaterThan(0)
+    expect(body.agents[0]).toHaveProperty('agentId')
+    expect(body.agents[0]).toHaveProperty('affinityTags')
+    expect(body.agents[0]).toHaveProperty('weight')
+  })
+
+  it('PUT /routing-policy validates agents array', async () => {
+    const { body } = await req('PUT', '/routing-policy', {
+      agents: [],
+      updatedBy: 'test',
+    })
+    expect(body.success).toBe(false)
+    expect(body.error).toContain('agents')
+  })
+})

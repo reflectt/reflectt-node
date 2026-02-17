@@ -1444,12 +1444,250 @@ async function escalateReviewBreaches(breachedTasks) {
   }
 }
 
+// ---- Approval Queue ----
+let approvalQueueData = null;
+let routingPolicyVisible = false;
+let routingPolicyData = null;
+let policyEdits = {};
+
+async function loadApprovalQueue() {
+  try {
+    const res = await fetch(BASE + '/approval-queue');
+    approvalQueueData = await res.json();
+    renderApprovalQueue();
+  } catch (e) {
+    const body = document.getElementById('approval-queue-body');
+    if (body) body.innerHTML = '<div class="empty">Failed to load approval queue</div>';
+  }
+}
+
+function renderApprovalQueue() {
+  const body = document.getElementById('approval-queue-body');
+  const count = document.getElementById('approval-queue-count');
+  if (!body || !approvalQueueData) return;
+
+  const items = approvalQueueData.items || [];
+  const highCount = approvalQueueData.highConfidenceCount || 0;
+  const needsCount = approvalQueueData.needsReviewCount || 0;
+  count.textContent = items.length + ' pending';
+
+  if (items.length === 0) {
+    body.innerHTML = '<div class="empty" style="text-align:center;padding:20px;color:var(--text-dim)">✓ Queue is clear — no tasks waiting for approval.</div>';
+    return;
+  }
+
+  let html = '';
+
+  // Batch approve bar
+  if (highCount > 0) {
+    html += '<div class="batch-approve-bar">';
+    html += '<span>' + highCount + ' high-confidence · ' + needsCount + ' need review</span>';
+    html += '<button onclick="batchApproveHighConfidence()">Approve All High-Confidence (' + highCount + ')</button>';
+    html += '</div>';
+  }
+
+  // High confidence section
+  const highItems = items.filter(function(i) { return i.confidenceScore >= 0.85; });
+  const lowItems = items.filter(function(i) { return i.confidenceScore < 0.85; });
+
+  if (highItems.length > 0) {
+    html += '<div style="padding:6px 12px;font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-top:4px">High Confidence (≥ 85%)</div>';
+    highItems.forEach(function(item) { html += renderApprovalCard(item, true); });
+  }
+
+  if (lowItems.length > 0) {
+    html += '<div style="padding:6px 12px;font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-top:4px">Needs Review (&lt; 85%)</div>';
+    lowItems.forEach(function(item) { html += renderApprovalCard(item, false); });
+  }
+
+  body.innerHTML = html;
+}
+
+function renderApprovalCard(item, isHigh) {
+  const icon = isHigh ? '✦' : '⚠';
+  const pct = Math.round(item.confidenceScore * 100);
+  const confClass = isHigh ? 'high' : 'low';
+  return '<div class="approval-card">' +
+    '<div class="approval-header">' +
+    '<span>' + icon + '</span> ' +
+    '<span class="approval-title">' + esc(item.title.substring(0, 60)) + '</span>' +
+    '<span class="assignee-tag">' + esc(item.priority) + '</span>' +
+    '<span class="confidence-score ' + confClass + '">' + pct + '%</span>' +
+    '</div>' +
+    '<div class="approval-meta">' +
+    'Suggested: @' + esc(item.suggestedAgent || '?') + ' — ' + esc(item.confidenceReason || '') +
+    '</div>' +
+    '<div class="approval-actions">' +
+    (isHigh ? '' : '<button class="btn-reject" onclick="rejectApproval(\'' + esc(item.taskId) + '\')">✗ Reject</button>') +
+    '<button class="btn-edit" onclick="openTaskModal(\'' + esc(item.taskId) + '\')">Edit</button>' +
+    '<button class="btn-approve" onclick="approveTask(\'' + esc(item.taskId) + '\', \'' + esc(item.suggestedAgent || '') + '\')">✓ Approve</button>' +
+    '</div>' +
+    '</div>';
+}
+
+async function approveTask(taskId, agent) {
+  try {
+    await fetch(BASE + '/approval-queue/' + encodeURIComponent(taskId) + '/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assignedAgent: agent, reviewedBy: 'dashboard' })
+    });
+    await loadApprovalQueue();
+  } catch (e) { console.error('Approve failed:', e); }
+}
+
+async function rejectApproval(taskId) {
+  const reason = prompt('Rejection reason (optional):') || '';
+  try {
+    await fetch(BASE + '/approval-queue/' + encodeURIComponent(taskId) + '/reject', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason, reviewedBy: 'dashboard' })
+    });
+    await loadApprovalQueue();
+  } catch (e) { console.error('Reject failed:', e); }
+}
+
+async function batchApproveHighConfidence() {
+  if (!approvalQueueData) return;
+  const highItems = (approvalQueueData.items || []).filter(function(i) { return i.confidenceScore >= 0.85; });
+  if (highItems.length === 0) return;
+  if (!confirm('Approve ' + highItems.length + ' high-confidence tasks? They will be assigned immediately.')) return;
+
+  try {
+    await fetch(BASE + '/approval-queue/batch-approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskIds: highItems.map(function(i) { return i.taskId; }), reviewedBy: 'dashboard' })
+    });
+    await loadApprovalQueue();
+  } catch (e) { console.error('Batch approve failed:', e); }
+}
+
+// ---- Routing Policy Editor ----
+function toggleRoutingPolicy() {
+  routingPolicyVisible = !routingPolicyVisible;
+  const panel = document.getElementById('routing-policy-panel');
+  if (!panel) return;
+  panel.style.display = routingPolicyVisible ? '' : 'none';
+  if (routingPolicyVisible) loadRoutingPolicy();
+}
+
+async function loadRoutingPolicy() {
+  try {
+    const res = await fetch(BASE + '/routing-policy');
+    routingPolicyData = await res.json();
+    policyEdits = {};
+    renderRoutingPolicy();
+  } catch (e) {
+    const panel = document.getElementById('routing-policy-panel');
+    if (panel) panel.innerHTML = '<div class="empty">Failed to load routing policy</div>';
+  }
+}
+
+function renderRoutingPolicy() {
+  const panel = document.getElementById('routing-policy-panel');
+  if (!panel || !routingPolicyData) return;
+
+  const agents = routingPolicyData.agents || [];
+  let html = '<div style="font-size:12px;font-weight:600;color:var(--text-bright);margin-bottom:8px">Agent Affinity Maps</div>';
+  html += '<div style="font-size:10px;color:var(--text-muted);margin-bottom:12px">Edit which task types each agent is preferred for. Confidence scores are calculated from these affinities.</div>';
+
+  agents.forEach(function(agent, idx) {
+    const edited = policyEdits[agent.agentId] || agent;
+    const tags = edited.affinityTags || [];
+    const weight = typeof edited.weight === 'number' ? edited.weight : 0.5;
+
+    html += '<div class="policy-agent-card">';
+    html += '<div class="agent-name">@' + esc(agent.agentId) + '</div>';
+    html += '<div class="tag-row">';
+    tags.forEach(function(tag, ti) {
+      html += '<span class="tag-chip">' + esc(tag) + ' <span class="tag-remove" onclick="removePolicyTag(\'' + esc(agent.agentId) + '\',' + ti + ')">×</span></span>';
+    });
+    html += '<input type="text" placeholder="+ tag" style="font-size:10px;width:60px;background:none;border:1px solid var(--border-subtle);color:var(--text-bright);padding:2px 6px;border-radius:10px" onkeydown="addPolicyTag(event,\'' + esc(agent.agentId) + '\')">';
+    html += '</div>';
+    html += '<div class="weight-row">';
+    html += '<span style="color:var(--text-dim)">Weight:</span>';
+    html += '<input type="range" min="0" max="10" value="' + Math.round(weight * 10) + '" oninput="updatePolicyWeight(\'' + esc(agent.agentId) + '\', this.value)">';
+    html += '<span class="weight-val">' + weight.toFixed(1) + '</span>';
+    html += '</div>';
+    html += '</div>';
+  });
+
+  // Save bar
+  const editCount = Object.keys(policyEdits).length;
+  if (editCount > 0) {
+    html += '<div class="policy-save-bar">';
+    html += '<span style="font-size:10px;color:var(--text-muted)">' + editCount + ' unsaved change' + (editCount !== 1 ? 's' : '') + '</span>';
+    html += '<button class="btn-discard" onclick="loadRoutingPolicy()">Discard</button>';
+    html += '<button class="btn-save" onclick="saveRoutingPolicy()">Save</button>';
+    html += '</div>';
+  }
+
+  panel.innerHTML = html;
+}
+
+function removePolicyTag(agentId, tagIndex) {
+  if (!routingPolicyData) return;
+  const agent = routingPolicyData.agents.find(function(a) { return a.agentId === agentId; });
+  if (!agent) return;
+  const edited = policyEdits[agentId] || JSON.parse(JSON.stringify(agent));
+  edited.affinityTags.splice(tagIndex, 1);
+  policyEdits[agentId] = edited;
+  renderRoutingPolicy();
+}
+
+function addPolicyTag(event, agentId) {
+  if (event.key !== 'Enter') return;
+  const val = event.target.value.trim();
+  if (!val) return;
+  if (!routingPolicyData) return;
+  const agent = routingPolicyData.agents.find(function(a) { return a.agentId === agentId; });
+  if (!agent) return;
+  const edited = policyEdits[agentId] || JSON.parse(JSON.stringify(agent));
+  if (!edited.affinityTags.includes(val)) {
+    edited.affinityTags.push(val);
+  }
+  policyEdits[agentId] = edited;
+  event.target.value = '';
+  renderRoutingPolicy();
+}
+
+function updatePolicyWeight(agentId, sliderVal) {
+  if (!routingPolicyData) return;
+  const agent = routingPolicyData.agents.find(function(a) { return a.agentId === agentId; });
+  if (!agent) return;
+  const edited = policyEdits[agentId] || JSON.parse(JSON.stringify(agent));
+  edited.weight = Number(sliderVal) / 10;
+  policyEdits[agentId] = edited;
+  renderRoutingPolicy();
+}
+
+async function saveRoutingPolicy() {
+  if (!routingPolicyData) return;
+  const agents = routingPolicyData.agents.map(function(a) {
+    return policyEdits[a.agentId] || a;
+  });
+  try {
+    const res = await fetch(BASE + '/routing-policy', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agents: agents, updatedBy: 'dashboard' })
+    });
+    const result = await res.json();
+    if (result.success) {
+      policyEdits = {};
+      await loadRoutingPolicy();
+    }
+  } catch (e) { console.error('Save policy failed:', e); }
+}
+
 async function refresh() {
   refreshCount += 1;
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard()]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue()]);
   await renderPromotionSSOT();
 }
 

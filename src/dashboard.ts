@@ -837,6 +837,70 @@ export function getDashboardHTML(): string {
   .qa-contract .qa-value.missing { color: var(--yellow); font-style: italic; }
   .qa-contract .qa-value.has-artifact { color: var(--green); }
 
+  /* Approval Queue */
+  .approval-card {
+    padding: 10px 12px; margin-bottom: 6px; border-radius: var(--radius-sm);
+    background: var(--surface-raised); border: 1px solid var(--border-subtle);
+  }
+  .approval-card .approval-header {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .approval-card .approval-title { font-size: 12px; font-weight: 600; color: var(--text-bright); flex: 1; }
+  .approval-card .approval-meta {
+    font-size: 10px; color: var(--text-muted); margin-top: 4px;
+  }
+  .approval-card .approval-actions {
+    display: flex; gap: 4px; margin-top: 8px; justify-content: flex-end;
+  }
+  .approval-card .approval-actions button {
+    font-size: 10px; padding: 3px 10px; border-radius: 4px; cursor: pointer; border: none;
+  }
+  .approval-card .btn-approve { background: var(--green); color: #fff; }
+  .approval-card .btn-reject { background: var(--red); color: #fff; }
+  .approval-card .btn-edit { background: none; border: 1px solid var(--border) !important; color: var(--text-muted); }
+  .approval-card .confidence-score {
+    font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 8px;
+  }
+  .approval-card .confidence-score.high { background: rgba(76,175,80,0.15); color: var(--green); }
+  .approval-card .confidence-score.low { background: rgba(255,193,7,0.15); color: var(--yellow); }
+  .batch-approve-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--border-subtle);
+    font-size: 11px; color: var(--text-muted);
+  }
+  .batch-approve-bar button {
+    font-size: 11px; padding: 4px 12px; border-radius: 4px; border: none;
+    background: var(--green); color: #fff; cursor: pointer; font-weight: 600;
+  }
+  .batch-approve-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+  /* Routing Policy Editor */
+  .policy-agent-card {
+    padding: 10px 12px; margin-bottom: 8px; border-radius: var(--radius-sm);
+    background: var(--surface-raised); border: 1px solid var(--border-subtle);
+  }
+  .policy-agent-card .agent-name { font-size: 13px; font-weight: 600; color: var(--text-bright); }
+  .policy-agent-card .tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .policy-agent-card .tag-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--border-subtle); color: var(--text-muted);
+  }
+  .policy-agent-card .tag-chip .tag-remove {
+    cursor: pointer; color: var(--red); font-size: 11px; margin-left: 2px;
+  }
+  .policy-agent-card .weight-row {
+    display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px;
+  }
+  .policy-agent-card .weight-row input[type="range"] { flex: 1; }
+  .policy-agent-card .weight-row .weight-val { font-weight: 600; color: var(--text-bright); min-width: 28px; }
+  .policy-save-bar {
+    display: flex; justify-content: flex-end; align-items: center; gap: 8px;
+    padding: 8px 0; margin-top: 8px; border-top: 1px solid var(--border-subtle);
+  }
+  .policy-save-bar button { font-size: 11px; padding: 4px 12px; border-radius: 4px; border: none; cursor: pointer; }
+  .policy-save-bar .btn-save { background: var(--accent); color: #fff; font-weight: 600; }
+  .policy-save-bar .btn-discard { background: none; border: 1px solid var(--border) !important; color: var(--text-muted); }
+
   /* PR Review Quality Panel */
   .pr-review-section { margin-bottom: 14px; }
   .pr-review-section-title {
@@ -965,6 +1029,14 @@ export function getDashboardHTML(): string {
   <div class="panel" id="review-queue-panel">
     <div class="panel-header">👀 Review Queue <span class="count" id="review-queue-count"></span></div>
     <div class="panel-body" id="review-queue-body" style="max-height:350px;overflow-y:auto"></div>
+  </div>
+
+  <div class="panel" id="approval-queue-panel">
+    <div class="panel-header">🎯 Approval Queue <span class="count" id="approval-queue-count"></span>
+      <button id="approval-policy-btn" onclick="toggleRoutingPolicy()" style="float:right;font-size:11px;background:none;border:1px solid var(--border);color:var(--text-muted);padding:2px 8px;border-radius:4px;cursor:pointer">⚙ Policy</button>
+    </div>
+    <div class="panel-body" id="approval-queue-body" style="max-height:400px;overflow-y:auto"></div>
+    <div id="routing-policy-panel" style="display:none;border-top:1px solid var(--border-subtle);padding:12px;max-height:400px;overflow-y:auto"></div>
   </div>
 
   <div class="panel" id="backlog-panel">
