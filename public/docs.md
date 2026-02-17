@@ -382,3 +382,9 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/telemetry` | Full telemetry snapshot (config + metrics) |
 | GET | `/telemetry/config` | Telemetry configuration (safe — no secrets) |
 | POST | `/api/telemetry/ingest` | Cloud telemetry ingest endpoint (receives snapshots from hosts) |
+| POST | `/canvas/render` | Push content to a canvas slot (Screen Contract v0 validated) |
+| GET | `/canvas/slots` | Current active (non-stale) slots |
+| GET | `/canvas/slots/all` | All slots including stale (debug) |
+| GET | `/canvas/history` | Recent render history (?slot=&limit=) |
+| GET | `/canvas/rejections` | Recent contract validation rejections |
+| GET | `/canvas/stream` | SSE stream of canvas render events |

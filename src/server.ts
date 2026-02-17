@@ -48,6 +48,8 @@ import { policyManager } from './policy.js'
 import { runPrecheck, applyAutoDefaults } from './taskPrecheck.js'
 import { resolveRoute, getRoutingLog, getRoutingStats, type MessageSeverity, type MessageCategory } from './messageRouter.js'
 import { submitFeedback, listFeedback, getFeedback, updateFeedback, voteFeedback, checkRateLimit, type FeedbackQuery } from './feedback.js'
+import { slotManager as canvasSlots } from './canvas-slots.js'
+import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -3992,6 +3994,107 @@ export async function createServer(): Promise<FastifyInstance> {
       updatedBy,
       path: result.path,
     }
+  })
+
+  // ── Canvas / Screen Surface (v0) ───────────────────────────────────
+
+  // POST /canvas/render — agents push content to slots
+  app.post('/canvas/render', async (request, reply) => {
+    const body = request.body as any
+    if (!body || typeof body !== 'object') {
+      reply.code(400)
+      return { error: 'Request body is required', valid: false }
+    }
+
+    const event = {
+      slot: body.slot,
+      content_type: body.content_type,
+      payload: body.payload || {},
+      priority: body.priority || 'normal',
+      append: body.append || false,
+    }
+
+    const result = processRender(event as any)
+
+    if (!result.valid) {
+      logRejection(event as any, result.errors)
+      reply.code(422)
+      return {
+        valid: false,
+        errors: result.errors,
+        warnings: result.warnings,
+      }
+    }
+
+    return {
+      valid: true,
+      slot: result.slot,
+      warnings: result.warnings,
+    }
+  })
+
+  // GET /canvas/slots — current active slots
+  app.get('/canvas/slots', async () => {
+    return {
+      slots: canvasSlots.getActive(),
+      stats: canvasSlots.getStats(),
+    }
+  })
+
+  // GET /canvas/slots/all — all slots including stale (debug)
+  app.get('/canvas/slots/all', async () => {
+    return { slots: canvasSlots.getAll() }
+  })
+
+  // GET /canvas/history — recent render history
+  app.get('/canvas/history', async (request) => {
+    const query = request.query as any
+    const slot = query?.slot as string | undefined
+    const limit = Math.min(Number(query?.limit) || 20, 100)
+    return { history: canvasSlots.getHistory(slot, limit) }
+  })
+
+  // GET /canvas/rejections — recent contract rejections (for tuning)
+  app.get('/canvas/rejections', async () => {
+    return { rejections: getRecentRejections() }
+  })
+
+  // GET /canvas/stream — SSE stream of canvas render events
+  app.get('/canvas/stream', async (request, reply) => {
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Send current state as initial snapshot
+    const activeSlots = canvasSlots.getActive()
+    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ slots: activeSlots })}\n\n`)
+
+    // Subscribe to new render events
+    const unsubscribe = subscribeCanvas((event, slot) => {
+      try {
+        reply.raw.write(`event: render\ndata: ${JSON.stringify({ event, slot })}\n\n`)
+      } catch {
+        // Connection closed
+      }
+    })
+
+    // Heartbeat to keep connection alive
+    const heartbeat = setInterval(() => {
+      try {
+        reply.raw.write(`:heartbeat\n\n`)
+      } catch {
+        clearInterval(heartbeat)
+      }
+    }, 15_000)
+
+    // Cleanup on disconnect
+    request.raw.on('close', () => {
+      unsubscribe()
+      clearInterval(heartbeat)
+    })
   })
 
   // ── Feedback Collection ─────────────────────────────────────────────
