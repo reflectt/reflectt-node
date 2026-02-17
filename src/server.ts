@@ -47,6 +47,7 @@ import { buildAgentFeed, type FeedEventKind } from './changeFeed.js'
 import { policyManager } from './policy.js'
 import { runPrecheck, applyAutoDefaults } from './taskPrecheck.js'
 import { resolveRoute, getRoutingLog, getRoutingStats, type MessageSeverity, type MessageCategory } from './messageRouter.js'
+import { submitFeedback, listFeedback, getFeedback, updateFeedback, voteFeedback, checkRateLimit, type FeedbackQuery } from './feedback.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -1690,6 +1691,29 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.type('text/css').send(data)
     } catch (err) {
       reply.code(404).send({ error: 'Animations CSS not found' })
+    }
+  })
+
+  // Serve feedback widget (embeddable, self-contained)
+  app.get('/widget/feedback.js', async (_request, reply) => {
+    try {
+      const { promises: fs } = await import('fs')
+      const { join } = await import('path')
+      const { fileURLToPath } = await import('url')
+      const { dirname } = await import('path')
+
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const filePath = join(__dirname, '..', 'public', 'widget', 'feedback.js')
+
+      const data = await fs.readFile(filePath, 'utf-8')
+      reply
+        .type('application/javascript')
+        .header('Access-Control-Allow-Origin', '*')
+        .header('Cache-Control', 'public, max-age=3600')
+        .send(data)
+    } catch (err) {
+      reply.code(404).send({ error: 'Widget not found' })
     }
   })
 
@@ -3968,6 +3992,96 @@ export async function createServer(): Promise<FastifyInstance> {
       updatedBy,
       path: result.path,
     }
+  })
+
+  // ── Feedback Collection ─────────────────────────────────────────────
+
+  const VALID_CATEGORIES = new Set(['bug', 'feature', 'general'])
+
+  app.post('/feedback', async (request, reply) => {
+    const ip = request.ip || '0.0.0.0'
+    const limit = checkRateLimit(ip)
+    if (!limit.allowed) {
+      reply.code(429)
+      return { success: false, message: `Rate limit exceeded. Try again in ${limit.retryAfterSec} seconds.` }
+    }
+
+    const body = request.body as Record<string, unknown>
+    const category = body.category as string
+    const message = typeof body.message === 'string' ? body.message.trim() : ''
+    const siteToken = typeof body.siteToken === 'string' ? body.siteToken : ''
+
+    if (!VALID_CATEGORIES.has(category)) {
+      reply.code(400)
+      return { success: false, message: 'Category must be bug, feature, or general.', field: 'category' }
+    }
+    if (message.length < 10) {
+      reply.code(400)
+      return { success: false, message: 'Message must be at least 10 characters.', field: 'message' }
+    }
+    if (message.length > 1000) {
+      reply.code(400)
+      return { success: false, message: 'Message must be at most 1000 characters.', field: 'message' }
+    }
+
+    const record = submitFeedback({
+      category: category as 'bug' | 'feature' | 'general',
+      message,
+      email: typeof body.email === 'string' ? body.email : undefined,
+      url: typeof body.url === 'string' ? body.url : undefined,
+      userAgent: typeof body.userAgent === 'string' ? body.userAgent : undefined,
+      sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
+      siteToken,
+      timestamp: Date.now(),
+    })
+
+    reply.code(201)
+    return { success: true, id: record.id, message: 'Feedback received.' }
+  })
+
+  app.get('/feedback', async (request) => {
+    const q = request.query as Record<string, string>
+    const query: FeedbackQuery = {
+      status: (q.status as any) || 'new',
+      category: (q.category as any) || 'all',
+      sort: (q.sort as any) || 'date',
+      order: (q.order as any) || 'desc',
+      limit: q.limit ? Number(q.limit) : 25,
+      offset: q.offset ? Number(q.offset) : 0,
+    }
+    return listFeedback(query)
+  })
+
+  app.get<{ Params: { id: string } }>('/feedback/:id', async (request, reply) => {
+    const record = getFeedback(request.params.id)
+    if (!record) {
+      reply.code(404)
+      return { success: false, error: 'Feedback not found' }
+    }
+    return { success: true, feedback: record }
+  })
+
+  app.patch<{ Params: { id: string } }>('/feedback/:id', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const updated = updateFeedback(request.params.id, {
+      status: body.status as any,
+      notes: typeof body.notes === 'string' ? body.notes : undefined,
+      assignedTo: typeof body.assignedTo === 'string' ? body.assignedTo : undefined,
+    })
+    if (!updated) {
+      reply.code(404)
+      return { success: false, error: 'Feedback not found' }
+    }
+    return { success: true, feedback: updated }
+  })
+
+  app.post<{ Params: { id: string } }>('/feedback/:id/vote', async (request, reply) => {
+    const updated = voteFeedback(request.params.id)
+    if (!updated) {
+      reply.code(404)
+      return { success: false, error: 'Feedback not found' }
+    }
+    return { success: true, votes: updated.votes }
   })
 
   // Get next task (pull-based assignment)

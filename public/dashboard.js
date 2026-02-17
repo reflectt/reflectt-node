@@ -1444,6 +1444,99 @@ async function escalateReviewBreaches(breachedTasks) {
   }
 }
 
+// ---- Feedback ----
+let feedbackData = null;
+
+async function loadFeedback() {
+  try {
+    const res = await fetch(BASE + '/feedback?status=all&limit=50');
+    feedbackData = await res.json();
+    renderFeedback();
+  } catch (e) {
+    const body = document.getElementById('feedback-body');
+    if (body) body.innerHTML = '<div class="empty">Failed to load feedback</div>';
+  }
+}
+
+function renderFeedback() {
+  const body = document.getElementById('feedback-body');
+  const count = document.getElementById('feedback-count');
+  if (!body || !feedbackData) return;
+
+  const items = feedbackData.items || [];
+  const newCount = feedbackData.newCount || 0;
+  count.textContent = newCount > 0 ? newCount + ' new' : items.length + ' total';
+
+  if (items.length === 0) {
+    body.innerHTML = '<div class="empty" style="text-align:center;padding:20px;color:var(--text-dim)">💬 No feedback yet.<br><span style="font-size:11px">Embed the widget to start collecting.</span></div>';
+    return;
+  }
+
+  body.innerHTML = items.map(function(fb) {
+    var catIcon = fb.category === 'bug' ? '🐛' : fb.category === 'feature' ? '✨' : '💬';
+    var catClass = fb.category || 'general';
+    var domain = '';
+    if (fb.url) { try { domain = new URL(fb.url).hostname; } catch(e) {} }
+    return '<div class="feedback-card">' +
+      '<div class="fb-header">' +
+      '<span class="fb-category ' + catClass + '">' + catIcon + ' ' + esc(fb.category) + '</span>' +
+      (domain ? '<span class="fb-source"> · ' + esc(domain) + '</span>' : '') +
+      '<span class="fb-time">' + ago(fb.createdAt) + '</span>' +
+      '</div>' +
+      '<div class="fb-message">"' + esc(fb.messagePreview) + '"</div>' +
+      '<div class="fb-footer">' +
+      (fb.email ? '<span class="fb-email">' + esc(fb.email) + '</span>' : '') +
+      (fb.votes > 0 ? '<span class="fb-votes" onclick="voteFeedback(\'' + esc(fb.id) + '\')">▲ ' + fb.votes + '</span>' : '<span class="fb-votes" onclick="voteFeedback(\'' + esc(fb.id) + '\')">▲ 0</span>') +
+      '<span class="fb-actions">' +
+      (fb.status === 'new' ? '<button onclick="triageFeedback(\'' + esc(fb.id) + '\')">Triage</button>' : '') +
+      (fb.status !== 'archived' ? '<button onclick="archiveFeedback(\'' + esc(fb.id) + '\')">Archive</button>' : '<button onclick="unarchiveFeedback(\'' + esc(fb.id) + '\')">Unarchive</button>') +
+      '</span>' +
+      '</div>' +
+      '</div>';
+  }).join('');
+}
+
+async function triageFeedback(id) {
+  var notes = prompt('Triage notes (optional):') || '';
+  try {
+    await fetch(BASE + '/feedback/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'triaged', notes: notes })
+    });
+    await loadFeedback();
+  } catch (e) { console.error('Triage failed:', e); }
+}
+
+async function archiveFeedback(id) {
+  try {
+    await fetch(BASE + '/feedback/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'archived' })
+    });
+    await loadFeedback();
+  } catch (e) { console.error('Archive failed:', e); }
+}
+
+async function unarchiveFeedback(id) {
+  try {
+    await fetch(BASE + '/feedback/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'triaged' })
+    });
+    await loadFeedback();
+  } catch (e) { console.error('Unarchive failed:', e); }
+}
+
+async function voteFeedback(id) {
+  try {
+    await fetch(BASE + '/feedback/' + encodeURIComponent(id) + '/vote', { method: 'POST' });
+    await loadFeedback();
+  } catch (e) { console.error('Vote failed:', e); }
+}
+
 // ---- Approval Queue ----
 let approvalQueueData = null;
 let routingPolicyVisible = false;
@@ -1687,7 +1780,7 @@ async function refresh() {
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue()]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback()]);
   await renderPromotionSSOT();
 }
 

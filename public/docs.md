@@ -338,6 +338,12 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | POST | `/approval-queue/batch-approve` | Batch approve high-confidence tasks. Body: `{ taskIds[], reviewedBy }`. |
 | GET | `/routing-policy` | Current agent affinity maps from TEAM-ROLES.yaml. Returns `{ agents[], version, source }`. |
 | PUT | `/routing-policy` | Update agent affinity maps. Body: `{ agents[{ agentId, affinityTags[], weight, ... }], updatedBy }`. Writes to `~/.reflectt/TEAM-ROLES.yaml`. |
+| POST | `/feedback` | Submit user feedback. Body: `{ category: "bug"\|"feature"\|"general", message (10-1000 chars), email?, url?, siteToken }`. Rate limited 5/min/IP. |
+| GET | `/feedback` | List feedback. Query: `status=new\|triaged\|archived\|all`, `category`, `sort=date\|votes`, `order`, `limit`, `offset`. |
+| GET | `/feedback/:id` | Get single feedback record. |
+| PATCH | `/feedback/:id` | Triage feedback. Body: `{ status?, notes?, assignedTo? }`. |
+| POST | `/feedback/:id/vote` | Upvote feedback. |
+| GET | `/widget/feedback.js` | Embeddable feedback widget (Shadow DOM, self-contained). Embed: `<script src="/widget/feedback.js" data-token="..." data-theme="auto">`. |
 | GET | `/routing/log` | Recent routing decisions. Query: `?limit=50&since=timestamp&category=watchdog-alert&severity=warning`. |
 | POST | `/routing/resolve` | Dry-run route resolution. Body: `{ from, content, severity?, category?, taskId?, mentions? }`. Returns where message would go. |
 | POST | `/tasks/:id/precheck` | Precheck task transition. Body: `{ targetStatus }`. Returns required fields, auto-defaults, and a PATCH template. |
