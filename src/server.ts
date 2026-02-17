@@ -289,6 +289,15 @@ const CreateResearchHandoffSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
 })
 
+const ReviewPacketSchema = z.object({
+  task_id: z.string().trim().regex(/^task-[a-z0-9-]+$/i, 'must be a task-* id'),
+  pr_url: z.string().trim().url().regex(/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:$|[/?#])/i, 'must be a GitHub PR URL'),
+  commit: z.string().trim().min(7),
+  changed_files: z.array(z.string().trim().min(1)).min(1),
+  artifact_path: z.string().trim().regex(/^process\/.+/, 'must be repo-relative under process/'),
+  caveats: z.string().trim().min(1),
+})
+
 const QaBundleSchema = z.object({
   lane: z.string().trim().min(1),
   summary: z.string().trim().min(1),
@@ -300,6 +309,7 @@ const QaBundleSchema = z.object({
   screenshot_proof: z.array(z.string().trim().min(1)).min(1),
   reviewer_notes: z.string().trim().min(1).optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
+  review_packet: ReviewPacketSchema,
 })
 
 const ReviewHandoffSchema = z.object({
@@ -396,6 +406,7 @@ const MetricsDailyQuerySchema = z.object({
 function enforceQaBundleGateForValidating(
   status: Task['status'] | undefined,
   metadata: unknown,
+  expectedTaskId?: string,
 ): { ok: true } | { ok: false; error: string; hint: string } {
   if (status !== 'validating') return { ok: true }
 
@@ -406,10 +417,36 @@ function enforceQaBundleGateForValidating(
     .safeParse(metadata ?? {})
 
   if (!parsed.success) {
+    const missing = parsed.error.issues
+      .map(issue => {
+        const path = issue.path.join('.')
+        const label = path ? `metadata.${path}` : 'metadata'
+        return `${label} (${issue.message})`
+      })
+    const detail = missing.length > 0 ? ` Missing/invalid: ${missing.join(', ')}.` : ''
     return {
       ok: false,
-      error: 'QA bundle required: PATCH to status=validating must include metadata.qa_bundle { lane, summary, pr_link, commit_shas[], changed_files[], artifact_links[], checks[], screenshot_proof[] }',
-      hint: 'Example: { "status":"validating", "metadata": { "artifact_path":"process/TASK-proof.md", "qa_bundle": { "lane":"docs", "summary":"what changed", "pr_link":"https://github.com/org/repo/pull/123", "commit_shas":["abc1234"], "changed_files":["docs/file.md"], "artifact_links":["process/TASK-proof.md"], "checks":["npm run build"], "screenshot_proof":["docs/screenshot.png"] } } }',
+      error: `Review packet required before validating.${detail}`,
+      hint: 'Include metadata.qa_bundle.review_packet with: task_id, pr_url, commit, changed_files[], artifact_path, caveats (plus summary/artifact_links/checks).',
+    }
+  }
+
+  const reviewPacket = parsed.data.qa_bundle.review_packet
+  if (expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
+    return {
+      ok: false,
+      error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
+      hint: 'Set review_packet.task_id to the current task ID before moving to validating.',
+    }
+  }
+
+  const metadataObj = (metadata ?? {}) as Record<string, unknown>
+  const artifactPath = typeof metadataObj.artifact_path === 'string' ? metadataObj.artifact_path.trim() : ''
+  if (artifactPath && artifactPath !== reviewPacket.artifact_path) {
+    return {
+      ok: false,
+      error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
+      hint: 'Use the same canonical process/... artifact path in both fields.',
     }
   }
 
@@ -3504,7 +3541,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // QA bundle gate: validating requires structured review evidence.
       const effectiveStatus = parsed.status ?? existing.status
-      const qaGate = enforceQaBundleGateForValidating(effectiveStatus, mergedMeta)
+      const qaGate = enforceQaBundleGateForValidating(parsed.status, mergedMeta, existing.id)
       if (!qaGate.ok) {
         reply.code(400)
         return {
