@@ -33,7 +33,7 @@ import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
-import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, checkWipCap } from './assignment.js'
+import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, checkWipCap, saveAgentRoles, scoreAssignment } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
@@ -3769,6 +3769,204 @@ export async function createServer(): Promise<FastifyInstance> {
       suggested: result.suggested,
       protectedMatch: result.protectedMatch || null,
       scores: result.scores,
+    }
+  })
+
+  // ── Approval Queue ──────────────────────────────────────────────────
+
+  app.get('/approval-queue', async () => {
+    // Tasks in 'todo' that were auto-assigned (have suggestedAgent in metadata) or need assignment review
+    const allTasks = taskManager.listTasks({})
+    const todoTasks = allTasks.filter(t => t.status === 'todo')
+
+    const items = todoTasks.map(t => {
+      const task = t as any
+      const meta = task.metadata || {}
+      const title = task.title || ''
+      const tags = Array.isArray(task.tags) ? task.tags : []
+      const doneCriteria = Array.isArray(task.done_criteria) ? task.done_criteria : []
+
+      // Score all agents for this task
+      const roles = getAgentRoles()
+      const agentOptions = roles.map(agent => {
+        const wipCount = allTasks.filter(at => at.status === 'doing' && (at.assignee || '').toLowerCase() === agent.name).length
+        const s = scoreAssignment(agent, { title, tags, done_criteria: doneCriteria }, wipCount)
+        return {
+          agentId: agent.name,
+          name: agent.name,
+          confidenceScore: Math.max(0, Math.min(1, s.score)),
+          affinityTags: agent.affinityTags,
+        }
+      }).sort((a, b) => b.confidenceScore - a.confidenceScore)
+
+      const topAgent = agentOptions[0]
+      const suggestedAgent = task.assignee || topAgent?.agentId || null
+      const confidenceScore = topAgent?.confidenceScore || 0
+      const confidenceReason = topAgent && topAgent.confidenceScore > 0
+        ? `${topAgent.name}: affinity match on ${topAgent.affinityTags.slice(0, 3).join(', ')}`
+        : 'No strong affinity match'
+
+      return {
+        taskId: task.id,
+        title,
+        description: task.description || '',
+        priority: task.priority || 'P3',
+        suggestedAgent,
+        confidenceScore,
+        confidenceReason,
+        agentOptions,
+        status: 'pending' as const,
+      }
+    })
+
+    const highConfidence = items.filter(i => i.confidenceScore >= 0.85)
+    const needsReview = items.filter(i => i.confidenceScore < 0.85)
+
+    return {
+      items: [...highConfidence, ...needsReview],
+      total: items.length,
+      highConfidenceCount: highConfidence.length,
+      needsReviewCount: needsReview.length,
+    }
+  })
+
+  app.post<{ Params: { taskId: string } }>('/approval-queue/:taskId/approve', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const taskId = request.params.taskId
+    const assignedAgent = (body.assignedAgent as string) || undefined
+    const priorityOverride = body.priorityOverride as string | undefined
+    const note = body.note as string | undefined
+    const reviewedBy = (body.reviewedBy as string) || 'system'
+
+    const lookup = taskManager.resolveTaskId(taskId)
+    if (lookup.matchType === 'none') {
+      reply.code(404)
+      return { success: false, error: 'Task not found' }
+    }
+    const resolvedId = lookup.resolvedId || taskId
+
+    const patch: Record<string, unknown> = {}
+    if (assignedAgent) patch.assignee = assignedAgent
+    if (priorityOverride) patch.priority = priorityOverride
+    patch.metadata = { approval: { approvedBy: reviewedBy, approvedAt: Date.now(), note } }
+
+    const result = taskManager.updateTask(resolvedId, patch)
+    return { success: true, task: result }
+  })
+
+  app.post<{ Params: { taskId: string } }>('/approval-queue/:taskId/reject', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const taskId = request.params.taskId
+    const reason = (body.reason as string) || ''
+    const reviewedBy = (body.reviewedBy as string) || 'system'
+
+    const lookup = taskManager.resolveTaskId(taskId)
+    if (lookup.matchType === 'none') {
+      reply.code(404)
+      return { success: false, error: 'Task not found' }
+    }
+    const resolvedId = lookup.resolvedId || taskId
+
+    // Archive/reject the task
+    const result = taskManager.updateTask(resolvedId, {
+      status: 'done',
+      metadata: {
+        rejection: { rejectedBy: reviewedBy, rejectedAt: Date.now(), reason },
+        outcome: 'rejected',
+      },
+    })
+    return { success: true, task: result }
+  })
+
+  app.post('/approval-queue/batch-approve', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const taskIds = Array.isArray(body.taskIds) ? body.taskIds as string[] : []
+    const reviewedBy = (body.reviewedBy as string) || 'system'
+
+    const results: Array<{ taskId: string; success: boolean; error?: string }> = []
+
+    for (const taskId of taskIds) {
+      try {
+        const lookup = taskManager.resolveTaskId(taskId)
+        if (lookup.matchType === 'none') {
+          results.push({ taskId, success: false, error: 'Not found' })
+          continue
+        }
+        const resolvedId = lookup.resolvedId || taskId
+        taskManager.updateTask(resolvedId, {
+          metadata: { approval: { approvedBy: reviewedBy, approvedAt: Date.now(), batch: true } },
+        })
+        results.push({ taskId: resolvedId, success: true })
+      } catch (err: any) {
+        results.push({ taskId, success: false, error: err?.message || 'Unknown error' })
+      }
+    }
+
+    return {
+      success: true,
+      approved: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
+      results,
+    }
+  })
+
+  // ── Routing Policy (CRUD for TEAM-ROLES.yaml) ────────────────────
+
+  app.get('/routing-policy', async () => {
+    const roles = getAgentRoles()
+    const source = getAgentRolesSource()
+
+    return {
+      version: Date.now(), // Use timestamp as pseudo-version
+      updatedAt: Date.now(),
+      updatedBy: 'config',
+      source: source.source,
+      agents: roles.map(r => ({
+        agentId: r.name,
+        role: r.role,
+        affinityTags: r.affinityTags,
+        weight: r.wipCap > 0 ? Math.min(r.wipCap / 2, 1.0) : 0.5, // Derive weight from wipCap
+        wipCap: r.wipCap,
+        alwaysRoute: r.alwaysRoute || [],
+        neverRoute: r.neverRoute || [],
+        protectedDomains: r.protectedDomains || [],
+      })),
+    }
+  })
+
+  app.put('/routing-policy', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const agents = body.agents as Array<Record<string, unknown>> | undefined
+    const updatedBy = (body.updatedBy as string) || 'system'
+
+    if (!agents || !Array.isArray(agents) || agents.length === 0) {
+      return { success: false, error: 'agents array required' }
+    }
+
+    const currentRoles = getAgentRoles()
+    const updatedRoles = agents.map(a => {
+      const existing = currentRoles.find(r => r.name === a.agentId)
+      const weight = typeof a.weight === 'number' ? a.weight : 0.5
+      return {
+        name: (a.agentId as string) || '',
+        role: (a.role as string) || existing?.role || 'agent',
+        description: existing?.description,
+        affinityTags: Array.isArray(a.affinityTags) ? a.affinityTags.map(String) : existing?.affinityTags || [],
+        alwaysRoute: Array.isArray(a.alwaysRoute) ? a.alwaysRoute.map(String) : existing?.alwaysRoute,
+        neverRoute: Array.isArray(a.neverRoute) ? a.neverRoute.map(String) : existing?.neverRoute,
+        protectedDomains: Array.isArray(a.protectedDomains) ? a.protectedDomains.map(String) : existing?.protectedDomains,
+        wipCap: typeof a.wipCap === 'number' ? a.wipCap : Math.round(weight * 2) || 1,
+      }
+    }).filter(r => r.name)
+
+    const result = saveAgentRoles(updatedRoles)
+
+    return {
+      success: true,
+      version: result.version,
+      changesApplied: updatedRoles.length,
+      updatedBy,
+      path: result.path,
     }
   })
 

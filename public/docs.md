@@ -332,6 +332,12 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | PATCH | `/policy` | Update policy config at runtime (deep-merged, persisted to ~/.reflectt/policy.json). Propagates to running workers. |
 | POST | `/policy/reset` | Reset policy to defaults + env overrides. |
 | GET | `/routing/stats` | Message routing stats: total routed, by channel/category/severity, general vs ops count. |
+| GET | `/approval-queue` | Pending tasks with confidence scores and agent suggestions. Returns `{ items[], total, highConfidenceCount, needsReviewCount }`. |
+| POST | `/approval-queue/:taskId/approve` | Approve a task. Body: `{ assignedAgent?, priorityOverride?, note?, reviewedBy }`. |
+| POST | `/approval-queue/:taskId/reject` | Reject a task. Body: `{ reason?, reviewedBy }`. |
+| POST | `/approval-queue/batch-approve` | Batch approve high-confidence tasks. Body: `{ taskIds[], reviewedBy }`. |
+| GET | `/routing-policy` | Current agent affinity maps from TEAM-ROLES.yaml. Returns `{ agents[], version, source }`. |
+| PUT | `/routing-policy` | Update agent affinity maps. Body: `{ agents[{ agentId, affinityTags[], weight, ... }], updatedBy }`. Writes to `~/.reflectt/TEAM-ROLES.yaml`. |
 | GET | `/routing/log` | Recent routing decisions. Query: `?limit=50&since=timestamp&category=watchdog-alert&severity=warning`. |
 | POST | `/routing/resolve` | Dry-run route resolution. Body: `{ from, content, severity?, category?, taskId?, mentions? }`. Returns where message would go. |
 | POST | `/tasks/:id/precheck` | Precheck task transition. Body: `{ targetStatus }`. Returns required fields, auto-defaults, and a PATCH template. |
