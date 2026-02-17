@@ -303,6 +303,10 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/webhooks/stats` | Webhook delivery statistics: counts by status, config, oldest pending. |
 | PATCH | `/webhooks/config` | Update webhook delivery config (maxAttempts, backoff, retention, timeout, concurrency). |
 | GET | `/webhooks/idempotency/:key` | Lookup webhook event by idempotency key. |
+| GET | `/portability/export` | One-click export: team config, server config (redacted), encrypted secrets, webhook routes, provisioning state. |
+| GET | `/portability/export/download` | Download export bundle as JSON file attachment. |
+| POST | `/portability/import` | Import from export bundle. Body: `{ bundle, overwrite?, skipSecrets?, skipConfig? }`. Rehydrates ~/.reflectt/ on a new host. |
+| GET | `/portability/manifest` | Preview what would be exported (file list, counts, no content). |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
 ## Team

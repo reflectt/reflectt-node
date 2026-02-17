@@ -9,7 +9,7 @@ import fastifyWebsocket from '@fastify/websocket'
 import fastifyCors from '@fastify/cors'
 import { z } from 'zod'
 import { createHash } from 'crypto'
-import { promises as fs } from 'fs'
+import { promises as fs, existsSync } from 'fs'
 import { resolve, sep, join } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
@@ -39,6 +39,7 @@ import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import { getProvisioningManager } from './provisioning.js'
 import { getWebhookDeliveryManager } from './webhooks.js'
+import { exportBundle, importBundle } from './portability.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -4301,6 +4302,77 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, message: 'No webhook found for this idempotency key' }
     }
     return { success: true, event }
+  })
+
+  // ============ PORTABILITY (Export / Import) ============
+
+  // One-click export: config, secrets, webhooks, team files
+  app.get('/portability/export', async () => {
+    const bundle = exportBundle(vault)
+    return { success: true, bundle }
+  })
+
+  // Download export as JSON file
+  app.get('/portability/export/download', async (_request, reply) => {
+    const bundle = exportBundle(vault)
+    const filename = `reflectt-export-${new Date().toISOString().slice(0, 10)}.json`
+    reply.header('Content-Type', 'application/json')
+    reply.header('Content-Disposition', `attachment; filename="${filename}"`)
+    return JSON.stringify(bundle, null, 2)
+  })
+
+  // Import from export bundle
+  app.post('/portability/import', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const bundle = body?.bundle as any
+    const overwrite = body?.overwrite === true
+    const skipSecrets = body?.skipSecrets === true
+    const skipConfig = body?.skipConfig === true
+
+    if (!bundle || bundle.format !== 'reflectt-export') {
+      reply.code(400)
+      return { success: false, message: 'Invalid or missing export bundle. Wrap in { bundle: <export-json> }.' }
+    }
+
+    const result = importBundle(bundle, { overwrite, skipSecrets, skipConfig })
+    reply.code(result.success ? 200 : 400)
+    return result
+  })
+
+  // Export manifest (what would be exported, without actual content)
+  app.get('/portability/manifest', async () => {
+    const provStatus = getProvisioningManager().getStatus()
+    const webhookDelivery = getWebhookDeliveryManager()
+    const vaultStats = vault.getStats()
+
+    const teamFiles: string[] = []
+    const teamFilePaths = ['TEAM.md', 'TEAM-ROLES.yaml', 'TEAM-STANDARDS.md']
+    for (const f of teamFilePaths) {
+      if (existsSync(join(REFLECTT_HOME, f))) teamFiles.push(f)
+    }
+
+    const configExists = existsSync(join(REFLECTT_HOME, 'config.json'))
+
+    return {
+      success: true,
+      manifest: {
+        teamConfig: teamFiles,
+        serverConfig: configExists,
+        secrets: {
+          count: vaultStats.secretCount,
+          note: 'Exported as encrypted ciphertext. Requires source HMK to decrypt.',
+        },
+        webhooks: {
+          routeCount: provStatus.webhooks.length,
+          deliveryConfig: webhookDelivery.getConfig(),
+        },
+        provisioning: {
+          phase: provStatus.phase,
+          hostName: provStatus.hostName,
+          enrolled: provStatus.hasCredential,
+        },
+      },
+    }
   })
 
   app.get('/runtime/truth', async () => {
