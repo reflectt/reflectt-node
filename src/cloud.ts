@@ -16,6 +16,7 @@
 import { presenceManager } from './presence.js'
 import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
+import { slotManager } from './canvas-slots.js'
 import { getDb } from './db.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
@@ -57,10 +58,12 @@ interface CloudState {
   heartbeatTimer: ReturnType<typeof setInterval> | null
   taskSyncTimer: ReturnType<typeof setInterval> | null
   chatSyncTimer: ReturnType<typeof setInterval> | null
+  canvasSyncTimer: ReturnType<typeof setInterval> | null
   heartbeatCount: number
   lastHeartbeat: number | null
   lastTaskSync: number | null
   lastChatSync: number | null
+  lastCanvasSync: number | null
   errors: number
   running: boolean
   startedAt: number
@@ -77,10 +80,12 @@ let state: CloudState = {
   heartbeatTimer: null,
   taskSyncTimer: null,
   chatSyncTimer: null,
+  canvasSyncTimer: null,
   heartbeatCount: 0,
   lastHeartbeat: null,
   lastTaskSync: null,
   lastChatSync: null,
+  lastCanvasSync: null,
   errors: 0,
   running: false,
   startedAt: Date.now(),
@@ -147,6 +152,7 @@ export function getCloudStatus() {
     lastHeartbeat: state.lastHeartbeat,
     lastTaskSync: state.lastTaskSync,
     lastChatSync: state.lastChatSync,
+    lastCanvasSync: state.lastCanvasSync,
     errors: state.errors,
     uptimeMs: state.running ? Date.now() - state.startedAt : 0,
   }
@@ -236,7 +242,14 @@ export async function startCloudIntegration(): Promise<void> {
     syncChat().catch(() => {})
   }, chatSyncMs)
 
-  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s, chat sync every ${chatSyncMs / 1000}s`)
+  // Canvas sync for remote canvas relay
+  const canvasSyncMs = Number(process.env.REFLECTT_CANVAS_SYNC_MS) || 5_000
+  syncCanvas().catch(() => {})
+  state.canvasSyncTimer = setInterval(() => {
+    syncCanvas().catch(() => {})
+  }, canvasSyncMs)
+
+  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s, chat sync every ${chatSyncMs / 1000}s, canvas sync every ${canvasSyncMs / 1000}s`)
 }
 
 /**
@@ -299,6 +312,10 @@ export function stopCloudIntegration(): void {
   if (state.chatSyncTimer) {
     clearInterval(state.chatSyncTimer)
     state.chatSyncTimer = null
+  }
+  if (state.canvasSyncTimer) {
+    clearInterval(state.canvasSyncTimer)
+    state.canvasSyncTimer = null
   }
   console.log('☁️  Cloud integration: stopped')
 }
@@ -627,6 +644,36 @@ async function syncChat(): Promise<void> {
     // Log first few, then every 20th to avoid spam
     if (chatSyncErrors <= 3 || chatSyncErrors % 20 === 0) {
       console.warn(`☁️  [Chat] Sync failed (${chatSyncErrors}): ${result.error}`)
+    }
+  }
+}
+
+// ---- Canvas sync ----
+
+let canvasSyncErrors = 0
+
+async function syncCanvas(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  // Get active (non-stale) canvas slots
+  const activeSlots = slotManager.getActive()
+
+  // Push to cloud
+  const result = await cloudPost<{ ok: boolean; slotCount: number }>(
+    `/api/hosts/${state.hostId}/canvas`,
+    { slots: activeSlots }
+  )
+
+  if (result.success && result.data) {
+    state.lastCanvasSync = Date.now()
+    if (canvasSyncErrors > 0) {
+      console.log(`☁️  [Canvas] Sync recovered after ${canvasSyncErrors} errors`)
+      canvasSyncErrors = 0
+    }
+  } else {
+    canvasSyncErrors++
+    if (canvasSyncErrors <= 3 || canvasSyncErrors % 20 === 0) {
+      console.warn(`☁️  [Canvas] Sync failed (${canvasSyncErrors}): ${result.error}`)
     }
   }
 }
