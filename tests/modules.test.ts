@@ -909,3 +909,87 @@ describe('MessageRouter', () => {
     expect(res.body.decision.channel).toBe('general')
   })
 })
+
+// ── Task Precheck Tests ──
+
+describe('TaskPrecheck', () => {
+  let testTaskId: string
+
+  beforeAll(async () => {
+    const res = await req('POST', '/tasks', {
+      title: 'TEST: precheck test task',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['test criterion'],
+      eta: '1h',
+      createdBy: 'test',
+    })
+    testTaskId = res.body.task?.id
+  })
+
+  afterAll(async () => {
+    if (testTaskId) await req('DELETE', `/tasks/${testTaskId}`)
+  })
+
+  it('POST /tasks/:id/precheck returns precheck for doing', async () => {
+    const res = await req('POST', `/tasks/${testTaskId}/precheck`, {
+      targetStatus: 'doing',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.taskId).toBe(testTaskId)
+    expect(res.body.targetStatus).toBe('doing')
+    expect(typeof res.body.ready).toBe('boolean')
+    expect(Array.isArray(res.body.items)).toBe(true)
+    expect(res.body.template).toBeDefined()
+  })
+
+  it('POST /tasks/:id/precheck returns precheck for validating with missing fields', async () => {
+    const res = await req('POST', `/tasks/${testTaskId}/precheck`, {
+      targetStatus: 'validating',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.ready).toBe(false)
+    // Should flag missing artifact_path, review_handoff
+    const fields = res.body.items.map((i: any) => i.field)
+    expect(fields).toContain('metadata.artifact_path')
+    expect(fields).toContain('metadata.review_handoff')
+  })
+
+  it('POST /tasks/:id/precheck provides auto-defaults', async () => {
+    const res = await req('POST', `/tasks/${testTaskId}/precheck`, {
+      targetStatus: 'doing',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.autoDefaults).toBeDefined()
+  })
+
+  it('POST /tasks/:id/precheck provides template', async () => {
+    const res = await req('POST', `/tasks/${testTaskId}/precheck`, {
+      targetStatus: 'validating',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.template).toBeDefined()
+    expect(res.body.template.status).toBe('validating')
+    expect(res.body.template.metadata.review_handoff).toBeDefined()
+  })
+
+  it('POST /tasks/:id/precheck handles unknown task', async () => {
+    const res = await req('POST', '/tasks/task-nonexistent/precheck', {
+      targetStatus: 'doing',
+    })
+    expect(res.status).toBe(200)
+    expect(res.body.ready).toBe(false)
+    expect(res.body.items[0].message).toContain('not found')
+  })
+
+  it('auto-defaults fill ETA when moving to doing', async () => {
+    // Move task to doing without explicit ETA in metadata
+    const res = await req('PATCH', `/tasks/${testTaskId}`, {
+      status: 'doing',
+    })
+    // Should succeed because auto-default fills ETA
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+  })
+})

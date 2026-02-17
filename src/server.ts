@@ -45,6 +45,7 @@ import { getConnectivityManager } from './connectivity.js'
 import { boardHealthWorker } from './boardHealthWorker.js'
 import { buildAgentFeed, type FeedEventKind } from './changeFeed.js'
 import { policyManager } from './policy.js'
+import { runPrecheck, applyAutoDefaults } from './taskPrecheck.js'
 import { resolveRoute, getRoutingLog, getRoutingStats, type MessageSeverity, type MessageCategory } from './messageRouter.js'
 
 // Schemas
@@ -2907,6 +2908,25 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, decision }
   })
 
+  // ── Task transition precheck ─────────────────────────────────────────
+
+  app.post<{ Params: { id: string }; Body: { targetStatus: string } }>(
+    '/tasks/:id/precheck',
+    async (request) => {
+      const { id } = request.params
+      const body = request.body as Record<string, unknown>
+      const targetStatus = (body.targetStatus as string) || 'doing'
+
+      const lookup = taskManager.resolveTaskId(id)
+      const resolvedId = (lookup.matchType === 'exact' || lookup.matchType === 'prefix')
+        ? (lookup.resolvedId || id)
+        : id
+
+      const result = runPrecheck(resolvedId, targetStatus)
+      return { success: true, ...result }
+    },
+  )
+
   // Update task
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
     try {
@@ -2929,8 +2949,12 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       // Merge incoming metadata with existing for gate checks + persistence.
+      // Apply auto-defaults (ETA, artifact_path) when not explicitly provided.
+      const incomingMeta = parsed.metadata || {}
+      const effectiveTargetStatus = parsed.status ?? existing.status
+      const autoFilledMeta = applyAutoDefaults(lookup.resolvedId, effectiveTargetStatus, incomingMeta as Record<string, unknown>)
+      const mergedRawMeta = { ...(existing.metadata || {}), ...autoFilledMeta }
       // Normalize review-state metadata for state-aware SLA tracking.
-      const mergedRawMeta = { ...(existing.metadata || {}), ...(parsed.metadata || {}) }
       const mergedMeta = applyReviewStateMetadata(existing, parsed, mergedRawMeta, Date.now())
 
       // TEST: prefixed tasks bypass gates (WIP cap, etc.)

@@ -14,6 +14,7 @@
     "lint": "eslint src --ext .ts",
     "test": "vitest run",
     "test:summary": "node tools/test-summary.mjs",
+    "pr:create": "node tools/pr-create.mjs",
     "test:idle-nudge:fixtures": "tsx tools/test-idle-nudge-lane-fixtures.ts",
     "test:idle-nudge:coherence": "tsx tools/idle-nudge-coherence-harness.ts",
     "test:task-linkify:regression": "tsx tools/task-linkify-regression-harness.ts",
