@@ -1128,6 +1128,49 @@ class TeamHealthMonitor {
     this.cadenceAlertState.set(key, now)
   }
 
+  /**
+   * Enhanced suppression: check if agent has had ANY recent activity
+   * (task comment, status update, chat message, task transition) since
+   * the last alert for this key. If so, suppress the repeat.
+   */
+  private hasRecentActivitySinceLastAlert(agent: string, key: string, now: number): boolean {
+    const lastAlertAt = this.cadenceAlertState.get(key)
+    if (!lastAlertAt) return false // No prior alert → can't suppress based on activity
+
+    const messages = chatManager.getMessages({ limit: 200 })
+
+    // Check for any message from this agent after the last alert
+    const hasRecentMessage = messages.some((m: any) => {
+      const from = (m.from || '').toLowerCase()
+      const ts = Number(m.timestamp || 0)
+      return from === agent && ts > lastAlertAt
+    })
+    if (hasRecentMessage) return true
+
+    // Check for task comments from this agent after last alert
+    const tasks = taskManager.listTasks({ status: 'doing' })
+    for (const task of tasks) {
+      if ((task.assignee || '').toLowerCase() !== agent) continue
+      const comments = taskManager.getTaskComments?.(task.id) || []
+      const hasRecentComment = comments.some((c: any) => {
+        const author = (c.author || '').toLowerCase()
+        const ts = Number(c.createdAt || 0)
+        return author === agent && ts > lastAlertAt
+      })
+      if (hasRecentComment) return true
+    }
+
+    // Check for task status changes after last alert
+    const updatedTask = tasks.find((t: any) => {
+      const assignee = (t.assignee || '').toLowerCase()
+      const updatedAt = Number(t.updatedAt || 0)
+      return assignee === agent && updatedAt > lastAlertAt
+    })
+    if (updatedTask) return true
+
+    return false
+  }
+
   private async logWatchdogIncident(entry: Record<string, unknown>): Promise<void> {
     const path = process.env.WATCHDOG_INCIDENT_LOG
       || resolve(process.cwd(), 'incidents/watchdog-incidents.jsonl')
@@ -1162,18 +1205,25 @@ class TeamHealthMonitor {
     if (trioSilenceMin >= this.cadenceSilenceMin) {
       const key = 'trio_general_silence'
       if (this.shouldEmitCadenceAlert(key, now)) {
-        const content = `@kai @link @pixel system watchdog: no #general update from trio for ${trioSilenceMin}m (threshold ${this.cadenceSilenceMin}m). Post status now using 1) shipped 2) blocker 3) next+ETA.`
-        alerts.push(content)
-
-        if (!dryRun) {
-          await chatManager.sendMessage({ from: 'system', channel: 'general', content })
-          await this.logWatchdogIncident({
-            type: 'trio_general_silence',
-            at: now,
-            thresholdMs: this.cadenceSilenceMin * 60_000,
-            lastUpdateAt: lastTrioGeneralUpdate,
-          })
+        // Enhanced suppression: skip if any trio member has had activity since last alert
+        const anyTrioActive = this.trioAgents.some(a => this.hasRecentActivitySinceLastAlert(a, key, now))
+        if (anyTrioActive) {
+          // Activity detected — extend cooldown without re-alerting
           this.markCadenceAlert(key, now)
+        } else {
+          const content = `@kai @link @pixel system watchdog: no #general update from trio for ${trioSilenceMin}m (threshold ${this.cadenceSilenceMin}m). Post status now using 1) shipped 2) blocker 3) next+ETA.`
+          alerts.push(content)
+
+          if (!dryRun) {
+            await chatManager.sendMessage({ from: 'system', channel: 'general', content })
+            await this.logWatchdogIncident({
+              type: 'trio_general_silence',
+              at: now,
+              thresholdMs: this.cadenceSilenceMin * 60_000,
+              lastUpdateAt: lastTrioGeneralUpdate,
+            })
+            this.markCadenceAlert(key, now)
+          }
         }
       }
     }
@@ -1210,6 +1260,9 @@ class TeamHealthMonitor {
 
       const key = `stale_working:${agent}:${task.id}`
       if (!this.shouldEmitCadenceAlert(key, now)) continue
+
+      // Enhanced suppression: skip if agent has had ANY activity since last alert
+      if (this.hasRecentActivitySinceLastAlert(agent, key, now)) continue
 
       const content = `@${agent} @kai @pixel system watchdog: status=working with no #general update for ${staleMin}m on ${task.id}. Post required status now: 1) shipped 2) blocker 3) next+ETA.`
       alerts.push(content)

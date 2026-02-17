@@ -319,7 +319,8 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | PATCH | `/connectivity/thresholds` | Update connectivity thresholds (degradedAfterFailures, offlineAfterMs, recoveryAfterSuccesses). |
 | POST | `/connectivity/simulate-failure` | Simulate cloud failure for outage drill. Body: `{ reason?, count? }`. |
 | POST | `/connectivity/simulate-success` | Simulate cloud success for recovery testing. Body: `{ count? }`. |
-| POST | `/connectivity/reset` | Reset connectivity state to connected. | Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
+| POST | `/connectivity/reset` | Reset connectivity state to connected. |
+| GET | `/health/watchdog/suppression` | Watchdog de-noise config: show all suppression rules, thresholds, and what activity types prevent re-firing. | Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
 ## Team
