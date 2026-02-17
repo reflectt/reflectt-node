@@ -2492,3 +2492,133 @@ describe('PR Review Quality Panel', () => {
     expect(res.statusCode).toBe(404)
   })
 })
+
+describe('Active Lane', () => {
+  it('/health/agents includes active_lane field for doing agent', async () => {
+    const agentName = `lane-test-${Date.now()}`
+    const created = await req('POST', '/tasks', {
+      title: 'TEST: active lane doing',
+      status: 'doing',
+      createdBy: 'test-runner',
+      assignee: agentName,
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Verify active lane'],
+      eta: '1h',
+    })
+    expect(created.status).toBe(200)
+    const taskId = created.body.task.id as string
+
+    const { status, body } = await req('GET', '/health/agents')
+    expect(status).toBe(200)
+    const agent = body.agents.find((row: any) => row.agent === agentName)
+    expect(agent).toBeDefined()
+    expect(agent.active_lane).toBe('doing')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('/me/:agent includes active_lane field', async () => {
+    const agentName = `lane-me-${Date.now()}`
+    const created = await req('POST', '/tasks', {
+      title: 'TEST: me endpoint active lane',
+      status: 'doing',
+      createdBy: 'test-runner',
+      assignee: agentName,
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Verify /me active lane'],
+      eta: '1h',
+    })
+    expect(created.status).toBe(200)
+    const taskId = created.body.task.id as string
+
+    const { status, body } = await req('GET', `/me/${agentName}`)
+    expect(status).toBe(200)
+    expect(body.active_lane).toBe('doing')
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('active_lane is queue-clear when agent has no active tasks', async () => {
+    const agentName = `lane-clear-${Date.now()}`
+    const { status, body } = await req('GET', `/me/${agentName}`)
+    expect(status).toBe(200)
+    expect(body.active_lane).toBe('queue-clear')
+  })
+})
+
+describe('Auto-queue notification', () => {
+  it('sends auto-queue chat message when task moves to done', async () => {
+    const agentName = `autoq-${Date.now()}`
+
+    // Create a todo candidate that could be recommended
+    const candidate = await req('POST', '/tasks', {
+      title: 'TEST: auto-queue candidate',
+      status: 'todo',
+      createdBy: 'test-runner',
+      assignee: agentName,
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Be recommended by auto-queue'],
+      eta: '1h',
+    })
+    expect(candidate.status).toBe(200)
+    const candidateId = candidate.body.task.id as string
+
+    // Create a doing task for the agent
+    const doingTask = await req('POST', '/tasks', {
+      title: 'TEST: auto-queue completing task',
+      status: 'doing',
+      createdBy: 'test-runner',
+      assignee: agentName,
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Complete and trigger auto-queue'],
+      eta: '1h',
+    })
+    expect(doingTask.status).toBe(200)
+    const doingTaskId = doingTask.body.task.id as string
+
+    // Move to validating
+    const validating = await req('PATCH', `/tasks/${doingTaskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-test-proof.md',
+        qa_bundle: validQaBundle(),
+        review_handoff: {
+          task_id: doingTaskId,
+          artifact_path: 'process/TASK-test-proof.md',
+          test_proof: 'npm test (pass)',
+          known_caveats: 'none',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/1',
+          commit_sha: 'abc1234',
+        },
+      },
+    })
+    expect(validating.status).toBe(200)
+
+    // Move to done with reviewer approval
+    const done = await req('PATCH', `/tasks/${doingTaskId}`, {
+      status: 'done',
+      metadata: {
+        reviewer_approved: true,
+        artifacts: ['https://github.com/reflectt/reflectt-node/pull/1'],
+      },
+    })
+    expect(done.status).toBe(200)
+
+    // Check chat for auto-queue message
+    const { body: chatBody } = await req('GET', '/chat/messages?limit=50')
+    const autoQueueMsg = chatBody.messages.find((m: any) =>
+      m.metadata?.kind === 'auto-queue' && m.metadata?.completedTaskId === doingTaskId
+    )
+    expect(autoQueueMsg).toBeDefined()
+    expect(autoQueueMsg.content).toContain(`@${agentName}`)
+    expect(autoQueueMsg.content).toContain('great work')
+    expect(autoQueueMsg.metadata.suggestedTaskIds.length).toBeGreaterThan(0)
+
+    await req('DELETE', `/tasks/${doingTaskId}`)
+    await req('DELETE', `/tasks/${candidateId}`)
+  })
+})
