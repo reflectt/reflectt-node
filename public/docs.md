@@ -307,6 +307,13 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/portability/export/download` | Download export bundle as JSON file attachment. |
 | POST | `/portability/import` | Import from export bundle. Body: `{ bundle, overwrite?, skipSecrets?, skipConfig? }`. Rehydrates ~/.reflectt/ on a new host. |
 | GET | `/portability/manifest` | Preview what would be exported (file list, counts, no content). |
+| GET | `/notifications/preferences` | List all agents' notification preferences. |
+| GET | `/notifications/preferences/:agent` | Get notification preferences for a specific agent. |
+| PATCH | `/notifications/preferences/:agent` | Update notification preferences (partial). Body: `{ enabled?, deliveryMethod?, priorityThreshold?, quietHours?, eventFilters?, channelSubscriptions? }`. |
+| DELETE | `/notifications/preferences/:agent` | Reset preferences to defaults. |
+| POST | `/notifications/preferences/:agent/mute` | Mute notifications. Body: `{ durationMs? }` or `{ until? }`. Default: 1 hour. |
+| POST | `/notifications/preferences/:agent/unmute` | Unmute notifications. |
+| POST | `/notifications/route` | Check if notification should be delivered. Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
 ## Team

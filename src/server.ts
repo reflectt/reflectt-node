@@ -40,6 +40,7 @@ import { SecretVault } from './secrets.js'
 import { getProvisioningManager } from './provisioning.js'
 import { getWebhookDeliveryManager } from './webhooks.js'
 import { exportBundle, importBundle } from './portability.js'
+import { getNotificationManager } from './notifications.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -4373,6 +4374,73 @@ export async function createServer(): Promise<FastifyInstance> {
         },
       },
     }
+  })
+
+  // ============ NOTIFICATION PREFERENCES ============
+
+  const notificationManager = getNotificationManager()
+  notificationManager.init()
+
+  // Get all agents' notification preferences
+  app.get('/notifications/preferences', async () => {
+    return { success: true, preferences: notificationManager.getAllPreferences() }
+  })
+
+  // Get preferences for a specific agent
+  app.get<{ Params: { agent: string } }>('/notifications/preferences/:agent', async (request) => {
+    return { success: true, preferences: notificationManager.getPreferences(request.params.agent) }
+  })
+
+  // Update preferences for a specific agent
+  app.patch<{ Params: { agent: string } }>('/notifications/preferences/:agent', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const prefs = notificationManager.updatePreferences(request.params.agent, body as any)
+    return { success: true, preferences: prefs }
+  })
+
+  // Reset preferences to defaults
+  app.delete<{ Params: { agent: string } }>('/notifications/preferences/:agent', async (request) => {
+    notificationManager.resetPreferences(request.params.agent)
+    return { success: true, message: `Preferences reset for ${request.params.agent}` }
+  })
+
+  // Mute an agent's notifications
+  app.post<{ Params: { agent: string } }>('/notifications/preferences/:agent/mute', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const durationMs = body?.durationMs as number
+    const until = body?.until as number
+
+    const mutedUntil = until || (durationMs ? Date.now() + durationMs : Date.now() + 60 * 60 * 1000)
+    const prefs = notificationManager.mute(request.params.agent, mutedUntil)
+    return { success: true, preferences: prefs, mutedUntil }
+  })
+
+  // Unmute an agent
+  app.post<{ Params: { agent: string } }>('/notifications/preferences/:agent/unmute', async (request) => {
+    const prefs = notificationManager.unmute(request.params.agent)
+    return { success: true, preferences: prefs }
+  })
+
+  // Check if a notification should be delivered (routing check)
+  app.post('/notifications/route', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agent = body?.agent as string
+    const type = body?.type as string
+
+    if (!agent || !type) {
+      reply.code(400)
+      return { success: false, message: 'agent and type are required' }
+    }
+
+    const result = notificationManager.shouldNotify({
+      type: type as any,
+      agent,
+      priority: body?.priority as string | undefined,
+      channel: body?.channel as string | undefined,
+      message: (body?.message as string) || '',
+    })
+
+    return { success: true, routing: result }
   })
 
   app.get('/runtime/truth', async () => {
