@@ -15,6 +15,7 @@
 
 import { presenceManager } from './presence.js'
 import { taskManager } from './tasks.js'
+import { chatManager } from './chat.js'
 import { getDb } from './db.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
@@ -55,9 +56,11 @@ interface CloudState {
   credential: string | null
   heartbeatTimer: ReturnType<typeof setInterval> | null
   taskSyncTimer: ReturnType<typeof setInterval> | null
+  chatSyncTimer: ReturnType<typeof setInterval> | null
   heartbeatCount: number
   lastHeartbeat: number | null
   lastTaskSync: number | null
+  lastChatSync: number | null
   errors: number
   running: boolean
   startedAt: number
@@ -65,6 +68,7 @@ interface CloudState {
 
 const DEFAULT_HEARTBEAT_MS = 30_000
 const DEFAULT_TASK_SYNC_MS = 60_000
+const DEFAULT_CHAT_SYNC_MS = 5_000
 
 let config: CloudConfig | null = null
 let state: CloudState = {
@@ -72,9 +76,11 @@ let state: CloudState = {
   credential: null,
   heartbeatTimer: null,
   taskSyncTimer: null,
+  chatSyncTimer: null,
   heartbeatCount: 0,
   lastHeartbeat: null,
   lastTaskSync: null,
+  lastChatSync: null,
   errors: 0,
   running: false,
   startedAt: Date.now(),
@@ -140,6 +146,7 @@ export function getCloudStatus() {
     heartbeatCount: state.heartbeatCount,
     lastHeartbeat: state.lastHeartbeat,
     lastTaskSync: state.lastTaskSync,
+    lastChatSync: state.lastChatSync,
     errors: state.errors,
     uptimeMs: state.running ? Date.now() - state.startedAt : 0,
   }
@@ -222,7 +229,14 @@ export async function startCloudIntegration(): Promise<void> {
     syncTasks().catch(() => {})
   }, config.taskSyncIntervalMs)
 
-  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s`)
+  // Chat sync for remote chat relay
+  const chatSyncMs = Number(process.env.REFLECTT_CHAT_SYNC_MS) || DEFAULT_CHAT_SYNC_MS
+  syncChat().catch(() => {})
+  state.chatSyncTimer = setInterval(() => {
+    syncChat().catch(() => {})
+  }, chatSyncMs)
+
+  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s, chat sync every ${chatSyncMs / 1000}s`)
 }
 
 /**
@@ -281,6 +295,10 @@ export function stopCloudIntegration(): void {
   if (state.taskSyncTimer) {
     clearInterval(state.taskSyncTimer)
     state.taskSyncTimer = null
+  }
+  if (state.chatSyncTimer) {
+    clearInterval(state.chatSyncTimer)
+    state.chatSyncTimer = null
   }
   console.log('☁️  Cloud integration: stopped')
 }
@@ -529,6 +547,74 @@ async function syncTasks(): Promise<void> {
     const errorMessage = result.error || 'task sync failed'
     markTaskRowsErrored(dirtyRows, errorMessage)
     state.errors++
+  }
+}
+
+// ---- Chat sync ----
+
+/** Timestamp of last chat sync — only send messages newer than this */
+let chatSyncCursor: number = Date.now() - 60_000 // Start with last minute of history
+
+async function syncChat(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  // Get recent messages since last sync
+  const recentMessages = chatManager.getMessages({
+    since: chatSyncCursor,
+    limit: 50,
+  })
+
+  // Send to cloud and get pending outbound messages
+  const payload = recentMessages.map(m => ({
+    id: m.id,
+    from: m.from,
+    content: m.content,
+    timestamp: m.timestamp,
+    channel: m.channel || 'general',
+  }))
+
+  const result = await cloudPost<{
+    synced: number
+    pending: Array<{
+      id: string
+      from: string
+      content: string
+      timestamp: number
+      channel?: string
+    }>
+  }>(`/api/hosts/${state.hostId}/chat/sync`, { messages: payload })
+
+  if (result.success && result.data) {
+    state.lastChatSync = Date.now()
+
+    // Update cursor to now
+    if (recentMessages.length > 0) {
+      chatSyncCursor = Math.max(...recentMessages.map(m => m.timestamp))
+    }
+
+    // Process pending outbound messages from cloud (dashboard user messages)
+    if (result.data.pending && result.data.pending.length > 0) {
+      for (const msg of result.data.pending) {
+        // Inject into local chat as if the user posted it
+        try {
+          await chatManager.sendMessage({
+            from: msg.from,
+            content: msg.content,
+            channel: msg.channel || 'general',
+            metadata: { source: 'cloud-relay', cloudMessageId: msg.id },
+          })
+          console.log(`☁️  [Chat] Relayed message from ${msg.from}: "${msg.content.slice(0, 50)}..."`)
+        } catch (err: any) {
+          console.warn(`☁️  [Chat] Failed to relay message: ${err?.message}`)
+        }
+      }
+    }
+  } else {
+    // Don't increment global error count for chat sync failures — it's non-critical
+    if (state.errors < 3) {
+      // Only log first few errors
+      console.warn(`☁️  [Chat] Sync failed: ${result.error}`)
+    }
   }
 }
 
