@@ -9,7 +9,8 @@
 import { createServer } from './server.js'
 import { serverConfig, isDev } from './config.js'
 import { acquirePidLock, releasePidLock, getPidPath } from './pidlock.js'
-import { startCloudIntegration, stopCloudIntegration, isCloudConfigured } from './cloud.js'
+import { startCloudIntegration, stopCloudIntegration, isCloudConfigured, watchConfigForCloudChanges, stopConfigWatcher } from './cloud.js'
+import { stopConfigWatch } from './assignment.js'
 import { getDb, closeDb } from './db.js'
 import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
 // OpenClaw connection is optional — server works for chat/tasks without it
@@ -79,6 +80,7 @@ async function main() {
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       console.log(`\n${signal} received, shutting down...`)
+      stopConfigWatch()
       stopCloudIntegration()
       stopTeamConfigLinter()
       closeDb()

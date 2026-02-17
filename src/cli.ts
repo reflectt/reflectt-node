@@ -840,6 +840,106 @@ dogfood
   })
 
 // ============ HOST COMMANDS ============
+// ============ BOOTSTRAP (one-shot install + connect + start) ============
+program
+  .command('bootstrap')
+  .description('One-shot setup: init + connect to cloud + start server (for npx/agent use)')
+  .option('--join-token <token>', 'Cloud host join token')
+  .option('--api-key <key>', 'Team API key (agent flow)')
+  .option('--cloud-url <url>', 'Cloud API base URL', 'https://api.reflectt.ai')
+  .option('--name <hostName>', 'Host display name', hostname())
+  .option('--type <hostType>', 'Host type', 'openclaw')
+  .action(async (options) => {
+    try {
+      if (!options.joinToken && !options.apiKey) {
+        console.error('❌ Either --join-token or --api-key is required')
+        console.error('')
+        console.error('Usage:')
+        console.error('  npx reflectt-node bootstrap --join-token <token>')
+        console.error('  npx reflectt-node bootstrap --api-key <key>')
+        process.exit(1)
+      }
+
+      // Step 1: Init
+      console.log('📦 Step 1/3: Initializing reflectt home...')
+      ensureReflecttHome()
+      if (!existsSync(CONFIG_PATH)) {
+        saveConfig({ port: 4445, host: '127.0.0.1' })
+      }
+      console.log(`   ✅ Home: ${REFLECTT_HOME}`)
+
+      // Step 2: Connect
+      console.log('☁️  Step 2/3: Connecting to Reflectt Cloud...')
+      const cloudUrl = String(options.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, '')
+
+      const registered = options.apiKey
+        ? await enrollHostWithApiKey({
+            cloudUrl,
+            apiKey: options.apiKey,
+            hostName: options.name,
+            hostType: options.type,
+          })
+        : await registerHostWithCloud({
+            cloudUrl,
+            joinToken: options.joinToken,
+            hostName: options.name,
+            hostType: options.type,
+          })
+
+      const config = loadConfig()
+      const nextConfig: Config = {
+        ...config,
+        cloud: {
+          cloudUrl,
+          hostName: options.name,
+          hostType: options.type,
+          hostId: registered.hostId,
+          credential: registered.credential,
+          connectedAt: Date.now(),
+        },
+      }
+      saveConfig(nextConfig)
+      console.log(`   ✅ Registered (host: ${registered.hostId})`)
+
+      // Step 3: Start
+      console.log('🚀 Step 3/3: Starting reflectt server...')
+      if (isServerRunning()) {
+        console.log('   Server already running, reloading cloud config...')
+        const reloadResult = await tryApiRequest('/cloud/reload', { method: 'POST' })
+        if (reloadResult?.success) {
+          console.log('   ✅ Cloud config reloaded')
+        } else {
+          console.log('   ⚠️  Reload failed, restarting...')
+          stopServerIfRunning()
+          startServerDetached(nextConfig)
+        }
+      } else {
+        startServerDetached(nextConfig)
+      }
+
+      // Verify
+      const heartbeat = await waitForCloudHeartbeat()
+      if (heartbeat) {
+        console.log('')
+        console.log('✅ Bootstrap complete!')
+        console.log(`   Host ID: ${registered.hostId}`)
+        console.log(`   Cloud: ${cloudUrl}`)
+        console.log(`   Heartbeats: ${heartbeat.heartbeatCount}`)
+        console.log('')
+        console.log('Your host is connected and reporting to Reflectt Cloud.')
+      } else {
+        console.log('')
+        console.log('⚠️  Bootstrap complete but heartbeat verification timed out.')
+        console.log('   Run `reflectt host status` to check.')
+        process.exitCode = 1
+      }
+    } catch (err: any) {
+      console.error(`❌ Bootstrap failed: ${err?.message || err}`)
+      process.exit(1)
+    }
+  })
+
+// ============ HOST COMMANDS ============
 const host = program.command('host').description('Cloud host enrollment and status')
 
 host

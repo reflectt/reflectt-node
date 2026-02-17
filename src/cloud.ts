@@ -16,6 +16,9 @@
 import { presenceManager } from './presence.js'
 import { taskManager } from './tasks.js'
 import { getDb } from './db.js'
+import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
+import { join } from 'path'
+import { REFLECTT_HOME } from './config.js'
 
 // ---- Types matching @reflectt/host-agent ----
 // We inline the types to avoid a build-time dependency on the monorepo package.
@@ -76,28 +79,69 @@ let state: CloudState = {
   running: false,
   startedAt: Date.now(),
 }
+let configWatcher: FSWatcher | null = null
+
+/**
+ * Load cloud config from ~/.reflectt/config.json (written by `reflectt host connect`)
+ */
+function loadCloudConfigFromFile(): { cloudUrl?: string; hostId?: string; credential?: string; hostName?: string; hostType?: string } | null {
+  try {
+    const configPath = join(REFLECTT_HOME, 'config.json')
+    if (!existsSync(configPath)) return null
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'))
+    if (!config?.cloud) return null
+    return {
+      cloudUrl: config.cloud.cloudUrl,
+      hostId: config.cloud.hostId,
+      credential: config.cloud.credential,
+      hostName: config.cloud.hostName,
+      hostType: config.cloud.hostType,
+    }
+  } catch {
+    return null
+  }
+}
 
 /**
  * Check if cloud integration is configured
  */
 export function isCloudConfigured(): boolean {
-  // Either a join token for fresh enrollment, or persisted credentials from prior enrollment
-  return Boolean(process.env.REFLECTT_HOST_TOKEN) || Boolean(process.env.REFLECTT_HOST_ID && process.env.REFLECTT_HOST_CREDENTIAL)
+  // Check env vars first
+  if (process.env.REFLECTT_HOST_TOKEN) return true
+  if (process.env.REFLECTT_HOST_ID && process.env.REFLECTT_HOST_CREDENTIAL) return true
+  // Check config.json (written by `reflectt host connect`)
+  const fileConfig = loadCloudConfigFromFile()
+  return Boolean(fileConfig?.hostId && fileConfig?.credential)
 }
 
 /**
  * Get current cloud connection status
  */
 export function getCloudStatus() {
+  const configured = isCloudConfigured()
+  const registered = state.hostId !== null
+  const connected = registered && state.running && state.heartbeatCount > 0
+
+  // Derive a user-friendly connection phase for the UI
+  let phase: 'unconfigured' | 'configured' | 'registering' | 'connected' | 'error'
+  if (!configured) phase = 'unconfigured'
+  else if (state.errors > 0 && !connected) phase = 'error'
+  else if (!registered) phase = 'registering'
+  else if (!connected) phase = 'configured'
+  else phase = 'connected'
+
   return {
-    configured: isCloudConfigured(),
-    registered: state.hostId !== null,
+    configured,
+    registered,
+    connected,
+    phase,
     hostId: state.hostId,
     running: state.running,
     heartbeatCount: state.heartbeatCount,
     lastHeartbeat: state.lastHeartbeat,
     lastTaskSync: state.lastTaskSync,
     errors: state.errors,
+    uptimeMs: state.running ? Date.now() - state.startedAt : 0,
   }
 }
 
@@ -111,11 +155,14 @@ export async function startCloudIntegration(): Promise<void> {
     return
   }
 
+  // Load from env vars first, then fall back to config.json
+  const fileConfig = loadCloudConfigFromFile()
+
   config = {
-    cloudUrl: (process.env.REFLECTT_CLOUD_URL || 'https://api.reflectt.ai').replace(/\/+$/, ''),
-    token: process.env.REFLECTT_HOST_TOKEN!,
-    hostName: process.env.REFLECTT_HOST_NAME || 'unnamed-host',
-    hostType: process.env.REFLECTT_HOST_TYPE || 'openclaw',
+    cloudUrl: (process.env.REFLECTT_CLOUD_URL || fileConfig?.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, ''),
+    token: process.env.REFLECTT_HOST_TOKEN || '',
+    hostName: process.env.REFLECTT_HOST_NAME || fileConfig?.hostName || 'unnamed-host',
+    hostType: process.env.REFLECTT_HOST_TYPE || fileConfig?.hostType || 'openclaw',
     heartbeatIntervalMs: Number(process.env.REFLECTT_HEARTBEAT_MS) || DEFAULT_HEARTBEAT_MS,
     taskSyncIntervalMs: Number(process.env.REFLECTT_TASK_SYNC_MS) || DEFAULT_TASK_SYNC_MS,
     capabilities: (process.env.REFLECTT_HOST_CAPABILITIES || 'tasks,chat,presence').split(',').map(s => s.trim()),
@@ -123,10 +170,11 @@ export async function startCloudIntegration(): Promise<void> {
 
   console.log(`☁️  Cloud integration: connecting to ${config.cloudUrl}`)
   console.log(`   Host: ${config.hostName} (${config.hostType})`)
+  if (fileConfig?.hostId) console.log(`   Source: config.json (auto-connect from host connect)`)
 
-  // Check if we already have a persisted host ID + credential (re-enrollment not needed)
-  const persistedHostId = process.env.REFLECTT_HOST_ID
-  const persistedCredential = process.env.REFLECTT_HOST_CREDENTIAL
+  // Check if we already have a persisted host ID + credential (env or config.json)
+  const persistedHostId = process.env.REFLECTT_HOST_ID || fileConfig?.hostId
+  const persistedCredential = process.env.REFLECTT_HOST_CREDENTIAL || fileConfig?.credential
 
   if (persistedHostId && persistedCredential) {
     state.hostId = persistedHostId
@@ -180,6 +228,50 @@ export async function startCloudIntegration(): Promise<void> {
 /**
  * Stop cloud integration (call on shutdown)
  */
+/**
+ * Watch config.json for changes and auto-start cloud integration.
+ * Enables zero-restart enrollment: agent writes config.json via
+ * `reflectt host connect`, running server auto-detects and connects.
+ */
+export function watchConfigForCloudChanges(): void {
+  if (configWatcher) return
+
+  try {
+    let debounce: ReturnType<typeof setTimeout> | null = null
+
+    configWatcher = watch(join(REFLECTT_HOME), { persistent: false }, (_event, filename) => {
+      if (filename !== 'config.json') return
+      if (debounce) clearTimeout(debounce)
+
+      debounce = setTimeout(async () => {
+        debounce = null
+        if (state.running) return // already connected, skip
+
+        const fileConfig = loadCloudConfigFromFile()
+        if (!fileConfig?.hostId || !fileConfig?.credential) return
+
+        console.log('☁️  Config change detected — auto-starting cloud integration...')
+        try {
+          await startCloudIntegration()
+        } catch (err: any) {
+          console.warn(`☁️  Cloud auto-start failed: ${err?.message || err}`)
+        }
+      }, 1000)
+    })
+
+    console.log(`☁️  Watching ${REFLECTT_HOME}/config.json for cloud config changes`)
+  } catch (err: any) {
+    console.warn(`☁️  Config watcher setup failed: ${err?.message || err}`)
+  }
+}
+
+export function stopConfigWatcher(): void {
+  if (configWatcher) {
+    configWatcher.close()
+    configWatcher = null
+  }
+}
+
 export function stopCloudIntegration(): void {
   state.running = false
   if (state.heartbeatTimer) {
