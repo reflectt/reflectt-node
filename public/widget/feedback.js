@@ -73,7 +73,7 @@
       background: #6c63ff; color: #fff; transition: ' + (reduceMotion ? 'none' : 'opacity 0.15s') + ';\
     }\
     .fb-submit:hover { opacity: 0.9; }\
-    .fb-submit:disabled { opacity: 0.5; cursor: not-allowed; }\
+    .fb-submit[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }\
     .fb-success { text-align: center; padding: 24px 16px; font-size: 14px; color: ' + (isDark ? '#8f8' : '#2a7') + '; }\
     .fb-error { text-align: center; padding: 16px; font-size: 13px; color: #e55; }\
     .hidden { display: none; }\
@@ -106,7 +106,7 @@
             <textarea class="fb-textarea" placeholder="Describe the issue…" aria-required="true" aria-describedby="fb-chars" maxlength="1000"></textarea>\
             <div class="fb-charcount" id="fb-chars">0 / 1000</div>\
             <input class="fb-input" type="email" placeholder="Email (optional)">\
-            <button class="fb-submit" disabled>Submit</button>\
+            <button class="fb-submit" aria-disabled="true">Submit</button>\
           </div>\
         </div>';
       var panel = container.querySelector('.fb-panel');
@@ -116,19 +116,32 @@
       var emailInput = container.querySelector('.fb-input');
       var submitBtn = container.querySelector('.fb-submit');
 
-      close.addEventListener('click', function() { state = 'idle'; render(); });
+      close.addEventListener('click', function() { state = 'idle'; render(); if (previousFocus && previousFocus.focus) previousFocus.focus(); });
       textarea.addEventListener('input', function() {
         charcount.textContent = textarea.value.length + ' / 1000';
-        submitBtn.disabled = textarea.value.trim().length < 10;
+        submitBtn.setAttribute('aria-disabled', textarea.value.trim().length < 10 ? 'true' : 'false');
       });
       textarea.focus();
 
-      // Escape to close
+      // Focus trap + Escape to close
+      var previousFocus = shadow.activeElement || document.activeElement;
       panel.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') { state = 'idle'; render(); }
+        if (e.key === 'Escape') { state = 'idle'; render(); if (previousFocus && previousFocus.focus) previousFocus.focus(); return; }
+        if (e.key === 'Tab') {
+          var focusable = panel.querySelectorAll('button, input, textarea, [tabindex]:not([tabindex="-1"])');
+          if (focusable.length === 0) return;
+          var first = focusable[0];
+          var last = focusable[focusable.length - 1];
+          if (e.shiftKey) {
+            if (shadow.activeElement === first || document.activeElement === first) { e.preventDefault(); last.focus(); }
+          } else {
+            if (shadow.activeElement === last || document.activeElement === last) { e.preventDefault(); first.focus(); }
+          }
+        }
       });
 
       submitBtn.addEventListener('click', function() {
+        if (submitBtn.getAttribute('aria-disabled') === 'true') return;
         var cat = container.querySelector('input[name="fb-cat"]:checked');
         doSubmit(cat ? cat.value : 'bug', textarea.value.trim(), emailInput.value.trim());
       });
@@ -146,7 +159,7 @@
   function doSubmit(category, message, email) {
     state = 'submitting';
     var submitBtn = container.querySelector('.fb-submit');
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Submitting…'; }
+    if (submitBtn) { submitBtn.setAttribute('aria-disabled', 'true'); submitBtn.textContent = 'Submitting…'; }
 
     var body = {
       category: category,
