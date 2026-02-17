@@ -2331,3 +2331,67 @@ describe('Model performance analytics', () => {
     await req('DELETE', `/tasks/${taskId}`)
   })
 })
+
+// ============ Definition of Ready ============
+describe('Definition of Ready enforcement', () => {
+  // Note: DoR is skipped in NODE_ENV=test, so these tests verify the
+  // checkDefinitionOfReady function behavior via the intake-schema endpoint
+  // and schema-level validation (priority always present via default).
+
+  it('GET /tasks/intake-schema returns required fields and DoR rules', async () => {
+    const { status, body } = await req('GET', '/tasks/intake-schema')
+    expect(status).toBe(200)
+    expect(body.required).toContain('priority')
+    expect(body.required).toContain('done_criteria')
+    expect(body.required).toContain('reviewer')
+    expect(body.types).toContain('bug')
+    expect(body.types).toContain('feature')
+    expect(body.definition_of_ready).toBeDefined()
+    expect(body.definition_of_ready.length).toBeGreaterThan(0)
+  })
+
+  it('task creation always sets priority (defaults to P3)', async () => {
+    const { status, body } = await req('POST', '/tasks', {
+      title: 'TEST: priority default verification task',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Priority is set to P3 by default'],
+      eta: '30m',
+      // no priority specified
+    })
+    expect(status).toBe(200)
+    expect(body.task.priority).toBe('P3')
+    await req('DELETE', `/tasks/${body.task.id}`)
+  })
+
+  it('task creation accepts type field', async () => {
+    const { status, body } = await req('POST', '/tasks', {
+      title: 'TEST: typed task creation for bug type',
+      type: 'bug',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Bug type stored in metadata'],
+      eta: '30m',
+      priority: 'P1',
+    })
+    expect(status).toBe(200)
+    expect(body.task.metadata?.type).toBe('bug')
+    await req('DELETE', `/tasks/${body.task.id}`)
+  })
+
+  it('rejects invalid task type', async () => {
+    const { status } = await req('POST', '/tasks', {
+      title: 'TEST: invalid type task',
+      type: 'invalid-type',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Should fail'],
+      eta: '30m',
+      priority: 'P2',
+    })
+    expect(status).toBe(400)
+  })
+})
