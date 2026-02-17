@@ -320,6 +320,12 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | POST | `/connectivity/simulate-failure` | Simulate cloud failure for outage drill. Body: `{ reason?, count? }`. |
 | POST | `/connectivity/simulate-success` | Simulate cloud success for recovery testing. Body: `{ count? }`. |
 | POST | `/connectivity/reset` | Reset connectivity state to connected. |
+| GET | `/board-health/status` | Board health worker status: config, running state, tick count, recent actions, rollbackable actions. |
+| GET | `/board-health/audit-log` | Audit log of all automated board actions. Query: `?limit=N&since=timestamp&kind=auto-block-stale\|suggest-close\|digest-emitted`. |
+| POST | `/board-health/tick` | Manually trigger board health tick. Query: `?dryRun=true` for preview. |
+| POST | `/board-health/rollback/:actionId` | Rollback an automated action within the rollback window. Body: `{ by? }`. |
+| PATCH | `/board-health/config` | Update worker config at runtime. Fields: enabled, intervalMs, staleDoingThresholdMin, suggestCloseThresholdMin, rollbackWindowMs, digestIntervalMs, digestChannel, quietHoursStart, quietHoursEnd, dryRun, maxActionsPerTick. |
+| POST | `/board-health/prune` | Prune old audit log entries. Query: `?maxAgeDays=7`. |
 | GET | `/health/watchdog/suppression` | Watchdog de-noise config: show all suppression rules, thresholds, and what activity types prevent re-firing. | Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
