@@ -37,6 +37,7 @@ import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, s
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
+import { getProvisioningManager } from './provisioning.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -4091,6 +4092,99 @@ export async function createServer(): Promise<FastifyInstance> {
       message: 'Cloud integration reloaded from config.json',
       status: getCloudStatus(),
     }
+  })
+
+  // ============ HOST PROVISIONING ============
+
+  const provisioning = getProvisioningManager()
+  provisioning.setVault(vault)
+
+  // Get provisioning status (dashboard-safe — no credentials)
+  app.get('/provisioning/status', async () => {
+    return { success: true, provisioning: provisioning.getStatus() }
+  })
+
+  // Full provisioning flow: enroll → pull config → pull secrets → configure webhooks
+  app.post('/provisioning/provision', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const cloudUrl = body?.cloudUrl as string
+    const joinToken = body?.joinToken as string | undefined
+    const apiKey = body?.apiKey as string | undefined
+    const hostName = body?.hostName as string
+    const capabilities = (body?.capabilities as string[]) || []
+
+    if (!cloudUrl || !hostName) {
+      reply.code(400)
+      return { success: false, message: 'cloudUrl and hostName are required' }
+    }
+
+    if (!joinToken && !apiKey) {
+      reply.code(400)
+      return { success: false, message: 'Either joinToken or apiKey is required' }
+    }
+
+    const result = await provisioning.provision({
+      cloudUrl,
+      joinToken,
+      apiKey,
+      hostName,
+      capabilities,
+    })
+
+    reply.code(result.success ? 200 : 500)
+    return result
+  })
+
+  // Refresh: re-pull config + secrets + webhooks (requires existing enrollment)
+  app.post('/provisioning/refresh', async (_request, reply) => {
+    const result = await provisioning.refresh()
+    reply.code(result.success ? 200 : 400)
+    return result
+  })
+
+  // Reset provisioning state (for re-enrollment)
+  app.post('/provisioning/reset', async () => {
+    provisioning.reset()
+    return { success: true, message: 'Provisioning state reset' }
+  })
+
+  // List configured webhook routes
+  app.get('/provisioning/webhooks', async () => {
+    return { success: true, webhooks: provisioning.getWebhooks() }
+  })
+
+  // Add a webhook route
+  app.post('/provisioning/webhooks', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const provider = body?.provider as string
+    const path = body?.path as string
+    const events = (body?.events as string[]) || []
+    const active = body?.active !== false
+
+    if (!provider) {
+      reply.code(400)
+      return { success: false, message: 'provider is required' }
+    }
+
+    const webhook = provisioning.addWebhookRoute({
+      provider,
+      path: path || `/webhooks/${provider}`,
+      events,
+      active,
+    })
+
+    reply.code(201)
+    return { success: true, webhook }
+  })
+
+  // Remove a webhook route
+  app.delete<{ Params: { id: string } }>('/provisioning/webhooks/:id', async (request, reply) => {
+    const removed = provisioning.removeWebhookRoute(request.params.id)
+    if (!removed) {
+      reply.code(404)
+      return { success: false, message: 'Webhook not found' }
+    }
+    return { success: true, message: 'Webhook removed' }
   })
 
   app.get('/runtime/truth', async () => {

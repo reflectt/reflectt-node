@@ -288,6 +288,13 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 |--------|------|-------------|
 | GET | `/cloud/status` | Cloud connection state (registered, heartbeat age, sync status). Only active when `REFLECTT_HOST_TOKEN` is set. |
 | POST | `/cloud/reload` | Hot-reload cloud config from `~/.reflectt/config.json` without server restart. Updates env vars and restarts heartbeat/sync loops. Used by CLI after `host connect` enrollment. |
+| GET | `/provisioning/status` | Host provisioning state: phase, enrollment, config/secrets pull status, webhook routes. Dashboard-safe (no credentials). |
+| POST | `/provisioning/provision` | Full provisioning flow: enroll with cloud (join token or API key), pull config + secrets, configure webhooks. Body: `{ cloudUrl, hostName, joinToken?, apiKey?, capabilities? }`. |
+| POST | `/provisioning/refresh` | Re-pull config + secrets + webhooks from cloud. Requires existing enrollment. |
+| POST | `/provisioning/reset` | Reset provisioning state for re-enrollment. Clears hostId, credential, and all provisioning data. |
+| GET | `/provisioning/webhooks` | List configured webhook routes for this host. |
+| POST | `/provisioning/webhooks` | Add a webhook route. Body: `{ provider, path?, events?, active? }`. |
+| DELETE | `/provisioning/webhooks/:id` | Remove a webhook route by ID. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
 ## Team
