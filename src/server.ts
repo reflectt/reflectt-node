@@ -22,6 +22,7 @@ import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp
 import { memoryManager } from './memory.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
+import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift } from './executionSweeper.js'
 import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus, FocusLevel } from './presence.js'
 import { analyticsManager } from './analytics.js'
@@ -3871,6 +3872,23 @@ export async function createServer(): Promise<FastifyInstance> {
           }
         }
 
+        // Gate 1b: code-lane tasks require at least one PR URL in artifacts
+        const lane = (mergedMeta.lane as string || '').toLowerCase()
+        const isCodeTask = lane === 'product' || lane === 'frontend' || lane === 'backend' || lane === 'infra'
+          || (existing.tags || []).some((t: string) => ['code', 'frontend', 'backend', 'infra'].includes(t.toLowerCase()))
+        const hasPrUrl = artifacts.some((a: string) => /github\.com\/.*\/pull\/\d+/.test(a))
+        const hasWaiver = mergedMeta.pr_waiver === true && typeof mergedMeta.pr_waiver_reason === 'string'
+
+        if (isCodeTask && !hasPrUrl && !hasWaiver) {
+          reply.code(422)
+          return {
+            success: false,
+            error: 'Task-close gate: code-lane tasks require at least one PR URL in metadata.artifacts',
+            gate: 'pr_link',
+            hint: 'Include a GitHub PR URL in artifacts, or set metadata.pr_waiver=true + metadata.pr_waiver_reason for hotfixes.',
+          }
+        }
+
         // Gate 2: reviewer sign-off (if task has a reviewer assigned)
         if (existing.reviewer) {
           const signedOff = mergedMeta.reviewer_approved as boolean | undefined
@@ -6356,6 +6374,90 @@ export async function createServer(): Promise<FastifyInstance> {
     })
     const body = await response.text()
     return body
+  })
+
+  // ── Execution Sweeper: zero-leak enforcement ──────────────────────────
+  startSweeper()
+
+  // GET /execution-health — sweeper status + current violations
+  app.get('/execution-health', async (_request, reply) => {
+    const status = getSweeperStatus()
+    const freshSweep = sweepValidatingQueue()
+    reply.send({
+      sweeper: {
+        running: status.running,
+        lastSweepAt: status.lastSweepAt,
+        escalationTracking: status.escalationTracking,
+      },
+      current: {
+        validatingCount: freshSweep.validatingCount,
+        violations: freshSweep.violations,
+        tasksScanned: freshSweep.tasksScanned,
+      },
+    })
+  })
+
+  // POST /pr-event — webhook for PR state changes (merge/close)
+  app.post<{ Body: { taskId: string; prState: 'merged' | 'closed'; prUrl?: string } }>('/pr-event', async (request, reply) => {
+    const { taskId, prState, prUrl } = request.body || {}
+    if (!taskId || !prState) {
+      reply.code(400)
+      return { error: 'taskId and prState (merged|closed) required' }
+    }
+
+    const drift = flagPrDrift(taskId, prState)
+
+    // If PR merged and task is validating, auto-add merged evidence
+    if (prState === 'merged') {
+      const lookup = taskManager.resolveTaskId(taskId)
+      if (lookup.task) {
+        const meta = (lookup.task.metadata || {}) as Record<string, unknown>
+        const artifacts = (meta.artifacts as string[]) || []
+        if (prUrl && !artifacts.includes(prUrl)) {
+          artifacts.push(prUrl)
+        }
+        try {
+          await taskManager.updateTask(lookup.resolvedId!, {
+            metadata: {
+              ...meta,
+              artifacts,
+              pr_merged: true,
+              pr_merged_at: Date.now(),
+              pr_url: prUrl || meta.pr_url,
+            },
+          })
+        } catch {
+          // Task update might fail validation — that's ok
+        }
+      }
+    }
+
+    // If PR closed (not merged), flag the task
+    if (prState === 'closed') {
+      const lookup = taskManager.resolveTaskId(taskId)
+      if (lookup.task && lookup.task.status !== 'done' && lookup.task.status !== 'blocked') {
+        try {
+          await taskManager.updateTask(lookup.resolvedId!, {
+            status: 'blocked',
+            metadata: {
+              ...(lookup.task.metadata || {}),
+              pr_closed_unmerged: true,
+              pr_closed_at: Date.now(),
+              blocked_reason: `PR ${prUrl || 'unknown'} was closed without merging. Replacement PR needed.`,
+            },
+          })
+        } catch {
+          // Lifecycle gate might prevent this — log it
+          console.warn(`[PR-Event] Could not auto-block task ${taskId} after PR close`)
+        }
+      }
+    }
+
+    return {
+      success: true,
+      drift: drift || null,
+      message: drift?.message || `PR ${prState} event recorded for ${taskId}`,
+    }
   })
 
   return app
