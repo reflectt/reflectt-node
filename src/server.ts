@@ -527,6 +527,16 @@ function enforceQaBundleGateForValidating(
     }
   }
 
+  const requiresCanonicalPr = isCodeOrDesignCodeLane(metadataObj) && !isNonCodeOrDocMetadata(metadataObj)
+  const qaPrLink = typeof parsed.data.qa_bundle.pr_link === 'string' ? parsed.data.qa_bundle.pr_link.trim() : ''
+  if (requiresCanonicalPr && (!qaPrLink || !parseGitHubPrUrl(qaPrLink))) {
+    return {
+      ok: false,
+      error: 'Validating gate: metadata.qa_bundle.pr_link must be a canonical GitHub PR URL (/pull/<number>) for code/design-code lanes.',
+      hint: 'Use https://github.com/<owner>/<repo>/pull/<number>. Reject /pull/new, /tree/*, and branch URLs. For docs/non-code work, set doc_only=true or non_code=true.',
+    }
+  }
+
   return { ok: true }
 }
 
@@ -594,6 +604,32 @@ function isTaskAutomatedRecurring(metadata: unknown): boolean {
 
 function normalizeLaneValue(value: unknown): string {
   return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function isNonCodeOrDocMetadata(metadata: Record<string, unknown>): boolean {
+  const rootDocOnly = metadata.doc_only === true
+  const rootNonCode = metadata.non_code === true
+  const rootConfigOnly = metadata.config_only === true
+
+  const qaBundle = (metadata.qa_bundle as Record<string, unknown> | undefined) || {}
+  const qaDocOnly = qaBundle.doc_only === true
+  const qaNonCode = qaBundle.non_code === true
+  const qaConfigOnly = qaBundle.config_only === true
+
+  const handoff = (metadata.review_handoff as Record<string, unknown> | undefined) || {}
+  const handoffDocOnly = handoff.doc_only === true
+  const handoffConfigOnly = handoff.config_only === true
+
+  return rootDocOnly || rootNonCode || rootConfigOnly || qaDocOnly || qaNonCode || qaConfigOnly || handoffDocOnly || handoffConfigOnly
+}
+
+function isCodeOrDesignCodeLane(metadata: Record<string, unknown>): boolean {
+  const lane = normalizeLaneValue(metadata.lane)
+  const qaBundle = (metadata.qa_bundle as Record<string, unknown> | undefined) || {}
+  const qaLane = normalizeLaneValue(qaBundle.lane)
+  const combined = `${lane} ${qaLane}`
+
+  return /(\bcode\b|design[-_ ]code)/i.test(combined)
 }
 
 function isDesignOrDocsLane(metadata: Record<string, unknown>): boolean {
@@ -681,8 +717,8 @@ function enforceReviewHandoffGateForValidating(
   if (!parsed.success) {
     return {
       ok: false,
-      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true or config_only=true).',
-      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For config tasks: set config_only=true.',
+      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true, non_code=true, or config_only=true).',
+      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For docs/non-code/config tasks: set doc_only=true, non_code=true, or config_only=true as appropriate.',
     }
   }
 
@@ -702,14 +738,14 @@ function enforceReviewHandoffGateForValidating(
     if (!handoff.pr_url || !parseGitHubPrUrl(handoff.pr_url)) {
       return {
         ok: false,
-        error: 'Validating gate: open PR URL required in metadata.review_handoff.pr_url (or set doc_only=true for docs-only, config_only=true for ~/.reflectt/ config tasks).',
-        hint: 'Use a canonical PR URL like https://github.com/<owner>/<repo>/pull/<number>.',
+        error: 'Validating gate: metadata.review_handoff.pr_url must be a canonical GitHub PR URL (/pull/<number>) when doc_only/non_code/config_only is not set.',
+        hint: 'Use https://github.com/<owner>/<repo>/pull/<number>. Reject /pull/new, /tree/*, and branch URLs.',
       }
     }
     if (!handoff.commit_sha) {
       return {
         ok: false,
-        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when doc_only/config_only is not set.',
+        error: 'Validating gate: commit SHA required in metadata.review_handoff.commit_sha when doc_only/non_code/config_only is not set.',
         hint: 'Use 7-40 hex chars, e.g. "a1b2c3d".',
       }
     }

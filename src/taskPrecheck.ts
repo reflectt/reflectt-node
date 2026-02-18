@@ -135,7 +135,7 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
         field: 'metadata.review_handoff',
         severity: 'error',
         message: 'review_handoff object required for validating transition',
-        hint: 'Must include: task_id, artifact_path, test_proof, known_caveats. Also pr_url + commit_sha unless doc_only or config_only.',
+        hint: 'Must include: task_id, artifact_path, test_proof, known_caveats. Also canonical pr_url + commit_sha unless doc_only, non_code, or config_only.'
       })
     } else {
       if (!handoff.task_id) {
@@ -154,13 +154,15 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
       }
 
       const isDocOnly = handoff.doc_only === true
+      const qaBundleMeta = meta.qa_bundle as Record<string, unknown> | undefined
+      const isNonCode = handoff.non_code === true || qaBundleMeta?.non_code === true || (meta.non_code as unknown) === true
       const isConfigOnly = handoff.config_only === true
-      if (!isDocOnly && !isConfigOnly) {
+      if (!isDocOnly && !isNonCode && !isConfigOnly) {
         if (!handoff.pr_url) {
-          items.push({ field: 'metadata.review_handoff.pr_url', severity: 'error', message: 'PR URL required (or set doc_only/config_only=true)' })
+          items.push({ field: 'metadata.review_handoff.pr_url', severity: 'error', message: 'Canonical PR URL required (or set doc_only/non_code/config_only=true)' })
         }
         if (!handoff.commit_sha) {
-          items.push({ field: 'metadata.review_handoff.commit_sha', severity: 'error', message: 'commit SHA required (or set doc_only/config_only=true)' })
+          items.push({ field: 'metadata.review_handoff.commit_sha', severity: 'error', message: 'commit SHA required (or set doc_only/non_code/config_only=true)' })
         }
       }
     }
