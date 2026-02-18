@@ -345,8 +345,6 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/feedback/:id` | Get single feedback record. |
 | PATCH | `/feedback/:id` | Triage feedback. Body: `{ status?, notes?, assignedTo? }`. |
 | POST | `/feedback/:id/vote` | Upvote feedback. |
-| GET | `/triage` | List triage queue. Query: `status=pending\|assigned\|resolved\|all`, `assignee`, `priority`, `limit`, `offset`. |
-| POST | `/feedback/:id/triage` | Route feedback to triage queue with ownership. Body: `{ priority: "P0"\|"P1"\|"P2"\|"P3", assignee, notes? }`. |
 | GET | `/widget/feedback.js` | Embeddable feedback widget (Shadow DOM, self-contained). Embed: `<script src="/widget/feedback.js" data-token="..." data-theme="auto">`. |
 | GET | `/routing/log` | Recent routing decisions. Query: `?limit=50&since=timestamp&category=watchdog-alert&severity=warning`. |
 | POST | `/routing/resolve` | Dry-run route resolution. Body: `{ from, content, severity?, category?, taskId?, mentions? }`. Returns where message would go. |
