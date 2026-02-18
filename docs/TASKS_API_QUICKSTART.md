@@ -14,7 +14,7 @@ BASE="http://localhost:4445"
 |---|---|
 | `todo` | `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria[]`, `eta` |
 | `doing` | `reviewer` + `metadata.eta` |
-| `validating` | `metadata.artifact_path` + `metadata.qa_bundle { lane, summary, pr_link, commit_shas[], changed_files[], artifact_links[], checks[], screenshot_proof[] }` |
+| `validating` | `metadata.artifact_path` + `metadata.qa_bundle` + `metadata.review_handoff` (code/design-code lanes require canonical GitHub PR URLs: `https://github.com/<owner>/<repo>/pull/<id>`) |
 | `done` | No extra required field (recommended: reviewer sign-off comment) |
 
 ## 1) Create a task
@@ -85,6 +85,11 @@ curl -s -X POST "$BASE/tasks/$TASK_ID/comments" \
 
 ## 4) Move to `validating`
 
+> Canonical PR URL requirement (code/design-code lanes):
+> - ✅ valid: `https://github.com/reflectt/reflectt-node/pull/123`
+> - ❌ invalid: `https://github.com/reflectt/reflectt-node/pull/new/main`
+> - ❌ invalid: `https://github.com/reflectt/reflectt-node/tree/main`
+
 ```bash
 curl -s -X PATCH "$BASE/tasks/$TASK_ID" \
   -H 'Content-Type: application/json' \
@@ -93,14 +98,31 @@ curl -s -X PATCH "$BASE/tasks/$TASK_ID" \
     "metadata": {
       "artifact_path": "process/demo.md",
       "qa_bundle": {
-        "lane": "docs",
+        "lane": "code",
         "summary": "Quickstart updated with validating QA bundle contract",
         "pr_link": "https://github.com/reflectt/reflectt-node/pull/123",
         "commit_shas": ["abc1234"],
         "changed_files": ["docs/TASKS_API_QUICKSTART.md"],
         "artifact_links": ["process/demo.md"],
-        "checks": ["npm run -s check:route-docs-contract"],
-        "screenshot_proof": ["docs/images/quickstart-validating.png"]
+        "checks": ["npx tsc --noEmit"],
+        "screenshot_proof": ["process/demo.md"],
+        "review_packet": {
+          "task_id": "task-REPLACE_ME",
+          "pr_url": "https://github.com/reflectt/reflectt-node/pull/123",
+          "commit": "abc1234",
+          "changed_files": ["docs/TASKS_API_QUICKSTART.md"],
+          "artifact_path": "process/demo.md",
+          "caveats": "none"
+        }
+      },
+      "review_handoff": {
+        "task_id": "task-REPLACE_ME",
+        "repo": "reflectt/reflectt-node",
+        "pr_url": "https://github.com/reflectt/reflectt-node/pull/123",
+        "commit_sha": "abc1234",
+        "artifact_path": "process/demo.md",
+        "test_proof": "npx tsc --noEmit (pass)",
+        "known_caveats": "none"
       }
     },
     "actor": "echo"
