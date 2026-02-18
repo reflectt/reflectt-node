@@ -24,6 +24,15 @@ import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
+import {
+  emitActivationEvent,
+  getUserFunnelState,
+  getFunnelSummary,
+  hasCompletedEvent,
+  isDay2Eligible,
+  loadActivationFunnel,
+  type ActivationEventType,
+} from './activationEvents.js'
 import { alertUnauthorizedApproval, alertFlipAttempt, getMutationAlertStatus, pruneOldAttempts } from './mutationAlert.js'
 import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus, FocusLevel } from './presence.js'
@@ -2078,6 +2087,16 @@ export async function createServer(): Promise<FastifyInstance> {
     if (data.from) {
       presenceManager.recordActivity(data.from, 'message')
       presenceManager.updatePresence(data.from, 'working')
+
+      // Activation funnel: first team message
+      emitActivationEvent('first_team_message_sent', data.from, {
+        channel: data.channel || 'general',
+      }).catch(() => {})
+
+      // Day-2 return via chat
+      if (isDay2Eligible(data.from) && !hasCompletedEvent(data.from, 'day2_return_action')) {
+        emitActivationEvent('day2_return_action', data.from, { action: 'chat_message' }).catch(() => {})
+      }
     }
 
     // Track mention ack lifecycle
@@ -4264,6 +4283,23 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      // ── Activation funnel: track first_task_started / first_task_completed ──
+      {
+        const funnelUserId = (task.metadata as any)?.userId || task.assignee || ''
+        if (funnelUserId) {
+          if (parsed.status === 'doing' && existing.status !== 'doing') {
+            emitActivationEvent('first_task_started', funnelUserId, { taskId: task.id }).catch(() => {})
+          }
+          if (parsed.status === 'done' && existing.status !== 'done') {
+            emitActivationEvent('first_task_completed', funnelUserId, { taskId: task.id }).catch(() => {})
+          }
+          // Day-2 return: any status change ≥24h after signup
+          if (isDay2Eligible(funnelUserId) && !hasCompletedEvent(funnelUserId, 'day2_return_action')) {
+            emitActivationEvent('day2_return_action', funnelUserId, { action: 'task_update', taskId: task.id }).catch(() => {})
+          }
+        }
+      }
+
       // ── Auto-queue: on task completion, recommend next tasks to assignee ──
       if (parsed.status === 'done' && existing.status !== 'done' && task.assignee) {
         const assignee = task.assignee.toLowerCase()
@@ -5721,6 +5757,53 @@ export async function createServer(): Promise<FastifyInstance> {
     return { performance }
   })
 
+  // ── Activation Funnel ──────────────────────────────────────────────
+  /**
+   * GET /activation/funnel — per-user funnel state + aggregate summary.
+   * Query params:
+   *   ?userId=xxx — get single user's funnel state
+   *   (no params) — get aggregate summary across all users
+   */
+  app.get('/activation/funnel', async (request) => {
+    const query = request.query as Record<string, string>
+    const userId = query.userId
+
+    if (userId) {
+      return { funnel: getUserFunnelState(userId) }
+    }
+
+    return { funnel: getFunnelSummary() }
+  })
+
+  /**
+   * POST /activation/event — manually emit an activation event.
+   * Body: { type, userId, metadata? }
+   * Used by cloud signup flow and workspace setup.
+   */
+  app.post('/activation/event', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const type = body.type as string
+    const userId = body.userId as string
+    const metadata = body.metadata as Record<string, unknown> | undefined
+
+    const validTypes = [
+      'signup_completed', 'workspace_ready', 'first_task_started',
+      'first_task_completed', 'first_team_message_sent', 'day2_return_action',
+    ]
+
+    if (!type || !validTypes.includes(type)) {
+      reply.code(400)
+      return { success: false, error: `Invalid type. Must be one of: ${validTypes.join(', ')}` }
+    }
+    if (!userId) {
+      reply.code(400)
+      return { success: false, error: 'userId is required' }
+    }
+
+    const isNew = await emitActivationEvent(type as any, userId, metadata)
+    return { success: true, isNew, funnel: getUserFunnelState(userId) }
+  })
+
   // Get task analytics
   app.get('/tasks/analytics', async (request) => {
     const query = request.query as Record<string, string>
@@ -6783,6 +6866,13 @@ export async function createServer(): Promise<FastifyInstance> {
     if (count > 0) console.log(`[Audit] Loaded ${count} audit entries from ledger`)
   }).catch(err => {
     console.error('[Audit] Failed to load audit ledger:', err)
+  })
+
+  // ── Activation Funnel: load persisted events ──────────────────────────
+  loadActivationFunnel().then(count => {
+    if (count > 0) console.log(`[ActivationFunnel] Loaded ${count} funnel events`)
+  }).catch(err => {
+    console.error('[ActivationFunnel] Failed to load funnel data:', err)
   })
 
   // GET /execution-health — sweeper status + current violations
