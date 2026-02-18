@@ -224,17 +224,34 @@ export function sweepValidatingQueue(): SweepResult {
 
 // ── Helper: Extract PR URL from task metadata ──────────────────────────────
 
+function isValidPrUrl(url: string): boolean {
+  // Filter out placeholder/invalid PR URLs (e.g. /pull/0, /pull/00)
+  const match = url.match(/\/pull\/(\d+)/)
+  if (!match) return false
+  const prNumber = parseInt(match[1], 10)
+  return prNumber > 0
+}
+
 function extractPrUrl(meta: Record<string, unknown>): string | null {
-  // Check multiple locations where PR URLs are stored
-  if (meta.pr_url && typeof meta.pr_url === 'string') return meta.pr_url
-  const qaBundle = meta.qa_bundle as Record<string, unknown> | undefined
-  if (qaBundle?.pr_link && typeof qaBundle.pr_link === 'string') return qaBundle.pr_link
+  // Skip extraction entirely for doc-only or config-only tasks
   const reviewHandoff = meta.review_handoff as Record<string, unknown> | undefined
-  if (reviewHandoff?.pr_url && typeof reviewHandoff.pr_url === 'string') return reviewHandoff.pr_url
+  if (reviewHandoff?.doc_only || reviewHandoff?.config_only) return null
+
+  // Check multiple locations where PR URLs are stored
+  const candidates: string[] = []
+  if (meta.pr_url && typeof meta.pr_url === 'string') candidates.push(meta.pr_url)
+  const qaBundle = meta.qa_bundle as Record<string, unknown> | undefined
+  if (qaBundle?.pr_link && typeof qaBundle.pr_link === 'string') candidates.push(qaBundle.pr_link)
+  if (reviewHandoff?.pr_url && typeof reviewHandoff.pr_url === 'string') candidates.push(reviewHandoff.pr_url)
   const artifacts = meta.artifacts as string[] | undefined
   if (artifacts?.length) {
     const ghPr = artifacts.find(a => typeof a === 'string' && a.includes('github.com') && a.includes('/pull/'))
-    if (ghPr) return ghPr
+    if (ghPr) candidates.push(ghPr)
+  }
+
+  // Return first valid PR URL, filtering out placeholders like /pull/0
+  for (const url of candidates) {
+    if (isValidPrUrl(url)) return url
   }
   return null
 }

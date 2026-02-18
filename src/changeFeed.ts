@@ -371,13 +371,25 @@ function mentionsAgent(text: string, agent: string): boolean {
   return new RegExp(`@${agent}\\b`, 'i').test(text)
 }
 
+function isValidPrUrl(url: string): boolean {
+  const match = url.match(/\/pull\/(\d+)/)
+  if (!match) return false
+  return parseInt(match[1], 10) > 0
+}
+
 function extractPrUrl(task: Task): string | null {
   const meta = task.metadata as Record<string, unknown> | null
   if (!meta) return null
-  if (typeof meta.pr_url === 'string') return meta.pr_url
-  if (typeof meta.pr_link === 'string') return meta.pr_link
+  // Skip doc-only/config-only tasks that use placeholder PR URLs
   const handoff = meta.review_handoff as Record<string, unknown> | undefined
-  if (handoff && typeof handoff.pr_url === 'string') return handoff.pr_url
+  if (handoff?.doc_only || handoff?.config_only) return null
+  const candidates: string[] = []
+  if (typeof meta.pr_url === 'string') candidates.push(meta.pr_url)
+  if (typeof meta.pr_link === 'string') candidates.push(meta.pr_link)
+  if (handoff && typeof handoff.pr_url === 'string') candidates.push(handoff.pr_url)
+  for (const url of candidates) {
+    if (isValidPrUrl(url)) return url
+  }
   return null
 }
 
