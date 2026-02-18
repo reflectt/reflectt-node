@@ -1618,6 +1618,15 @@ export async function createServer(): Promise<FastifyInstance> {
       })
     }
 
+    // Definition-of-ready gate for backlog readiness: todo + required fields + unblocked
+    const hasRequiredFields = (task: typeof allTasks[number]): boolean => {
+      const hasTitle = typeof task.title === 'string' && task.title.trim().length > 0
+      const hasPriority = typeof task.priority === 'string' && ['P0', 'P1', 'P2', 'P3'].includes(task.priority)
+      const hasReviewer = typeof task.reviewer === 'string' && task.reviewer.trim().length > 0
+      const hasDoneCriteria = Array.isArray(task.done_criteria) && task.done_criteria.length > 0
+      return hasTitle && hasPriority && hasReviewer && hasDoneCriteria
+    }
+
     // Build per-lane health
     const laneHealth = Object.entries(lanes).map(([laneName, config]) => {
       const laneTasks = allTasks.filter(t => config.agents.includes(t.assignee || ''))
@@ -1628,8 +1637,9 @@ export async function createServer(): Promise<FastifyInstance> {
       const blocked = laneTasks.filter(t => t.status === 'blocked' || (t.status === 'todo' && isBlocked(t)))
       const done = laneTasks.filter(t => t.status === 'done')
 
-      // Ready = todo + not blocked
-      const ready = todo.filter(t => !isBlocked(t))
+      // Ready = todo + required fields + unblocked
+      const ready = todo.filter(t => !isBlocked(t) && hasRequiredFields(t))
+      const notReady = todo.filter(t => isBlocked(t) || !hasRequiredFields(t))
 
       // Per-agent breakdown
       const agentBreakdown = config.agents.map(agent => {
@@ -1664,6 +1674,7 @@ export async function createServer(): Promise<FastifyInstance> {
         counts: {
           todo: todo.length,
           ready: ready.length,
+          notReady: notReady.length,
           doing: doing.length,
           validating: validating.length,
           blocked: blocked.length,
@@ -1677,6 +1688,10 @@ export async function createServer(): Promise<FastifyInstance> {
             required: config.readyFloor,
             deficit: config.readyFloor - a.ready,
           })),
+          notReadyReasons: {
+            blocked: todo.filter(t => isBlocked(t)).length,
+            missingRequiredFields: todo.filter(t => !hasRequiredFields(t)).length,
+          },
         },
         agentBreakdown,
       }
@@ -1684,6 +1699,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // Aggregate summary
     const totalReady = laneHealth.reduce((sum, l) => sum + l.counts.ready, 0)
+    const totalNotReady = laneHealth.reduce((sum, l) => sum + l.counts.notReady, 0)
     const totalDoing = laneHealth.reduce((sum, l) => sum + l.counts.doing, 0)
     const totalValidating = laneHealth.reduce((sum, l) => sum + l.counts.validating, 0)
     const totalBlocked = laneHealth.reduce((sum, l) => sum + l.counts.blocked, 0)
@@ -1706,6 +1722,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const payload = {
       summary: {
         totalReady,
+        totalNotReady,
         totalDoing,
         totalValidating,
         totalBlocked,

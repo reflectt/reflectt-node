@@ -1,0 +1,83 @@
+{
+  "capturedAt": "2026-02-18T18:15:21.337Z",
+  "summary": {
+    "totalReady": 31,
+    "totalDoing": 8,
+    "totalValidating": 0,
+    "totalBlocked": 6,
+    "breachedLaneCount": 1,
+    "overallStatus": "breach",
+    "staleValidatingCount": 0
+  },
+  "operations": {
+    "counts": {
+      "todo": 6,
+      "ready": 6,
+      "doing": 2,
+      "validating": 0,
+      "blocked": 2,
+      "done": 240
+    },
+    "compliance": {
+      "status": "breach",
+      "floorBreaches": [
+        {
+          "agent": "kai",
+          "ready": 0,
+          "required": 1,
+          "deficit": 1
+        }
+      ]
+    },
+    "agentBreakdown": [
+      {
+        "agent": "kai",
+        "ready": 0,
+        "doing": 1,
+        "validating": 0,
+        "total": 27,
+        "belowFloor": true,
+        "readyTasks": []
+      },
+      {
+        "agent": "sage",
+        "ready": 6,
+        "doing": 1,
+        "validating": 0,
+        "total": 223,
+        "belowFloor": false,
+        "readyTasks": [
+          {
+            "id": "task-1771432364543-lkrc22gb7",
+            "title": "Reviewer assignment guardrail: block Ryan as reviewer + auto-reassign sweep",
+            "priority": "P1"
+          },
+          {
+            "id": "task-1771432109760-oafejjd2e",
+            "title": "Creation gate: mandatory source/owner/artifact/ETA fields for every new task",
+            "priority": "P0"
+          },
+          {
+            "id": "task-1771431944621-xd705qq4v",
+            "title": "Content intake hard gate: route/state links + constraints + decision-owner SLA",
+            "priority": "P0"
+          },
+          {
+            "id": "task-1771431915423-2vu826zve",
+            "title": "Intake quality gate for reliability tasks (baseline+owner+DoD required)",
+            "priority": "P0"
+          },
+          {
+            "id": "task-1771431877446-eel0fbm0b",
+            "title": "Backlog intake hard gate: no task without lane-source evidence",
+            "priority": "P0"
+          },
+          {
+            "id": "task-1771426549306-kjtzgr7ns",
+            "title": "skip-open-predecessor-smoke"
+          }
+        ]
+      }
+    ]
+  }
+}
