@@ -24,6 +24,7 @@ import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
+import { alertUnauthorizedApproval, alertFlipAttempt, getMutationAlertStatus, pruneOldAttempts } from './mutationAlert.js'
 import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus, FocusLevel } from './presence.js'
 import { analyticsManager } from './analytics.js'
@@ -3119,6 +3120,15 @@ export async function createServer(): Promise<FastifyInstance> {
     const expectedReviewer = task.reviewer.trim().toLowerCase()
     const actualReviewer = body.reviewer.trim().toLowerCase()
     if (expectedReviewer !== actualReviewer) {
+      // Alert on unauthorized review attempt
+      alertUnauthorizedApproval({
+        taskId: task.id,
+        taskTitle: task.title,
+        actor: body.reviewer,
+        expectedReviewer: task.reviewer,
+        context: `POST /tasks/${task.id}/review`,
+      }).catch(err => console.error('[MutationAlert] Alert failed:', err))
+
       reply.code(403)
       return {
         success: false,
@@ -3844,6 +3854,16 @@ export async function createServer(): Promise<FastifyInstance> {
             expected_reviewer: existing.reviewer,
             at: Date.now(),
           }
+
+          // Alert on unauthorized approval attempt
+          alertUnauthorizedApproval({
+            taskId: existing.id,
+            taskTitle: existing.title,
+            actor,
+            expectedReviewer: existing.reviewer,
+            context: `PATCH /tasks/${existing.id}`,
+          }).catch(err => console.error('[MutationAlert] Alert failed:', err))
+
           reply.code(403)
           return {
             success: false,
@@ -4132,19 +4152,35 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // ── Audit ledger: log review-field mutations ──
       {
+        const oldMeta = (existing.metadata || {}) as Record<string, unknown>
+        const newMeta = (task.metadata || {}) as Record<string, unknown>
         const reviewChanges = diffReviewFields(
           existing as unknown as Record<string, unknown>,
           task as unknown as Record<string, unknown>,
-          (existing.metadata || {}) as Record<string, unknown>,
-          (task.metadata || {}) as Record<string, unknown>,
+          oldMeta,
+          newMeta,
         )
         if (reviewChanges.length > 0) {
+          const mutationActor = parsed.actor || parsed.assignee || 'unknown'
           recordReviewMutation({
             taskId: task.id,
-            actor: parsed.actor || parsed.assignee || 'unknown',
+            actor: mutationActor,
             context: `PATCH /tasks/${task.id}`,
             changes: reviewChanges,
           }).catch(err => console.error('[Audit] Failed to record mutation:', err))
+
+          // Detect approval flip (reviewer_approved toggled)
+          const approvalChange = reviewChanges.find(c => c.field === 'metadata.reviewer_approved')
+          if (approvalChange && typeof approvalChange.before === 'boolean' && typeof approvalChange.after === 'boolean') {
+            alertFlipAttempt({
+              taskId: task.id,
+              taskTitle: task.title,
+              actor: mutationActor,
+              fromValue: approvalChange.before,
+              toValue: approvalChange.after,
+              context: `PATCH /tasks/${task.id}`,
+            }).catch(err => console.error('[MutationAlert] Flip alert failed:', err))
+          }
         }
       }
 
@@ -6525,6 +6561,15 @@ export async function createServer(): Promise<FastifyInstance> {
     })
     reply.send(response.body)
   })
+
+  // GET /audit/mutation-alerts — suspicious mutation alert status
+  app.get('/audit/mutation-alerts', async (_request, reply) => {
+    reply.send(getMutationAlertStatus())
+  })
+
+  // Prune old mutation alert tracking every 30 minutes
+  const pruneTimer = setInterval(pruneOldAttempts, 30 * 60 * 1000)
+  pruneTimer.unref()
 
   // GET /audit/reviews — review-field mutation audit ledger
   app.get('/audit/reviews', async (request, reply) => {
