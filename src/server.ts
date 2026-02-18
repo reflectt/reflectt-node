@@ -67,6 +67,17 @@ import {
   type FeedbackReporterType,
   type SupportTier,
 } from './feedback.js'
+import {
+  createEscalation,
+  acknowledgeEscalation,
+  resolveEscalation,
+  tickEscalations,
+  getEscalation,
+  getEscalationByFeedback,
+  listEscalations,
+  setAlertSink,
+  type EscalationStatus,
+} from './escalation.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
@@ -4915,6 +4926,12 @@ export async function createServer(): Promise<FastifyInstance> {
 
     markTriaged(request.params.id, task.id, triageAgent, triage.priority, triage.assignee)
 
+    // Auto-create escalation for P0/P1 tickets
+    const feedback = getFeedback(request.params.id)
+    if (feedback) {
+      createEscalation(request.params.id, triage.priority, feedback.tier || 'free', triage.assignee)
+    }
+
     reply.code(201)
     return {
       success: true,
@@ -4922,6 +4939,84 @@ export async function createServer(): Promise<FastifyInstance> {
       taskId: task.id,
       priority: triage.priority,
     }
+  })
+
+  // ── Escalation endpoints ──
+
+  app.get('/escalations', async (request) => {
+    const q = request.query as Record<string, string>
+    const status = q.status as EscalationStatus | undefined
+    return listEscalations(status)
+  })
+
+  app.get<{ Params: { id: string } }>('/escalations/:id', async (request, reply) => {
+    const record = getEscalation(request.params.id)
+    if (!record) {
+      reply.code(404)
+      return { success: false, error: 'Escalation not found' }
+    }
+    return { success: true, escalation: record }
+  })
+
+  app.get<{ Params: { feedbackId: string } }>('/feedback/:feedbackId/escalation', async (request, reply) => {
+    const record = getEscalationByFeedback(request.params.feedbackId)
+    if (!record) {
+      reply.code(404)
+      return { success: false, error: 'No escalation for this feedback' }
+    }
+    return { success: true, escalation: record }
+  })
+
+  app.post<{ Params: { id: string } }>('/escalations/:id/ack', async (request, reply) => {
+    const body = (request.body || {}) as Record<string, unknown>
+    const actor = typeof body.actor === 'string' ? body.actor : undefined
+    const record = acknowledgeEscalation(request.params.id, actor)
+    if (!record) {
+      reply.code(404)
+      return { success: false, error: 'Escalation not found' }
+    }
+    return { success: true, escalation: record }
+  })
+
+  app.post<{ Params: { id: string } }>('/escalations/:id/resolve', async (request, reply) => {
+    const record = resolveEscalation(request.params.id)
+    if (!record) {
+      reply.code(404)
+      return { success: false, error: 'Escalation not found' }
+    }
+    return { success: true, escalation: record }
+  })
+
+  // Manual escalation tick (also runs automatically via sweeper)
+  app.post('/escalations/tick', async () => {
+    return tickEscalations()
+  })
+
+  // Manual escalation creation (for testing or manual incidents)
+  app.post('/escalations', async (request, reply) => {
+    const body = (request.body || {}) as Record<string, unknown>
+    const feedbackId = typeof body.feedbackId === 'string' ? body.feedbackId : ''
+    const priority = typeof body.priority === 'string' ? body.priority : ''
+    const tier = (typeof body.tier === 'string' ? body.tier : 'free') as SupportTier
+    const owner = typeof body.owner === 'string' ? body.owner : undefined
+
+    if (!feedbackId || !priority) {
+      reply.code(400)
+      return { success: false, error: 'feedbackId and priority are required' }
+    }
+    if (priority !== 'P0' && priority !== 'P1') {
+      reply.code(400)
+      return { success: false, error: 'Escalation only supports P0 and P1 priority' }
+    }
+
+    const record = createEscalation(feedbackId, priority, tier, owner)
+    if (!record) {
+      reply.code(409)
+      return { success: false, error: 'Escalation already exists or priority not eligible' }
+    }
+
+    reply.code(201)
+    return { success: true, escalation: record }
   })
 
   // Get next task (pull-based assignment)

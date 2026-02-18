@@ -394,7 +394,14 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | POST | `/pr-event` | PR state webhook. Body: `{ taskId, prState: "merged"|"closed", prUrl? }`. Auto-updates task artifacts on merge, auto-blocks on close. |
 | GET | `/drift-report` | Task/PR drift report: tasks with merged PRs still in validating, orphan PRs, state mismatches. |
 | GET | `/audit/reviews` | Audit ledger for review-field mutations: actor trace, before/after diffs, timestamps. |
+| GET | `/audit/mutation-alerts` | Suspicious mutation alert status and history. |
+| GET | `/escalations` | List active escalations. |
+| GET | `/escalations/:id` | Get escalation details by ID. |
+| GET | `/feedback/:feedbackId/escalation` | Get escalation linked to feedback item. |
 | GET | `/feedback/:id/sla` | SLA status for a feedback/support item. |
 | GET | `/support/tiers` | Support tier SLA policy definitions. |
+| POST | `/escalations` | Create a new escalation. |
+| POST | `/escalations/:id/ack` | Acknowledge an escalation. |
+| POST | `/escalations/:id/resolve` | Resolve an escalation. |
+| POST | `/escalations/tick` | Trigger escalation timer tick (cron/manual). |
 | POST | `/feedback/:id/respond` | Respond to a feedback/support item. |
-| GET | `/audit/mutation-alerts` | Suspicious mutation alert status and history. |
