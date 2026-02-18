@@ -4004,7 +4004,7 @@ export async function createServer(): Promise<FastifyInstance> {
               }
             } catch {
               // If GitHub API is unavailable, don't block — log and continue
-              server.log.warn({ prUrl: url }, 'PR merge check skipped — GitHub API unavailable')
+              app.log.warn({ prUrl: url }, 'PR merge check skipped — GitHub API unavailable')
             }
           }
           if (openPrs.length > 0) {
