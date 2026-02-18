@@ -129,6 +129,18 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 
 If missing/invalid, API returns `400` with `Lane-state lock: ...` validation errors.
 
+### Done-gate: PR merge verification
+
+When closing a code-lane task (`product`/`frontend`/`backend`/`infra` lane or `code` tag), the API verifies:
+
+1. **`artifacts` required** — at least one proof link (`gate: artifacts`)
+2. **PR URL required** — at least one GitHub PR URL in artifacts (`gate: pr_link`)
+3. **PR must be merged** — linked PRs are checked via GitHub API; open PRs block closure (`gate: pr_not_merged`)
+4. **Reviewer sign-off** — assigned reviewer must approve (`gate: reviewer_signoff`)
+
+Bypass: set `metadata.pr_waiver=true` + `metadata.pr_waiver_reason` to skip PR gates (hotfixes).
+Graceful degradation: if GitHub API is unavailable, the merge check is skipped (does not block).
+
 ## Recurring Tasks
 
 | Method | Path | Description |
