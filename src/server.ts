@@ -48,7 +48,20 @@ import { buildAgentFeed, type FeedEventKind } from './changeFeed.js'
 import { policyManager } from './policy.js'
 import { runPrecheck, applyAutoDefaults } from './taskPrecheck.js'
 import { resolveRoute, getRoutingLog, getRoutingStats, type MessageSeverity, type MessageCategory } from './messageRouter.js'
-import { submitFeedback, listFeedback, getFeedback, updateFeedback, voteFeedback, checkRateLimit, type FeedbackQuery } from './feedback.js'
+import {
+  submitFeedback,
+  listFeedback,
+  getFeedback,
+  updateFeedback,
+  voteFeedback,
+  checkRateLimit,
+  getTriageQueue,
+  buildTriageTask,
+  markTriaged,
+  type FeedbackQuery,
+  type FeedbackSeverity,
+  type FeedbackReporterType,
+} from './feedback.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
@@ -344,6 +357,7 @@ const QaBundleSchema = z.object({
   screenshot_proof: z.array(z.string().trim().min(1)).min(1),
   reviewer_notes: z.string().trim().min(1).optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
+  non_code: z.boolean().optional(),
   review_packet: ReviewPacketSchema,
 })
 
@@ -355,6 +369,7 @@ const ReviewHandoffSchema = z.object({
   known_caveats: z.string().trim().min(1),
   doc_only: z.boolean().optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
+  non_code: z.boolean().optional(),
   pr_url: z.string().trim().url().optional(),
   commit_sha: z.string().trim().regex(/^[a-fA-F0-9]{7,40}$/).optional(),
 })
@@ -466,8 +481,11 @@ function enforceQaBundleGateForValidating(
     }
   }
 
+  const metadataObj = (metadata ?? {}) as Record<string, unknown>
+  const nonCodeLane = parsed.data.qa_bundle.non_code === true || isDesignOrDocsLane(metadataObj)
   const reviewPacket = parsed.data.qa_bundle.review_packet
-  if (expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
+
+  if (!nonCodeLane && expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
     return {
       ok: false,
       error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
@@ -475,9 +493,8 @@ function enforceQaBundleGateForValidating(
     }
   }
 
-  const metadataObj = (metadata ?? {}) as Record<string, unknown>
   const artifactPath = typeof metadataObj.artifact_path === 'string' ? metadataObj.artifact_path.trim() : ''
-  if (artifactPath && artifactPath !== reviewPacket.artifact_path) {
+  if (!nonCodeLane && artifactPath && artifactPath !== reviewPacket.artifact_path) {
     return {
       ok: false,
       error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
@@ -654,8 +671,9 @@ function enforceReviewHandoffGateForValidating(
   }
 
   // config_only: artifacts live in ~/.reflectt/, no repo/PR required
-  // doc_only: docs-only work, no PR/commit required
-  if (!handoff.doc_only && !handoff.config_only) {
+  // doc_only/non_code/design/docs lanes: no PR/commit required
+  const nonCodeLane = handoff.non_code === true || isDesignOrDocsLane(root)
+  if (!handoff.doc_only && !handoff.config_only && !nonCodeLane) {
     if (!handoff.pr_url || !parseGitHubPrUrl(handoff.pr_url)) {
       return {
         ok: false,
@@ -3787,6 +3805,38 @@ export async function createServer(): Promise<FastifyInstance> {
       // Normalize review-state metadata for state-aware SLA tracking.
       const mergedMeta = applyReviewStateMetadata(existing, parsed, mergedRawMeta, Date.now())
 
+      // Reviewer-identity gate: only assigned reviewer can set reviewer_approved=true.
+      const incomingReviewerApproved = (incomingMeta as Record<string, unknown>).reviewer_approved
+      if (incomingReviewerApproved === true) {
+        const actor = parsed.actor?.trim()
+        if (!actor) {
+          reply.code(400)
+          return {
+            success: false,
+            error: 'Reviewer identity gate: actor field is required when metadata.reviewer_approved=true',
+            gate: 'reviewer_identity',
+            hint: 'Include actor with the assigned reviewer name.',
+          }
+        }
+
+        if (existing.reviewer && actor.toLowerCase() !== existing.reviewer.toLowerCase()) {
+          mergedMeta.approval_rejected = {
+            attempted_by: actor,
+            expected_reviewer: existing.reviewer,
+            at: Date.now(),
+          }
+          reply.code(403)
+          return {
+            success: false,
+            error: `Only assigned reviewer "${existing.reviewer}" can approve this task`,
+            gate: 'reviewer_identity',
+          }
+        }
+
+        mergedMeta.approved_by = actor
+        mergedMeta.approved_at = Date.now()
+      }
+
       // Model validation gate on start: reject unknown model ids and auto-default when missing.
       if (parsed.status === 'doing' && existing.status !== 'doing') {
         const requestedModel = mergedMeta.model
@@ -4610,6 +4660,19 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, message: 'Message must be at most 1000 characters.', field: 'message' }
     }
 
+    const severity = typeof body.severity === 'string' ? body.severity.trim().toLowerCase() as FeedbackSeverity : undefined
+    const reporterType = typeof body.reporterType === 'string' ? body.reporterType.trim().toLowerCase() as FeedbackReporterType : undefined
+
+    if (severity && !['critical', 'high', 'medium', 'low'].includes(severity)) {
+      reply.code(400)
+      return { success: false, message: 'severity must be one of: critical, high, medium, low', field: 'severity' }
+    }
+
+    if (reporterType && !['human', 'agent'].includes(reporterType)) {
+      reply.code(400)
+      return { success: false, message: 'reporterType must be one of: human, agent', field: 'reporterType' }
+    }
+
     const record = submitFeedback({
       category: category as 'bug' | 'feature' | 'general',
       message,
@@ -4619,10 +4682,19 @@ export async function createServer(): Promise<FastifyInstance> {
       sessionId: typeof body.sessionId === 'string' ? body.sessionId : undefined,
       siteToken,
       timestamp: Date.now(),
+      severity,
+      reporterType,
+      reporterAgent: typeof body.reporterAgent === 'string' ? body.reporterAgent : undefined,
     })
 
     reply.code(201)
-    return { success: true, id: record.id, message: 'Feedback received.' }
+    return {
+      success: true,
+      id: record.id,
+      message: 'Feedback received.',
+      severity: record.severity,
+      reporterType: record.reporterType,
+    }
   })
 
   app.get('/feedback', async (request) => {
@@ -4630,6 +4702,8 @@ export async function createServer(): Promise<FastifyInstance> {
     const query: FeedbackQuery = {
       status: (q.status as any) || 'new',
       category: (q.category as any) || 'all',
+      severity: (q.severity as any) || 'all',
+      reporterType: (q.reporterType as any) || 'all',
       sort: (q.sort as any) || 'date',
       order: (q.order as any) || 'desc',
       limit: q.limit ? Number(q.limit) : 25,
@@ -4668,6 +4742,62 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, error: 'Feedback not found' }
     }
     return { success: true, votes: updated.votes }
+  })
+
+  app.get('/triage', async () => {
+    return getTriageQueue()
+  })
+
+  app.post<{ Params: { id: string } }>('/feedback/:id/triage', async (request, reply) => {
+    const body = (request.body || {}) as Record<string, unknown>
+    const triageAgent = typeof body.triageAgent === 'string' ? body.triageAgent.trim() : ''
+    if (!triageAgent) {
+      reply.code(400)
+      return { success: false, error: 'triageAgent is required' }
+    }
+
+    const triage = buildTriageTask({
+      feedbackId: request.params.id,
+      triageAgent,
+      priority: typeof body.priority === 'string' ? body.priority : undefined,
+      assignee: typeof body.assignee === 'string' ? body.assignee : undefined,
+      lane: typeof body.lane === 'string' ? body.lane : undefined,
+      title: typeof body.title === 'string' ? body.title : undefined,
+    })
+
+    if ('error' in triage) {
+      if (triage.error.includes('Already triaged')) {
+        reply.code(409)
+      } else {
+        reply.code(404)
+      }
+      return { success: false, error: triage.error }
+    }
+
+    const task = await taskManager.createTask({
+      title: triage.title,
+      description: triage.description,
+      status: 'todo',
+      assignee: triage.assignee,
+      reviewer: 'kai',
+      done_criteria: ['Triage feedback converted to actionable task'],
+      createdBy: triageAgent,
+      priority: triage.priority as Task['priority'],
+      metadata: {
+        ...triage.metadata,
+        ...(triage.lane ? { lane: triage.lane } : {}),
+      },
+    })
+
+    markTriaged(request.params.id, task.id, triageAgent, triage.priority, triage.assignee)
+
+    reply.code(201)
+    return {
+      success: true,
+      feedbackId: request.params.id,
+      taskId: task.id,
+      priority: triage.priority,
+    }
   })
 
   // Get next task (pull-based assignment)
