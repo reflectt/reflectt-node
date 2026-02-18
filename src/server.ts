@@ -23,6 +23,7 @@ import { memoryManager } from './memory.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
+import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
 import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus, FocusLevel } from './presence.js'
 import { analyticsManager } from './analytics.js'
@@ -3143,6 +3144,24 @@ export async function createServer(): Promise<FastifyInstance> {
       metadata: mergedMetadata,
     })
 
+    // ── Audit ledger: log review decision ──
+    if (updated) {
+      const reviewChanges = diffReviewFields(
+        task as unknown as Record<string, unknown>,
+        updated as unknown as Record<string, unknown>,
+        (task.metadata || {}) as Record<string, unknown>,
+        (updated.metadata || {}) as Record<string, unknown>,
+      )
+      if (reviewChanges.length > 0) {
+        recordReviewMutation({
+          taskId: task.id,
+          actor: body.reviewer,
+          context: `POST /tasks/${task.id}/review`,
+          changes: reviewChanges,
+        }).catch(err => console.error('[Audit] Failed to record review mutation:', err))
+      }
+    }
+
     await taskManager.addTaskComment(task.id, body.reviewer, `[review] ${decisionLabel}: ${body.comment}`)
 
     return {
@@ -4109,6 +4128,24 @@ export async function createServer(): Promise<FastifyInstance> {
       if (!task) {
         reply.code(404)
         return { success: false, error: 'Task not found' }
+      }
+
+      // ── Audit ledger: log review-field mutations ──
+      {
+        const reviewChanges = diffReviewFields(
+          existing as unknown as Record<string, unknown>,
+          task as unknown as Record<string, unknown>,
+          (existing.metadata || {}) as Record<string, unknown>,
+          (task.metadata || {}) as Record<string, unknown>,
+        )
+        if (reviewChanges.length > 0) {
+          recordReviewMutation({
+            taskId: task.id,
+            actor: parsed.actor || parsed.assignee || 'unknown',
+            context: `PATCH /tasks/${task.id}`,
+            changes: reviewChanges,
+          }).catch(err => console.error('[Audit] Failed to record mutation:', err))
+        }
       }
 
       // ── Send design→implementation handoff notification ──
@@ -6489,6 +6526,20 @@ export async function createServer(): Promise<FastifyInstance> {
     reply.send(response.body)
   })
 
+  // GET /audit/reviews — review-field mutation audit ledger
+  app.get('/audit/reviews', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const taskId = query.taskId || undefined
+    const limit = Math.min(parseInt(query.limit || '100', 10) || 100, 1000)
+
+    const entries = getAuditEntries({ taskId, limit })
+    reply.send({
+      entries,
+      count: entries.length,
+      taskId: taskId || null,
+    })
+  })
+
   // MCP messages endpoint (legacy protocol)
   app.post('/mcp/messages', async (request, reply) => {
     const fullUrl = `http://${request.headers.host || 'localhost'}${request.url}`
@@ -6508,6 +6559,13 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Execution Sweeper: zero-leak enforcement ──────────────────────────
   startSweeper()
+
+  // ── Audit Ledger: load persisted entries ──────────────────────────
+  loadAuditLedger().then(count => {
+    if (count > 0) console.log(`[Audit] Loaded ${count} audit entries from ledger`)
+  }).catch(err => {
+    console.error('[Audit] Failed to load audit ledger:', err)
+  })
 
   // GET /execution-health — sweeper status + current violations
   app.get('/execution-health', async (_request, reply) => {
