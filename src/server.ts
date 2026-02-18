@@ -60,9 +60,12 @@ import {
   getTriageQueue,
   buildTriageTask,
   markTriaged,
+  computeSLAStatus,
+  TIER_POLICIES,
   type FeedbackQuery,
   type FeedbackSeverity,
   type FeedbackReporterType,
+  type SupportTier,
 } from './feedback.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
@@ -4746,6 +4749,12 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, message: 'reporterType must be one of: human, agent', field: 'reporterType' }
     }
 
+    const tier = typeof body.tier === 'string' ? body.tier.trim().toLowerCase() as SupportTier : undefined
+    if (tier && !['free', 'pro', 'team'].includes(tier)) {
+      reply.code(400)
+      return { success: false, message: 'tier must be one of: free, pro, team', field: 'tier' }
+    }
+
     const record = submitFeedback({
       category: category as 'bug' | 'feature' | 'general',
       message,
@@ -4758,6 +4767,7 @@ export async function createServer(): Promise<FastifyInstance> {
       severity,
       reporterType,
       reporterAgent: typeof body.reporterAgent === 'string' ? body.reporterAgent : undefined,
+      tier,
     })
 
     reply.code(201)
@@ -4767,6 +4777,7 @@ export async function createServer(): Promise<FastifyInstance> {
       message: 'Feedback received.',
       severity: record.severity,
       reporterType: record.reporterType,
+      tier: record.tier,
     }
   })
 
@@ -4777,6 +4788,7 @@ export async function createServer(): Promise<FastifyInstance> {
       category: (q.category as any) || 'all',
       severity: (q.severity as any) || 'all',
       reporterType: (q.reporterType as any) || 'all',
+      tier: (q.tier as any) || 'all',
       sort: (q.sort as any) || 'date',
       order: (q.order as any) || 'desc',
       limit: q.limit ? Number(q.limit) : 25,
@@ -4815,6 +4827,45 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, error: 'Feedback not found' }
     }
     return { success: true, votes: updated.votes }
+  })
+
+  // Support tier policies reference
+  app.get('/support/tiers', async () => {
+    return { tiers: TIER_POLICIES }
+  })
+
+  // Mark first response on a feedback item (stops response SLA clock)
+  app.post<{ Params: { id: string } }>('/feedback/:id/respond', async (request, reply) => {
+    const record = getFeedback(request.params.id)
+    if (!record) {
+      reply.code(404)
+      return { success: false, error: 'Feedback not found' }
+    }
+    if (record.respondedAt) {
+      return { success: true, message: 'Already responded', respondedAt: record.respondedAt }
+    }
+    const updated = updateFeedback(request.params.id, { respondedAt: Date.now() })
+    if (!updated) {
+      reply.code(500)
+      return { success: false, error: 'Failed to update' }
+    }
+    const sla = computeSLAStatus(updated)
+    return {
+      success: true,
+      respondedAt: updated.respondedAt,
+      responseBreachRisk: sla.responseBreachRisk,
+      responseElapsedMs: sla.responseElapsedMs,
+    }
+  })
+
+  // SLA status for a specific feedback item
+  app.get<{ Params: { id: string } }>('/feedback/:id/sla', async (request, reply) => {
+    const record = getFeedback(request.params.id)
+    if (!record) {
+      reply.code(404)
+      return { success: false, error: 'Feedback not found' }
+    }
+    return { success: true, sla: computeSLAStatus(record) }
   })
 
   app.get('/triage', async () => {

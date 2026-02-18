@@ -1,7 +1,116 @@
 // SPDX-License-Identifier: Apache-2.0
-// Feedback collection: in-memory store + CRUD + triage pipeline
+// Feedback collection: in-memory store + CRUD + triage pipeline + support tier SLA
 
 import { randomUUID } from 'crypto'
+
+// ── Support Tier Policy ──
+
+export type SupportTier = 'free' | 'pro' | 'team'
+
+export interface SLAPolicy {
+  tier: SupportTier
+  /** First response SLA in milliseconds */
+  responseSlaMs: number
+  /** Resolution target SLA in milliseconds */
+  resolutionSlaMs: number
+  /** Priority boost — how many severity levels to escalate (0 = none) */
+  priorityBoost: number
+  /** Human description */
+  label: string
+}
+
+const HOUR = 3_600_000
+const DAY = 86_400_000
+
+export const TIER_POLICIES: Record<SupportTier, SLAPolicy> = {
+  free: {
+    tier: 'free',
+    responseSlaMs: 72 * HOUR,      // 72h first response
+    resolutionSlaMs: 14 * DAY,     // 14 days resolution
+    priorityBoost: 0,
+    label: 'Free — best effort',
+  },
+  pro: {
+    tier: 'pro',
+    responseSlaMs: 24 * HOUR,      // 24h first response
+    resolutionSlaMs: 7 * DAY,      // 7 days resolution
+    priorityBoost: 1,
+    label: 'Pro — priority support',
+  },
+  team: {
+    tier: 'team',
+    responseSlaMs: 4 * HOUR,       // 4h first response
+    resolutionSlaMs: 2 * DAY,      // 48h resolution
+    priorityBoost: 2,
+    label: 'Team — dedicated SLA',
+  },
+}
+
+export type BreachRisk = 'none' | 'approaching' | 'at_risk' | 'breached'
+
+export interface SLAStatus {
+  tier: SupportTier
+  responseSlaMs: number
+  resolutionSlaMs: number
+  responseElapsedMs: number
+  resolutionElapsedMs: number
+  responseBreachRisk: BreachRisk
+  resolutionBreachRisk: BreachRisk
+  /** Overall breach risk (worst of response + resolution) */
+  overallBreachRisk: BreachRisk
+  respondedAt?: number
+}
+
+/**
+ * Compute breach risk for a single SLA timer.
+ * Thresholds: >100% = breached, >75% = at_risk, >50% = approaching, else none
+ */
+export function computeBreachRisk(elapsedMs: number, slaMs: number): BreachRisk {
+  if (slaMs <= 0) return 'none'
+  const ratio = elapsedMs / slaMs
+  if (ratio >= 1.0) return 'breached'
+  if (ratio >= 0.75) return 'at_risk'
+  if (ratio >= 0.5) return 'approaching'
+  return 'none'
+}
+
+const BREACH_ORDER: Record<BreachRisk, number> = { none: 0, approaching: 1, at_risk: 2, breached: 3 }
+
+function worstBreachRisk(a: BreachRisk, b: BreachRisk): BreachRisk {
+  return BREACH_ORDER[a] >= BREACH_ORDER[b] ? a : b
+}
+
+/**
+ * Compute full SLA status for a feedback record at a given point in time.
+ */
+export function computeSLAStatus(record: FeedbackRecord, now: number = Date.now()): SLAStatus {
+  const tier = record.tier || 'free'
+  const policy = TIER_POLICIES[tier]
+
+  const responseElapsedMs = record.respondedAt
+    ? record.respondedAt - record.createdAt
+    : now - record.createdAt
+  const resolutionElapsedMs = now - record.createdAt
+
+  const responseBreachRisk = record.respondedAt
+    ? computeBreachRisk(record.respondedAt - record.createdAt, policy.responseSlaMs)
+    : computeBreachRisk(responseElapsedMs, policy.responseSlaMs)
+  const resolutionBreachRisk = record.status === 'triaged'
+    ? 'none' as BreachRisk  // resolved records don't accumulate resolution risk
+    : computeBreachRisk(resolutionElapsedMs, policy.resolutionSlaMs)
+
+  return {
+    tier,
+    responseSlaMs: policy.responseSlaMs,
+    resolutionSlaMs: policy.resolutionSlaMs,
+    responseElapsedMs,
+    resolutionElapsedMs,
+    responseBreachRisk,
+    resolutionBreachRisk,
+    overallBreachRisk: worstBreachRisk(responseBreachRisk, resolutionBreachRisk),
+    respondedAt: record.respondedAt,
+  }
+}
 
 // ── Types ──
 
@@ -22,6 +131,8 @@ export interface FeedbackSubmission {
   severity?: FeedbackSeverity
   reporterType?: FeedbackReporterType
   reporterAgent?: string  // agent name if reporterType === 'agent'
+  /** Support tier — looked up from org/plan or provided explicitly */
+  tier?: SupportTier
 }
 
 export interface FeedbackRecord extends FeedbackSubmission {
@@ -35,6 +146,10 @@ export interface FeedbackRecord extends FeedbackSubmission {
   severity: FeedbackSeverity
   reporterType: FeedbackReporterType
   triageResult?: TriageResult
+  /** Support tier — determines SLA policy */
+  tier: SupportTier
+  /** Timestamp when first response was sent (undefined = not yet responded) */
+  respondedAt?: number
 }
 
 export interface TriageResult {
@@ -58,6 +173,8 @@ export interface FeedbackListItem {
   url?: string
   assignedTo?: string
   triageResult?: TriageResult
+  tier: SupportTier
+  sla: SLAStatus
 }
 
 // ── Severity inference ──
@@ -106,6 +223,7 @@ export function submitFeedback(submission: FeedbackSubmission): FeedbackRecord {
   const now = Date.now()
   const severity = submission.severity || inferSeverity(submission.category, submission.message)
   const reporterType = submission.reporterType || 'human'
+  const tier = submission.tier || 'free'
   const record: FeedbackRecord = {
     ...submission,
     id,
@@ -113,6 +231,7 @@ export function submitFeedback(submission: FeedbackSubmission): FeedbackRecord {
     votes: 0,
     severity,
     reporterType,
+    tier,
     createdAt: now,
     updatedAt: now,
   }
@@ -125,7 +244,8 @@ export interface FeedbackQuery {
   category?: FeedbackCategory | 'all'
   severity?: FeedbackSeverity | 'all'
   reporterType?: FeedbackReporterType | 'all'
-  sort?: 'date' | 'votes' | 'severity'
+  tier?: SupportTier | 'all'
+  sort?: 'date' | 'votes' | 'severity' | 'breach_risk'
   order?: 'asc' | 'desc'
   limit?: number
   offset?: number
@@ -138,7 +258,8 @@ const SEVERITY_ORDER: Record<FeedbackSeverity, number> = {
   low: 3,
 }
 
-export function listFeedback(query: FeedbackQuery = {}): { items: FeedbackListItem[]; total: number; newCount: number } {
+export function listFeedback(query: FeedbackQuery = {}): { items: FeedbackListItem[]; total: number; newCount: number; breachedCount: number } {
+  const now = Date.now()
   let items = Array.from(feedbackStore.values())
 
   // Filter by status
@@ -162,8 +283,17 @@ export function listFeedback(query: FeedbackQuery = {}): { items: FeedbackListIt
     items = items.filter(f => f.reporterType === query.reporterType)
   }
 
+  // Filter by tier
+  if (query.tier && query.tier !== 'all') {
+    items = items.filter(f => (f.tier || 'free') === query.tier)
+  }
+
   const total = items.length
   const newCount = Array.from(feedbackStore.values()).filter(f => f.status === 'new').length
+  const breachedCount = Array.from(feedbackStore.values()).filter(f => {
+    if (f.status === 'triaged' || f.status === 'archived') return false
+    return computeSLAStatus(f, now).overallBreachRisk === 'breached'
+  }).length
 
   // Sort
   const sortBy = query.sort || 'date'
@@ -173,6 +303,15 @@ export function listFeedback(query: FeedbackQuery = {}): { items: FeedbackListIt
     if (sortBy === 'severity') {
       const diff = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
       return order === 'desc' ? -diff : diff
+    }
+    if (sortBy === 'breach_risk') {
+      const slaA = computeSLAStatus(a, now)
+      const slaB = computeSLAStatus(b, now)
+      const diff = BREACH_ORDER[slaB.overallBreachRisk] - BREACH_ORDER[slaA.overallBreachRisk]
+      if (diff !== 0) return order === 'desc' ? diff : -diff
+      // Secondary: tier priority (team > pro > free)
+      const tierOrder: Record<SupportTier, number> = { team: 2, pro: 1, free: 0 }
+      return tierOrder[b.tier || 'free'] - tierOrder[a.tier || 'free']
     }
     // date
     return order === 'desc' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt
@@ -197,9 +336,12 @@ export function listFeedback(query: FeedbackQuery = {}): { items: FeedbackListIt
       url: f.url,
       assignedTo: f.assignedTo,
       triageResult: f.triageResult,
+      tier: f.tier || 'free',
+      sla: computeSLAStatus(f, now),
     })),
     total,
     newCount,
+    breachedCount,
   }
 }
 
@@ -207,7 +349,7 @@ export function getFeedback(id: string): FeedbackRecord | undefined {
   return feedbackStore.get(id)
 }
 
-export function updateFeedback(id: string, patch: Partial<Pick<FeedbackRecord, 'status' | 'notes' | 'assignedTo' | 'votes' | 'severity'>>): FeedbackRecord | null {
+export function updateFeedback(id: string, patch: Partial<Pick<FeedbackRecord, 'status' | 'notes' | 'assignedTo' | 'votes' | 'severity' | 'tier' | 'respondedAt'>>): FeedbackRecord | null {
   const record = feedbackStore.get(id)
   if (!record) return null
 
@@ -216,6 +358,8 @@ export function updateFeedback(id: string, patch: Partial<Pick<FeedbackRecord, '
   if (patch.assignedTo !== undefined) record.assignedTo = patch.assignedTo
   if (patch.votes !== undefined) record.votes = patch.votes
   if (patch.severity !== undefined) record.severity = patch.severity
+  if (patch.tier !== undefined) record.tier = patch.tier
+  if (patch.respondedAt !== undefined) record.respondedAt = patch.respondedAt
   record.updatedAt = Date.now()
 
   return record
@@ -263,6 +407,12 @@ export interface TriageTaskPayload {
     category: FeedbackCategory
     triagedBy: string
     triagedAt: number
+    tier: SupportTier
+    slaAtTriage: {
+      responseBreachRisk: BreachRisk
+      resolutionBreachRisk: BreachRisk
+      responseElapsedMs: number
+    }
   }
 }
 
@@ -273,16 +423,29 @@ export function buildTriageTask(input: TriageInput): TriageTaskPayload | { error
     return { error: `Already triaged as task ${record.triageResult.taskId}` }
   }
 
-  const priority = input.priority || SEVERITY_TO_PRIORITY[record.severity]
+  const tier = record.tier || 'free'
+  const policy = TIER_POLICIES[tier]
+
+  // Apply tier priority boost
+  const basePriority = input.priority || SEVERITY_TO_PRIORITY[record.severity]
+  const priorities = ['P0', 'P1', 'P2', 'P3']
+  const baseIdx = priorities.indexOf(basePriority)
+  const boostedIdx = baseIdx >= 0 ? Math.max(0, baseIdx - policy.priorityBoost) : baseIdx
+  const priority = boostedIdx >= 0 ? priorities[boostedIdx] : basePriority
+
+  const sla = computeSLAStatus(record)
   const categoryLabel = record.category === 'bug' ? 'Bug' : record.category === 'feature' ? 'Feature request' : 'Feedback'
-  const title = input.title || `[${categoryLabel}] ${record.message.slice(0, 80)}`
+  const tierLabel = tier !== 'free' ? ` [${tier.toUpperCase()}]` : ''
+  const title = input.title || `[${categoryLabel}]${tierLabel} ${record.message.slice(0, 80)}`
 
   const description = [
     `**Source**: Feedback ${record.id} (${record.reporterType})`,
+    `**Tier**: ${tier} (${policy.label})`,
     record.reporterAgent ? `**Reporter agent**: ${record.reporterAgent}` : null,
     record.email ? `**Reporter email**: ${record.email}` : null,
     `**Category**: ${record.category}`,
     `**Severity**: ${record.severity}`,
+    sla.overallBreachRisk !== 'none' ? `**⚠️ SLA Risk**: ${sla.overallBreachRisk}` : null,
     record.url ? `**URL**: ${record.url}` : null,
     '',
     record.message,
@@ -304,6 +467,12 @@ export function buildTriageTask(input: TriageInput): TriageTaskPayload | { error
       category: record.category,
       triagedBy: input.triageAgent,
       triagedAt: Date.now(),
+      tier,
+      slaAtTriage: {
+        responseBreachRisk: sla.responseBreachRisk,
+        resolutionBreachRisk: sla.resolutionBreachRisk,
+        responseElapsedMs: sla.responseElapsedMs,
+      },
     },
   }
 }
@@ -336,20 +505,56 @@ export interface TriageQueueItem {
   createdAt: number
   votes: number
   suggestedPriority: string
+  tier: SupportTier
+  sla: SLAStatus
 }
 
-export function getTriageQueue(): { items: TriageQueueItem[]; total: number } {
+/**
+ * Get triage queue sorted by breach risk (highest first), then tier, then severity.
+ * This ensures SLA-breached items from paying tiers surface first.
+ */
+export function getTriageQueue(): { items: TriageQueueItem[]; total: number; breachedCount: number; atRiskCount: number } {
+  const now = Date.now()
   const newItems = Array.from(feedbackStore.values())
     .filter(f => f.status === 'new')
-    .sort((a, b) => {
-      // Sort by severity first, then by date
-      const sevDiff = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]
-      if (sevDiff !== 0) return sevDiff
-      return b.createdAt - a.createdAt
-    })
+
+  // Compute SLA for each item
+  const enriched = newItems.map(f => ({
+    record: f,
+    sla: computeSLAStatus(f, now),
+  }))
+
+  // Sort: breach risk desc → tier desc → severity asc → date desc
+  const tierOrder: Record<SupportTier, number> = { team: 2, pro: 1, free: 0 }
+  enriched.sort((a, b) => {
+    // Breach risk first (breached > at_risk > approaching > none)
+    const breachDiff = BREACH_ORDER[b.sla.overallBreachRisk] - BREACH_ORDER[a.sla.overallBreachRisk]
+    if (breachDiff !== 0) return breachDiff
+    // Then tier (team > pro > free)
+    const tierDiff = tierOrder[b.record.tier || 'free'] - tierOrder[a.record.tier || 'free']
+    if (tierDiff !== 0) return tierDiff
+    // Then severity
+    const sevDiff = SEVERITY_ORDER[a.record.severity] - SEVERITY_ORDER[b.record.severity]
+    if (sevDiff !== 0) return sevDiff
+    return b.record.createdAt - a.record.createdAt
+  })
+
+  const breachedCount = enriched.filter(e => e.sla.overallBreachRisk === 'breached').length
+  const atRiskCount = enriched.filter(e => e.sla.overallBreachRisk === 'at_risk').length
+
+  // Apply tier priority boost to suggested priority
+  function boostedPriority(severity: FeedbackSeverity, tier: SupportTier): string {
+    const basePriority = SEVERITY_TO_PRIORITY[severity]
+    const boost = TIER_POLICIES[tier].priorityBoost
+    if (boost === 0) return basePriority
+    const priorities = ['P0', 'P1', 'P2', 'P3']
+    const baseIdx = priorities.indexOf(basePriority)
+    const boostedIdx = Math.max(0, baseIdx - boost)
+    return priorities[boostedIdx]
+  }
 
   return {
-    items: newItems.map(f => ({
+    items: enriched.map(({ record: f, sla }) => ({
       feedbackId: f.id,
       category: f.category,
       severity: f.severity,
@@ -357,9 +562,13 @@ export function getTriageQueue(): { items: TriageQueueItem[]; total: number } {
       messagePreview: f.message.slice(0, 120),
       createdAt: f.createdAt,
       votes: f.votes,
-      suggestedPriority: SEVERITY_TO_PRIORITY[f.severity],
+      suggestedPriority: boostedPriority(f.severity, f.tier || 'free'),
+      tier: f.tier || 'free',
+      sla,
     })),
-    total: newItems.length,
+    total: enriched.length,
+    breachedCount,
+    atRiskCount,
   }
 }
 
