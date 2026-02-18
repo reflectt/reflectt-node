@@ -2586,8 +2586,9 @@ export async function createServer(): Promise<FastifyInstance> {
     const total = tasks.length
     const offset = parsePositiveInt(query.offset) || 0
     tasks = tasks.slice(offset, offset + limit)
+    const hasMore = offset + tasks.length < total
 
-    const payload = { tasks: tasks.map(enrichTaskWithComments), total, offset, limit }
+    const payload = { tasks: tasks.map(enrichTaskWithComments), total, offset, limit, hasMore }
     const lastModified = tasks.length > 0 ? Math.max(...tasks.map(t => t.updatedAt || 0)) : undefined
     if (applyConditionalCaching(request, reply, payload, lastModified)) {
       return

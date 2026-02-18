@@ -87,7 +87,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `offset`, `q` (text search), `updatedSince`. Returns `{ tasks, total, offset, limit }`. |
+| GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `offset`, `q` (text search), `updatedSince`. Returns `{ tasks, total, offset, limit, hasMore }`. |
 | GET | `/tasks/:id` | Get task by ID. Also accepts unambiguous ID prefixes. Ambiguous prefix returns `400` with full-ID suggestions. |
 | GET | `/tasks/:id/history` | Status changelog for task lifecycle transitions. Returns `history[]` entries shaped as `{ status, changedBy, changedAt, metadata }` for each status transition. |
 | GET | `/tasks/:id/comments` | List task discussion comments. Returns `{ comments, count }` |
