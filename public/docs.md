@@ -394,4 +394,7 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | POST | `/pr-event` | PR state webhook. Body: `{ taskId, prState: "merged"|"closed", prUrl? }`. Auto-updates task artifacts on merge, auto-blocks on close. |
 | GET | `/drift-report` | Task/PR drift report: tasks with merged PRs still in validating, orphan PRs, state mismatches. |
 | GET | `/audit/reviews` | Audit ledger for review-field mutations: actor trace, before/after diffs, timestamps. |
-| GET | `/audit/mutation-alerts` | Auto-documented endpoint. |
+| GET | `/feedback/:id/sla` | SLA status for a feedback/support item. |
+| GET | `/support/tiers` | Support tier SLA policy definitions. |
+| POST | `/feedback/:id/respond` | Respond to a feedback/support item. |
+| GET | `/audit/mutation-alerts` | Suspicious mutation alert status and history. |
