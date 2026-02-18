@@ -910,6 +910,109 @@ describe('Validating review handoff gate', () => {
     expect(body.error).toContain('open PR URL required')
   })
 
+  it('rejects validating when qa_bundle.pr_link is not canonical for code lanes', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        lane: 'code',
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: validQaBundle({
+          summary: 'handoff gate test',
+          pr_link: 'https://github.com/reflectt/reflectt-node/pull/new/main',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/601',
+            commit: 'abc5601',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-handoff-proof.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/601',
+          commit_sha: 'abc5601',
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toContain('metadata.qa_bundle.pr_link must be a canonical GitHub PR URL')
+  })
+
+  it('rejects validating when review_handoff.pr_url is /tree URL for code/design-code lanes', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        lane: 'design-code',
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: validQaBundle({
+          summary: 'handoff gate test',
+          pr_link: 'https://github.com/reflectt/reflectt-node/pull/602',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/602',
+            commit: 'abc5602',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-handoff-proof.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'npm test -- tests/api.test.ts (pass)',
+          known_caveats: 'none',
+          pr_url: 'https://github.com/reflectt/reflectt-node/tree/main',
+          commit_sha: 'abc5602',
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.error).toContain('metadata.review_handoff.pr_url must be a canonical GitHub PR URL')
+  })
+
+  it('accepts validating when non_code=true and review_handoff omits PR/commit', async () => {
+    const { status } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        lane: 'design-code',
+        non_code: true,
+        artifact_path: 'process/TASK-handoff-proof.md',
+        qa_bundle: validQaBundle({
+          summary: 'handoff gate test',
+          artifact_links: ['process/TASK-handoff-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/603',
+            commit: 'abc5603',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-handoff-proof.md',
+            caveats: 'none',
+          },
+          non_code: true,
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          artifact_path: 'process/TASK-handoff-proof.md',
+          test_proof: 'manual UX review complete',
+          known_caveats: 'none',
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+  })
+
   it('accepts validating with doc_only handoff and enforces delta note on re-review', async () => {
     const first = await req('PATCH', `/tasks/${taskId}`, {
       status: 'validating',
