@@ -22,7 +22,7 @@ import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp
 import { memoryManager } from './memory.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
-import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift } from './executionSweeper.js'
+import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
 import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus, FocusLevel } from './presence.js'
 import { analyticsManager } from './analytics.js'
@@ -6394,6 +6394,21 @@ export async function createServer(): Promise<FastifyInstance> {
         violations: freshSweep.violations,
         tasksScanned: freshSweep.tasksScanned,
       },
+    })
+  })
+
+  // GET /drift-report — comprehensive PR↔task drift report
+  app.get('/drift-report', async (_request, reply) => {
+    const report = generateDriftReport()
+    const status = getSweeperStatus()
+    reply.send({
+      ...report,
+      sweeper: {
+        running: status.running,
+        lastSweepAt: status.lastSweepAt,
+        escalationTracking: status.escalationTracking,
+      },
+      dryRunLog: status.dryRunLog.slice(-100), // Last 100 entries
     })
   })
 

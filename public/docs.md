@@ -388,3 +388,6 @@ If missing/invalid, API returns `400` with `Lane-state lock: ...` validation err
 | GET | `/canvas/history` | Recent render history (?slot=&limit=) |
 | GET | `/canvas/rejections` | Recent contract validation rejections |
 | GET | `/canvas/stream` | SSE stream of canvas render events |
+| GET | `/execution-health` | Execution sweeper status: validating queue violations, SLA breaches, escalation tracking. |
+| POST | `/pr-event` | PR state webhook. Body: `{ taskId, prState: "merged"|"closed", prUrl? }`. Auto-updates task artifacts on merge, auto-blocks on close. |
+| GET | `/drift-report` | Task/PR drift report: tasks with merged PRs still in validating, orphan PRs, state mismatches. |

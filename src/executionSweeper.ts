@@ -6,10 +6,11 @@
  * 
  * Periodically scans for:
  * 1. Stale validating tasks (no reviewer activity within SLA)
- * 2. Open PRs not linked to active tasks
+ * 2. Open PRs not linked to active tasks (orphan PRs)
  * 3. Task/PR state drift (merged PR but task still validating)
  * 
- * Escalates via chat messages to #blockers when thresholds are breached.
+ * Escalates via chat messages when thresholds are breached.
+ * Provides drift report endpoint for full visibility.
  */
 
 import { taskManager } from './tasks.js'
@@ -27,12 +28,29 @@ const VALIDATING_SLA_MS = 30 * 60 * 1000 // 30 minutes
 /** Critical SLA: second escalation tier */
 const VALIDATING_CRITICAL_MS = 60 * 60 * 1000 // 60 minutes
 
+/** PR age threshold: flag PRs linked to non-active tasks older than this */
+const ORPHAN_PR_THRESHOLD_MS = 2 * 60 * 60 * 1000 // 2 hours
+
 /** Track which tasks we've already escalated (avoid spam) */
 const escalated = new Map<string, { level: 'warning' | 'critical'; at: number }>()
+
+/** Track which orphan PRs we've already flagged */
+const flaggedOrphanPRs = new Set<string>()
 
 /** Track sweep stats for the /execution-health endpoint */
 let lastSweepAt = 0
 let lastSweepResults: SweepResult | null = null
+
+/** Dry-run log for 24h evidence capture */
+const dryRunLog: Array<{ timestamp: number; event: string; detail: string }> = []
+const DRY_RUN_LOG_MAX = 500
+
+function logDryRun(event: string, detail: string): void {
+  dryRunLog.push({ timestamp: Date.now(), event, detail })
+  if (dryRunLog.length > DRY_RUN_LOG_MAX) {
+    dryRunLog.splice(0, dryRunLog.length - DRY_RUN_LOG_MAX)
+  }
+}
 
 export interface SweepViolation {
   taskId: string
@@ -49,6 +67,32 @@ export interface SweepResult {
   violations: SweepViolation[]
   tasksScanned: number
   validatingCount: number
+}
+
+export interface DriftReportEntry {
+  taskId: string
+  title: string
+  status: string
+  assignee?: string
+  reviewer?: string
+  age_minutes: number
+  prUrl?: string
+  prMerged?: boolean
+  issue: 'stale_validating' | 'orphan_pr' | 'pr_merged_not_closed' | 'no_pr_linked' | 'clean'
+  detail: string
+}
+
+export interface DriftReport {
+  timestamp: number
+  validating: DriftReportEntry[]
+  orphanPRs: DriftReportEntry[]
+  summary: {
+    totalValidating: number
+    staleValidating: number
+    orphanPRCount: number
+    prDriftCount: number
+    cleanCount: number
+  }
 }
 
 // ── Core Sweep Logic ───────────────────────────────────────────────────────
@@ -76,9 +120,10 @@ export function sweepValidatingQueue(): SweepResult {
         reviewer: task.reviewer,
         type: 'validating_critical',
         age_minutes: ageMinutes,
-        message: `🚨 CRITICAL: "${task.title}" stuck in validating for ${ageMinutes}m. Reviewer: ${task.reviewer || 'none'}. Assignee: ${task.assignee || 'none'}. This is blocking flow.`,
+        message: `🚨 CRITICAL: "${task.title}" stuck in validating for ${ageMinutes}m. @${task.reviewer || 'unassigned'} please review. @${task.assignee || 'unassigned'} — your PR is blocked.`,
       })
       escalated.set(task.id, { level: 'critical', at: now })
+      logDryRun('validating_critical', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee}`)
     } else if (ageSinceActivity >= VALIDATING_SLA_MS && !prev) {
       violations.push({
         taskId: task.id,
@@ -87,9 +132,10 @@ export function sweepValidatingQueue(): SweepResult {
         reviewer: task.reviewer,
         type: 'validating_sla',
         age_minutes: ageMinutes,
-        message: `⚠️ SLA breach: "${task.title}" in validating ${ageMinutes}m without reviewer action. @${task.reviewer || 'unassigned'} — review or escalate now.`,
+        message: `⚠️ SLA breach: "${task.title}" in validating ${ageMinutes}m. @${task.reviewer || 'unassigned'} — review needed. @${task.assignee || 'unassigned'} — ping if blocked.`,
       })
       escalated.set(task.id, { level: 'warning', at: now })
+      logDryRun('validating_sla', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee}`)
     }
   }
 
@@ -98,6 +144,66 @@ export function sweepValidatingQueue(): SweepResult {
     const task = allTasks.find((t: Task) => t.id === taskId)
     if (!task || task.status !== 'validating') {
       escalated.delete(taskId)
+      logDryRun('escalation_cleared', `${taskId} — no longer validating`)
+    }
+  }
+
+  // ── Orphan PR detection ──────────────────────────────────────────────
+  // Scan all tasks with PR URLs where the task is done/cancelled but the PR
+  // was linked — these represent potential orphan open PRs
+  const doneTasks = allTasks.filter((t: Task) => t.status === 'done' || (t.status as string) === 'cancelled')
+  for (const task of doneTasks) {
+    const meta = (task.metadata || {}) as Record<string, unknown>
+    const prUrl = extractPrUrl(meta)
+    if (!prUrl || flaggedOrphanPRs.has(prUrl)) continue
+
+    // Check if this PR is also referenced by an active task — if so, it's not orphan
+    const activeRef = allTasks.find((t: Task) =>
+      t.id !== task.id &&
+      ['doing', 'validating', 'todo'].includes(t.status) &&
+      extractPrUrl((t.metadata || {}) as Record<string, unknown>) === prUrl
+    )
+    if (activeRef) continue
+
+    // PR on a done task with no active task referencing it
+    const prMerged = !!(meta.pr_merged)
+    if (prMerged) continue // Merged PRs on done tasks are fine
+
+    const completedAge = now - task.updatedAt
+    if (completedAge >= ORPHAN_PR_THRESHOLD_MS) {
+      violations.push({
+        taskId: task.id,
+        title: task.title,
+        assignee: task.assignee,
+        reviewer: task.reviewer,
+        type: 'orphan_pr',
+        age_minutes: Math.round(completedAge / 60_000),
+        message: `🔍 Orphan PR detected: ${prUrl} linked to done task "${task.title}" (${task.id}). PR may still be open — close or merge it.`,
+      })
+      flaggedOrphanPRs.add(prUrl)
+      logDryRun('orphan_pr', `${prUrl} on ${task.id} — task done ${Math.round(completedAge / 60_000)}m ago`)
+    }
+  }
+
+  // Also check validating tasks for PR drift (merged but not advanced)
+  for (const task of validating) {
+    const meta = (task.metadata || {}) as Record<string, unknown>
+    if (meta.pr_merged && task.status === 'validating') {
+      const mergedAt = (meta.pr_merged_at as number) || task.updatedAt
+      const driftAge = now - mergedAt
+      if (driftAge >= ORPHAN_PR_THRESHOLD_MS && !escalated.has(`drift:${task.id}`)) {
+        violations.push({
+          taskId: task.id,
+          title: task.title,
+          assignee: task.assignee,
+          reviewer: task.reviewer,
+          type: 'pr_drift',
+          age_minutes: Math.round(driftAge / 60_000),
+          message: `📦 PR merged ${Math.round(driftAge / 60_000)}m ago but "${task.title}" still in validating. @${task.reviewer || 'reviewer'} — approve or close.`,
+        })
+        escalated.set(`drift:${task.id}`, { level: 'warning', at: now })
+        logDryRun('pr_drift', `${task.id} — PR merged ${Math.round(driftAge / 60_000)}m ago, still validating`)
+      }
     }
   }
 
@@ -111,7 +217,26 @@ export function sweepValidatingQueue(): SweepResult {
   lastSweepAt = now
   lastSweepResults = result
 
+  logDryRun('sweep_complete', `scanned=${allTasks.length} validating=${validating.length} violations=${violations.length}`)
+
   return result
+}
+
+// ── Helper: Extract PR URL from task metadata ──────────────────────────────
+
+function extractPrUrl(meta: Record<string, unknown>): string | null {
+  // Check multiple locations where PR URLs are stored
+  if (meta.pr_url && typeof meta.pr_url === 'string') return meta.pr_url
+  const qaBundle = meta.qa_bundle as Record<string, unknown> | undefined
+  if (qaBundle?.pr_link && typeof qaBundle.pr_link === 'string') return qaBundle.pr_link
+  const reviewHandoff = meta.review_handoff as Record<string, unknown> | undefined
+  if (reviewHandoff?.pr_url && typeof reviewHandoff.pr_url === 'string') return reviewHandoff.pr_url
+  const artifacts = meta.artifacts as string[] | undefined
+  if (artifacts?.length) {
+    const ghPr = artifacts.find(a => typeof a === 'string' && a.includes('github.com') && a.includes('/pull/'))
+    if (ghPr) return ghPr
+  }
+  return null
 }
 
 // ── Escalation ─────────────────────────────────────────────────────────────
@@ -120,7 +245,7 @@ async function escalateViolations(violations: SweepViolation[]): Promise<void> {
   if (violations.length === 0) return
 
   for (const v of violations) {
-    // Post to general channel for visibility
+    // Post to general channel for visibility — includes @mentions for owner + reviewer
     try {
       await chatManager.sendMessage({
         channel: 'general',
@@ -137,7 +262,7 @@ async function escalateViolations(violations: SweepViolation[]): Promise<void> {
     violations.map(v => `${v.type}:${v.taskId}`).join(', '))
 }
 
-// ── PR-State Drift Detection ───────────────────────────────────────────────
+// ── PR-State Drift Detection (webhook-triggered) ──────────────────────────
 
 /**
  * Check if a task's linked PR has been merged but the task is still in validating.
@@ -151,6 +276,7 @@ export function flagPrDrift(taskId: string, prState: 'merged' | 'closed'): Sweep
   if (task.status === 'done') return null // Already done, no drift
 
   if (prState === 'merged' && task.status === 'validating') {
+    logDryRun('pr_drift_webhook', `${taskId} — PR merged while task validating`)
     return {
       taskId: task.id,
       title: task.title,
@@ -158,11 +284,12 @@ export function flagPrDrift(taskId: string, prState: 'merged' | 'closed'): Sweep
       reviewer: task.reviewer,
       type: 'pr_drift',
       age_minutes: 0,
-      message: `📦 PR merged but task "${task.title}" still in validating. Auto-advancing to ready-for-close.`,
+      message: `📦 PR merged but task "${task.title}" still in validating. @${task.reviewer || 'reviewer'} — review or auto-advance.`,
     }
   }
 
   if (prState === 'closed' && task.status !== 'blocked') {
+    logDryRun('pr_closed_webhook', `${taskId} — PR closed unmerged`)
     return {
       taskId: task.id,
       title: task.title,
@@ -177,6 +304,124 @@ export function flagPrDrift(taskId: string, prState: 'merged' | 'closed'): Sweep
   return null
 }
 
+// ── Drift Report ───────────────────────────────────────────────────────────
+
+/**
+ * Generate a comprehensive drift report showing all validating tasks,
+ * their PR status, and any orphan PRs or state drift.
+ */
+export function generateDriftReport(): DriftReport {
+  const now = Date.now()
+  const allTasks = taskManager.listTasks()
+  const validating = allTasks.filter((t: Task) => t.status === 'validating')
+
+  const validatingEntries: DriftReportEntry[] = []
+  const orphanEntries: DriftReportEntry[] = []
+
+  let staleCount = 0
+  let driftCount = 0
+  let cleanCount = 0
+
+  // Analyze validating tasks
+  for (const task of validating) {
+    const meta = (task.metadata || {}) as Record<string, unknown>
+    const enteredAt = (meta.entered_validating_at as number) || task.updatedAt
+    const lastActivity = (meta.review_last_activity_at as number) || enteredAt
+    const ageSinceActivity = now - lastActivity
+    const ageMinutes = Math.round(ageSinceActivity / 60_000)
+    const prUrl = extractPrUrl(meta)
+    const prMerged = !!(meta.pr_merged)
+
+    let issue: DriftReportEntry['issue'] = 'clean'
+    let detail = 'On track'
+
+    if (prMerged) {
+      issue = 'pr_merged_not_closed'
+      detail = `PR merged but task still validating (${ageMinutes}m since last activity)`
+      driftCount++
+    } else if (!prUrl) {
+      issue = 'no_pr_linked'
+      detail = `No PR URL found in task metadata — cannot verify PR state`
+      staleCount++
+    } else if (ageSinceActivity >= VALIDATING_CRITICAL_MS) {
+      issue = 'stale_validating'
+      detail = `${ageMinutes}m without reviewer activity (CRITICAL threshold: ${VALIDATING_CRITICAL_MS / 60_000}m)`
+      staleCount++
+    } else if (ageSinceActivity >= VALIDATING_SLA_MS) {
+      issue = 'stale_validating'
+      detail = `${ageMinutes}m without reviewer activity (SLA threshold: ${VALIDATING_SLA_MS / 60_000}m)`
+      staleCount++
+    } else {
+      cleanCount++
+    }
+
+    validatingEntries.push({
+      taskId: task.id,
+      title: task.title,
+      status: task.status,
+      assignee: task.assignee,
+      reviewer: task.reviewer,
+      age_minutes: ageMinutes,
+      prUrl: prUrl || undefined,
+      prMerged,
+      issue,
+      detail,
+    })
+  }
+
+  // Collect all PR URLs from all tasks to find orphans
+  const prToTasks = new Map<string, { taskId: string; status: string }[]>()
+  for (const task of allTasks) {
+    const meta = (task.metadata || {}) as Record<string, unknown>
+    const prUrl = extractPrUrl(meta)
+    if (!prUrl || prUrl.includes('workspace://')) continue
+    if (!prToTasks.has(prUrl)) prToTasks.set(prUrl, [])
+    prToTasks.get(prUrl)!.push({ taskId: task.id, status: task.status })
+  }
+
+  // Find orphan PRs: PR URLs only linked to done/cancelled tasks (not merged)
+  for (const [prUrl, tasks] of prToTasks) {
+    const hasActiveTask = tasks.some(t => ['doing', 'validating', 'todo', 'blocked'].includes(t.status))
+    if (hasActiveTask) continue
+
+    const doneTasks = tasks.filter(t => t.status === 'done' || t.status === 'cancelled')
+    if (doneTasks.length === 0) continue
+
+    // Check if any of the done tasks have pr_merged — if so, no orphan
+    const anyMerged = doneTasks.some(t => {
+      const task = allTasks.find(at => at.id === t.taskId)
+      return task && ((task.metadata || {}) as Record<string, unknown>).pr_merged
+    })
+    if (anyMerged) continue
+
+    const oldestDone = allTasks.find(t => t.id === doneTasks[0].taskId)
+    orphanEntries.push({
+      taskId: doneTasks[0].taskId,
+      title: oldestDone?.title || 'Unknown',
+      status: 'done',
+      assignee: oldestDone?.assignee,
+      reviewer: oldestDone?.reviewer,
+      age_minutes: oldestDone ? Math.round((now - oldestDone.updatedAt) / 60_000) : 0,
+      prUrl,
+      issue: 'orphan_pr',
+      detail: `PR linked to ${doneTasks.length} done task(s) but not marked as merged. May still be open.`,
+    })
+  }
+
+  return {
+    timestamp: now,
+    validating: validatingEntries,
+    orphanPRs: orphanEntries,
+    summary: {
+      totalValidating: validating.length,
+      staleValidating: staleCount,
+      orphanPRCount: orphanEntries.length,
+      prDriftCount: driftCount,
+      cleanCount,
+    },
+  }
+}
+
 // ── Periodic Runner ────────────────────────────────────────────────────────
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null
@@ -189,6 +434,7 @@ export function startSweeper(): void {
   // Run once immediately
   const initial = sweepValidatingQueue()
   escalateViolations(initial.violations)
+  logDryRun('sweeper_started', `interval=${SWEEP_INTERVAL_MS / 1000}s SLA=${VALIDATING_SLA_MS / 60_000}m critical=${VALIDATING_CRITICAL_MS / 60_000}m`)
 
   sweepTimer = setInterval(() => {
     try {
@@ -196,6 +442,7 @@ export function startSweeper(): void {
       escalateViolations(result.violations)
     } catch (err) {
       console.error('[Sweeper] Sweep failed:', err)
+      logDryRun('sweep_error', String(err))
     }
   }, SWEEP_INTERVAL_MS)
 
@@ -206,6 +453,7 @@ export function stopSweeper(): void {
   if (sweepTimer) {
     clearInterval(sweepTimer)
     sweepTimer = null
+    logDryRun('sweeper_stopped', 'Manual stop')
   }
 }
 
@@ -214,6 +462,7 @@ export function getSweeperStatus(): {
   lastSweepAt: number
   lastResults: SweepResult | null
   escalationTracking: Array<{ taskId: string; level: string; at: number }>
+  dryRunLog: typeof dryRunLog
 } {
   return {
     running: sweepTimer !== null,
@@ -224,5 +473,6 @@ export function getSweeperStatus(): {
       level: e.level,
       at: e.at,
     })),
+    dryRunLog,
   }
 }
