@@ -300,6 +300,10 @@ class TeamHealthMonitor {
   private readonly cadenceWorkingStaleMin = Number(process.env.CADENCE_WORKING_STALE_MIN || 45)
   private readonly cadenceWorkingTaskMaxAgeMin = Number(process.env.CADENCE_WORKING_TASK_MAX_AGE_MIN || 240)
   private readonly cadenceAlertCooldownMin = Number(process.env.CADENCE_ALERT_COOLDOWN_MIN || 30)
+  /** Grace period after service start — suppress cadence alerts to avoid restart-triggered batch spam */
+  private readonly cadenceStartupGraceMs = Number(process.env.CADENCE_STARTUP_GRACE_MS || 10 * 60_000)
+  /** Window for rate-limit failure message suppression (ms) */
+  private readonly cadenceRateLimitSuppressMs = Number(process.env.CADENCE_RATE_LIMIT_SUPPRESS_MS || 20 * 60_000)
   private cadenceAlertState = new Map<string, number>()
   private readonly staleDoingThresholdMin = Number(process.env.STALE_DOING_THRESHOLD_MIN || 240)
 
@@ -591,6 +595,24 @@ class TeamHealthMonitor {
     }
 
     return lastAt
+  }
+
+  /**
+   * Returns true if the agent has posted a rate-limit / provider-failure message
+   * within the given window. Used to suppress false cadence alerts during outages.
+   *
+   * These messages look like: "⚠️ Agent failed before reply: All models failed..."
+   * They indicate the agent is alive and trying but blocked by infra — not genuinely idle.
+   */
+  private hasRecentRateLimitFailure(messages: any[], agent: string, now: number, windowMs: number): boolean {
+    const cutoff = now - windowMs
+    return messages.some((m: any) => {
+      if ((m.from || '').toLowerCase() !== agent) return false
+      const ts = Number(m.timestamp || 0)
+      if (ts < cutoff) return false
+      const content = typeof m.content === 'string' ? m.content : ''
+      return content.startsWith('⚠️ Agent failed before reply:') || content.startsWith('⚠️ API rate limit reached')
+    })
   }
 
   private findLastValidStatusAt(messages: any[], agent: string): number | null {
@@ -1319,6 +1341,12 @@ class TeamHealthMonitor {
       return { alerts }
     }
 
+    // Startup grace period — suppress alerts for first N minutes after service restart.
+    // Prevents a fresh restart from immediately firing a batch of stale alerts for all agents.
+    if (now - this.systemStartTime < this.cadenceStartupGraceMs) {
+      return { alerts }
+    }
+
     const tasks = taskManager.listTasks({})
     const messages = chatManager.getMessages({ limit: 300 })
 
@@ -1332,6 +1360,9 @@ class TeamHealthMonitor {
         const anyTrioActive = this.trioAgents.some(a => this.hasRecentActivitySinceLastAlert(a, key, now))
         if (anyTrioActive) {
           // Activity detected — extend cooldown without re-alerting
+          this.markCadenceAlert(key, now)
+        } else if (this.trioAgents.some(a => this.hasRecentRateLimitFailure(messages, a, now, this.cadenceRateLimitSuppressMs))) {
+          // Rate-limit failure suppressor: trio is silent due to provider outage, not genuine inactivity
           this.markCadenceAlert(key, now)
         } else {
           const content = `@kai @link @pixel system watchdog: no #general update from trio for ${trioSilenceMin}m (threshold ${this.cadenceSilenceMin}m). Post status now using 1) shipped 2) blocker 3) next+ETA.`
@@ -1414,6 +1445,14 @@ class TeamHealthMonitor {
       if (agentLastGeneralAt > 0) {
         const sinceGeneralMin = Math.floor((now - agentLastGeneralAt) / 60_000)
         if (sinceGeneralMin < this.cadenceWorkingStaleMin) continue
+      }
+
+      // Rate-limit failure suppressor: if the agent's silence is caused by infra failures
+      // (rate limits, provider outage), suppress the alert and extend cooldown silently.
+      // Prevents noisy false positives during provider outages when agents are trying but blocked.
+      if (this.hasRecentRateLimitFailure(messages, agent, now, this.cadenceRateLimitSuppressMs)) {
+        this.markCadenceAlert(key, now)
+        continue
       }
 
       const content = `@${agent} @kai @pixel system watchdog: status=working with no #general update for ${staleMin}m on ${task.id}. Post required status now: 1) shipped 2) blocker 3) next+ETA.`
