@@ -1595,6 +1595,135 @@ export async function createServer(): Promise<FastifyInstance> {
     return payload
   })
 
+  // ─── Backlog health: ready counts per lane, breach status, floor compliance ───
+  app.get('/health/backlog', async (request, reply) => {
+    const now = Date.now()
+    const allTasks = taskManager.listTasks({})
+
+    // Define lanes and their agents
+    const lanes: Record<string, { agents: string[]; readyFloor: number }> = {
+      engineering: { agents: ['link', 'pixel'], readyFloor: 2 },
+      content: { agents: ['echo'], readyFloor: 2 },
+      operations: { agents: ['kai', 'sage'], readyFloor: 1 },
+      research: { agents: ['scout'], readyFloor: 1 },
+      rhythm: { agents: ['rhythm'], readyFloor: 1 },
+    }
+
+    // Helper: check if a task is blocked
+    const isBlocked = (task: typeof allTasks[number]): boolean => {
+      if (!task.blocked_by || task.blocked_by.length === 0) return false
+      return task.blocked_by.some((blockerId: string) => {
+        const blocker = taskManager.getTask(blockerId)
+        return blocker && blocker.status !== 'done'
+      })
+    }
+
+    // Build per-lane health
+    const laneHealth = Object.entries(lanes).map(([laneName, config]) => {
+      const laneTasks = allTasks.filter(t => config.agents.includes(t.assignee || ''))
+
+      const todo = laneTasks.filter(t => t.status === 'todo')
+      const doing = laneTasks.filter(t => t.status === 'doing')
+      const validating = laneTasks.filter(t => t.status === 'validating')
+      const blocked = laneTasks.filter(t => t.status === 'blocked' || (t.status === 'todo' && isBlocked(t)))
+      const done = laneTasks.filter(t => t.status === 'done')
+
+      // Ready = todo + not blocked
+      const ready = todo.filter(t => !isBlocked(t))
+
+      // Per-agent breakdown
+      const agentBreakdown = config.agents.map(agent => {
+        const agentTasks = laneTasks.filter(t => t.assignee === agent)
+        const agentReady = ready.filter(t => t.assignee === agent)
+        const agentDoing = doing.filter(t => t.assignee === agent)
+        const agentValidating = validating.filter(t => t.assignee === agent)
+
+        return {
+          agent,
+          ready: agentReady.length,
+          doing: agentDoing.length,
+          validating: agentValidating.length,
+          total: agentTasks.length,
+          belowFloor: agentReady.length < config.readyFloor,
+          readyTasks: agentReady.map(t => ({ id: t.id, title: t.title, priority: t.priority })),
+        }
+      })
+
+      // Active agents = those with doing or validating tasks, or any recent activity
+      const activeAgents = agentBreakdown.filter(a => a.doing > 0 || a.validating > 0 || a.ready > 0)
+
+      // Floor compliance: per-active-assignee floor
+      const floorBreaches = agentBreakdown.filter(a =>
+        (a.doing > 0 || a.validating > 0) && a.belowFloor,
+      )
+
+      return {
+        lane: laneName,
+        agents: config.agents,
+        readyFloor: config.readyFloor,
+        counts: {
+          todo: todo.length,
+          ready: ready.length,
+          doing: doing.length,
+          validating: validating.length,
+          blocked: blocked.length,
+          done: done.length,
+        },
+        compliance: {
+          status: floorBreaches.length > 0 ? 'breach' : ready.length >= config.readyFloor ? 'healthy' : 'warning',
+          floorBreaches: floorBreaches.map(a => ({
+            agent: a.agent,
+            ready: a.ready,
+            required: config.readyFloor,
+            deficit: config.readyFloor - a.ready,
+          })),
+        },
+        agentBreakdown,
+      }
+    })
+
+    // Aggregate summary
+    const totalReady = laneHealth.reduce((sum, l) => sum + l.counts.ready, 0)
+    const totalDoing = laneHealth.reduce((sum, l) => sum + l.counts.doing, 0)
+    const totalValidating = laneHealth.reduce((sum, l) => sum + l.counts.validating, 0)
+    const totalBlocked = laneHealth.reduce((sum, l) => sum + l.counts.blocked, 0)
+    const breachedLanes = laneHealth.filter(l => l.compliance.status === 'breach')
+
+    // Stale validating tasks (>30min)
+    const staleValidating = allTasks
+      .filter(t => t.status === 'validating')
+      .filter(t => {
+        const updatedAt = Number(t.updatedAt || 0)
+        return updatedAt > 0 && now - updatedAt > 30 * 60_000
+      })
+      .map(t => ({
+        id: t.id,
+        title: t.title,
+        assignee: t.assignee,
+        staleMinutes: Math.floor((now - Number(t.updatedAt || 0)) / 60_000),
+      }))
+
+    const payload = {
+      summary: {
+        totalReady,
+        totalDoing,
+        totalValidating,
+        totalBlocked,
+        breachedLaneCount: breachedLanes.length,
+        overallStatus: breachedLanes.length > 0 ? 'breach' : totalReady === 0 ? 'critical' : 'healthy',
+        staleValidatingCount: staleValidating.length,
+      },
+      lanes: laneHealth,
+      staleValidating,
+      timestamp: now,
+    }
+
+    if (applyConditionalCaching(request, reply, payload, now)) {
+      return
+    }
+    return payload
+  })
+
   // Mention ack metrics
   app.get('/health/mention-ack', async () => {
     return mentionAckTracker.getMetrics()
