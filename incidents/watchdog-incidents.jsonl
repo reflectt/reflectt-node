@@ -92,5 +92,8 @@
 {"type":"trio_general_silence","at":1771303668234,"thresholdMs":3600000,"lastUpdateAt":1771283821514}
 {"type":"trio_general_silence","at":1771305468344,"thresholdMs":3600000,"lastUpdateAt":1771283821514}
 {"type":"trio_general_silence","at":1771307268463,"thresholdMs":3600000,"lastUpdateAt":1771283821514}
-{"type":"stale_working","at":1771371334987,"agent":"pixel","taskId":"task-1771365564568-24epzu35f","thresholdMs":2700000,"lastUpdateAt":1771368597717,"workingSinceAt":1771365906076}
-{"type":"trio_general_silence","at":1771372475038,"thresholdMs":3600000,"lastUpdateAt":1771368854490}
+{"type":"trio_general_silence","at":1771366195944,"thresholdMs":3600000,"lastUpdateAt":1771360759399}
+{"type":"trio_general_silence","at":1771367996028,"thresholdMs":3600000,"lastUpdateAt":1771360759399}
+{"type":"trio_general_silence","at":1771369856019,"thresholdMs":3600000,"lastUpdateAt":1771360759399}
+{"type":"trio_general_silence","at":1771371656093,"thresholdMs":3600000,"lastUpdateAt":1771360759399}
+{"type":"trio_general_silence","at":1771373456171,"thresholdMs":3600000,"lastUpdateAt":1771360759399}

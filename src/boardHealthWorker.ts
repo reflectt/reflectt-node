@@ -16,6 +16,7 @@ import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import { routeMessage } from './messageRouter.js'
 import { validateTaskTimestamp, verifyTaskExists } from './health.js'
+import { policyManager } from './policy.js'
 import type { Task } from './types.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -25,6 +26,8 @@ export type PolicyActionKind =
   | 'suggest-close'
   | 'digest-emitted'
   | 'auto-unassign-orphan'
+  | 'ready-queue-warning'
+  | 'idle-queue-escalation'
 
 export interface PolicyAction {
   id: string
@@ -188,7 +191,11 @@ export class BoardHealthWorker {
       }
     }
 
-    // 3. Emit digest if interval elapsed
+    // 3. Ready-queue floor check
+    const rqfActions = await this.checkReadyQueueFloor(now, dryRun)
+    actions.push(...rqfActions)
+
+    // 4. Emit digest if interval elapsed
     let digest: BoardHealthDigest | null = null
     if (force || now - this.lastDigestAt >= this.config.digestIntervalMs) {
       digest = await this.emitDigest(now, actions, dryRun)
@@ -357,6 +364,108 @@ export class BoardHealthWorker {
 
     this.auditLog.push(action)
     return action
+  }
+
+  // ── Policy: Ready-queue floor ──────────────────────────────────────────
+
+  /** Track last alert time per agent to enforce cooldown */
+  private readyQueueLastAlertAt: Record<string, number> = {}
+  /** Track when each agent's queue first went empty (for idle escalation) */
+  private idleQueueSince: Record<string, number> = {}
+
+  private async checkReadyQueueFloor(now: number, dryRun: boolean): Promise<PolicyAction[]> {
+    const policy = policyManager.get()
+    const rqf = policy.readyQueueFloor
+    if (!rqf?.enabled) return []
+
+    const actions: PolicyAction[] = []
+
+    for (const agent of rqf.agents) {
+      // Count unblocked todo tasks for this agent
+      const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
+      const unblockedTodo = todoTasks.filter(t => {
+        const blocked = t.metadata?.blocked_by
+        if (!blocked) return true
+        // Check if blocker is still open
+        const blocker = taskManager.getTask(blocked as string)
+        return !blocker || blocker.status === 'done'
+      })
+
+      const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
+      const readyCount = unblockedTodo.length
+
+      // Check cooldown
+      const lastAlert = this.readyQueueLastAlertAt[agent] || 0
+      const cooldownMs = (rqf.cooldownMin || 30) * 60_000
+
+      // Ready-queue floor warning
+      if (readyCount < rqf.minReady && now - lastAlert > cooldownMs) {
+        const deficit = rqf.minReady - readyCount
+        const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.`
+
+        if (!dryRun) {
+          try {
+            await routeMessage(msg, rqf.channel || 'general', 'system')
+          } catch { /* chat may not be available in test */ }
+          this.readyQueueLastAlertAt[agent] = now
+        }
+
+        const action: PolicyAction = {
+          id: `rqf-${agent}-${now}`,
+          kind: 'ready-queue-warning',
+          taskId: null,
+          agent,
+          description: `Ready queue below floor: ${readyCount}/${rqf.minReady} for @${agent}`,
+          previousState: { readyCount, doingCount: doingTasks.length },
+          appliedAt: now,
+          rolledBack: false,
+          rolledBackAt: null,
+          rollbackBy: null,
+        }
+        this.auditLog.push(action)
+        actions.push(action)
+      }
+
+      // Idle escalation: agent has 0 doing + 0 todo for too long
+      const totalActive = doingTasks.length + readyCount
+      if (totalActive === 0) {
+        if (!this.idleQueueSince[agent]) {
+          this.idleQueueSince[agent] = now
+        }
+        const idleMinutes = Math.floor((now - this.idleQueueSince[agent]) / 60_000)
+
+        if (idleMinutes >= (rqf.escalateAfterMin || 60) && now - lastAlert > cooldownMs) {
+          const msg = `🚨 Idle escalation: @${agent} has had 0 tasks (doing + todo) for ${idleMinutes}m. Immediate assignment needed. @sage`
+
+          if (!dryRun) {
+            try {
+              await routeMessage(msg, rqf.channel || 'general', 'system')
+            } catch { /* chat may not be available in test */ }
+            this.readyQueueLastAlertAt[agent] = now
+          }
+
+          const action: PolicyAction = {
+            id: `idle-${agent}-${now}`,
+            kind: 'idle-queue-escalation',
+            taskId: null,
+            agent,
+            description: `Idle queue escalation: @${agent} idle for ${idleMinutes}m`,
+            previousState: { idleMinutes },
+            appliedAt: now,
+            rolledBack: false,
+            rolledBackAt: null,
+            rollbackBy: null,
+          }
+          this.auditLog.push(action)
+          actions.push(action)
+        }
+      } else {
+        // Reset idle tracker when agent has work
+        delete this.idleQueueSince[agent]
+      }
+    }
+
+    return actions
   }
 
   // ── Digest ────────────────────────────────────────────────────────────

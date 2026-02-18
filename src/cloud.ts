@@ -235,12 +235,22 @@ export async function startCloudIntegration(): Promise<void> {
     syncTasks().catch(() => {})
   }, config.taskSyncIntervalMs)
 
-  // Chat sync for remote chat relay
+  // Chat sync for remote chat relay — event-driven with polling fallback
   const chatSyncMs = Number(process.env.REFLECTT_CHAT_SYNC_MS) || DEFAULT_CHAT_SYNC_MS
   syncChat().catch(() => {})
   state.chatSyncTimer = setInterval(() => {
     syncChat().catch(() => {})
   }, chatSyncMs)
+
+  // Event-driven: sync immediately when new messages arrive (debounced 500ms)
+  let chatSyncDebounce: ReturnType<typeof setTimeout> | null = null
+  chatManager.subscribe(() => {
+    if (!state.running) return
+    if (chatSyncDebounce) clearTimeout(chatSyncDebounce)
+    chatSyncDebounce = setTimeout(() => {
+      syncChat().catch(() => {})
+    }, 500)
+  })
 
   // Canvas sync for remote canvas relay
   const canvasSyncMs = Number(process.env.REFLECTT_CANVAS_SYNC_MS) || 5_000

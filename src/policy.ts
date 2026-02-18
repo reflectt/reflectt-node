@@ -74,6 +74,16 @@ export interface PolicyConfig {
     maxActionsPerTick: number
   }
 
+  /** Ready-queue floor: ensure engineering agents always have specced tasks */
+  readyQueueFloor: {
+    enabled: boolean
+    minReady: number           // minimum unblocked todo tasks per agent
+    agents: string[]           // agents to monitor
+    escalateAfterMin: number   // idle+empty-queue → escalation timer
+    cooldownMin: number        // don't re-alert within this window
+    channel: string            // where to post warnings
+  }
+
   /** Escalation channels for different severity levels */
   escalation: {
     defaultChannel: string
@@ -125,6 +135,14 @@ export const DEFAULT_POLICY: PolicyConfig = {
     digestChannel: 'ops',
     dryRun: false,
     maxActionsPerTick: 5,
+  },
+  readyQueueFloor: {
+    enabled: true,
+    minReady: 2,
+    agents: ['link'],
+    escalateAfterMin: 60,
+    cooldownMin: 30,
+    channel: 'general',
   },
   escalation: {
     defaultChannel: 'general',
