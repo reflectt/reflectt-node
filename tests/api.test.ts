@@ -3804,3 +3804,73 @@ describe('Stale SLA alert guardrails (integration)', () => {
     }
   })
 })
+
+// ── PR merge gate tests ──
+describe('Task close gate: PR merge state', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: PR merge gate task',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['PR merge gate tested'],
+      tags: ['code'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('rejects done for code-lane task without PR URL', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      actor: 'test-reviewer',
+      metadata: {
+        artifacts: ['tested locally'],
+        reviewer_approved: true,
+      },
+    })
+    expect(status).toBe(422)
+    expect(body.gate).toBe('pr_link')
+  })
+
+  it('accepts done with waiver even without merged PR', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      actor: 'test-reviewer',
+      metadata: {
+        artifacts: ['https://github.com/reflectt/reflectt-node/pull/999999'],
+        reviewer_approved: true,
+        pr_waiver: true,
+        pr_waiver_reason: 'Test waiver — hotfix scenario',
+      },
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('done')
+  })
+
+  it('does not block when GitHub API is unavailable (graceful degradation)', async () => {
+    // Reset task to doing
+    await req('PATCH', `/tasks/${taskId}`, { status: 'doing' })
+
+    // Use a clearly fake PR URL — GitHub API will fail, gate should not block
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'done',
+      actor: 'test-reviewer',
+      metadata: {
+        artifacts: ['https://github.com/fake-org/fake-repo/pull/99999'],
+        reviewer_approved: true,
+      },
+    })
+    // Should pass because GitHub API failure = graceful skip
+    expect(status).toBe(200)
+    expect(body.task.status).toBe('done')
+  })
+})

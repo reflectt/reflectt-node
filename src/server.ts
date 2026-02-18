@@ -3992,6 +3992,33 @@ export async function createServer(): Promise<FastifyInstance> {
           }
         }
 
+        // Gate 1c: verify linked PRs are merged (not just opened)
+        if (isCodeTask && hasPrUrl && !hasWaiver) {
+          const prUrls = artifacts.filter((a: string) => /github\.com\/.*\/pull\/\d+/.test(a))
+          const openPrs: string[] = []
+          for (const url of prUrls) {
+            try {
+              const result = await resolvePrAndCi(url)
+              if (result.pr && result.pr.merged !== true && result.pr.state !== 'closed') {
+                openPrs.push(url)
+              }
+            } catch {
+              // If GitHub API is unavailable, don't block — log and continue
+              server.log.warn({ prUrl: url }, 'PR merge check skipped — GitHub API unavailable')
+            }
+          }
+          if (openPrs.length > 0) {
+            reply.code(422)
+            return {
+              success: false,
+              error: `Task-close gate: linked PR(s) not merged: ${openPrs.join(', ')}`,
+              gate: 'pr_not_merged',
+              openPrs,
+              hint: 'Merge linked PRs before closing task, or set metadata.pr_waiver=true + metadata.pr_waiver_reason to bypass.',
+            }
+          }
+        }
+
         // Gate 2: reviewer sign-off (if task has a reviewer assigned)
         if (existing.reviewer) {
           const signedOff = mergedMeta.reviewer_approved as boolean | undefined
