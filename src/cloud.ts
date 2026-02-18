@@ -364,17 +364,28 @@ async function sendHeartbeat(): Promise<void> {
   const result = await cloudPost(`/api/hosts/${state.hostId}/heartbeat`, {
     contractVersion: 'host-heartbeat.v1',
     status: hostStatus,
+    timestamp: Date.now(),
     agents: agents.map(a => ({
+      id: a.name,
       name: a.name,
       status: a.status,
-      currentTask: a.currentTask,
-      lastSeen: a.lastSeen,
+      currentTaskId: a.currentTask || undefined,
+      lastSeenAt: a.lastSeen || Date.now(),
     })),
     activeTasks: doingTasks.map(t => ({
       id: t.id,
       title: t.title,
-      assignee: t.assignee,
+      status: t.status,
+      assignee: t.assignee || undefined,
+      priority: t.priority || undefined,
+      updatedAt: t.updatedAt || Date.now(),
     })),
+    source: {
+      hostId: state.hostId,
+      hostName: config.hostName,
+      hostType: config.hostType,
+      uptimeMs: Date.now() - state.startedAt,
+    },
   })
 
   if (result.success || result.data) {
