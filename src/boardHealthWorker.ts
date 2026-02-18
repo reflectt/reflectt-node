@@ -405,7 +405,7 @@ export class BoardHealthWorker {
 
         if (!dryRun) {
           try {
-            await routeMessage(msg, rqf.channel || 'general', 'system')
+            await routeMessage({ from: 'system', content: msg, forceChannel: rqf.channel || 'general', category: 'watchdog-alert', severity: 'warning' })
           } catch { /* chat may not be available in test */ }
           this.readyQueueLastAlertAt[agent] = now
         }
@@ -439,7 +439,7 @@ export class BoardHealthWorker {
 
           if (!dryRun) {
             try {
-              await routeMessage(msg, rqf.channel || 'general', 'system')
+              await routeMessage({ from: 'system', content: msg, forceChannel: rqf.channel || 'general', category: 'escalation', severity: 'critical' })
             } catch { /* chat may not be available in test */ }
             this.readyQueueLastAlertAt[agent] = now
           }
