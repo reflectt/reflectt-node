@@ -204,6 +204,32 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
     }
   }
 
+  // ── Ready-queue floor warning ────────────────────────────────────────
+
+  if ((targetStatus === 'validating' || targetStatus === 'done') && task.assignee) {
+    const policy = policyManager.get()
+    const rqf = policy.readyQueueFloor
+    if (rqf?.enabled && rqf.agents.includes(task.assignee)) {
+      const todoTasks = taskManager.listTasks({ status: 'todo', assignee: task.assignee })
+      const unblockedTodo = todoTasks.filter(t => {
+        const blocked = t.metadata?.blocked_by
+        if (!blocked) return true
+        const blocker = taskManager.getTask(blocked as string)
+        return !blocker || blocker.status === 'done'
+      })
+      // This task is leaving the queue, so effective count will drop
+      const effectiveReady = unblockedTodo.length
+      if (effectiveReady < rqf.minReady) {
+        items.push({
+          field: 'readyQueueFloor',
+          severity: 'warning',
+          message: `Ready queue will be ${effectiveReady}/${rqf.minReady} after this transition. Ensure next tasks are queued for @${task.assignee}.`,
+          hint: 'Create/assign more todo tasks to maintain engineering lane throughput.',
+        })
+      }
+    }
+  }
+
   // ── Build template ──────────────────────────────────────────────────
 
   const template = buildTemplate(task, targetStatus, autoDefaults)

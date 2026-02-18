@@ -1459,12 +1459,20 @@ class TeamHealthMonitor {
     const cooldownMs = this.mentionRescueCooldownMin * 60_000
     const globalCooldownMs = this.mentionRescueGlobalCooldownMin * 60_000
 
+    // Maximum age for mentions to be eligible for rescue (30 minutes).
+    // Prevents stale mentions from hours/days ago from triggering infinite rescue loops.
+    const maxMentionAgeMs = 30 * 60_000
+
     for (const mention of mentions) {
       const mentionId = String(mention.id || mention.timestamp || '')
       if (!mentionId) continue
 
       const mentionAt = Number(mention.timestamp || 0)
       if (!mentionAt || now - mentionAt < delayMs) continue
+
+      // Skip stale mentions — if a mention is older than maxMentionAgeMs, stop rescuing it.
+      // This prevents infinite rescue loops for old unresolved mentions.
+      if (now - mentionAt > maxMentionAgeMs) continue
 
       // Global cooldown to avoid duplicate fallback nudges across near-identical mentions.
       if (now - this.mentionRescueLastAt < globalCooldownMs) continue
@@ -1493,6 +1501,14 @@ class TeamHealthMonitor {
         await routeMessage({ from: 'system', content, category: 'mention-rescue', severity: 'warning' })
         this.mentionRescueState.set(mentionId, now)
         this.mentionRescueLastAt = now
+      }
+    }
+
+    // Prune stale rescue state entries (older than 1 hour) to prevent unbounded map growth
+    const pruneThresholdMs = 60 * 60_000
+    for (const [key, lastAt] of this.mentionRescueState) {
+      if (now - lastAt > pruneThresholdMs) {
+        this.mentionRescueState.delete(key)
       }
     }
 
