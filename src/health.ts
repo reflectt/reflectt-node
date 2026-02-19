@@ -287,7 +287,7 @@ class TeamHealthMonitor {
   private readonly idleNudgeShipCooldownMin = Number(process.env.IDLE_NUDGE_SHIP_COOLDOWN_MIN || 30)
   private readonly idleNudgeActiveTaskMaxAgeMin = Number(process.env.IDLE_NUDGE_ACTIVE_TASK_MAX_AGE_MIN || 180)
   private readonly idleNudgeExcluded = new Set(
-    (process.env.IDLE_NUDGE_EXCLUDE || 'ryan,system,diag')
+    (process.env.IDLE_NUDGE_EXCLUDE || 'ryan,diag')
       .split(',')
       .map(s => s.trim().toLowerCase())
       .filter(Boolean),
