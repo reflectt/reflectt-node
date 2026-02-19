@@ -109,7 +109,7 @@ export const DEFAULT_POLICY: PolicyConfig = {
     suppressRecentMin: 20,
     shipCooldownMin: 30,
     activeTaskMaxAgeMin: 180,
-    excluded: ['ryan', 'system', 'diag'],
+    excluded: ['ryan', 'diag'],
   },
   cadenceWatchdog: {
     enabled: true,
