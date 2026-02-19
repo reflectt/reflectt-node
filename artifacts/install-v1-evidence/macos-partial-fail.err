@@ -1,0 +1,4 @@
+ERROR: Safe-rerun checks failed due to inconsistent partial state.
+ERROR: Run cleanup, then rerun installer:
+ERROR: rm -rf '/Users/ryan/.reflectt/openclaw'
+ERROR: curl -fsSL https://reflectt.ai/install.sh | bash

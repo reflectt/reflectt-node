@@ -1,0 +1,3 @@
+ERROR: Existing OpenClaw installation detected at /Users/ryan/.nvm/versions/node/v22.22.0/bin/openclaw.
+ERROR: This installer supports fresh installs only in v1 (no upgrade/migration path).
+ERROR: Next step: run this installer on a clean machine/environment.
