@@ -3535,6 +3535,22 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      const normalizeTitle = (value: string) => value.trim().toLowerCase().replace(/\s+/g, ' ')
+      const forceCreate = data.metadata?.force_create === true || data.metadata?.allow_duplicate === true
+      if (!forceCreate) {
+        const existingTasks = taskManager.listTasks({})
+        const normalizedIncomingTitle = normalizeTitle(data.title)
+        const duplicate = existingTasks.find(t => t.status !== 'done' && normalizeTitle(t.title) === normalizedIncomingTitle)
+        if (duplicate) {
+          return {
+            success: true,
+            deduplicated: true,
+            duplicateOf: duplicate.id,
+            task: enrichTaskWithComments(duplicate),
+          }
+        }
+      }
+
       const { eta, type, ...rest } = data
 
       // Auto-assign reviewer when 'auto' or missing

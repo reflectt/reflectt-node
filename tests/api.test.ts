@@ -461,6 +461,24 @@ describe('Task CRUD', () => {
     taskId = body.task.id
   })
 
+  it('POST /tasks deduplicates active tasks by exact normalized title', async () => {
+    const { status, body } = await req('POST', '/tasks', {
+      title: '  TEST:   integration   test task  ',
+      description: 'duplicate attempt',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Test passes'],
+      eta: '1h',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.deduplicated).toBe(true)
+    expect(body.duplicateOf).toBe(taskId)
+    expect(body.task.id).toBe(taskId)
+  })
+
   it('GET /tasks/:id reads the task', async () => {
     const { status, body } = await req('GET', `/tasks/${taskId}`)
     expect(status).toBe(200)
