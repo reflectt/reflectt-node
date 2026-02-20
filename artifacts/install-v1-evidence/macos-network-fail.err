@@ -1,0 +1,3 @@
+ERROR: Download failed (network timeout).
+ERROR: Check internet connectivity, then rerun:
+ERROR: curl -fsSL https://reflectt.ai/install.sh | bash

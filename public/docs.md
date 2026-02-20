@@ -69,6 +69,7 @@ Operationally:
 | GET | `/health/team/summary` | Compact team health summary |
 | GET | `/health/team/history` | Historical team health data |
 | GET | `/health/workflow` | Unified per-agent workflow state: doing-task age, last shipped timestamp, blocker flag, artifact path, and linked PR state |
+| GET | `/health/backlog` | Backlog readiness snapshot by lane/agent with ready-floor breach detection and stale-validating summary. |
 | GET | `/health/mention-ack` | Mention-ack lifecycle metrics (pending, timeout, latency counters) |
 | GET | `/health/mention-ack/recent` | Recent mention-ack entries for debugging. Query: `limit` (max 100) |
 | GET | `/health/mention-ack/:agent` | Pending mention-ack entries for one agent |
@@ -88,7 +89,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `offset`, `q` (text search), `updatedSince`. Returns `{ tasks, total, offset, limit }`. |
+| GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `offset`, `q` (text search), `updatedSince`. Returns `{ tasks, total, offset, limit, hasMore }`. |
 | GET | `/tasks/:id` | Get task by ID. Also accepts unambiguous ID prefixes. Ambiguous prefix returns `400` with full-ID suggestions. |
 | GET | `/tasks/:id/history` | Status changelog for task lifecycle transitions. Returns `history[]` entries shaped as `{ status, changedBy, changedAt, metadata }` for each status transition. |
 | GET | `/tasks/:id/comments` | List task discussion comments. Returns `{ comments, count }` |

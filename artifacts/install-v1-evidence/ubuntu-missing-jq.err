@@ -1,0 +1,5 @@
+debconf: delaying package configuration, since apt-utils is not installed
+ERROR: Missing required dependency: jq.
+ERROR: Install jq, then rerun this command.
+ERROR: macOS: brew install jq
+ERROR: Ubuntu/Debian: sudo apt-get update && sudo apt-get install -y jq

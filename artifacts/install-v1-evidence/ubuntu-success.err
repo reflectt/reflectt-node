@@ -1,0 +1,8 @@
+Unable to find image 'ubuntu:24.04' locally
+24.04: Pulling from library/ubuntu
+66a4bbbfab88: Pulling fs layer
+66a4bbbfab88: Download complete
+66a4bbbfab88: Pull complete
+Digest: sha256:d1e2e92c075e5ca139d51a140fff46f84315c0fdce203eab2807c7e495eff4f9
+Status: Downloaded newer image for ubuntu:24.04
+debconf: delaying package configuration, since apt-utils is not installed
