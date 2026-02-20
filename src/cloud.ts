@@ -72,6 +72,8 @@ interface CloudState {
 const DEFAULT_HEARTBEAT_MS = 30_000
 const DEFAULT_TASK_SYNC_MS = 60_000
 const DEFAULT_CHAT_SYNC_MS = 5_000
+const DEFAULT_CHAT_SYNC_MIN_INTERVAL_MS = 1_500
+const DEFAULT_CHAT_SYNC_MAX_BACKOFF_MS = 30_000
 
 let config: CloudConfig | null = null
 let state: CloudState = {
@@ -237,9 +239,9 @@ export async function startCloudIntegration(): Promise<void> {
 
   // Chat sync for remote chat relay — event-driven with polling fallback
   const chatSyncMs = Number(process.env.REFLECTT_CHAT_SYNC_MS) || DEFAULT_CHAT_SYNC_MS
-  syncChat().catch(() => {})
+  requestChatSync('startup').catch(() => {})
   state.chatSyncTimer = setInterval(() => {
-    syncChat().catch(() => {})
+    requestChatSync('interval').catch(() => {})
   }, chatSyncMs)
 
   // Event-driven: sync immediately when new messages arrive (debounced 500ms)
@@ -248,7 +250,7 @@ export async function startCloudIntegration(): Promise<void> {
     if (!state.running) return
     if (chatSyncDebounce) clearTimeout(chatSyncDebounce)
     chatSyncDebounce = setTimeout(() => {
-      syncChat().catch(() => {})
+      requestChatSync('event').catch(() => {})
     }, 500)
   })
 
@@ -601,9 +603,61 @@ async function syncTasks(): Promise<void> {
 /** Timestamp of last chat sync — only send messages newer than this */
 let chatSyncCursor: number = Date.now() - 60_000 // Start with last minute of history
 let chatSyncErrors = 0
+let chatSyncInFlight = false
+let chatSyncQueued = false
+let chatSyncTimerRef: ReturnType<typeof setTimeout> | null = null
+let chatSyncBackoffMs = 0
+let chatSyncNextAllowedAt = 0
+
+const chatSyncMinIntervalMs = Number(process.env.REFLECTT_CHAT_SYNC_MIN_INTERVAL_MS) || DEFAULT_CHAT_SYNC_MIN_INTERVAL_MS
+const chatSyncMaxBackoffMs = Number(process.env.REFLECTT_CHAT_SYNC_MAX_BACKOFF_MS) || DEFAULT_CHAT_SYNC_MAX_BACKOFF_MS
+
+function computeBackoffWithJitter(currentMs: number): number {
+  const base = currentMs > 0 ? Math.min(currentMs * 2, chatSyncMaxBackoffMs) : 1_000
+  const jitter = Math.floor(Math.random() * 500)
+  return Math.min(base + jitter, chatSyncMaxBackoffMs)
+}
+
+async function requestChatSync(_reason: 'startup' | 'interval' | 'event'): Promise<void> {
+  if (!state.running) return
+
+  if (chatSyncInFlight) {
+    chatSyncQueued = true
+    return
+  }
+
+  const now = Date.now()
+  if (now < chatSyncNextAllowedAt) {
+    const waitMs = Math.max(0, chatSyncNextAllowedAt - now)
+    if (!chatSyncTimerRef) {
+      chatSyncTimerRef = setTimeout(() => {
+        chatSyncTimerRef = null
+        requestChatSync('event').catch(() => {})
+      }, waitMs)
+    }
+    return
+  }
+
+  await syncChat()
+
+  if (chatSyncQueued) {
+    chatSyncQueued = false
+    await requestChatSync('event')
+  }
+}
 
 async function syncChat(): Promise<void> {
   if (!state.hostId || !config) return
+  if (chatSyncInFlight) return
+
+  chatSyncInFlight = true
+
+  // Enforce minimum sync interval + active backoff window
+  const now = Date.now()
+  if (now < chatSyncNextAllowedAt) {
+    chatSyncInFlight = false
+    return
+  }
 
   // Get recent messages since last sync
   const recentMessages = chatManager.getMessages({
@@ -638,6 +692,10 @@ async function syncChat(): Promise<void> {
       chatSyncErrors = 0
     }
 
+    // Reset backoff window on success, enforce minimum interval
+    chatSyncBackoffMs = 0
+    chatSyncNextAllowedAt = Date.now() + chatSyncMinIntervalMs
+
     // Update cursor to now
     if (recentMessages.length > 0) {
       chatSyncCursor = Math.max(...recentMessages.map(m => m.timestamp))
@@ -662,11 +720,18 @@ async function syncChat(): Promise<void> {
     }
   } else {
     chatSyncErrors++
+
+    // Exponential backoff + jitter on repeated failures
+    chatSyncBackoffMs = computeBackoffWithJitter(chatSyncBackoffMs)
+    chatSyncNextAllowedAt = Date.now() + Math.max(chatSyncBackoffMs, chatSyncMinIntervalMs)
+
     // Log first few, then every 20th to avoid spam
     if (chatSyncErrors <= 3 || chatSyncErrors % 20 === 0) {
-      console.warn(`☁️  [Chat] Sync failed (${chatSyncErrors}): ${result.error}`)
+      console.warn(`☁️  [Chat] Sync failed (${chatSyncErrors}): ${result.error}; next attempt in ~${chatSyncBackoffMs}ms`)
     }
   }
+
+  chatSyncInFlight = false
 }
 
 // ---- Canvas sync ----
