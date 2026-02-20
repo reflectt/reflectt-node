@@ -1,20 +1,20 @@
-# First-Run Required Flow (R0 → R7)
+# First-Run Required Flow (reflectt-node, R0 → R7)
 
-This is the canonical first-run path for getting from zero to a working team.
+This is the canonical first-run path for getting **reflectt-node** from clone to usable local runtime.
 
-> Required-first rule: do **only** R0 → R7 for first success.
+> Required-first rule: do only R0 → R7 for first success.
 > Optional enhancements are deferred until after `R7_SMOKE_PASS`.
 
 ## Required states
 
-- `R0_INIT` — Environment baseline check
-- `R1_CLI_READY` — OpenClaw CLI installed and available on PATH
-- `R2_WORKSPACE_READY` — Workspace initialized with required files
-- `R3_AUTH_READY` — Provider/auth configured and validated
-- `R4_CHANNEL_READY` — One primary channel configured
-- `R5_GATEWAY_HEALTHY` — Gateway running and healthy
-- `R6_NODE_CONNECTED` — Node/channel connectivity verified
-- `R7_SMOKE_PASS` — Round-trip smoke succeeds (`@mention` → agent response)
+- `R0_INIT` — Local toolchain baseline (bash/curl/node/npm)
+- `R1_DEPS_READY` — Node dependencies installed (`node_modules` present)
+- `R2_WORKSPACE_READY` — reflectt-node workspace files present
+- `R3_BUILD_READY` — TypeScript build passes
+- `R4_API_HEALTHY` — Local API health endpoint responds
+- `R5_TASKS_API_READY` — Tasks API responds
+- `R6_CHAT_API_READY` — Chat API responds
+- `R7_SMOKE_PASS` — Round-trip smoke succeeds (`@mention` → non-smoke response)
 
 ## Time semantics
 
@@ -34,8 +34,8 @@ This is the canonical first-run path for getting from zero to a working team.
 Expected output pattern on failure:
 
 ```text
-❌ R3_AUTH_READY
-next: openclaw status
+❌ R1_DEPS_READY
+next: npm ci
 ```
 
 ### 2) Round-trip smoke (R7)
@@ -45,14 +45,14 @@ next: openclaw status
 ```
 
 Success requires both:
-1. outbound user mention recorded, and
-2. agent response observed on the same channel
+1. outbound mention recorded, and
+2. a non-smoke response observed on the same channel.
 
 ## Optional (deferred until after first success)
 
-- Additional channels
-- Non-critical plugins/integrations
-- Custom UX/polish flows
+- Additional channels/integrations
+- Non-critical plugin setup
+- UX/polish flows
 - Advanced automation/rules
 
 ## Acceptance mapping

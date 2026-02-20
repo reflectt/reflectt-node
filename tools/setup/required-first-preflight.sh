@@ -5,6 +5,7 @@ LOCAL_TIMEOUT=45
 NETWORK_TIMEOUT=90
 GLOBAL_BUDGET=300
 START_TS=$(date +%s)
+API_BASE="${API_BASE:-http://127.0.0.1:4445}"
 
 state_fail() {
   local ref="$1"
@@ -24,7 +25,7 @@ check_budget() {
   now=$(date +%s)
   local elapsed=$((now - START_TS))
   if [[ "$elapsed" -gt "$GLOBAL_BUDGET" ]]; then
-    state_fail "RUNTIME_BUDGET_EXCEEDED" "openclaw status"
+    state_fail "RUNTIME_BUDGET_EXCEEDED" "npm run dev"
   fi
 }
 
@@ -64,39 +65,44 @@ run_network_check() {
 
 # R0
 check_budget
-if timeout "$LOCAL_TIMEOUT" bash -lc "command -v bash >/dev/null && command -v curl >/dev/null"; then
+if timeout "$LOCAL_TIMEOUT" bash -lc "command -v bash >/dev/null && command -v curl >/dev/null && command -v node >/dev/null && command -v npm >/dev/null"; then
   state_pass "R0_INIT"
 else
-  state_fail "R0_INIT" "xcode-select --install"
+  state_fail "R0_INIT" "install Node.js 22+, then rerun this script"
 fi
 
 # R1
 check_budget
-if timeout "$LOCAL_TIMEOUT" bash -lc "command -v openclaw >/dev/null"; then
-  state_pass "R1_CLI_READY"
+if timeout "$LOCAL_TIMEOUT" bash -lc "test -d node_modules"; then
+  state_pass "R1_DEPS_READY"
 else
-  state_fail "R1_CLI_READY" "npm i -g openclaw && openclaw --help"
+  state_fail "R1_DEPS_READY" "npm ci"
 fi
 
 # R2
 check_budget
-if timeout "$LOCAL_TIMEOUT" bash -lc "test -d . && test -f AGENTS.md && test -f SOUL.md && test -f MEMORY.md"; then
+if timeout "$LOCAL_TIMEOUT" bash -lc "test -f package.json && test -d src && test -f src/server.ts"; then
   state_pass "R2_WORKSPACE_READY"
 else
-  state_fail "R2_WORKSPACE_READY" "openclaw init"
+  state_fail "R2_WORKSPACE_READY" "cd reflectt-node && ls"
 fi
 
 # R3
-run_network_check "R3_AUTH_READY" "openclaw status >/dev/null" "openclaw status"
+check_budget
+if timeout "$LOCAL_TIMEOUT" bash -lc "npm run build >/dev/null"; then
+  state_pass "R3_BUILD_READY"
+else
+  state_fail "R3_BUILD_READY" "npm run build"
+fi
 
 # R4
-run_network_check "R4_CHANNEL_READY" "openclaw status | grep -Eiq 'channel|reflectt|telegram|discord|signal|slack|whatsapp|imessage'" "openclaw status"
+run_network_check "R4_API_HEALTHY" "curl -fsS ${API_BASE}/health >/dev/null" "npm run dev"
 
 # R5
-run_network_check "R5_GATEWAY_HEALTHY" "openclaw status | grep -Eiq 'gateway|running|healthy|online'" "openclaw gateway restart"
+run_network_check "R5_TASKS_API_READY" "curl -fsS \"${API_BASE}/tasks?limit=1\" >/dev/null" "curl -s ${API_BASE}/health"
 
 # R6
-run_network_check "R6_NODE_CONNECTED" "openclaw status | grep -Eiq 'node|connected|paired|online'" "openclaw status"
+run_network_check "R6_CHAT_API_READY" "curl -fsS \"${API_BASE}/chat/channels\" >/dev/null" "curl -s ${API_BASE}/chat/channels"
 
-echo "✅ PRECHECK_DONE (R0_INIT → R6_NODE_CONNECTED)"
+echo "✅ PRECHECK_DONE (R0_INIT → R6_CHAT_API_READY)"
 echo "next: ./tools/setup/required-first-smoke.sh --channel task-comments --mention @link"
