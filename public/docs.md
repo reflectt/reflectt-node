@@ -392,6 +392,15 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/insights/promotions` | List all promotion audit entries. Query: `limit`. |
 | GET | `/insights/recurring/candidates` | List recurring task candidates from insights with persistent patterns. Auto-suggests owner/lane per failure family. Template-first (no auto task spam). |
 
+## Intake Pipeline
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/intake` | Process a single reflection through the full intake pipeline (validate → create reflection → cluster into insight → auto-promote if gate met). Body: `{ reflection: { pain, impact, evidence[], went_well, suspected_why, proposed_fix, confidence, role_type, author }, auto_promote?: boolean, promotion_contract?: { owner, reviewer, eta, acceptance_checks[], artifact_proof_requirement, next_checkpoint_eta } }`. Returns pipeline result with reflection, insight, and optional promotion outcome. |
+| POST | `/intake/batch` | Batch process multiple reflections through the intake pipeline. Body: `{ items: [{ reflection: {...}, auto_promote?: boolean, promotion_contract?: {...} }, ...] }`. Returns per-item results with summary counts (processed, promoted, errors). |
+| GET | `/intake/stats` | Pipeline statistics: total processed, auto-promoted count, error count, last run timestamp. |
+| POST | `/intake/maintenance` | Run pipeline maintenance: tick cooldowns, clean stale state, advance insight state machine. Returns maintenance summary. |
+
 ## Team
 
 | Method | Path | Description |
