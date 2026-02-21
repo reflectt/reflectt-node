@@ -276,6 +276,35 @@ function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_tasks_team_id ON tasks(team_id);
       `,
     },
+    {
+      version: 7,
+      sql: `
+        CREATE TABLE IF NOT EXISTS reflections (
+          id TEXT PRIMARY KEY,
+          pain TEXT NOT NULL,
+          impact TEXT NOT NULL,
+          evidence TEXT NOT NULL,        -- JSON array of strings
+          went_well TEXT NOT NULL,
+          suspected_why TEXT NOT NULL,
+          proposed_fix TEXT NOT NULL,
+          confidence REAL NOT NULL,      -- 0-10
+          role_type TEXT NOT NULL,       -- engineering|product|ops|comms|growth|support|sales|finance|hr|other
+          severity TEXT,                 -- low|medium|high|critical (nullable)
+          author TEXT NOT NULL,
+          task_id TEXT,                  -- optional link to originating task
+          tags TEXT,                     -- JSON array (nullable)
+          team_id TEXT,                  -- optional team scope
+          metadata TEXT,                 -- JSON object (nullable)
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_reflections_author ON reflections(author);
+        CREATE INDEX IF NOT EXISTS idx_reflections_role_type ON reflections(role_type);
+        CREATE INDEX IF NOT EXISTS idx_reflections_severity ON reflections(severity);
+        CREATE INDEX IF NOT EXISTS idx_reflections_task_id ON reflections(task_id);
+        CREATE INDEX IF NOT EXISTS idx_reflections_created_at ON reflections(created_at);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')

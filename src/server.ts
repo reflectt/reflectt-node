@@ -88,6 +88,7 @@ import {
   type EscalationStatus,
 } from './escalation.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
+import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
 // Schemas
@@ -5235,6 +5236,69 @@ export async function createServer(): Promise<FastifyInstance> {
 
     reply.code(201)
     return { success: true, escalation: record }
+  })
+
+  // ── Reflections ────────────────────────────────────────────────────────
+
+  app.post('/reflections', async (request, reply) => {
+    const result = validateReflection(request.body)
+    if (!result.valid) {
+      reply.code(400)
+      return {
+        success: false,
+        error: 'Validation failed',
+        errors: result.errors,
+        hint: `Required fields: pain, impact, evidence[] (array), went_well, suspected_why, proposed_fix, confidence (0-10), role_type (${ROLE_TYPES.join('|')}), author. Optional: severity (${SEVERITY_LEVELS.join('|')}), task_id, tags, team_id, metadata.`,
+      }
+    }
+
+    const reflection = createReflection(result.data)
+
+    reply.code(201)
+    return { success: true, reflection }
+  })
+
+  app.get('/reflections', async (request) => {
+    const query = request.query as Record<string, string>
+
+    const opts: Record<string, unknown> = {}
+    if (query.author) opts.author = query.author
+    if (query.role_type) opts.role_type = query.role_type
+    if (query.severity) opts.severity = query.severity
+    if (query.task_id) opts.task_id = query.task_id
+    if (query.team_id) opts.team_id = query.team_id
+    if (query.since) opts.since = Number(query.since)
+    if (query.before) opts.before = Number(query.before)
+    if (query.limit) opts.limit = Math.min(Number(query.limit) || 50, 200)
+    if (query.offset) opts.offset = Number(query.offset) || 0
+
+    const reflections = listReflections(opts as any)
+    const total = countReflections(opts as any)
+    return { reflections, total, limit: opts.limit || 50, offset: opts.offset || 0 }
+  })
+
+  app.get('/reflections/stats', async () => {
+    return reflectionStats()
+  })
+
+  app.get('/reflections/schema', async () => {
+    return {
+      required: ['pain', 'impact', 'evidence', 'went_well', 'suspected_why', 'proposed_fix', 'confidence', 'role_type', 'author'],
+      optional: ['severity', 'task_id', 'tags', 'team_id', 'metadata'],
+      role_types: ROLE_TYPES,
+      severity_levels: SEVERITY_LEVELS,
+      confidence_range: { min: 0, max: 10 },
+      evidence_note: 'Array of strings — at least one evidence link, path, or reference required',
+    }
+  })
+
+  app.get<{ Params: { id: string } }>('/reflections/:id', async (request, reply) => {
+    const reflection = getReflection(request.params.id)
+    if (!reflection) {
+      reply.code(404)
+      return { success: false, error: 'Reflection not found' }
+    }
+    return { reflection }
   })
 
   // Get next task (pull-based assignment)

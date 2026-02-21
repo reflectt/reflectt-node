@@ -368,6 +368,16 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/health/watchdog/suppression` | Watchdog de-noise config: show all suppression rules, thresholds, and what activity types prevent re-firing. | Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
 
+## Reflections
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/reflections` | Create a structured reflection. Body: `{ pain, impact, evidence[] (array, min 1), went_well, suspected_why, proposed_fix, confidence (0-10), role_type, author }`. Optional: `severity` (low\|medium\|high\|critical), `task_id`, `tags[]`, `team_id`, `metadata {}`. Returns 400 with field-level errors on validation failure. |
+| GET | `/reflections` | List reflections. Query: `author`, `role_type`, `severity`, `task_id`, `team_id`, `since`, `before`, `limit` (max 200), `offset`. |
+| GET | `/reflections/:id` | Get single reflection by ID. |
+| GET | `/reflections/stats` | Aggregate stats: total count, by role_type, by severity, average confidence. |
+| GET | `/reflections/schema` | Machine-readable field reference (required/optional fields, enums, ranges). |
+
 ## Team
 
 | Method | Path | Description |
