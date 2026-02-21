@@ -3133,12 +3133,7 @@ export async function createServer(): Promise<FastifyInstance> {
             .map(agent => `@${agent}`)
             .join(' ')
 
-          const maxContent = 280
-          const snippet = data.content.length > maxContent
-            ? `${data.content.slice(0, maxContent)}…`
-            : data.content
-
-          const inboxNotification = `${mentionPrefix} [task-comment:${task.id}] ${snippet}`.trim()
+          const inboxNotification = `${mentionPrefix} [task-comment:${task.id}] ${data.content}`.trim()
 
           // Non-blocking best-effort notification path via chat/inbox routing.
           // Uses dedicated task-comments channel; mentions still route as high-priority inbox items.

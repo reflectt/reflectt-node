@@ -3874,3 +3874,82 @@ describe('Task close gate: PR merge state', () => {
     expect(body.task.status).toBe('done')
   })
 })
+
+// ── Regression: task comment notification truncation ───────────────────────
+
+describe('task comment notification - no truncation', () => {
+  it('preserves full comment content in notification relay (no 280-char truncation)', async () => {
+    // Create a task
+    const { body: taskBody } = await req('POST', '/tasks', {
+      title: 'TEST: truncation regression',
+      createdBy: 'test-runner',
+      assignee: 'truncation-agent',
+      reviewer: 'truncation-reviewer',
+      done_criteria: ['No truncation'],
+      eta: '~15m',
+    })
+    const taskId = taskBody.task.id
+
+    // Post a long comment (>280 chars)
+    const longContent = 'A'.repeat(500) + ' END_MARKER'
+    const { status, body } = await req('POST', `/tasks/${taskId}/comments`, {
+      author: 'truncation-reviewer',
+      content: longContent,
+    })
+    expect(status).toBe(200)
+    expect(body.comment.content).toBe(longContent)
+
+    // Verify the comment is stored in full
+    const { body: commentsBody } = await req('GET', `/tasks/${taskId}/comments`)
+    const stored = commentsBody.comments.find((c: any) => c.content.includes('END_MARKER'))
+    expect(stored).toBeDefined()
+    expect(stored.content).toBe(longContent)
+    expect(stored.content.length).toBe(511) // 500 A's + ' END_MARKER'
+
+    // Verify chat relay message contains full content (not truncated to 280)
+    const { body: chatBody } = await req('GET', '/chat/messages?channel=task-comments&limit=50')
+    const allMsgs = chatBody.messages || []
+    const relayMsg = allMsgs.find((m: any) =>
+      m.content.includes('END_MARKER') && m.content.includes('[task-comment:')
+    )
+    expect(relayMsg).toBeDefined()
+    // The relay message should contain the full content, not a 280-char snippet
+    expect(relayMsg.content).toContain('END_MARKER')
+    expect(relayMsg.content.length).toBeGreaterThan(400)
+
+    // Cleanup
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('preserves short comments unchanged', async () => {
+    const uniqueSuffix = Date.now()
+    const { status: createStatus, body: taskBody } = await req('POST', '/tasks', {
+      title: `TEST: short comment regression ${uniqueSuffix}`,
+      createdBy: 'test-runner',
+      assignee: 'truncation-short-agent',
+      reviewer: 'truncation-short-reviewer',
+      done_criteria: ['Short ok'],
+      eta: '~15m',
+    })
+    expect(createStatus).toBe(200)
+    const taskId = taskBody.task.id
+
+    const shortContent = `LGTM, ship it! ${uniqueSuffix}`
+    const { status, body } = await req('POST', `/tasks/${taskId}/comments`, {
+      author: 'truncation-short-reviewer',
+      content: shortContent,
+    })
+    expect(status).toBe(200)
+    expect(body.comment.content).toBe(shortContent)
+
+    // Verify chat relay has full content
+    const { body: chatBody } = await req('GET', '/chat/messages?channel=task-comments&limit=50')
+    const relayMsg = (chatBody.messages || []).find((m: any) =>
+      m.content.includes(`ship it! ${uniqueSuffix}`) && m.content.includes('[task-comment:')
+    )
+    expect(relayMsg).toBeDefined()
+    expect(relayMsg.content).toContain(shortContent)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+})
