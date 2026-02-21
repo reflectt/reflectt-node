@@ -369,11 +369,12 @@ function suggestOwnerForInsight(
     }
   }
 
-  // Fallback: try suggestAssignee with a synthetic title
+  // Fallback: try suggestAssignee with a synthetic task
   try {
-    const suggestion = suggestAssignee(`Fix ${failureFamily} issue in ${impactedUnit}`)
-    if (suggestion) {
-      return { owner: suggestion.name, lane: suggestion.role }
+    const suggestion = suggestAssignee({ title: `Fix ${failureFamily} issue in ${impactedUnit}` }, [])
+    if (suggestion?.suggested) {
+      const matchedRole = roles.find(r => r.name === suggestion.suggested)
+      return { owner: suggestion.suggested, lane: matchedRole?.role ?? null }
     }
   } catch {
     // assignment module may not be loaded
