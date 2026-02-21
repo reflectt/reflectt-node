@@ -11,3 +11,9 @@ data/
 
 # Task artifacts
 process/
+
+# Security: never commit environment dumps or process listings
+**/env-*.txt
+**/runtime-env*.txt
+**/*-env.txt
+**/ps-output*.txt

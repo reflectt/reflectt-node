@@ -1,1 +1,0 @@
-{"success":true,"dryRun":true,"nudged":[],"decisions":[{"agent":"link","taskId":"task-1770912232889-u72w28ko8","idleMinutes":0,"warnMin":45,"escalateMin":60,"cooldownMin":30,"recentSuppressMin":10,"at":1770923845338,"decision":"none","reason":"below-warn-threshold","renderedMessage":null}],"timestamp":1770923845342}
