@@ -99,3 +99,5 @@
 {"type":"trio_general_silence","at":1771373456171,"thresholdMs":3600000,"lastUpdateAt":1771360759399}
 {"type":"trio_general_silence","at":1771621078538,"thresholdMs":3600000,"lastUpdateAt":1771617452299}
 {"type":"trio_general_silence","at":1771622878628,"thresholdMs":3600000,"lastUpdateAt":1771617452299}
+{"type":"stale_working","at":1771700486971,"agent":"link","taskId":"task-1771520453161-8wtd2kym7","thresholdMs":2700000,"lastUpdateAt":null,"workingSinceAt":1771699848718}
+{"type":"stale_working","at":1771700486971,"agent":"kai","taskId":"task-1771695803638-4habgloi3","thresholdMs":2700000,"lastUpdateAt":null,"workingSinceAt":1771698968542}

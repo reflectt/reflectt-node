@@ -1,0 +1,40 @@
+# Gitleaks configuration for reflectt-node
+# https://github.com/gitleaks/gitleaks
+
+title = "reflectt-node secret scanning"
+
+[extend]
+# Use the default gitleaks rules as base
+useDefault = true
+
+# Allowlist: documented false positives only
+# Each entry must have a comment explaining why it's safe
+[allowlist]
+description = "Audited false positives"
+
+# Documentation files with example/placeholder credentials (not real)
+# Test files with mock data
+paths = [
+  '''tests/.*\.test\.ts$''',
+  '''node_modules/''',
+  '''dist/''',
+  '''\.git/''',
+  '''\.env\.example$''',
+]
+
+# Documentation placeholder patterns (e.g. "your_gateway_token_here", "sk_test_xxxxx")
+regexTarget = "match"
+regexes = [
+  '''your_\w+_here''',
+  '''sk_test_\w+''',
+  '''xxxxx''',
+  '''YOUR_\w+''',
+  '''REPLACE_WITH_''',
+]
+
+# Block common env dump patterns even if not caught by default rules
+[[rules]]
+id = "env-dump"
+description = "Environment variable dump containing secrets"
+regex = '''(BRAVE_API_KEY|OPENCLAW_GATEWAY_TOKEN|API_KEY|SECRET_KEY|ACCESS_TOKEN)\s*[=:]\s*\S{10,}'''
+tags = ["env", "secret"]
