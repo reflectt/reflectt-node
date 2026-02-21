@@ -110,7 +110,8 @@ export async function runIntake(input: IntakeInput): Promise<IntakeResult> {
   let clusterKey: string
   try {
     insight = ingestReflection(reflection)
-    clusterKey = extractClusterKey(reflection)
+    const keyObj = extractClusterKey(reflection)
+    clusterKey = `${keyObj.workflow_stage}::${keyObj.failure_family}::${keyObj.impacted_unit}`
   } catch (err) {
     stats.errors++
     return {
@@ -167,10 +168,16 @@ export async function runIntake(input: IntakeInput): Promise<IntakeResult> {
         insight = getInsight(insight.id) || insight
 
         // Emit event for downstream consumers
-        eventBus.emit('insight:auto-promoted', {
-          insight_id: insight.id,
-          task_id: promotionResult.task_id,
-          cluster_key: clusterKey,
+        eventBus.emit({
+          id: `evt-auto-promote-${insight.id}`,
+          type: 'task_created' as const,
+          timestamp: Date.now(),
+          data: {
+            kind: 'insight:auto-promoted',
+            insight_id: insight.id,
+            task_id: promotionResult.task_id,
+            cluster_key: clusterKey,
+          },
         })
       }
     } catch (err) {
