@@ -89,6 +89,7 @@ import {
 } from './escalation.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
+import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns } from './insights.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
 // Schemas
@@ -5299,6 +5300,58 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, error: 'Reflection not found' }
     }
     return { reflection }
+  })
+
+  // ── Insights (clustering engine) ──────────────────────────────────────
+
+  app.post('/insights/ingest', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const reflectionId = typeof body.reflection_id === 'string' ? body.reflection_id : ''
+
+    if (!reflectionId) {
+      reply.code(400)
+      return { success: false, error: 'reflection_id is required', hint: 'POST /insights/ingest { reflection_id }. Clustering is auto-derived from reflection tags/content.' }
+    }
+
+    const reflection = getReflection(reflectionId)
+    if (!reflection) {
+      reply.code(404)
+      return { success: false, error: `Reflection ${reflectionId} not found` }
+    }
+
+    const insight = ingestReflection(reflection)
+    reply.code(201)
+    return { success: true, insight, cluster_key: extractClusterKey(reflection) }
+  })
+
+  app.get('/insights', async (request) => {
+    const query = request.query as Record<string, string>
+    return listInsights({
+      status: query.status,
+      priority: query.priority,
+      workflow_stage: query.workflow_stage,
+      failure_family: query.failure_family,
+      impacted_unit: query.impacted_unit,
+      limit: query.limit ? Math.min(Number(query.limit) || 50, 200) : 50,
+      offset: query.offset ? Number(query.offset) || 0 : 0,
+    })
+  })
+
+  app.get<{ Params: { id: string } }>('/insights/:id', async (request, reply) => {
+    const insight = getInsight(request.params.id)
+    if (!insight) {
+      reply.code(404)
+      return { success: false, error: 'Insight not found' }
+    }
+    return { insight }
+  })
+
+  app.get('/insights/stats', async () => {
+    return insightStats()
+  })
+
+  app.post('/insights/tick-cooldowns', async () => {
+    return { success: true, ...tickCooldowns() }
   })
 
   // Get next task (pull-based assignment)
