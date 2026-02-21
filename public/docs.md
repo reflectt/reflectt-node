@@ -387,6 +387,10 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/insights/:id` | Get single insight by ID. |
 | GET | `/insights/stats` | Aggregate stats: by status, priority, failure family. |
 | POST | `/insights/tick-cooldowns` | Advance cooldown state machine: promoted past deadline → cooldown, expired cooldown → archived. |
+| POST | `/insights/:id/promote` | Promote insight to board task. Body: `{ contract: { owner, reviewer, eta, acceptance_check, artifact_proof_requirement, next_checkpoint_eta }, promoted_by }`. Optional: `title`, `description`, `priority`, `team_id`. Returns task_id + audit entry. |
+| GET | `/insights/:id/audit` | Promotion audit trail for an insight. |
+| GET | `/insights/promotions` | List all promotion audit entries. Query: `limit`. |
+| GET | `/insights/recurring/candidates` | List recurring task candidates from insights with persistent patterns. Auto-suggests owner/lane per failure family. Template-first (no auto task spam). |
 
 ## Team
 
