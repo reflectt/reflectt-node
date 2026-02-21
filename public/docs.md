@@ -378,6 +378,16 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/reflections/stats` | Aggregate stats: total count, by role_type, by severity, average confidence. |
 | GET | `/reflections/schema` | Machine-readable field reference (required/optional fields, enums, ranges). |
 
+## Insights (Clustering Engine)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/insights/ingest` | Ingest a reflection into clustering. Body: `{ reflection_id }`. Cluster key auto-derived from reflection tags/content. Promotion gate: 2 independent reflections (distinct authors) OR severity high/critical. 24h cooldown after promotion. |
+| GET | `/insights` | List insights. Query: `status` (emerging\|promoted\|cooldown\|archived), `priority` (P0-P3), `workflow_stage`, `failure_family`, `impacted_unit`, `limit`, `offset`. Sorted by score desc. |
+| GET | `/insights/:id` | Get single insight by ID. |
+| GET | `/insights/stats` | Aggregate stats: by status, priority, failure family. |
+| POST | `/insights/tick-cooldowns` | Advance cooldown state machine: promoted past deadline → cooldown, expired cooldown → archived. |
+
 ## Team
 
 | Method | Path | Description |
