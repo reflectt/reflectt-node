@@ -242,7 +242,7 @@ function collectTaskComments(agent: string, since: number, events: FeedEvent[]):
         timestamp: comment.timestamp,
         relevantTo: agent,
         actor: comment.author,
-        summary: `${comment.author} commented on ${task.title}: ${truncate(comment.content, 80)}`,
+        summary: `${comment.author} commented on ${task.title}: ${truncate(comment.content, 300)}`,
         taskId: task.id,
         prUrl: null,
         data: { commentId: comment.id, content: comment.content },
@@ -268,10 +268,10 @@ function collectChatEvents(agent: string, since: number, events: FeedEvent[]): v
         timestamp: msg.timestamp,
         relevantTo: agent,
         actor: from,
-        summary: `${msg.from} mentioned you: ${truncate(content, 100)}`,
+        summary: `${msg.from} mentioned you: ${truncate(content, 300)}`,
         taskId: extractTaskId(content),
         prUrl: extractPrUrlFromText(content),
-        data: { channel: msg.channel, messageId: msg.id },
+        data: { channel: msg.channel, messageId: msg.id, content },
       })
     }
 
@@ -287,7 +287,7 @@ function collectChatEvents(agent: string, since: number, events: FeedEvent[]): v
             timestamp: msg.timestamp,
             relevantTo: agent,
             actor: from,
-            summary: `Blocker reported: ${truncate(content, 100)}`,
+            summary: `Blocker reported: ${truncate(content, 300)}`,
             taskId,
             prUrl: null,
             data: { channel: msg.channel, content },
@@ -324,7 +324,7 @@ function collectPrAndDeployEvents(agent: string, since: number, events: FeedEven
           timestamp: msg.timestamp,
           relevantTo: isRelevant ? agent : null,
           actor: from,
-          summary: `PR #${prMatch[1]} merged: ${truncate(content, 100)}`,
+          summary: `PR #${prMatch[1]} merged: ${truncate(content, 300)}`,
           taskId,
           prUrl,
           data: { prNumber: Number(prMatch[1]), channel: msg.channel },
@@ -340,7 +340,7 @@ function collectPrAndDeployEvents(agent: string, since: number, events: FeedEven
         timestamp: msg.timestamp,
         relevantTo: null, // Deploys are relevant to everyone
         actor: from,
-        summary: `Deploy: ${truncate(content, 100)}`,
+        summary: `Deploy: ${truncate(content, 300)}`,
         taskId: extractTaskId(content),
         prUrl: extractPrUrlFromText(content),
         data: { channel: msg.channel },
