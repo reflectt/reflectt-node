@@ -21,7 +21,7 @@ const VALID_INPUT = {
   suspected_why: 'chatToComment() slices content to 200 chars for "compact" display',
   proposed_fix: 'Remove slice, add expandable UI for long comments',
   confidence: 8,
-  role_type: 'engineering' as const,
+  role_type: 'agent' as const,
   author: 'link',
 }
 
@@ -35,10 +35,9 @@ describe('validateReflection', () => {
   it('accepts valid input with all required fields', () => {
     const result = validateReflection(VALID_INPUT)
     expect(result.valid).toBe(true)
-    if (result.valid) {
-      expect(result.data.pain).toBe(VALID_INPUT.pain)
-      expect(result.data.evidence).toEqual(VALID_INPUT.evidence)
-    }
+    expect(result.errors).toBeUndefined()
+    expect(result.data.pain).toBe(VALID_INPUT.pain)
+    expect(result.data.evidence).toEqual(VALID_INPUT.evidence)
   })
 
   it('accepts valid input with optional fields', () => {
@@ -46,108 +45,112 @@ describe('validateReflection', () => {
       ...VALID_INPUT,
       severity: 'high',
       task_id: 'task-123',
-      metadata: { sprint: 12, category: 'relay' },
+      tags: ['relay', 'chat'],
+      team_id: 'team-abc',
+      metadata: { sprint: 12 },
     })
     expect(result.valid).toBe(true)
-    if (result.valid) {
-      expect(result.data.severity).toBe('high')
-      expect(result.data.task_id).toBe('task-123')
-      expect(result.data.metadata).toEqual({ sprint: 12, category: 'relay' })
-    }
+    expect(result.data.severity).toBe('high')
+    expect(result.data.task_id).toBe('task-123')
+    expect(result.data.tags).toEqual(['relay', 'chat'])
+    expect(result.data.team_id).toBe('team-abc')
+    expect(result.data.metadata).toEqual({ sprint: 12 })
   })
 
   it('rejects null body', () => {
     const result = validateReflection(null)
     expect(result.valid).toBe(false)
+    expect(result.errors).toBeDefined()
   })
 
   it('rejects missing pain', () => {
     const { pain: _, ...noPain } = VALID_INPUT
     const result = validateReflection(noPain)
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('pain'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'pain')).toBe(true)
   })
 
-  it('rejects missing impact', () => {
+  it('rejects empty impact', () => {
     const result = validateReflection({ ...VALID_INPUT, impact: '' })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('impact'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'impact')).toBe(true)
   })
 
   it('rejects empty evidence array', () => {
     const result = validateReflection({ ...VALID_INPUT, evidence: [] })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('evidence'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'evidence')).toBe(true)
   })
 
   it('rejects non-array evidence', () => {
     const result = validateReflection({ ...VALID_INPUT, evidence: 'just-a-string' })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('evidence'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'evidence')).toBe(true)
   })
 
   it('rejects evidence with empty strings', () => {
     const result = validateReflection({ ...VALID_INPUT, evidence: ['valid', ''] })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('evidence'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'evidence')).toBe(true)
   })
 
-  it('rejects confidence out of range (negative)', () => {
+  it('rejects confidence below 0', () => {
     const result = validateReflection({ ...VALID_INPUT, confidence: -1 })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('confidence'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'confidence')).toBe(true)
   })
 
-  it('rejects confidence out of range (too high)', () => {
+  it('rejects confidence above 10', () => {
     const result = validateReflection({ ...VALID_INPUT, confidence: 11 })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('confidence'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'confidence')).toBe(true)
+  })
+
+  it('rejects NaN confidence', () => {
+    const result = validateReflection({ ...VALID_INPUT, confidence: NaN })
+    expect(result.valid).toBe(false)
+    expect(result.errors!.some(e => e.field === 'confidence')).toBe(true)
   })
 
   it('rejects invalid role_type', () => {
     const result = validateReflection({ ...VALID_INPUT, role_type: 'robot' })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('role_type'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'role_type')).toBe(true)
   })
 
   it('rejects invalid severity', () => {
     const result = validateReflection({ ...VALID_INPUT, severity: 'extreme' })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('severity'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'severity')).toBe(true)
   })
 
-  it('rejects missing author', () => {
+  it('rejects empty author', () => {
     const result = validateReflection({ ...VALID_INPUT, author: '' })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.some(e => e.field.includes('author'))).toBe(true)
-    }
+    expect(result.errors!.some(e => e.field === 'author')).toBe(true)
+  })
+
+  it('rejects non-array tags', () => {
+    const result = validateReflection({ ...VALID_INPUT, tags: 'not-array' })
+    expect(result.valid).toBe(false)
+    expect(result.errors!.some(e => e.field === 'tags')).toBe(true)
   })
 
   it('collects multiple errors', () => {
     const result = validateReflection({ pain: '', evidence: 'not-array', confidence: -5, role_type: 'invalid' })
     expect(result.valid).toBe(false)
-    if (!result.valid) {
-      expect(result.errors.length).toBeGreaterThanOrEqual(4)
-    }
+    expect(result.errors!.length).toBeGreaterThanOrEqual(4)
+  })
+
+  it('trims whitespace from string fields', () => {
+    const result = validateReflection({
+      ...VALID_INPUT,
+      pain: '  leading/trailing  ',
+      author: '  link  ',
+    })
+    expect(result.valid).toBe(true)
+    expect(result.data.pain).toBe('leading/trailing')
+    expect(result.data.author).toBe('link')
   })
 
   it('validates all ROLE_TYPES are accepted', () => {
@@ -167,23 +170,21 @@ describe('validateReflection', () => {
 
 // ── CRUD ──
 
-describe('Reflection CRUD', () => {
-  it('creates a reflection with generated id and timestamp', () => {
+describe('createReflection + getReflection', () => {
+  it('creates a reflection with generated id and timestamps', () => {
     const ref = createReflection(VALID_INPUT)
-
     expect(ref.id).toMatch(/^ref-/)
     expect(ref.created_at).toBeGreaterThan(0)
-    expect(ref.updated_at).toBeGreaterThan(0)
+    expect(ref.updated_at).toBe(ref.created_at)
     expect(ref.pain).toBe(VALID_INPUT.pain)
     expect(ref.evidence).toEqual(VALID_INPUT.evidence)
     expect(ref.confidence).toBe(8)
-    expect(ref.role_type).toBe('engineering')
+    expect(ref.role_type).toBe('agent')
   })
 
   it('retrieves a reflection by id', () => {
     const created = createReflection(VALID_INPUT)
     const fetched = getReflection(created.id)
-
     expect(fetched).not.toBeNull()
     expect(fetched!.id).toBe(created.id)
     expect(fetched!.pain).toBe(created.pain)
@@ -194,97 +195,6 @@ describe('Reflection CRUD', () => {
     expect(getReflection('ref-nonexistent')).toBeNull()
   })
 
-  it('lists reflections ordered by created_at desc', () => {
-    createReflection(VALID_INPUT)
-    createReflection({ ...VALID_INPUT, pain: 'Different pain', author: 'echo' })
-
-    const reflections = listReflections()
-    expect(reflections).toHaveLength(2)
-    expect(countReflections()).toBe(2)
-    // Most recent first
-    expect(reflections[0].author).toBe('echo')
-  })
-
-  it('filters by author', () => {
-    createReflection(VALID_INPUT)
-    createReflection({ ...VALID_INPUT, author: 'echo' })
-
-    const reflections = listReflections({ author: 'link' })
-    expect(reflections).toHaveLength(1)
-    expect(reflections[0].author).toBe('link')
-    expect(countReflections({ author: 'link' })).toBe(1)
-  })
-
-  it('filters by role_type', () => {
-    createReflection(VALID_INPUT) // engineering
-    createReflection({ ...VALID_INPUT, role_type: 'product' })
-
-    const reflections = listReflections({ role_type: 'product' })
-    expect(reflections).toHaveLength(1)
-    expect(reflections[0].role_type).toBe('product')
-  })
-
-  it('filters by severity', () => {
-    createReflection({ ...VALID_INPUT, severity: 'critical' })
-    createReflection({ ...VALID_INPUT, severity: 'low' })
-    createReflection(VALID_INPUT) // no severity
-
-    const reflections = listReflections({ severity: 'critical' })
-    expect(reflections).toHaveLength(1)
-    expect(reflections[0].severity).toBe('critical')
-  })
-
-  it('filters by task_id', () => {
-    createReflection({ ...VALID_INPUT, task_id: 'task-abc' })
-    createReflection(VALID_INPUT)
-
-    const reflections = listReflections({ task_id: 'task-abc' })
-    expect(reflections).toHaveLength(1)
-    expect(reflections[0].task_id).toBe('task-abc')
-  })
-
-  it('filters by since/before timestamps', () => {
-    const ref1 = createReflection(VALID_INPUT)
-
-    // since: everything from ref1's timestamp onward
-    const sinceResults = listReflections({ since: ref1.created_at })
-    expect(sinceResults).toHaveLength(1)
-    expect(sinceResults[0].id).toBe(ref1.id)
-
-    // before: nothing before ref1's timestamp
-    const beforeResults = listReflections({ before: ref1.created_at })
-    expect(beforeResults).toHaveLength(0)
-  })
-
-  it('respects limit and offset', () => {
-    for (let i = 0; i < 5; i++) {
-      createReflection({ ...VALID_INPUT, pain: `Pain ${i}` })
-    }
-
-    const page1 = listReflections({ limit: 2, offset: 0 })
-    expect(page1).toHaveLength(2)
-    expect(countReflections()).toBe(5)
-
-    const page2 = listReflections({ limit: 2, offset: 2 })
-    expect(page2).toHaveLength(2)
-
-    const page3 = listReflections({ limit: 2, offset: 4 })
-    expect(page3).toHaveLength(1)
-  })
-
-  it('computes stats', () => {
-    createReflection(VALID_INPUT) // engineering, no severity
-    createReflection({ ...VALID_INPUT, role_type: 'product', severity: 'high' })
-    createReflection({ ...VALID_INPUT, role_type: 'product', severity: 'high', author: 'ryan' })
-
-    const stats = reflectionStats()
-    expect(stats.total).toBe(3)
-    expect(stats.byRole.engineering).toBe(1)
-    expect(stats.byRole.product).toBe(2)
-    expect(stats.bySeverity.high).toBe(2)
-    expect(stats.avgConfidence).toBe(8)
-  })
-
   it('stores and retrieves metadata', () => {
     const meta = { sprint: 12, tags: ['relay', 'chat'] }
     const ref = createReflection({ ...VALID_INPUT, metadata: meta })
@@ -292,11 +202,109 @@ describe('Reflection CRUD', () => {
     expect(fetched!.metadata).toEqual(meta)
   })
 
-  it('handles confidence boundary values', () => {
+  it('stores and retrieves tags', () => {
+    const ref = createReflection({ ...VALID_INPUT, tags: ['relay', 'chat'] })
+    const fetched = getReflection(ref.id)
+    expect(fetched!.tags).toEqual(['relay', 'chat'])
+  })
+
+  it('handles confidence boundary values (0 and 10)', () => {
     const ref0 = createReflection({ ...VALID_INPUT, confidence: 0 })
     const ref10 = createReflection({ ...VALID_INPUT, confidence: 10 })
     expect(ref0.confidence).toBe(0)
     expect(ref10.confidence).toBe(10)
+  })
+})
+
+// ── List + Count ──
+
+describe('listReflections + countReflections', () => {
+  it('lists reflections ordered by created_at DESC', () => {
+    createReflection({ ...VALID_INPUT, pain: 'First' })
+    createReflection({ ...VALID_INPUT, pain: 'Second' })
+    const list = listReflections()
+    expect(list).toHaveLength(2)
+    expect(list[0].pain).toBe('Second') // most recent first
+  })
+
+  it('countReflections returns total', () => {
+    createReflection(VALID_INPUT)
+    createReflection({ ...VALID_INPUT, author: 'echo' })
+    expect(countReflections()).toBe(2)
+  })
+
+  it('filters by author', () => {
+    createReflection(VALID_INPUT)
+    createReflection({ ...VALID_INPUT, author: 'echo' })
+    const list = listReflections({ author: 'link' })
+    expect(list).toHaveLength(1)
+    expect(list[0].author).toBe('link')
+    expect(countReflections({ author: 'link' })).toBe(1)
+  })
+
+  it('filters by role_type', () => {
+    createReflection(VALID_INPUT) // agent
+    createReflection({ ...VALID_INPUT, role_type: 'human' })
+    const list = listReflections({ role_type: 'human' })
+    expect(list).toHaveLength(1)
+    expect(list[0].role_type).toBe('human')
+  })
+
+  it('filters by severity', () => {
+    createReflection({ ...VALID_INPUT, severity: 'critical' })
+    createReflection({ ...VALID_INPUT, severity: 'low' })
+    createReflection(VALID_INPUT) // no severity
+    const list = listReflections({ severity: 'critical' })
+    expect(list).toHaveLength(1)
+    expect(list[0].severity).toBe('critical')
+  })
+
+  it('filters by task_id', () => {
+    createReflection({ ...VALID_INPUT, task_id: 'task-abc' })
+    createReflection(VALID_INPUT)
+    const list = listReflections({ task_id: 'task-abc' })
+    expect(list).toHaveLength(1)
+    expect(list[0].task_id).toBe('task-abc')
+  })
+
+  it('filters by team_id', () => {
+    createReflection({ ...VALID_INPUT, team_id: 'team-1' })
+    createReflection(VALID_INPUT)
+    const list = listReflections({ team_id: 'team-1' })
+    expect(list).toHaveLength(1)
+    expect(list[0].team_id).toBe('team-1')
+  })
+
+  it('respects limit and offset', () => {
+    for (let i = 0; i < 5; i++) {
+      createReflection({ ...VALID_INPUT, pain: `Pain ${i}` })
+    }
+    const page1 = listReflections({ limit: 2, offset: 0 })
+    expect(page1).toHaveLength(2)
+    const page2 = listReflections({ limit: 2, offset: 2 })
+    expect(page2).toHaveLength(2)
+    const page3 = listReflections({ limit: 2, offset: 4 })
+    expect(page3).toHaveLength(1)
+    expect(countReflections()).toBe(5)
+  })
+})
+
+// ── Stats ──
+
+describe('reflectionStats', () => {
+  it('computes aggregate stats', () => {
+    createReflection(VALID_INPUT) // agent, author: link, no severity
+    createReflection({ ...VALID_INPUT, role_type: 'human', severity: 'high', author: 'echo' })
+    createReflection({ ...VALID_INPUT, role_type: 'human', severity: 'high', author: 'ryan' })
+
+    const stats = reflectionStats()
+    expect(stats.total).toBe(3)
+    expect(stats.by_role_type.agent).toBe(1)
+    expect(stats.by_role_type.human).toBe(2)
+    expect(stats.by_severity.high).toBe(2)
+    expect(stats.by_author.link).toBe(1)
+    expect(stats.by_author.echo).toBe(1)
+    expect(stats.by_author.ryan).toBe(1)
   })
 })
 
