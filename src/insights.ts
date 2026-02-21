@@ -307,9 +307,19 @@ function createInsight(key: InsightClusterKey, clusterKeyStr: string, reflection
   )
 
   if (shouldPromote) {
-    eventBus.emit('insight:promoted', { insightId: id, priority, score })
+    eventBus.emit({
+      id: `evt-insight-promoted-${id}`,
+      type: 'task_created' as const,
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: id, priority, score },
+    })
   } else {
-    eventBus.emit('insight:created', { insightId: id })
+    eventBus.emit({
+      id: `evt-insight-created-${id}`,
+      type: 'task_created' as const,
+      timestamp: Date.now(),
+      data: { kind: 'insight:created', insightId: id },
+    })
   }
 
   return insight
@@ -365,7 +375,12 @@ function addReflectionToInsight(existing: Insight, reflection: Reflection): Insi
   )
 
   if (shouldPromote && wasCandidate) {
-    eventBus.emit('insight:promoted', { insightId: existing.id, priority, score })
+    eventBus.emit({
+      id: `evt-insight-promoted-${existing.id}`,
+      type: 'task_created' as const,
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: existing.id, priority, score },
+    })
   }
 
   return {
@@ -420,7 +435,12 @@ function reopenInsight(existing: Insight, reflection: Reflection): Insight {
     existing.id,
   )
 
-  eventBus.emit('insight:reopened', { insightId: existing.id })
+  eventBus.emit({
+    id: `evt-insight-reopened-${existing.id}`,
+    type: 'task_updated' as const,
+    timestamp: Date.now(),
+    data: { kind: 'insight:reopened', insightId: existing.id },
+  })
 
   return {
     ...existing,
