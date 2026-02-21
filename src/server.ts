@@ -90,6 +90,7 @@ import {
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns } from './insights.js'
+import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
 // Schemas
@@ -5352,6 +5353,45 @@ export async function createServer(): Promise<FastifyInstance> {
 
   app.post('/insights/tick-cooldowns', async () => {
     return { success: true, ...tickCooldowns() }
+  })
+
+  app.post<{ Params: { id: string } }>('/insights/:id/promote', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+
+    // Inject insight_id from URL param
+    const input = { ...body, insight_id: request.params.id }
+    const validation = validatePromotionInput(input)
+    if (!validation.valid) {
+      reply.code(400)
+      return {
+        success: false,
+        error: 'Invalid promotion request',
+        errors: validation.errors,
+        hint: 'Required: contract.owner, contract.reviewer, contract.eta, contract.acceptance_check, contract.artifact_proof_requirement, contract.next_checkpoint_eta',
+      }
+    }
+
+    const promotedBy = typeof body.promoted_by === 'string' ? body.promoted_by : 'system'
+    const result = await promoteInsight(input as PromotionInput, promotedBy)
+
+    reply.code(result.success ? 201 : 400)
+    return result
+  })
+
+  app.get<{ Params: { id: string } }>('/insights/:id/audit', async (request) => {
+    const audit = getPromotionAuditByInsight(request.params.id)
+    return { audit: audit ? [audit] : [], found: !!audit }
+  })
+
+  app.get('/insights/promotions', async (request) => {
+    const query = request.query as Record<string, string>
+    const limit = query.limit ? Number(query.limit) : 50
+    return { audits: listPromotionAudits(limit) }
+  })
+
+  app.get('/insights/recurring/candidates', async () => {
+    const candidates = generateRecurringCandidates()
+    return { candidates, count: candidates.length }
   })
 
   // Get next task (pull-based assignment)
