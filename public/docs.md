@@ -412,6 +412,16 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/intake/stats` | Pipeline statistics: total processed, auto-promoted count, error count, last run timestamp. |
 | POST | `/intake/maintenance` | Run pipeline maintenance: tick cooldowns, clean stale state, advance insight state machine. Returns maintenance summary. |
 
+## Continuity Loop
+
+Autonomous work-continuity system. Monitors agent queue floors and auto-replenishes by promoting qualified insights into tasks. Falls back to reflection nudges when no promotable insights exist.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/continuity/stats` | Loop statistics: cycles run, insights promoted, reflection nudges fired, no-candidate cycles, last run timestamp. |
+| GET | `/continuity/audit` | Persistent audit trail of all continuity actions. Query: `agent`, `limit`, `since` (epoch ms). Returns timestamped actions with kind, detail, linked insight/task IDs. |
+| POST | `/continuity/tick` | Manually trigger one continuity cycle. Returns actions taken, agents checked, and replenishment count. Normally runs automatically via board health worker. |
+
 ## Team
 
 | Method | Path | Description |
