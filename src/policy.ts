@@ -85,6 +85,17 @@ export interface PolicyConfig {
     enforceBlock?: boolean     // if true (default), block validating/done transitions when queue drops below floor
   }
 
+  /** Reflection automation nudges */
+  reflectionNudge: {
+    enabled: boolean
+    postTaskDelayMin: number     // minutes to wait after task done before nudging
+    idleReflectionHours: number  // nudge if no reflection in this many hours
+    cooldownMin: number          // minimum minutes between nudges to same agent
+    agents: string[]             // agents to monitor (empty = all active)
+    channel: string              // delivery channel
+    roleCadenceHours: Record<string, number>  // per-agent cadence overrides
+  }
+
   /** Escalation channels for different severity levels */
   escalation: {
     defaultChannel: string
@@ -144,6 +155,15 @@ export const DEFAULT_POLICY: PolicyConfig = {
     escalateAfterMin: 60,
     cooldownMin: 30,
     channel: 'general',
+  },
+  reflectionNudge: {
+    enabled: true,
+    postTaskDelayMin: 5,
+    idleReflectionHours: 8,
+    cooldownMin: 60,
+    agents: [],
+    channel: 'general',
+    roleCadenceHours: {},
   },
   escalation: {
     defaultChannel: 'general',
