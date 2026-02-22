@@ -730,3 +730,62 @@ export function updateInsightStatus(
 }
 
 export { COOLDOWN_MS, PROMOTION_THRESHOLD, SCORING_ENGINE_VERSION as _SCORING_ENGINE_VERSION }
+
+// ── Reconciler: find promoted insights without task links ──
+
+export function getOrphanedInsights(): Insight[] {
+  const db = getDb()
+  const rows = db.prepare(
+    "SELECT * FROM insights WHERE status IN ('promoted', 'task_created') AND (task_id IS NULL OR task_id = '') ORDER BY score DESC"
+  ).all() as InsightRow[]
+  return rows.map(rowToInsight)
+}
+
+export interface ReconcileResult {
+  scanned: number
+  linked: number
+  created: number
+  skipped: number
+  errors: string[]
+  details: Array<{ insight_id: string; action: string; task_id?: string; reason?: string }>
+}
+
+export function reconcileInsightTaskLinks(
+  createTaskFn: (insight: Insight) => { taskId: string } | null,
+  dryRun = false,
+): ReconcileResult {
+  const orphans = getOrphanedInsights()
+  const result: ReconcileResult = {
+    scanned: orphans.length,
+    linked: 0,
+    created: 0,
+    skipped: 0,
+    errors: [],
+    details: [],
+  }
+
+  for (const insight of orphans) {
+    try {
+      if (dryRun) {
+        result.details.push({ insight_id: insight.id, action: 'would_create', reason: 'dry run' })
+        result.created++
+        continue
+      }
+
+      const taskResult = createTaskFn(insight)
+      if (taskResult) {
+        updateInsightStatus(insight.id, 'task_created', taskResult.taskId)
+        result.created++
+        result.details.push({ insight_id: insight.id, action: 'created', task_id: taskResult.taskId })
+      } else {
+        result.skipped++
+        result.details.push({ insight_id: insight.id, action: 'skipped', reason: 'createTaskFn returned null' })
+      }
+    } catch (err) {
+      result.errors.push(`${insight.id}: ${(err as Error).message}`)
+      result.details.push({ insight_id: insight.id, action: 'error', reason: (err as Error).message })
+    }
+  }
+
+  return result
+}

@@ -92,7 +92,7 @@ import {
 } from './escalation.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
-import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus } from './insights.js'
+import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks } from './insights.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
 import { listLineage, getLineage, lineageStats } from './lineage.js'
@@ -5526,6 +5526,76 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/insights/recurring/candidates', async () => {
     const candidates = generateRecurringCandidates()
     return { candidates, count: candidates.length }
+  })
+
+  // ── Orphan detection + reconciliation ──
+
+  app.get('/insights/orphans', async () => {
+    const orphans = getOrphanedInsights()
+    return {
+      orphans: orphans.map(o => ({
+        id: o.id,
+        title: o.title,
+        status: o.status,
+        score: o.score,
+        priority: o.priority,
+        authors: o.authors,
+        task_id: o.task_id,
+        created_at: o.created_at,
+      })),
+      count: orphans.length,
+    }
+  })
+
+  app.post('/insights/reconcile', async (request) => {
+    const { dry_run } = request.query as { dry_run?: string }
+    const isDryRun = dry_run === 'true' || dry_run === '1'
+
+    // For live runs, collect orphans and create tasks one by one (async)
+    if (isDryRun) {
+      const result = reconcileInsightTaskLinks(() => ({ taskId: 'dry-run' }), true)
+      return { success: true, dry_run: true, ...result }
+    }
+
+    const orphans = getOrphanedInsights()
+    const details: Array<{ insight_id: string; action: string; task_id?: string; reason?: string }> = []
+    let created = 0
+    let skipped = 0
+    const errors: string[] = []
+
+    for (const insight of orphans) {
+      try {
+        const decision = resolveAssignment(insight)
+        const task = await taskManager.createTask({
+          title: `[Insight] ${insight.title}`,
+          description: `Auto-reconciled from orphaned insight ${insight.id}. ${insight.evidence_refs?.join('; ') || ''}`,
+          status: 'todo',
+          assignee: decision.assignee,
+          reviewer: decision.reviewer,
+          priority: (insight.priority as 'P0' | 'P1' | 'P2' | 'P3') || 'P1',
+          createdBy: 'reconciler',
+          done_criteria: [
+            'Root cause addressed or mitigated',
+            `Evidence from insight ${insight.id} validated`,
+            'Follow-up reflection submitted confirming fix',
+          ],
+          metadata: {
+            source_insight: insight.id,
+            source_reflection: insight.reflection_ids?.[0],
+            reconciled: true,
+            reconciled_at: Date.now(),
+          },
+        })
+        updateInsightStatus(insight.id, 'task_created', task.id)
+        created++
+        details.push({ insight_id: insight.id, action: 'created', task_id: task.id })
+      } catch (err) {
+        errors.push(`${insight.id}: ${(err as Error).message}`)
+        details.push({ insight_id: insight.id, action: 'error', reason: (err as Error).message })
+      }
+    }
+
+    return { success: true, dry_run: false, scanned: orphans.length, created, skipped, errors, details }
   })
 
   // Insight→Task bridge stats
