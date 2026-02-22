@@ -11,6 +11,16 @@ import type { Reflection } from './reflections.js'
 const COOLDOWN_MS = 24 * 60 * 60 * 1000 // 24 hours
 const PROMOTION_THRESHOLD = 2             // independent reflections needed
 
+/** Scoring engine version — increment on any rule change for audit trail */
+export const SCORING_ENGINE_VERSION = '1.1.0'
+
+// ── Hysteresis config ──
+// Buffer zone around priority thresholds to prevent flapping.
+// A score must cross threshold + buffer to change priority upward,
+// or drop below threshold - buffer to change downward.
+export const HYSTERESIS_BUFFER = 0.3
+export const PRIORITY_THRESHOLDS = { P0: 8, P1: 5, P2: 3 } as const
+
 export const INSIGHT_STATUSES = ['candidate', 'promoted', 'pending_triage', 'task_created', 'cooldown', 'closed'] as const
 export type InsightStatus = (typeof INSIGHT_STATUSES)[number]
 
@@ -110,11 +120,49 @@ function generateId(): string {
   return `ins-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
 }
 
+/**
+ * Derive priority from score (no hysteresis — used for initial assignment).
+ */
 export function scoreToPriority(score: number): string {
-  if (score >= 8) return 'P0'
-  if (score >= 5) return 'P1'
-  if (score >= 3) return 'P2'
+  if (score >= PRIORITY_THRESHOLDS.P0) return 'P0'
+  if (score >= PRIORITY_THRESHOLDS.P1) return 'P1'
+  if (score >= PRIORITY_THRESHOLDS.P2) return 'P2'
   return 'P3'
+}
+
+/**
+ * Priority with hysteresis: prevents flapping near threshold boundaries.
+ *
+ * - To upgrade priority (e.g. P1→P0), score must exceed threshold + buffer
+ * - To downgrade (e.g. P0→P1), score must drop below threshold - buffer
+ * - If score is in the buffer zone, previous priority is retained
+ */
+export function scoreToPriorityWithHysteresis(score: number, previousPriority: string | null): string {
+  if (!previousPriority) return scoreToPriority(score)
+
+  const buf = HYSTERESIS_BUFFER
+  const { P0, P1, P2 } = PRIORITY_THRESHOLDS
+
+  if (previousPriority === 'P0') {
+    if (score >= P0 - buf) return 'P0'
+  }
+  if (previousPriority === 'P1') {
+    if (score >= P0 + buf) return 'P0'
+    if (score >= P1 - buf) return 'P1'
+  }
+  if (previousPriority === 'P2') {
+    if (score >= P0 + buf) return 'P0'
+    if (score >= P1 + buf) return 'P1'
+    if (score >= P2 - buf) return 'P2'
+  }
+  if (previousPriority === 'P3') {
+    if (score >= P0 + buf) return 'P0'
+    if (score >= P1 + buf) return 'P1'
+    if (score >= P2 + buf) return 'P2'
+    return 'P3'
+  }
+
+  return scoreToPriority(score)
 }
 
 function buildClusterKeyString(key: InsightClusterKey): string {
@@ -176,6 +224,52 @@ function _inferFailureFamily(pain: string): string {
   if (/deploy|release|build|ci/i.test(lower)) return 'deployment'
   if (/test|coverage|flak/i.test(lower)) return 'testing'
   return 'uncategorized'
+}
+
+// ── Audit / Decision Trace ──
+
+export interface DecisionTrace {
+  version: string
+  dedupe_cluster_id: string
+  promotion_band: PromotionReadiness
+  top_contributors: Array<{ factor: string; value: number; description: string }>
+  hysteresis_applied: boolean
+  previous_priority: string | null
+  raw_score: number
+}
+
+export function buildDecisionTrace(
+  reflections: Reflection[],
+  clusterKeyStr: string,
+  readiness: PromotionReadiness,
+  previousPriority: string | null,
+  score: number,
+): DecisionTrace {
+  const maxConf = reflections.length > 0 ? Math.max(...reflections.map(r => r.confidence)) : 0
+  const severityBoost = reflections.reduce((max, r) => {
+    if (r.severity === 'critical') return Math.max(max, 2)
+    if (r.severity === 'high') return Math.max(max, 1)
+    return max
+  }, 0)
+  const volumeBoost = Math.min((reflections.length - 1) * 0.5, 2)
+
+  const contributors: DecisionTrace['top_contributors'] = []
+  contributors.push({ factor: 'max_confidence', value: maxConf, description: 'Highest reflection confidence' })
+  if (severityBoost > 0) contributors.push({ factor: 'severity_boost', value: severityBoost, description: 'Max severity boost (high=+1, critical=+2)' })
+  if (volumeBoost > 0) contributors.push({ factor: 'volume_boost', value: volumeBoost, description: `${reflections.length} reflections (+0.5 each, max +2)` })
+
+  const withHysteresis = scoreToPriorityWithHysteresis(score, previousPriority)
+  const without = scoreToPriority(score)
+
+  return {
+    version: SCORING_ENGINE_VERSION,
+    dedupe_cluster_id: clusterKeyStr,
+    promotion_band: readiness,
+    top_contributors: contributors.sort((a, b) => b.value - a.value),
+    hysteresis_applied: withHysteresis !== without,
+    previous_priority: previousPriority,
+    raw_score: score,
+  }
 }
 
 // ── Promotion gate ──
@@ -267,6 +361,15 @@ function createInsight(key: InsightClusterKey, clusterKeyStr: string, reflection
 
   const title = `${key.failure_family}: ${reflection.pain.slice(0, 80)}`
 
+  // Build initial decision trace for audit
+  const decisionTrace = buildDecisionTrace(reflections, clusterKeyStr, readiness, null, score)
+  const metadata: Record<string, unknown> = {
+    decision_trace: decisionTrace,
+    dedupe_cluster_id: clusterKeyStr,
+    promotion_band: readiness,
+    scoring_version: SCORING_ENGINE_VERSION,
+  }
+
   const insight: Insight = {
     id,
     cluster_key: clusterKeyStr,
@@ -286,6 +389,7 @@ function createInsight(key: InsightClusterKey, clusterKeyStr: string, reflection
     cooldown_until: cooldownUntil,
     cooldown_reason: cooldownReason,
     severity_max: sevMax,
+    metadata,
     created_at: now,
     updated_at: now,
   }
@@ -295,8 +399,8 @@ function createInsight(key: InsightClusterKey, clusterKeyStr: string, reflection
       id, cluster_key, workflow_stage, failure_family, impacted_unit,
       title, status, score, priority, reflection_ids, independent_count,
       evidence_refs, authors, promotion_readiness, recurring_candidate,
-      cooldown_until, cooldown_reason, severity_max, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      cooldown_until, cooldown_reason, severity_max, metadata, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, clusterKeyStr, key.workflow_stage, key.failure_family, key.impacted_unit,
     title, status, score, priority,
@@ -306,6 +410,7 @@ function createInsight(key: InsightClusterKey, clusterKeyStr: string, reflection
     safeJsonStringify(authors),
     readiness, 0,
     cooldownUntil, cooldownReason, sevMax,
+    safeJsonStringify(metadata),
     now, now,
   )
 
@@ -341,11 +446,13 @@ function addReflectionToInsight(existing: Insight, reflection: Reflection): Insi
 
   const allReflections = loadReflectionsById(updatedIds)
   const score = computeScore(allReflections)
-  const priority = scoreToPriority(score)
   const sevMax = maxSeverity(allReflections)
 
   const wasCandidate = existing.status === 'candidate'
   const shouldPromote = wasCandidate && canPromote(allReflections)
+
+  // Apply hysteresis to prevent priority flapping
+  const priority = scoreToPriorityWithHysteresis(score, existing.priority)
 
   const status: InsightStatus = shouldPromote ? 'promoted' : existing.status
   const readiness: PromotionReadiness = shouldPromote
@@ -357,13 +464,23 @@ function addReflectionToInsight(existing: Insight, reflection: Reflection): Insi
   // Recurring if reopened or has many reflections
   const recurring = updatedIds.length >= 4
 
+  // Build decision trace for audit
+  const decisionTrace = buildDecisionTrace(allReflections, existing.cluster_key, readiness, existing.priority, score)
+  const updatedMetadata = {
+    ...(existing.metadata || {}),
+    decision_trace: decisionTrace,
+    dedupe_cluster_id: existing.cluster_key,
+    promotion_band: readiness,
+    scoring_version: SCORING_ENGINE_VERSION,
+  }
+
   db.prepare(`
     UPDATE insights SET
       reflection_ids = ?, independent_count = ?, evidence_refs = ?,
       authors = ?, score = ?, priority = ?, status = ?,
       promotion_readiness = ?, recurring_candidate = ?,
       cooldown_until = ?, cooldown_reason = ?, severity_max = ?,
-      updated_at = ?
+      metadata = ?, updated_at = ?
     WHERE id = ?
   `).run(
     safeJsonStringify(updatedIds),
@@ -373,6 +490,7 @@ function addReflectionToInsight(existing: Insight, reflection: Reflection): Insi
     score, priority, status,
     readiness, recurring ? 1 : 0,
     cooldownUntil, cooldownReason, sevMax,
+    safeJsonStringify(updatedMetadata),
     now,
     existing.id,
   )
@@ -400,6 +518,7 @@ function addReflectionToInsight(existing: Insight, reflection: Reflection): Insi
     cooldown_until: cooldownUntil,
     cooldown_reason: cooldownReason,
     severity_max: sevMax,
+    metadata: updatedMetadata,
     updated_at: now,
   }
 }
@@ -610,4 +729,4 @@ export function updateInsightStatus(
   }
 }
 
-export { COOLDOWN_MS, PROMOTION_THRESHOLD }
+export { COOLDOWN_MS, PROMOTION_THRESHOLD, SCORING_ENGINE_VERSION as _SCORING_ENGINE_VERSION }
