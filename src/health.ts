@@ -312,7 +312,8 @@ class TeamHealthMonitor {
   private readonly mentionRescueDelayMin = Number(process.env.MENTION_RESCUE_DELAY_MIN || 0)
   private readonly mentionRescueCooldownMin = Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10)
   private readonly mentionRescueGlobalCooldownMin = Number(process.env.MENTION_RESCUE_GLOBAL_COOLDOWN_MIN || 5)
-  private mentionRescueState = new Map<string, number>()
+  /** Maps mentionId → { lastRescueAt, rescueCount }. Once rescued, won't rescue again (one-shot). */
+  private mentionRescueState = new Map<string, { lastRescueAt: number; rescueCount: number }>()
   private mentionRescueLastAt = 0
 
   private systemStartTime = Date.now()
@@ -1525,8 +1526,10 @@ class TeamHealthMonitor {
 
       if (replied) continue
 
-      const lastRescueAt = this.mentionRescueState.get(mentionId) || 0
-      if (now - lastRescueAt < cooldownMs) continue
+      const rescueEntry = this.mentionRescueState.get(mentionId)
+      // One-shot: if we already rescued this mention, skip it entirely.
+      // This prevents duplicate fallback spam for the same unresolved mention.
+      if (rescueEntry && rescueEntry.rescueCount > 0) continue
 
       // Focus mode is a hard suppressor for fallback nudges.
       const anyFocused = this.trioAgents.some(a => presenceManager.isInFocus(a) !== null)
@@ -1538,15 +1541,15 @@ class TeamHealthMonitor {
 
       if (!dryRun) {
         await routeMessage({ from: 'system', content, category: 'mention-rescue', severity: 'warning' })
-        this.mentionRescueState.set(mentionId, now)
+        this.mentionRescueState.set(mentionId, { lastRescueAt: now, rescueCount: 1 })
         this.mentionRescueLastAt = now
       }
     }
 
     // Prune stale rescue state entries (older than 1 hour) to prevent unbounded map growth
     const pruneThresholdMs = 60 * 60_000
-    for (const [key, lastAt] of this.mentionRescueState) {
-      if (now - lastAt > pruneThresholdMs) {
+    for (const [key, entry] of this.mentionRescueState) {
+      if (now - entry.lastRescueAt > pruneThresholdMs) {
         this.mentionRescueState.delete(key)
       }
     }
