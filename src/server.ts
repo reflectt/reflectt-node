@@ -1466,7 +1466,9 @@ export async function createServer(): Promise<FastifyInstance> {
     lastAlertAt: 0,
     firstZeroInsightAt: 0,
     recentReflections: 0,
-    recentInsights: 0,
+    recentInsightsCreated: 0,
+    recentInsightsUpdated: 0,
+    recentInsightActivity: 0,
     recentPromotions: 0,
     windowMin: 30,
     zeroInsightThresholdMin: 10,
@@ -1478,11 +1480,16 @@ export async function createServer(): Promise<FastifyInstance> {
     const db = getDb()
 
     const recentReflections = countReflections({ since })
-    const recentInsights = (db.prepare('SELECT COUNT(*) as c FROM insights WHERE created_at >= ?').get(since) as { c: number }).c
+    // Count both newly created insights AND existing insights that received new reflections (updated_at advanced)
+    const recentInsightsCreated = (db.prepare('SELECT COUNT(*) as c FROM insights WHERE created_at >= ?').get(since) as { c: number }).c
+    const recentInsightsUpdated = (db.prepare('SELECT COUNT(*) as c FROM insights WHERE updated_at >= ? AND created_at < ?').get(since, since) as { c: number }).c
+    const recentInsightActivity = recentInsightsCreated + recentInsightsUpdated
     const recentPromotions = listPromotionAudits(500).filter(a => a.created_at >= since).length
 
     reflectionPipelineHealth.recentReflections = recentReflections
-    reflectionPipelineHealth.recentInsights = recentInsights
+    reflectionPipelineHealth.recentInsightsCreated = recentInsightsCreated
+    reflectionPipelineHealth.recentInsightsUpdated = recentInsightsUpdated
+    reflectionPipelineHealth.recentInsightActivity = recentInsightActivity
     reflectionPipelineHealth.recentPromotions = recentPromotions
     reflectionPipelineHealth.lastCheckedAt = now
 
@@ -1492,7 +1499,8 @@ export async function createServer(): Promise<FastifyInstance> {
       return reflectionPipelineHealth
     }
 
-    if (recentInsights > 0) {
+    // Pipeline is healthy if any insight activity occurred (create or merge-update)
+    if (recentInsightActivity > 0) {
       reflectionPipelineHealth.status = 'healthy'
       reflectionPipelineHealth.firstZeroInsightAt = 0
       return reflectionPipelineHealth
@@ -1566,14 +1574,18 @@ export async function createServer(): Promise<FastifyInstance> {
       windowMin: health.windowMin,
       zeroInsightThresholdMin: health.zeroInsightThresholdMin,
       recentReflections: health.recentReflections,
-      recentInsights: health.recentInsights,
+      recentInsightsCreated: health.recentInsightsCreated,
+      recentInsightsUpdated: health.recentInsightsUpdated,
+      recentInsightActivity: health.recentInsightActivity,
       recentPromotions: health.recentPromotions,
       lastCheckedAt: health.lastCheckedAt,
       lastAlertAt: health.lastAlertAt || null,
       firstZeroInsightAt: health.firstZeroInsightAt || null,
       signals: {
         reflections_flowing: health.recentReflections > 0,
-        insights_flowing: health.recentInsights > 0,
+        insights_created: health.recentInsightsCreated > 0,
+        insights_updated: health.recentInsightsUpdated > 0,
+        insights_flowing: health.recentInsightActivity > 0,
         promotions_flowing: health.recentPromotions > 0,
       },
     }
