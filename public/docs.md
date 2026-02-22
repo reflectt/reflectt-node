@@ -472,9 +472,12 @@ Team-wide nudging and SLA tracking for reflection cadence.
 
 1. **Post-task nudges**: When a task moves to `done` or `blocked`, the assignee is queued for a reflection nudge (configurable delay, default 5min).
 2. **Idle nudges**: Agents who haven't submitted a reflection within their cadence interval (default: 8h for humans, 2h for agents) receive a reminder.
-3. **SLA breach**: Agents overdue beyond 1.5× their cadence interval are marked as `overdue`.
-4. **Cooldowns**: Nudges are throttled per-agent (default: 60min between nudges).
-5. **Tracking resets**: Submitting a reflection via `POST /reflections` resets the agent's tasks-done counter and last-reflection timestamp.
+3. **Never-reflected agents**: New agents are auto-seeded into tracking on first discovery. Once seeded long enough (≥ cadence interval), they receive their first nudge. Controlled by `nudgeNeverReflected` (default: true).
+4. **SLA breach**: Agents overdue beyond 1.5× their cadence interval are marked as `overdue`.
+5. **Cooldowns**: Nudges are throttled per-agent (default: 60min between nudges).
+6. **Tracking resets**: Submitting a reflection via `POST /reflections` resets the agent's tasks-done counter and last-reflection timestamp.
+7. **Agent filtering**: Test/system agents (names matching `test-*`, `proof-*`, `lane-*`, `unassigned`, `system`, `bot`) are auto-excluded from SLA reporting and nudges. Additional exclusions via `excludeAgents` config.
+8. **SLA agent discovery**: Agents are discovered from both active tasks (doing/todo/validating) AND the tracking table (agents who have reflected before). This ensures agents who go idle aren't silently dropped from SLA tracking.
 
 ### SLA Statuses
 
@@ -495,7 +498,9 @@ Set via `reflectionNudge` in policy config:
     "cooldownMin": 60,
     "agents": [],
     "channel": "general",
-    "roleCadenceHours": { "engineering": 4, "ops": 8 }
+    "roleCadenceHours": { "link": 4, "sage": 8 },
+    "excludeAgents": [],
+    "nudgeNeverReflected": true
   }
 }
 ```

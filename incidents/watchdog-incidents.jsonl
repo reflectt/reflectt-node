@@ -101,3 +101,4 @@
 {"type":"trio_general_silence","at":1771622878628,"thresholdMs":3600000,"lastUpdateAt":1771617452299}
 {"type":"stale_working","at":1771714086080,"agent":"link","taskId":"task-1771692505229-q114ozo7l","thresholdMs":2700000,"lastUpdateAt":null,"workingSinceAt":1771702230934}
 {"type":"stale_working","at":1771715886190,"agent":"link","taskId":"task-1771692505229-q114ozo7l","thresholdMs":2700000,"lastUpdateAt":null,"workingSinceAt":1771702230934}
+{"type":"stale_working","at":1771726531145,"agent":"link","taskId":"task-1771725461490-lu8mb9fxe","thresholdMs":2700000,"lastUpdateAt":null,"workingSinceAt":1771725839164}

@@ -4508,8 +4508,11 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
-      // ── Reflection automation: nudge agent to reflect after task completion ──
-      if (parsed.status === 'done' && existing.status !== 'done' && task.assignee) {
+      // ── Reflection automation: nudge agent to reflect after task completion or block ──
+      if (task.assignee && (
+        (parsed.status === 'done' && existing.status !== 'done') ||
+        (parsed.status === 'blocked' && existing.status !== 'blocked')
+      )) {
         try {
           const { onTaskDone } = await import('./reflection-automation.js')
           onTaskDone(task)
