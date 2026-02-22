@@ -343,6 +343,17 @@ function runMigrations(db: Database.Database): void {
         ALTER TABLE insights ADD COLUMN task_id TEXT;
       `,
     },
+    {
+      version: 10,
+      sql: `
+        CREATE TABLE IF NOT EXISTS mention_rescue_state (
+          thread_key TEXT PRIMARY KEY,
+          message_ids TEXT NOT NULL DEFAULT '[]',
+          rescued_at INTEGER NOT NULL,
+          rescue_count INTEGER NOT NULL DEFAULT 1
+        );
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
