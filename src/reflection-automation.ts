@@ -44,6 +44,7 @@ interface PendingNudge {
   agent: string
   taskId: string
   taskTitle: string
+  taskStatus: string
   doneAt: number
   nudgeAt: number // when to fire the nudge
 }
@@ -98,6 +99,7 @@ export function onTaskDone(task: Task): void {
     agent,
     taskId: task.id,
     taskTitle: task.title,
+    taskStatus: task.status,
     doneAt: Date.now(),
     nudgeAt,
   })
@@ -151,7 +153,7 @@ export async function tickReflectionNudges(): Promise<{
     const tracking = getAgentTracking(nudge.agent)
     if (tracking && tracking.last_reflection_at && tracking.last_reflection_at > nudge.doneAt) continue
 
-    await sendPostTaskNudge(nudge.agent, nudge.taskId, nudge.taskTitle, config)
+    await sendPostTaskNudge(nudge.agent, nudge.taskId, nudge.taskTitle, config, nudge.taskStatus)
     lastNudgeAt[nudge.agent] = now
     postTaskNudges++
   }
@@ -279,10 +281,15 @@ export function getReflectionSLAs(): ReflectionSLA[] {
 
 // ── Nudge messages ──
 
-async function sendPostTaskNudge(agent: string, taskId: string, taskTitle: string, config: ReflectionNudgeConfig): Promise<void> {
-  const msg = `🪞 Reflection nudge: @${agent}, you just completed "${taskTitle}" (${taskId}). ` +
-    `Take 2 min to reflect — what went well, what was painful, and what would you change? ` +
-    `Submit via POST /reflections with your observations.`
+async function sendPostTaskNudge(agent: string, taskId: string, taskTitle: string, config: ReflectionNudgeConfig, taskStatus?: string): Promise<void> {
+  const isBlocked = taskStatus === 'blocked'
+  const msg = isBlocked
+    ? `🪞 Reflection nudge: @${agent}, "${taskTitle}" (${taskId}) is blocked. ` +
+      `Take 2 min to reflect — what's blocking you, what did you try, and what would unblock it? ` +
+      `Submit via POST /reflections with your observations.`
+    : `🪞 Reflection nudge: @${agent}, you just completed "${taskTitle}" (${taskId}). ` +
+      `Take 2 min to reflect — what went well, what was painful, and what would you change? ` +
+      `Submit via POST /reflections with your observations.`
 
   try {
     await routeMessage({

@@ -498,7 +498,7 @@ Set via `reflectionNudge` in policy config:
     "cooldownMin": 60,
     "agents": [],
     "channel": "general",
-    "roleCadenceHours": { "engineering": 4, "ops": 8 },
+    "roleCadenceHours": { "link": 4, "sage": 8 },
     "excludeAgents": [],
     "nudgeNeverReflected": true
   }

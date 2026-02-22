@@ -71,6 +71,16 @@ describe('onTaskDone', () => {
     expect(pending[0].taskId).toBe(task.id)
   })
 
+  it('should queue a pending nudge when task is blocked', () => {
+    const task = makeTask({ assignee: 'link', status: 'blocked' })
+    onTaskDone(task)
+
+    const pending = _getPendingNudges()
+    expect(pending.length).toBe(1)
+    expect(pending[0].agent).toBe('link')
+    expect(pending[0].taskStatus).toBe('blocked')
+  })
+
   it('should not queue nudge when no assignee', () => {
     const task = makeTask({ assignee: undefined })
     onTaskDone(task)
