@@ -5279,8 +5279,16 @@ export async function createServer(): Promise<FastifyInstance> {
       onReflectionSubmitted(reflection.author)
     } catch { /* reflection automation may not be loaded */ }
 
+    // Auto-ingest into insight pipeline (reflection → insight clustering)
+    let insight = null
+    try {
+      insight = ingestReflection(reflection)
+    } catch (err) {
+      console.warn(`[Reflections] Auto-ingest to insight pipeline failed for ${reflection.id}:`, err)
+    }
+
     reply.code(201)
-    return { success: true, reflection }
+    return { success: true, reflection, insight: insight ? { id: insight.id, cluster_key: insight.cluster_key, score: insight.score, status: insight.status } : null }
   })
 
   app.get('/reflections', async (request) => {
