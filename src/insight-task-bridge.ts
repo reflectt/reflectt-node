@@ -219,8 +219,8 @@ export function resolveAssignment(insight: Insight, teamId?: string): Assignment
     const suggestion = suggestAssignee(syntheticTask, allTasks as any)
     const suggestedAgent = suggestion.suggested
 
-    if (suggestedAgent && !authors.includes(suggestedAgent)) {
-      // Scoring engine picked a non-author — great
+    if (suggestedAgent && !authors.includes(suggestedAgent) && (candidates.length === 0 || candidates.includes(suggestedAgent))) {
+      // Scoring engine picked a non-author within candidates — great
       assignee = suggestedAgent
       reason = `Scoring engine selected non-author "${suggestedAgent}" (guardrail active, sole author "${authors[0]}" avoided)`
       guardrailApplied = true
