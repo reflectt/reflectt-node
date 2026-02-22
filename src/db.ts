@@ -32,6 +32,20 @@ export function getDb(): Database.Database {
   _db.pragma('synchronous = NORMAL')
   _db.pragma('foreign_keys = ON')
 
+  // Prevent SQLITE_BUSY timeouts under concurrent agent access.
+  // 5000ms wait before returning BUSY — covers typical heartbeat storms.
+  _db.pragma('busy_timeout = 5000')
+
+  // WAL auto-checkpoint every 1000 pages (~4MB) to prevent unbounded WAL growth
+  _db.pragma('wal_autocheckpoint = 1000')
+
+  // Checkpoint WAL on startup to reclaim disk space from accumulated writes
+  try {
+    _db.pragma('wal_checkpoint(TRUNCATE)')
+  } catch {
+    // Non-fatal: checkpoint may fail if another process holds a read lock
+  }
+
   // Run schema migrations
   runMigrations(_db)
 
@@ -370,6 +384,17 @@ function runMigrations(db: Database.Database): void {
         }
         db.exec("CREATE INDEX IF NOT EXISTS idx_insights_task_id ON insights(task_id)")
       },
+    },
+    {
+      version: 12,
+      // Compound indexes for hot query paths — eliminates TEMP B-TREE sorts
+      // on chat_messages (92K+ rows) and tasks (900+ rows) under concurrent agent load.
+      sql: `
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_channel_ts ON chat_messages(channel, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_from_ts ON chat_messages("from", timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_tasks_assignee_status ON tasks(assignee, status);
+        CREATE INDEX IF NOT EXISTS idx_tasks_status_priority ON tasks(status, priority);
+      `,
     },
   ]
 
