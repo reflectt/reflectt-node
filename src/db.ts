@@ -327,6 +327,7 @@ function runMigrations(db: Database.Database): void {
           cooldown_until INTEGER,
           cooldown_reason TEXT,
           severity_max TEXT,
+          task_id TEXT,
           metadata TEXT,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL
@@ -339,9 +340,13 @@ function runMigrations(db: Database.Database): void {
     },
     {
       version: 9,
-      sql: `
-        ALTER TABLE insights ADD COLUMN task_id TEXT;
-      `,
+      // task_id now in base schema; ALTER handled via runFn for legacy DBs
+      runFn: (database) => {
+        const cols = database.pragma('table_info(insights)') as Array<{ name: string }>
+        if (!cols.some(c => c.name === 'task_id')) {
+          database.exec('ALTER TABLE insights ADD COLUMN task_id TEXT')
+        }
+      },
     },
     {
       version: 10,
