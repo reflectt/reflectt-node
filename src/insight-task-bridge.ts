@@ -397,6 +397,58 @@ export function startInsightTaskBridge(): void {
   }
   eventBus.on(LISTENER_ID, handlePromotedInsight)
   console.log('[InsightTaskBridge] Listening for insight:promoted events')
+
+  // Catch-up scan: process any promoted insights that were missed
+  // (e.g., emitted before bridge was registered, or async handler failed)
+  catchUpPromotedInsights().catch(err =>
+    console.error('[InsightTaskBridge] Catch-up scan error:', err)
+  )
+}
+
+/**
+ * Scan for promoted insights without linked tasks and process them.
+ * Runs once on bridge startup to close the event-miss gap.
+ */
+async function catchUpPromotedInsights(): Promise<void> {
+  const db = getDb()
+  // Find insights that are promoted but never got a task.
+  // Check both status=promoted (set by engine) and readiness signals.
+  const rows = db.prepare(`
+    SELECT * FROM insights
+    WHERE task_id IS NULL
+      AND (
+        status = 'promoted'
+        OR promotion_readiness IN ('promoted', 'override', 'ready')
+      )
+      AND status NOT IN ('closed', 'pending_triage', 'task_created')
+    ORDER BY score DESC
+  `).all() as any[]
+
+  if (rows.length === 0) return
+
+  console.log(`[InsightTaskBridge] Catch-up: found ${rows.length} promoted insight(s) without tasks`)
+  let processed = 0
+
+  for (const row of rows) {
+    const insight = getInsight(row.id)
+    if (!insight || insight.task_id) continue // re-check after getInsight
+
+    const severity = insight.severity_max || 'medium'
+    const isAutoCreate = config.autoCreateSeverities.includes(severity)
+
+    if (isAutoCreate) {
+      await autoCreateTask(insight)
+      processed++
+    } else if (insight.status !== 'pending_triage') {
+      updateInsightStatus(insight.id, 'pending_triage')
+      stats.insightsTriaged++
+      processed++
+    }
+  }
+
+  if (processed > 0) {
+    console.log(`[InsightTaskBridge] Catch-up: processed ${processed} insight(s)`)
+  }
 }
 
 export function stopInsightTaskBridge(): void {
