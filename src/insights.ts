@@ -181,20 +181,40 @@ function _inferFailureFamily(pain: string): string {
 // ── Promotion gate ──
 
 /**
+ * Minimum content quality check for a reflection.
+ * Prevents synthetic/test reflections with sparse content from triggering
+ * promotion. Each key field must have at least MIN_FIELD_LENGTH chars
+ * and at least MIN_QUALITY_FIELDS fields must pass.
+ */
+const MIN_FIELD_LENGTH = 10
+const MIN_QUALITY_FIELDS = 3
+
+export function hasMinimumQuality(reflection: Reflection): boolean {
+  const fields = [reflection.pain, reflection.impact, reflection.suspected_why, reflection.proposed_fix]
+  const qualifyingFields = fields.filter(f => f && f.trim().length >= MIN_FIELD_LENGTH)
+  return qualifyingFields.length >= MIN_QUALITY_FIELDS
+}
+
+/**
  * Can this set of reflections promote an insight?
  *
  * Rules:
+ *   0. At least one reflection must pass minimum quality gate
  *   1. >= 2 independent reflections (different authors)
  *   2. OR 1 high/critical-severity reflection with evidence (override)
  */
 export function canPromote(reflections: Reflection[]): boolean {
-  // High-severity override
+  // Quality gate: at least one substantive reflection required
+  const hasQualityReflection = reflections.some(hasMinimumQuality)
+  if (!hasQualityReflection) return false
+
+  // High-severity override (only from quality reflections)
   const hasHighSeverityWithEvidence = reflections.some(
-    r => (r.severity === 'high' || r.severity === 'critical') && r.evidence.length > 0
+    r => (r.severity === 'high' || r.severity === 'critical') && r.evidence.length > 0 && hasMinimumQuality(r)
   )
   if (hasHighSeverityWithEvidence) return true
 
-  // Standard: 2 independent authors
+  // Standard: 2 independent authors (at least one quality)
   const uniqueAuthors = new Set(reflections.map(r => r.author))
   return uniqueAuthors.size >= PROMOTION_THRESHOLD
 }
