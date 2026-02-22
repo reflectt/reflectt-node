@@ -69,6 +69,7 @@ Operationally:
 | GET | `/health/team/summary` | Compact team health summary |
 | GET | `/health/team/history` | Historical team health data |
 | GET | `/health/workflow` | Unified per-agent workflow state: doing-task age, last shipped timestamp, blocker flag, artifact path, and linked PR state |
+| GET | `/health/reflection-pipeline` | Reflection→Insight→Promotion health signal. Returns recent reflection/insight/promotion counts, status (`healthy`\|`at_risk`\|`broken`), and alert timestamps. Triggers alert when reflections flow but insights remain zero past threshold. |
 | GET | `/health/backlog` | Backlog readiness snapshot by lane/agent with ready-floor breach detection and stale-validating summary. |
 | GET | `/health/mention-ack` | Mention-ack lifecycle metrics (pending, timeout, latency counters) |
 | GET | `/health/mention-ack/recent` | Recent mention-ack entries for debugging. Query: `limit` (max 100) |
