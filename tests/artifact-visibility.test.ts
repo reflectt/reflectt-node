@@ -1,7 +1,18 @@
-// Tests for GET /tasks/:id/artifacts and GET /tasks/heartbeat-status endpoints
-import { describe, it, expect } from 'vitest'
+// Integration tests for GET /tasks/:id/artifacts and GET /tasks/heartbeat-status endpoints
+// Auto-skipped when server is unavailable (e.g., CI environment)
+import { describe, it, expect, beforeAll } from 'vitest'
 
 const BASE = 'http://127.0.0.1:4445'
+let serverUp = false
+
+beforeAll(async () => {
+  try {
+    const res = await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(2000) })
+    serverUp = res.ok
+  } catch {
+    serverUp = false
+  }
+})
 
 // Helper: create a task with artifacts metadata, return ID
 async function createTestTask(overrides: Record<string, any> = {}) {
@@ -45,18 +56,9 @@ async function addComment(taskId: string, author: string, content: string) {
   return res.json() as any
 }
 
-// Helper: update task status
-async function updateTask(taskId: string, patch: Record<string, any>) {
-  const res = await fetch(`${BASE}/tasks/${taskId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  })
-  return res.json() as any
-}
-
 describe('GET /tasks/:id/artifacts', () => {
-  it('returns empty artifacts for task with no artifact metadata', async () => {
+  it('returns empty artifacts for task with no artifact metadata', async (ctx) => {
+    if (!serverUp) return ctx.skip()
     const id = await createTestTask()
     const res = await fetch(`${BASE}/tasks/${id}/artifacts`)
     expect(res.status).toBe(200)
@@ -66,7 +68,8 @@ describe('GET /tasks/:id/artifacts', () => {
     expect(data.artifacts).toEqual([])
   })
 
-  it('resolves artifact_path from metadata', async () => {
+  it('resolves artifact_path from metadata', async (ctx) => {
+    if (!serverUp) return ctx.skip()
     const id = await createTestTask({
       metadata: {
         source_reflection: 'ref-test',
@@ -80,11 +83,11 @@ describe('GET /tasks/:id/artifacts', () => {
     const artRef = data.artifacts.find((a: any) => a.source === 'metadata.artifact_path')
     expect(artRef).toBeDefined()
     expect(artRef.type).toBe('file')
-    // File may or may not exist, but the path should be resolved
     expect(artRef.path).toBe('process/test-artifact.md')
   })
 
-  it('resolves URL artifacts', async () => {
+  it('resolves URL artifacts', async (ctx) => {
+    if (!serverUp) return ctx.skip()
     const id = await createTestTask({
       metadata: {
         source_reflection: 'ref-test',
@@ -99,7 +102,8 @@ describe('GET /tasks/:id/artifacts', () => {
     expect(urlArt.accessible).toBe(true)
   })
 
-  it('includes heartbeat status', async () => {
+  it('includes heartbeat status', async (ctx) => {
+    if (!serverUp) return ctx.skip()
     const id = await createTestTask()
     const res = await fetch(`${BASE}/tasks/${id}/artifacts`)
     const data = await res.json() as any
@@ -107,14 +111,16 @@ describe('GET /tasks/:id/artifacts', () => {
     expect(data.heartbeat.thresholdMs).toBe(30 * 60 * 1000)
   })
 
-  it('returns 404 for missing task', async () => {
+  it('returns 404 for missing task', async (ctx) => {
+    if (!serverUp) return ctx.skip()
     const res = await fetch(`${BASE}/tasks/task-nonexistent-id/artifacts`)
     expect(res.status).toBe(404)
   })
 })
 
 describe('GET /tasks/heartbeat-status', () => {
-  it('returns heartbeat status with doing task count', async () => {
+  it('returns heartbeat status with doing task count', async (ctx) => {
+    if (!serverUp) return ctx.skip()
     const res = await fetch(`${BASE}/tasks/heartbeat-status`)
     expect(res.status).toBe(200)
     const data = await res.json() as any
@@ -127,17 +133,13 @@ describe('GET /tasks/heartbeat-status', () => {
 })
 
 describe('POST /tasks/:id/comments heartbeat warning', () => {
-  it('returns heartbeatWarning when comment gap exceeds threshold on doing task', async () => {
-    // Create task and move to doing — the gap from creation to first comment
-    // will likely exceed 0 but not 30m. This tests the structure exists.
+  it('returns heartbeatWarning when comment gap exceeds threshold on doing task', async (ctx) => {
+    if (!serverUp) return ctx.skip()
     const id = await createTestTask()
-    // First comment
     const result = await addComment(id, 'link', 'Starting work on this')
     expect(result.success).toBe(true)
-    // heartbeatWarning should only appear if gap > 30m, so for a fresh task it should be absent
-    // (unless the task was created >30m ago, which is unlikely in tests)
     expect(result.comment).toBeDefined()
-    // The field should be absent for recent tasks
+    // heartbeatWarning should only appear if gap > 30m — absent for fresh tasks
     if (result.heartbeatWarning) {
       expect(typeof result.heartbeatWarning).toBe('string')
     }
