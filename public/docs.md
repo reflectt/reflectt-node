@@ -403,6 +403,20 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/insights/promotions` | List all promotion audit entries. Query: `limit`. |
 | GET | `/insights/recurring/candidates` | List recurring task candidates from insights with persistent patterns. Auto-suggests owner/lane per failure family. Template-first (no auto task spam). |
 
+## Lineage Timeline (Debug/Audit)
+
+Traces the full reflection → insight → task chain for debugging and audit. Each insight forms a chain; anomalies (missing links, stale promotions) are flagged automatically.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/lineage` | List lineage entries (insight-centric chains). Each entry includes linked reflection, insight, task, promotion audit, timeline events, and anomaly flags. Query: `status` (insight status filter), `team_id`, `role_type`, `author`, `has_anomaly` (true\|false), `limit` (default 50, max 200), `offset`. Sorted by most recently updated. |
+| GET | `/lineage/:id` | Get lineage chain by insight ID, reflection ID, or task ID. Resolves any ID type to its full chain. Returns 404 if no chain found. |
+| GET | `/lineage/stats` | Lineage statistics: total chains, chains with tasks, chains with anomalies, anomaly type breakdown. |
+
+**Anomaly types:** `missing_insight` (reflection not clustered), `missing_task` (task_id points to deleted task), `orphaned_insight` (insight with no reflections), `stale_promotion` (promoted >48h with no task), `missing_reflection` (reflection ID in insight but not in DB).
+
+**Timeline events:** `reflection_created`, `insight_created`, `insight_promoted`, `task_created` — each with timestamp and actor.
+
 ## Intake Pipeline
 
 | Method | Path | Description |
