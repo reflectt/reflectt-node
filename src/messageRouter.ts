@@ -37,6 +37,7 @@ export type MessageCategory =
   | 'digest'           // Periodic digest
   | 'system-info'      // System-level informational
   | 'mention-rescue'   // Fallback nudge for unresponded mentions
+  | 'continuity-loop'  // Queue replenishment and self-nudge automation
 
 export interface RoutedMessage {
   from: string

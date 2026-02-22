@@ -28,6 +28,7 @@ export type PolicyActionKind =
   | 'auto-unassign-orphan'
   | 'ready-queue-warning'
   | 'idle-queue-escalation'
+  | 'continuity-replenish'
 
 export interface PolicyAction {
   id: string
@@ -201,6 +202,28 @@ export class BoardHealthWorker {
         const { tickReflectionNudges } = await import('./reflection-automation.js')
         await tickReflectionNudges()
       } catch { /* reflection automation may not be loaded */ }
+    }
+
+    // 3c. Continuity loop: auto-replenish queues from promoted insights
+    if (!dryRun) {
+      try {
+        const { tickContinuityLoop } = await import('./continuity-loop.js')
+        const clResult = await tickContinuityLoop()
+        if (clResult.replenished > 0) {
+          actions.push(...clResult.actions.map(a => ({
+            id: a.id,
+            kind: 'continuity-replenish' as PolicyActionKind,
+            taskId: a.taskId ?? null,
+            agent: a.agent,
+            description: a.detail,
+            previousState: { insightId: a.insightId },
+            appliedAt: a.timestamp,
+            rolledBack: false,
+            rolledBackAt: null,
+            rollbackBy: null,
+          })))
+        }
+      } catch { /* continuity loop may not be loaded */ }
     }
 
     // 4. Emit digest if interval elapsed

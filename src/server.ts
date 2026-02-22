@@ -5543,6 +5543,31 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, config: getBridgeConfig() }
   })
 
+  // ── Continuity Loop ──────────────────────────────────────────────────
+
+  app.get('/continuity/stats', async () => {
+    const { getContinuityStats } = await import('./continuity-loop.js')
+    return getContinuityStats()
+  })
+
+  app.get('/continuity/audit', async (request) => {
+    const query = request.query as Record<string, string>
+    const { getContinuityAuditFromDb } = await import('./continuity-loop.js')
+    return {
+      actions: getContinuityAuditFromDb({
+        agent: query.agent,
+        limit: query.limit ? Number(query.limit) : 50,
+        since: query.since ? Number(query.since) : undefined,
+      }),
+    }
+  })
+
+  app.post('/continuity/tick', async () => {
+    const { tickContinuityLoop } = await import('./continuity-loop.js')
+    const result = await tickContinuityLoop()
+    return { success: true, ...result }
+  })
+
   // Assignment preview: dry-run the ownership guardrail for an insight
   app.get<{ Params: { id: string } }>('/insights/:id/assignment-preview', async (request, reply) => {
     const insight = getInsight(request.params.id)
