@@ -219,12 +219,16 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
       })
       // This task is leaving the queue, so effective count will drop
       const effectiveReady = unblockedTodo.length
-      if (effectiveReady < rqf.minReady) {
+      const hasOverride = task.metadata?.readyQueueOverride === true
+      if (effectiveReady < rqf.minReady && !hasOverride) {
+        const enforce = rqf.enforceBlock !== false // default to enforced
         items.push({
           field: 'readyQueueFloor',
-          severity: 'warning',
-          message: `Ready queue will be ${effectiveReady}/${rqf.minReady} after this transition. Ensure next tasks are queued for @${task.assignee}.`,
-          hint: 'Create/assign more todo tasks to maintain engineering lane throughput.',
+          severity: enforce ? 'error' : 'warning',
+          message: `Ready queue will be ${effectiveReady}/${rqf.minReady} after this transition. ${enforce ? 'Blocked: queue more tasks for @' + task.assignee + ' before closing.' : 'Ensure next tasks are queued for @' + task.assignee + '.'}`,
+          hint: enforce
+            ? 'Next-task-before-close rule: assign at least ' + rqf.minReady + ' todo tasks to @' + task.assignee + ' before this task can move to ' + targetStatus + '. Override with metadata.readyQueueOverride=true.'
+            : 'Create/assign more todo tasks to maintain engineering lane throughput.',
         })
       }
     }
