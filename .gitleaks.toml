@@ -1,5 +1,8 @@
 # Gitleaks configuration for reflectt-node
 # https://github.com/gitleaks/gitleaks
+#
+# Governance: Changes to this file require review from @sage or @kai.
+# Do NOT add broad directory allowlists. Each path pattern must be specific.
 
 title = "reflectt-node secret scanning"
 
@@ -10,18 +13,20 @@ useDefault = true
 # Allowlist: documented false positives only
 # Each entry must have a comment explaining why it's safe
 [allowlist]
-description = "Audited false positives"
+description = "Audited false positives — scoped patterns only"
 
-# Documentation files with example/placeholder credentials (not real)
-# Test files with mock data
+# Test files with mock data, dependency/build artifacts, env examples
+# NOTE: artifacts/ and process/ are NOT blanket-allowed — only specific safe patterns
 paths = [
   '''tests/.*\.test\.ts$''',
   '''node_modules/''',
   '''dist/''',
   '''\.git/''',
   '''\.env\.example$''',
-  '''artifacts/''',
-  '''process/''',
+  '''artifacts/.*\.md$''',
+  '''artifacts/.*\.json$''',
+  '''process/.*\.md$''',
+  '''process/.*\.json$''',
 ]
 
 # Documentation placeholder patterns (e.g. "your_gateway_token_here", "sk_test_xxxxx")

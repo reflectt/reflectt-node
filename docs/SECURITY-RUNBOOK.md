@@ -43,8 +43,15 @@ gitleaks detect --source . --log-opts="HEAD~10..HEAD"
 - Test files are excluded by default (`tests/*.test.ts`)
 - To add a false positive:
   1. Add to `.gitleaks.toml` allowlist with a comment explaining why
-  2. Get PR approval from a reviewer
+  2. Get PR approval from a reviewer (required: @sage or @kai)
   3. Never allowlist real credentials — rotate them instead
+
+### Allowlist Governance Rules
+
+1. **No broad directory allowlists.** Never add a bare `artifacts/` or `process/` path — only scoped file-type patterns (e.g. `artifacts/.*\.md$`).
+2. **Each allowlist entry must have a documented reason** (comment in `.gitleaks.toml`).
+3. **Review required.** All changes to `.gitleaks.toml` require review from @sage or @kai before merge.
+4. **Negative test on PR.** When tightening allowlists, include proof that a real-looking secret in a source path is still detected (CI or manual scan output).
 
 ## Credential Rotation Checklist
 
