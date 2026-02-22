@@ -146,6 +146,53 @@ describe('EventBus internal listeners', () => {
     expect(typeof eventBus.off).toBe('function')
     expect(typeof eventBus.emit).toBe('function')
   })
+
+  it('regression: listener processes events emitted through EventBus after bridge startup', async () => {
+    // This test exercises the REAL listener path (not direct handler calls)
+    // to prove registration survival across multiple events.
+    const { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, _resetBridgeStats } = await import('../src/insight-task-bridge.js')
+
+    _resetBridgeStats()
+    startInsightTaskBridge()
+
+    // Create two insights with high severity
+    const { insight: insight1 } = createTestInsight({
+      tags: ['stage:eb-regression1', 'family:eb-regression1', 'unit:eb-regression1'],
+      severity: 'high',
+    })
+    const { insight: insight2 } = createTestInsight({
+      tags: ['stage:eb-regression2', 'family:eb-regression2', 'unit:eb-regression2'],
+      severity: 'critical',
+    })
+
+    // Emit through EventBus (not direct handler call)
+    eventBus.emit({
+      id: `evt-regression-1-${Date.now()}`,
+      type: 'task_created' as const,
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: insight1.id },
+    })
+
+    // Small delay to allow async handler
+    await new Promise(r => setTimeout(r, 50))
+
+    // Emit second event — proves listener survives across multiple events
+    eventBus.emit({
+      id: `evt-regression-2-${Date.now()}`,
+      type: 'task_created' as const,
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: insight2.id },
+    })
+
+    await new Promise(r => setTimeout(r, 50))
+
+    const stats = getInsightTaskBridgeStats()
+    // Both should have been processed (auto-created since high/critical)
+    expect(stats.tasksAutoCreated).toBeGreaterThanOrEqual(2)
+    expect(stats.lastEventAt).toBeTruthy()
+
+    stopInsightTaskBridge()
+  })
 })
 
 describe('Triage endpoints', () => {
