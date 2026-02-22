@@ -471,7 +471,7 @@ Team-wide nudging and SLA tracking for reflection cadence.
 ### How It Works
 
 1. **Post-task nudges**: When a task moves to `done` or `blocked`, the assignee is queued for a reflection nudge (configurable delay, default 5min).
-2. **Idle nudges**: Agents who haven't submitted a reflection within their cadence interval (default: 8h for humans, 2h for agents) receive a reminder.
+2. **Idle nudges**: Agents who haven't submitted a reflection within their role-based cadence interval receive a reminder. Cadence is resolved by agent role (e.g., `engineering: 4h`, `ops: 8h`) via `roleCadenceHours` config, falling back to `idleReflectionHours` default (8h).
 3. **SLA breach**: Agents overdue beyond 1.5× their cadence interval are marked as `overdue`.
 4. **Cooldowns**: Nudges are throttled per-agent (default: 60min between nudges).
 5. **Tracking resets**: Submitting a reflection via `POST /reflections` resets the agent's tasks-done counter and last-reflection timestamp.

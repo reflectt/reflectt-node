@@ -4508,11 +4508,17 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
-      // ── Reflection automation: nudge agent to reflect after task completion ──
+      // ── Reflection automation: nudge agent to reflect after post-task transitions ──
       if (parsed.status === 'done' && existing.status !== 'done' && task.assignee) {
         try {
           const { onTaskDone } = await import('./reflection-automation.js')
           onTaskDone(task)
+        } catch { /* reflection automation may not be loaded */ }
+      }
+      if (parsed.status === 'blocked' && existing.status !== 'blocked' && task.assignee) {
+        try {
+          const { onTaskBlocked } = await import('./reflection-automation.js')
+          onTaskBlocked(task)
         } catch { /* reflection automation may not be loaded */ }
       }
 

@@ -8,6 +8,7 @@ import type { Task } from './types.js'
 import { routeMessage } from './messageRouter.js'
 import { policyManager } from './policy.js'
 import { countReflections, listReflections } from './reflections.js'
+import { getAgentRoles } from './assignment.js'
 
 // ── Types ──
 
@@ -42,6 +43,7 @@ interface PendingNudge {
   taskTitle: string
   doneAt: number
   nudgeAt: number // when to fire the nudge
+  trigger: 'done' | 'blocked'
 }
 
 // ── State ──
@@ -67,9 +69,22 @@ export function ensureReflectionTrackingTable(): void {
 // ── Core: task completion hook ──
 
 /**
- * Called when a task transitions to done. Queues a reflection nudge.
+ * Called when a task transitions to a post-task state (done or blocked).
+ * Queues a reflection nudge after a configurable delay.
  */
 export function onTaskDone(task: Task): void {
+  return onPostTaskTransition(task, 'done')
+}
+
+/**
+ * Called when a task transitions to blocked.
+ * Queues a reflection nudge so the agent can capture context while fresh.
+ */
+export function onTaskBlocked(task: Task): void {
+  return onPostTaskTransition(task, 'blocked')
+}
+
+function onPostTaskTransition(task: Task, trigger: 'done' | 'blocked'): void {
   const config = getConfig()
   if (!config.enabled) return
 
@@ -96,6 +111,7 @@ export function onTaskDone(task: Task): void {
     taskTitle: task.title,
     doneAt: Date.now(),
     nudgeAt,
+    trigger,
   })
 }
 
@@ -147,7 +163,7 @@ export async function tickReflectionNudges(): Promise<{
     const tracking = getAgentTracking(nudge.agent)
     if (tracking && tracking.last_reflection_at && tracking.last_reflection_at > nudge.doneAt) continue
 
-    await sendPostTaskNudge(nudge.agent, nudge.taskId, nudge.taskTitle, config)
+    await sendPostTaskNudge(nudge.agent, nudge.taskId, nudge.taskTitle, config, nudge.trigger)
     lastNudgeAt[nudge.agent] = now
     postTaskNudges++
   }
@@ -163,7 +179,8 @@ export async function tickReflectionNudges(): Promise<{
     const tracking = getAgentTracking(agent)
     const lastReflection = tracking?.last_reflection_at || 0
     const hoursSince = (now - lastReflection) / (1000 * 60 * 60)
-    const cadenceHours = config.roleCadenceHours[agent] || config.idleReflectionHours
+    const agentRole = resolveAgentRole(agent)
+    const cadenceHours = config.roleCadenceHours[agentRole] || config.idleReflectionHours
 
     if (hoursSince >= cadenceHours && lastReflection > 0) {
       await sendIdleNudge(agent, Math.floor(hoursSince), tracking?.tasks_done_since_reflection || 0, config)
@@ -196,7 +213,8 @@ export function getReflectionSLAs(): ReflectionSLA[] {
   for (const agent of agents) {
     const tracking = getAgentTracking(agent)
     const lastReflection = tracking?.last_reflection_at || null
-    const cadenceHours = config.roleCadenceHours[agent] || config.idleReflectionHours
+    const agentRole = resolveAgentRole(agent)
+    const cadenceHours = config.roleCadenceHours[agentRole] || config.idleReflectionHours
 
     let hoursOverdue: number | null = null
     let status: ReflectionSLA['status'] = 'healthy'
@@ -233,8 +251,11 @@ export function getReflectionSLAs(): ReflectionSLA[] {
 
 // ── Nudge messages ──
 
-async function sendPostTaskNudge(agent: string, taskId: string, taskTitle: string, config: ReflectionNudgeConfig): Promise<void> {
-  const msg = `🪞 Reflection nudge: @${agent}, you just completed "${taskTitle}" (${taskId}). ` +
+async function sendPostTaskNudge(agent: string, taskId: string, taskTitle: string, config: ReflectionNudgeConfig, trigger: 'done' | 'blocked' = 'done'): Promise<void> {
+  const action = trigger === 'blocked'
+    ? `your task "${taskTitle}" (${taskId}) is blocked`
+    : `you just completed "${taskTitle}" (${taskId})`
+  const msg = `🪞 Reflection nudge: @${agent}, ${action}. ` +
     `Take 2 min to reflect — what went well, what was painful, and what would you change? ` +
     `Submit via POST /reflections with your observations.`
 
@@ -288,6 +309,20 @@ function getAgentTracking(agent: string): {
   ensureReflectionTrackingTable()
   const db = getDb()
   return db.prepare('SELECT * FROM reflection_tracking WHERE agent = ?').get(agent) as any
+}
+
+/**
+ * Resolve agent name to their team role (e.g., 'engineering', 'ops').
+ * Falls back to 'general' if role not found.
+ */
+function resolveAgentRole(agent: string): string {
+  try {
+    const roles = getAgentRoles()
+    const match = roles.find(r => r.name === agent)
+    return match?.role || 'general'
+  } catch {
+    return 'general'
+  }
 }
 
 function getActiveAgents(): string[] {

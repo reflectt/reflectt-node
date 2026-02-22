@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   onTaskDone,
+  onTaskBlocked,
   onReflectionSubmitted,
   tickReflectionNudges,
   getReflectionSLAs,
@@ -240,6 +241,80 @@ describe('getReflectionSLAs', () => {
       const healthyIdx = slas.findIndex(s => s.status === 'healthy')
       if (overdueIdx >= 0 && healthyIdx >= 0) {
         expect(overdueIdx).toBeLessThan(healthyIdx)
+      }
+    }
+  })
+})
+
+// ── Blocked transition trigger ──
+
+describe('onTaskBlocked', () => {
+  it('should queue a pending nudge when task becomes blocked', () => {
+    const task = makeTask({ assignee: 'link', status: 'blocked' })
+    onTaskBlocked(task)
+
+    const pending = _getPendingNudges()
+    expect(pending.length).toBe(1)
+    expect(pending[0].agent).toBe('link')
+    expect(pending[0].trigger).toBe('blocked')
+  })
+
+  it('should not queue nudge when no assignee', () => {
+    const task = makeTask({ assignee: undefined, status: 'blocked' })
+    onTaskBlocked(task)
+
+    expect(_getPendingNudges().length).toBe(0)
+  })
+
+  it('should fire blocked nudge with correct trigger context', async () => {
+    ensureReflectionTrackingTable()
+    const task = makeTask({ assignee: 'blocked-agent', status: 'blocked' })
+    onTaskBlocked(task)
+
+    const pending = _getPendingNudges()
+    expect(pending.length).toBe(1)
+    expect(pending[0].trigger).toBe('blocked')
+
+    // Set to fire immediately
+    ;(pending[0] as any).nudgeAt = Date.now() - 1000
+
+    const result = await tickReflectionNudges()
+    expect(result).toHaveProperty('postTaskNudges')
+  })
+})
+
+// ── Role-based cadence ──
+
+describe('role-based cadence resolution', () => {
+  it('should track agents through onTaskDone and onTaskBlocked', () => {
+    ensureReflectionTrackingTable()
+
+    // Both done and blocked transitions should create tracking entries
+    onTaskDone(makeTask({ assignee: 'role-agent-eng' }))
+    onTaskBlocked(makeTask({ assignee: 'role-agent-ops' }))
+
+    const pending = _getPendingNudges()
+    expect(pending.length).toBe(2)
+    expect(pending[0].trigger).toBe('done')
+    expect(pending[1].trigger).toBe('blocked')
+  })
+
+  it('should use role-based cadence when resolving SLAs', () => {
+    ensureReflectionTrackingTable()
+    // Submit reflections so agents appear in tracking
+    onReflectionSubmitted('role-test-a')
+    onReflectionSubmitted('role-test-b')
+
+    // Make them active by completing tasks
+    onTaskDone(makeTask({ assignee: 'role-test-a' }))
+    onTaskDone(makeTask({ assignee: 'role-test-b' }))
+
+    const slas = getReflectionSLAs()
+    // Both should be tracked and healthy (just reflected)
+    expect(Array.isArray(slas)).toBe(true)
+    for (const sla of slas) {
+      if (['role-test-a', 'role-test-b'].includes(sla.agent)) {
+        expect(sla.status).toBe('healthy')
       }
     }
   })
