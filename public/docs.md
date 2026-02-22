@@ -512,3 +512,31 @@ Set via `reflectionNudge` in policy config:
   }
 }
 ```
+
+## Usage Tracking + Cost Guardrails
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/usage/report` | Record model usage event. Body: `{ agent, model, provider?, input_tokens, output_tokens, estimated_cost_usd?, category?, task_id?, team_id? }`. Auto-estimates cost if not provided. |
+| POST | `/usage/report/batch` | Record batch of usage events. Body: `{ events: [...] }`. |
+| GET | `/usage/summary` | Aggregated usage totals. Query: `since`, `until`, `agent`, `team_id`. |
+| GET | `/usage/by-agent` | Per-agent cost breakdown. Query: `since`, `until`. |
+| GET | `/usage/by-model` | Per-model cost breakdown. Query: `since`, `until`. |
+| GET | `/usage/by-task` | Per-task cost attribution. Query: `since`, `until`, `limit`. |
+| GET | `/usage/estimate` | Dry-run cost estimate (no storage). Query: `model`, `input_tokens`, `output_tokens`. |
+| GET | `/usage/caps` | List active spend caps with current utilization status. |
+| POST | `/usage/caps` | Create spend cap. Body: `{ scope: "global"\|"agent"\|"team", scope_id?, period: "daily"\|"weekly"\|"monthly", limit_usd, action: "warn"\|"throttle"\|"block" }`. |
+| DELETE | `/usage/caps/:id` | Delete a spend cap. |
+| GET | `/usage/routing-suggestions` | Smart routing savings suggestions (which low-stakes categories could use cheaper models). Query: `since`. |
+
+### Model Pricing (built-in estimates, per 1M tokens)
+| Model | Input | Output |
+|-------|-------|--------|
+| claude-opus-4-6 | $15.00 | $75.00 |
+| claude-sonnet-4-6 | $3.00 | $15.00 |
+| gpt-5.3 / gpt-5.3-codex | $2.00 | $8.00 |
+| gpt-4o-mini | $0.15 | $0.60 |
+
+### Spend Cap Events
+- `usage:cap_warning` — emitted when spend reaches 80% of cap limit
+- `usage:cap_breached` — emitted when spend exceeds cap limit
