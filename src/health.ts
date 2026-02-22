@@ -19,6 +19,7 @@ import { taskManager } from './tasks.js'
 import { routeMessage } from './messageRouter.js'
 import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
+import { getDb } from './db.js'
 
 /**
  * Validate a task timestamp is within reasonable bounds.
@@ -315,6 +316,8 @@ class TeamHealthMonitor {
   /** Maps mentionId → { lastRescueAt, rescueCount }. Once rescued, won't rescue again (one-shot). */
   private mentionRescueState = new Map<string, { lastRescueAt: number; rescueCount: number }>()
   private mentionRescueLastAt = 0
+  /** Thread-level idempotency: tracks which thread keys have been rescued (persisted in SQLite). */
+  private mentionRescueDbInitialized = false
 
   private systemStartTime = Date.now()
   private requestCount = 0
@@ -1477,6 +1480,132 @@ class TeamHealthMonitor {
     return { alerts }
   }
 
+  /**
+   * Ensure the mention_rescue_state SQLite table exists.
+   * Called lazily on first tick to avoid import-time side effects.
+   */
+  private ensureMentionRescueDb(): void {
+    if (this.mentionRescueDbInitialized) return
+    try {
+      const db = getDb()
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS mention_rescue_state (
+          thread_key TEXT PRIMARY KEY,
+          message_ids TEXT NOT NULL DEFAULT '[]',
+          rescued_at INTEGER NOT NULL,
+          rescue_count INTEGER NOT NULL DEFAULT 1
+        )
+      `)
+      this.mentionRescueDbInitialized = true
+    } catch {
+      // DB not available — fall back to in-memory only
+    }
+  }
+
+  /**
+   * Build a thread-level idempotency key for mention-rescue.
+   * Groups mentions by thread context so that multiple messages in the same
+   * thread/channel with the same mentioned agents produce one rescue, not many.
+   *
+   * Key format: `{channel}:{threadId || 'root'}:{sortedAgents}`
+   */
+  private buildMentionThreadKey(mention: Record<string, unknown>): string {
+    const channel = String(mention.channel || 'general')
+    const threadId = String(mention.threadId || mention.thread_id || 'root')
+    const content = typeof mention.content === 'string' ? mention.content : ''
+    const agents = (content.match(/@(kai|link|pixel)/gi) || [])
+      .map(a => a.toLowerCase())
+      .sort()
+      .join(',')
+    return `${channel}:${threadId}:${agents}`
+  }
+
+  /**
+   * Check if a thread key has already been rescued (persisted or in-memory).
+   */
+  private isThreadRescued(threadKey: string, cooldownMs: number, now: number): boolean {
+    // Check in-memory first (covers current session)
+    for (const [, entry] of this.mentionRescueState) {
+      if (entry.rescueCount > 0) {
+        // In-memory entries are keyed by mentionId, not threadKey — checked below
+      }
+    }
+
+    // Check SQLite for cross-restart persistence
+    try {
+      this.ensureMentionRescueDb()
+      const db = getDb()
+      const row = db.prepare(
+        'SELECT rescued_at, rescue_count FROM mention_rescue_state WHERE thread_key = ?'
+      ).get(threadKey) as { rescued_at: number; rescue_count: number } | undefined
+      if (row && row.rescue_count > 0) {
+        // Within cooldown window — still suppressed
+        if (now - row.rescued_at < cooldownMs) return true
+        // Beyond cooldown — allow re-rescue (but this is unusual; max age usually prevents it)
+        return true // One-shot per thread: once rescued, always rescued
+      }
+    } catch {
+      // DB read failed — rely on in-memory only
+    }
+
+    return false
+  }
+
+  /**
+   * Record a thread rescue in both in-memory state and SQLite.
+   */
+  private recordThreadRescue(threadKey: string, mentionId: string, now: number): void {
+    // In-memory
+    this.mentionRescueState.set(mentionId, { lastRescueAt: now, rescueCount: 1 })
+    this.mentionRescueLastAt = now
+
+    // SQLite persistence
+    try {
+      this.ensureMentionRescueDb()
+      const db = getDb()
+      const existing = db.prepare(
+        'SELECT message_ids, rescue_count FROM mention_rescue_state WHERE thread_key = ?'
+      ).get(threadKey) as { message_ids: string; rescue_count: number } | undefined
+
+      if (existing) {
+        const ids = JSON.parse(existing.message_ids || '[]')
+        if (!ids.includes(mentionId)) ids.push(mentionId)
+        db.prepare(
+          'UPDATE mention_rescue_state SET message_ids = ?, rescued_at = ?, rescue_count = rescue_count + 1 WHERE thread_key = ?'
+        ).run(JSON.stringify(ids), now, threadKey)
+      } else {
+        db.prepare(
+          'INSERT INTO mention_rescue_state (thread_key, message_ids, rescued_at, rescue_count) VALUES (?, ?, ?, 1)'
+        ).run(threadKey, JSON.stringify([mentionId]), now)
+      }
+    } catch {
+      // DB write failed — in-memory state still covers current session
+    }
+  }
+
+  /**
+   * Prune stale rescue state entries from both in-memory and SQLite.
+   */
+  private pruneRescueState(now: number): void {
+    const pruneThresholdMs = 60 * 60_000
+
+    // Prune in-memory
+    for (const [key, entry] of this.mentionRescueState) {
+      if (now - entry.lastRescueAt > pruneThresholdMs) {
+        this.mentionRescueState.delete(key)
+      }
+    }
+
+    // Prune SQLite
+    try {
+      this.ensureMentionRescueDb()
+      const db = getDb()
+      db.prepare('DELETE FROM mention_rescue_state WHERE rescued_at < ?').run(now - pruneThresholdMs)
+    } catch {
+      // DB prune failed — non-critical
+    }
+  }
+
   async runMentionRescueTick(now = Date.now(), options?: { dryRun?: boolean }): Promise<{ rescued: string[] }> {
     const dryRun = options?.dryRun === true
     const rescued: string[] = []
@@ -1484,6 +1613,9 @@ class TeamHealthMonitor {
     if (!this.mentionRescueEnabled) {
       return { rescued }
     }
+
+    // Initialize DB table on first tick
+    this.ensureMentionRescueDb()
 
     const messages = chatManager.getMessages({ limit: 300 })
     const mentions = messages.filter((m: any) => {
@@ -1503,6 +1635,10 @@ class TeamHealthMonitor {
     // Prevents stale mentions from hours/days ago from triggering infinite rescue loops.
     const maxMentionAgeMs = 30 * 60_000
 
+    // Track which thread keys we've already processed this tick to avoid
+    // emitting multiple rescues for different messages in the same thread.
+    const processedThreadKeys = new Set<string>()
+
     for (const mention of mentions) {
       const mentionId = String(mention.id || mention.timestamp || '')
       if (!mentionId) continue
@@ -1517,6 +1653,25 @@ class TeamHealthMonitor {
       // Global cooldown to avoid duplicate fallback nudges across near-identical mentions.
       if (now - this.mentionRescueLastAt < globalCooldownMs) continue
 
+      // ── Thread-level idempotency ─────────────────────────────────────
+      // Build a thread key that groups mentions by channel + thread + mentioned agents.
+      // This prevents duplicate rescues when Ryan sends multiple messages in the
+      // same thread mentioning the same agents.
+      const threadKey = this.buildMentionThreadKey(mention as Record<string, unknown>)
+
+      // Skip if we already processed this thread key during this tick
+      if (processedThreadKeys.has(threadKey)) continue
+
+      // Skip if this thread was already rescued (persisted across restarts)
+      if (this.isThreadRescued(threadKey, cooldownMs, now)) {
+        processedThreadKeys.add(threadKey)
+        continue
+      }
+
+      // Also check in-memory per-message state (backward compat)
+      const rescueEntry = this.mentionRescueState.get(mentionId)
+      if (rescueEntry && rescueEntry.rescueCount > 0) continue
+
       const replied = messages.some((m: any) => {
         const from = (m.from || '').toLowerCase()
         if (!trioSet.has(from as typeof this.trioAgents[number])) return false
@@ -1524,12 +1679,10 @@ class TeamHealthMonitor {
         return ts > mentionAt
       })
 
-      if (replied) continue
-
-      const rescueEntry = this.mentionRescueState.get(mentionId)
-      // One-shot: if we already rescued this mention, skip it entirely.
-      // This prevents duplicate fallback spam for the same unresolved mention.
-      if (rescueEntry && rescueEntry.rescueCount > 0) continue
+      if (replied) {
+        processedThreadKeys.add(threadKey)
+        continue
+      }
 
       // Focus mode is a hard suppressor for fallback nudges.
       const anyFocused = this.trioAgents.some(a => presenceManager.isInFocus(a) !== null)
@@ -1541,18 +1694,14 @@ class TeamHealthMonitor {
 
       if (!dryRun) {
         await routeMessage({ from: 'system', content, category: 'mention-rescue', severity: 'warning' })
-        this.mentionRescueState.set(mentionId, { lastRescueAt: now, rescueCount: 1 })
-        this.mentionRescueLastAt = now
+        this.recordThreadRescue(threadKey, mentionId, now)
       }
+
+      processedThreadKeys.add(threadKey)
     }
 
-    // Prune stale rescue state entries (older than 1 hour) to prevent unbounded map growth
-    const pruneThresholdMs = 60 * 60_000
-    for (const [key, entry] of this.mentionRescueState) {
-      if (now - entry.lastRescueAt > pruneThresholdMs) {
-        this.mentionRescueState.delete(key)
-      }
-    }
+    // Prune stale state from both in-memory and SQLite
+    this.pruneRescueState(now)
 
     return { rescued }
   }

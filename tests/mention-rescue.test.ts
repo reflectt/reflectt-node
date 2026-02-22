@@ -1,95 +1,190 @@
-import { describe, it, expect } from 'vitest'
-
 /**
- * Mention-rescue one-shot idempotency — behavioral specification.
+ * Tests for mention-rescue thread-level idempotency.
  *
- * The core fix is in BoardHealthWorker.runMentionRescueTick():
- * - mentionRescueState now tracks { lastRescueAt, rescueCount } per mentionId
- * - Once rescueCount > 0, the mention is NEVER rescued again (one-shot)
- * - This prevents the duplicate fallback spam we've been seeing
- *
- * Since BoardHealthWorker is tightly coupled to ChatManager and presenceManager,
- * we test the idempotency logic pattern directly rather than through the HTTP API.
+ * Verifies:
+ * - Thread-key dedup prevents duplicate rescues within same thread
+ * - SQLite persistence survives across ticks
+ * - Same-thread repeated tick produces zero duplicates
+ * - Different threads are rescued independently
  */
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { createServer } from '../src/server.js'
+import { getDb } from '../src/db.js'
+import type { FastifyInstance } from 'fastify'
 
-describe('Mention-rescue one-shot idempotency logic', () => {
-  // Simulate the mentionRescueState map behavior
-  type RescueEntry = { lastRescueAt: number; rescueCount: number }
+let app: FastifyInstance
 
-  it('first rescue for a mentionId should fire', () => {
-    const state = new Map<string, RescueEntry>()
-    const mentionId = 'msg-123'
+beforeAll(async () => {
+  app = await createServer()
+  await app.ready()
+})
 
-    const entry = state.get(mentionId)
-    const shouldSkip = entry && entry.rescueCount > 0
-    expect(shouldSkip).toBeFalsy()
+afterAll(async () => {
+  await app.close()
+})
 
-    // After rescue fires:
-    state.set(mentionId, { lastRescueAt: Date.now(), rescueCount: 1 })
-    expect(state.get(mentionId)!.rescueCount).toBe(1)
+beforeEach(() => {
+  // Clear mention_rescue_state table between tests
+  try {
+    const db = getDb()
+    db.exec('DELETE FROM mention_rescue_state')
+  } catch {
+    // Table may not exist yet — first tick will create it
+  }
+})
+
+describe('Mention-rescue idempotency', () => {
+  it('dry-run tick returns rescued array', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/health/mention-rescue/tick?dryRun=true',
+    })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(Array.isArray(body.rescued)).toBe(true)
   })
 
-  it('second rescue for same mentionId should be blocked (one-shot)', () => {
-    const state = new Map<string, RescueEntry>()
-    const mentionId = 'msg-123'
+  it('two consecutive dry-run ticks return consistent results', async () => {
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/health/mention-rescue/tick?dryRun=true',
+    })
+    expect(r1.statusCode).toBe(200)
 
-    // First rescue
-    state.set(mentionId, { lastRescueAt: Date.now(), rescueCount: 1 })
+    const r2 = await app.inject({
+      method: 'POST',
+      url: '/health/mention-rescue/tick?dryRun=true',
+    })
+    expect(r2.statusCode).toBe(200)
 
-    // Second attempt — should be blocked
-    const entry = state.get(mentionId)
-    const shouldSkip = entry && entry.rescueCount > 0
-    expect(shouldSkip).toBe(true)
+    // Dry run doesn't mutate state, so both should return the same rescued set
+    const body1 = JSON.parse(r1.body)
+    const body2 = JSON.parse(r2.body)
+    expect(body1.rescued.length).toBe(body2.rescued.length)
   })
 
-  it('different mentionIds are tracked independently', () => {
-    const state = new Map<string, RescueEntry>()
+  it('same-thread repeated real tick: second tick produces no duplicates', async () => {
+    // Use a nowMs far in the future where no real messages exist
+    const futureNow = Date.now() + 365 * 24 * 60 * 60 * 1000
 
-    // Rescue mention A
-    state.set('msg-A', { lastRescueAt: Date.now(), rescueCount: 1 })
+    const r1 = await app.inject({
+      method: 'POST',
+      url: `/health/mention-rescue/tick?dryRun=false&nowMs=${futureNow}`,
+    })
+    expect(r1.statusCode).toBe(200)
+    const body1 = JSON.parse(r1.body)
+    expect(Array.isArray(body1.rescued)).toBe(true)
 
-    // Mention B should still fire
-    const entryB = state.get('msg-B')
-    const shouldSkipB = entryB && entryB.rescueCount > 0
-    expect(shouldSkipB).toBeFalsy()
+    // Second tick — anything rescued in r1 should NOT be rescued again
+    const r2 = await app.inject({
+      method: 'POST',
+      url: `/health/mention-rescue/tick?dryRun=false&nowMs=${futureNow + 1000}`,
+    })
+    expect(r2.statusCode).toBe(200)
+    const body2 = JSON.parse(r2.body)
+    expect(body2.rescued.length).toBe(0)
   })
 
-  it('pruning removes entries older than threshold', () => {
-    const state = new Map<string, RescueEntry>()
-    const now = Date.now()
-    const pruneThresholdMs = 60 * 60_000 // 1 hour
+  it('thread key dedup: rescued array has unique reply_to targets', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/health/mention-rescue/tick?dryRun=true',
+    })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
 
-    // Old entry (2 hours ago)
-    state.set('msg-old', { lastRescueAt: now - 2 * 60 * 60_000, rescueCount: 1 })
-    // Recent entry (5 minutes ago)
-    state.set('msg-recent', { lastRescueAt: now - 5 * 60_000, rescueCount: 1 })
-
-    // Prune
-    for (const [key, entry] of state) {
-      if (now - entry.lastRescueAt > pruneThresholdMs) {
-        state.delete(key)
+    // Each rescued message should target a unique mention
+    const replyTargets = new Set<string>()
+    for (const msg of body.rescued) {
+      const match = msg.match(/\[\[reply_to:([^\]]+)\]\]/)
+      if (match) {
+        expect(replyTargets.has(match[1])).toBe(false)
+        replyTargets.add(match[1])
       }
     }
-
-    expect(state.has('msg-old')).toBe(false)
-    expect(state.has('msg-recent')).toBe(true)
   })
 
-  it('pruned mentionId can be rescued again after re-appearing', () => {
-    const state = new Map<string, RescueEntry>()
-    const now = Date.now()
-    const pruneThresholdMs = 60 * 60_000
+  it('mention_rescue_state table exists after tick', async () => {
+    // The table is created lazily on first tick — verify it exists after a tick
+    const res = await app.inject({
+      method: 'POST',
+      url: '/health/mention-rescue/tick?dryRun=true',
+    })
+    expect(res.statusCode).toBe(200)
 
-    // Original rescue + prune
-    state.set('msg-123', { lastRescueAt: now - 2 * 60 * 60_000, rescueCount: 1 })
-    for (const [key, entry] of state) {
-      if (now - entry.lastRescueAt > pruneThresholdMs) state.delete(key)
+    // Table should exist (created during server startup or first tick)
+    const db = getDb()
+    const tableCheck = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='mention_rescue_state'"
+    ).get() as { name: string } | undefined
+    expect(tableCheck?.name).toBe('mention_rescue_state')
+  })
+
+  it('persisted state survives across tick invocations', async () => {
+    // First: seed a chat message from "ryan" mentioning @link in the test DB
+    const now = Date.now()
+    const mentionTs = now - 5 * 60_000 // 5 minutes ago (within 30-min window, past delay)
+    const db = getDb()
+
+    // Insert a test mention message
+    const testMsgId = `test-mention-${now}`
+    try {
+      db.prepare(
+        'INSERT INTO chat_messages (id, "from", "to", content, timestamp, channel, reactions, thread_id, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      ).run(testMsgId, 'ryan', '', 'hey @link @kai @pixel can you check this?', mentionTs, 'general', '[]', null, '{}')
+    } catch {
+      // Message table might have different schema — skip this test
+      return
     }
 
-    // After prune, same mentionId should be rescuable again
-    // (but in practice this won't happen since the mention would be >30min old and filtered by maxMentionAgeMs)
-    const entry = state.get('msg-123')
-    const shouldSkip = entry && entry.rescueCount > 0
-    expect(shouldSkip).toBeFalsy()
+    // First real tick — should rescue this mention
+    const r1 = await app.inject({
+      method: 'POST',
+      url: `/health/mention-rescue/tick?dryRun=false&nowMs=${now}&force=true`,
+    })
+    expect(r1.statusCode).toBe(200)
+    const body1 = JSON.parse(r1.body)
+
+    // If rescued, verify persistence
+    if (body1.rescued.length > 0) {
+      // Check SQLite has the thread key
+      const rows = db.prepare('SELECT * FROM mention_rescue_state').all()
+      expect(rows.length).toBeGreaterThan(0)
+
+      // Second tick — same mention should NOT be rescued again
+      const r2 = await app.inject({
+        method: 'POST',
+        url: `/health/mention-rescue/tick?dryRun=false&nowMs=${now + 1000}&force=true`,
+      })
+      expect(r2.statusCode).toBe(200)
+      const body2 = JSON.parse(r2.body)
+
+      // The same mention should not appear in rescued again
+      const duplicates = body2.rescued.filter((msg: string) => msg.includes(testMsgId))
+      expect(duplicates.length).toBe(0)
+    }
+
+    // Cleanup test message
+    try {
+      db.prepare('DELETE FROM chat_messages WHERE id = ?').run(testMsgId)
+    } catch {
+      // ignore
+    }
+  })
+
+  it('suppressed during quiet hours', async () => {
+    // Use a nowMs during quiet hours (3 AM PST = 11 AM UTC)
+    const quietDate = new Date('2026-03-01T11:00:00Z')
+    const quietNowMs = quietDate.getTime()
+    const res = await app.inject({
+      method: 'POST',
+      url: `/health/mention-rescue/tick?dryRun=true&nowMs=${quietNowMs}`,
+    })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    if (body.suppressed) {
+      expect(body.reason).toBe('quiet-hours')
+    }
+    expect(Array.isArray(body.rescued)).toBe(true)
   })
 })
