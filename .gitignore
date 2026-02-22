@@ -11,3 +11,5 @@ data/
 
 # Task artifacts
 process/
+node_modules/
+process/

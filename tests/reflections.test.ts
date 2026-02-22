@@ -124,6 +124,24 @@ describe('validateReflection', () => {
     expect(result.errors!.some(e => e.field === 'severity')).toBe(true)
   })
 
+  it('rejects invalid domain', () => {
+    const result = validateReflection({ ...VALID_INPUT, domain: 'invalid-domain' })
+    expect(result.valid).toBe(false)
+    expect(result.errors!.some(e => e.field === 'domain')).toBe(true)
+  })
+
+  it('accepts valid domain', () => {
+    const result = validateReflection({ ...VALID_INPUT, domain: 'retail' })
+    expect(result.valid).toBe(true)
+    expect(result.data.domain).toBe('retail')
+  })
+
+  it('accepts missing domain (optional)', () => {
+    const result = validateReflection(VALID_INPUT)
+    expect(result.valid).toBe(true)
+    expect(result.data.domain).toBeUndefined()
+  })
+
   it('rejects empty author', () => {
     const result = validateReflection({ ...VALID_INPUT, author: '' })
     expect(result.valid).toBe(false)
@@ -273,6 +291,13 @@ describe('listReflections + countReflections', () => {
     const list = listReflections({ team_id: 'team-1' })
     expect(list).toHaveLength(1)
     expect(list[0].team_id).toBe('team-1')
+  })
+
+  it('stores and retrieves domain field', () => {
+    const r = createReflection({ ...VALID_INPUT, domain: 'retail' })
+    expect(r.domain).toBe('retail')
+    const list = listReflections({})
+    expect(list[0].domain).toBe('retail')
   })
 
   it('respects limit and offset', () => {
