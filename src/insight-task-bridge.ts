@@ -148,6 +148,8 @@ async function autoCreateTask(insight: Insight): Promise<void> {
       ],
       metadata: {
         insight_id: insight.id,
+        source_insight: insight.id,
+        source_reflection: insight.reflection_ids[0] || undefined,
         promotion_reason: insight.promotion_readiness,
         severity: insight.severity_max,
         source: 'insight-task-bridge',
