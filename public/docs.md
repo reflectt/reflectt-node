@@ -596,3 +596,12 @@ Set via `reflectionNudge` in policy config:
 ### Spend Cap Events
 - `usage:cap_warning` — emitted when spend reaches 80% of cap limit
 - `usage:cap_breached` — emitted when spend exceeds cap limit
+
+## Insight Reconciliation (Orphan Detection)
+
+Ensures promoted insights always have task linkage. Detects and fixes orphaned insights.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/insights/orphans` | List promoted/task_created insights with no `task_id`. Returns `orphans[]` with id, title, status, score, priority, authors. |
+| POST | `/insights/reconcile` | Scan orphaned insights and create tasks for each. Query: `dry_run=true` for preview. Returns scanned/created/skipped counts + details per insight. |
