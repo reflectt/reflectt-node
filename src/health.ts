@@ -1657,7 +1657,7 @@ class TeamHealthMonitor {
       // Build a thread key that groups mentions by channel + thread + mentioned agents.
       // This prevents duplicate rescues when Ryan sends multiple messages in the
       // same thread mentioning the same agents.
-      const threadKey = this.buildMentionThreadKey(mention as Record<string, unknown>)
+      const threadKey = this.buildMentionThreadKey(mention as unknown as Record<string, unknown>)
 
       // Skip if we already processed this thread key during this tick
       if (processedThreadKeys.has(threadKey)) continue
