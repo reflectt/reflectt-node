@@ -403,6 +403,36 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/insights/promotions` | List all promotion audit entries. Query: `limit`. |
 | GET | `/insights/recurring/candidates` | List recurring task candidates from insights with persistent patterns. Auto-suggests owner/lane per failure family. Template-first (no auto task spam). |
 
+## Scoring Engine Configuration
+
+The insight scoring engine uses the following parameters (defined in `src/insights.ts`):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `PROMOTION_THRESHOLD` | `2` | Minimum independent reflections (distinct authors) required for automatic promotion. Severity high/critical bypasses this gate. |
+| `COOLDOWN_MS` | `86400000` (24h) | Cooldown period after promotion before the insight can be re-promoted. |
+| `HYSTERESIS_BUFFER` | `0.3` | Score buffer zone around priority thresholds to prevent flapping. A score must exceed `threshold + buffer` to upgrade priority, or drop below `threshold - buffer` to downgrade. If within the buffer zone, previous priority is retained. |
+| `SCORING_ENGINE_VERSION` | `1.1.0` | Semver tag included in all scoring output for audit lineage. |
+
+### Priority thresholds (with hysteresis)
+
+| Priority | Score threshold | Upgrade requires | Downgrade requires |
+|----------|----------------|------------------|--------------------|
+| P0 | ≥ 9 | score ≥ 9.3 | score < 8.7 |
+| P1 | ≥ 7 | score ≥ 7.3 | score < 6.7 |
+| P2 | ≥ 4 | score ≥ 4.3 | score < 3.7 |
+| P3 | < 4 | — | — |
+
+### Audit fields in scoring output
+
+Every scored insight includes these audit fields:
+
+- **`dedupe_cluster_id`** — Cluster key for deduplication across reflections
+- **`promotion_band`** — Current priority band (P0–P3) after hysteresis
+- **`decision_trace`** — Top contributing factors to the score (severity, author count, recency, etc.)
+- **`version`** — Scoring engine version for reproducibility
+- **`hysteresis_applied`** — Whether the buffer zone retained a previous priority
+
 ## Lineage Timeline (Debug/Audit)
 
 Traces the full reflection → insight → task chain for debugging and audit. Each insight forms a chain; anomalies (missing links, stale promotions) are flagged automatically.
