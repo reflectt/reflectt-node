@@ -16,6 +16,59 @@
 import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import type { Task } from './types.js'
+import { execSync } from 'child_process'
+
+// ── Live PR State Check ────────────────────────────────────────────────────
+
+export interface LivePrState {
+  state: 'open' | 'merged' | 'closed' | 'unknown'
+  error?: string
+}
+
+/**
+ * Check live PR state via `gh` CLI. Returns 'unknown' if gh is unavailable.
+ * Results are cached for the duration of one sweep cycle to avoid rate limits.
+ */
+const prStateCache = new Map<string, { state: LivePrState; cachedAt: number }>()
+const PR_CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
+export function checkLivePrState(prUrl: string): LivePrState {
+  const now = Date.now()
+  const cached = prStateCache.get(prUrl)
+  if (cached && (now - cached.cachedAt) < PR_CACHE_TTL_MS) {
+    return cached.state
+  }
+
+  try {
+    // Extract owner/repo and PR number from URL
+    const match = prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/)
+    if (!match) return { state: 'unknown', error: 'Invalid PR URL format' }
+
+    const [, repo, prNumber] = match
+    const raw = execSync(
+      `gh pr view ${prNumber} --repo ${repo} --json state --jq .state`,
+      { timeout: 10_000, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim().toUpperCase()
+
+    let state: LivePrState['state'] = 'unknown'
+    if (raw === 'OPEN') state = 'open'
+    else if (raw === 'MERGED') state = 'merged'
+    else if (raw === 'CLOSED') state = 'closed'
+
+    const result: LivePrState = { state }
+    prStateCache.set(prUrl, { state: result, cachedAt: now })
+    return result
+  } catch (err) {
+    const result: LivePrState = { state: 'unknown', error: String(err) }
+    prStateCache.set(prUrl, { state: result, cachedAt: now })
+    return result
+  }
+}
+
+/** Clear PR state cache (for testing) */
+export function _clearPrStateCache(): void {
+  prStateCache.clear()
+}
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
@@ -120,7 +173,7 @@ export function sweepValidatingQueue(): SweepResult {
         reviewer: task.reviewer,
         type: 'validating_critical',
         age_minutes: ageMinutes,
-        message: `🚨 CRITICAL: "${task.title}" stuck in validating for ${ageMinutes}m. @${task.reviewer || 'unassigned'} please review. @${task.assignee || 'unassigned'} — your PR is blocked.`,
+        message: `🚨 CRITICAL: "${task.title}" (${task.id}) stuck in validating for ${ageMinutes}m. @${task.reviewer || 'unassigned'} please review. @${task.assignee || 'unassigned'} — your PR is blocked.`,
       })
       escalated.set(task.id, { level: 'critical', at: now })
       logDryRun('validating_critical', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee}`)
@@ -132,7 +185,7 @@ export function sweepValidatingQueue(): SweepResult {
         reviewer: task.reviewer,
         type: 'validating_sla',
         age_minutes: ageMinutes,
-        message: `⚠️ SLA breach: "${task.title}" in validating ${ageMinutes}m. @${task.reviewer || 'unassigned'} — review needed. @${task.assignee || 'unassigned'} — ping if blocked.`,
+        message: `⚠️ SLA breach: "${task.title}" (${task.id}) in validating ${ageMinutes}m. @${task.reviewer || 'unassigned'} — review needed. @${task.assignee || 'unassigned'} — ping if blocked.`,
       })
       escalated.set(task.id, { level: 'warning', at: now })
       logDryRun('validating_sla', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee}`)
@@ -166,11 +219,39 @@ export function sweepValidatingQueue(): SweepResult {
     if (activeRef) continue
 
     // PR on a done task with no active task referencing it
+    // Check metadata flags that indicate the PR was merged/resolved
     const prMerged = !!(meta.pr_merged)
-    if (prMerged) continue // Merged PRs on done tasks are fine
+    const reviewerApproved = !!(meta.reviewer_approved)
+    const taskDone = task.status === 'done'
+
+    // If metadata says merged, skip
+    if (prMerged) continue
+
+    // If task is done AND reviewer approved, very likely the PR was merged — check live
+    if (taskDone && reviewerApproved) {
+      const liveResult = checkLivePrState(prUrl)
+      if (liveResult.state === 'merged' || liveResult.state === 'closed') {
+        logDryRun('orphan_pr_skipped', `${prUrl} on ${task.id} — live state: ${liveResult.state}`)
+        continue
+      }
+      if (liveResult.state === 'unknown') {
+        logDryRun('orphan_pr_live_check_failed', `${prUrl} on ${task.id} — task done+approved, gh check failed`)
+      }
+    }
+
+    // For done tasks without reviewer approval, also do live check
+    if (taskDone) {
+      const liveResult = checkLivePrState(prUrl)
+      if (liveResult.state === 'merged' || liveResult.state === 'closed') {
+        logDryRun('orphan_pr_skipped', `${prUrl} on ${task.id} — live state: ${liveResult.state}`)
+        continue
+      }
+    }
 
     const completedAge = now - task.updatedAt
     if (completedAge >= ORPHAN_PR_THRESHOLD_MS) {
+      const assigneeMention = task.assignee ? `@${task.assignee}` : '@unassigned'
+      const reviewerMention = task.reviewer ? `@${task.reviewer}` : '@unassigned'
       violations.push({
         taskId: task.id,
         title: task.title,
@@ -178,7 +259,7 @@ export function sweepValidatingQueue(): SweepResult {
         reviewer: task.reviewer,
         type: 'orphan_pr',
         age_minutes: Math.round(completedAge / 60_000),
-        message: `🔍 Orphan PR detected: ${prUrl} linked to done task "${task.title}" (${task.id}). PR may still be open — close or merge it.`,
+        message: `🔍 Orphan PR detected: ${prUrl} linked to done task "${task.title}" (${task.id}). PR may still be open — ${assigneeMention} close or merge it. ${reviewerMention} — confirm status.`,
       })
       flaggedOrphanPRs.add(prUrl)
       logDryRun('orphan_pr', `${prUrl} on ${task.id} — task done ${Math.round(completedAge / 60_000)}m ago`)
@@ -199,7 +280,7 @@ export function sweepValidatingQueue(): SweepResult {
           reviewer: task.reviewer,
           type: 'pr_drift',
           age_minutes: Math.round(driftAge / 60_000),
-          message: `📦 PR merged ${Math.round(driftAge / 60_000)}m ago but "${task.title}" still in validating. @${task.reviewer || 'reviewer'} — approve or close.`,
+          message: `📦 PR merged ${Math.round(driftAge / 60_000)}m ago but "${task.title}" (${task.id}) still in validating. @${task.reviewer || 'unassigned'} — approve or close. @${task.assignee || 'unassigned'} — ping if needed.`,
         })
         escalated.set(`drift:${task.id}`, { level: 'warning', at: now })
         logDryRun('pr_drift', `${task.id} — PR merged ${Math.round(driftAge / 60_000)}m ago, still validating`)
@@ -301,7 +382,7 @@ export function flagPrDrift(taskId: string, prState: 'merged' | 'closed'): Sweep
       reviewer: task.reviewer,
       type: 'pr_drift',
       age_minutes: 0,
-      message: `📦 PR merged but task "${task.title}" still in validating. @${task.reviewer || 'reviewer'} — review or auto-advance.`,
+      message: `📦 PR merged but task "${task.title}" (${task.id}) still in validating. @${task.reviewer || 'unassigned'} — review or auto-advance. @${task.assignee || 'unassigned'} — confirm status.`,
     }
   }
 
@@ -314,7 +395,7 @@ export function flagPrDrift(taskId: string, prState: 'merged' | 'closed'): Sweep
       reviewer: task.reviewer,
       type: 'pr_drift',
       age_minutes: 0,
-      message: `🔴 PR closed (not merged) for task "${task.title}". Task should be blocked or have replacement PR.`,
+      message: `🔴 PR closed (not merged) for task "${task.title}" (${task.id}). @${task.assignee || 'unassigned'} — task should be blocked or have replacement PR. @${task.reviewer || 'unassigned'} — confirm action.`,
     }
   }
 
@@ -404,12 +485,18 @@ export function generateDriftReport(): DriftReport {
     const doneTasks = tasks.filter(t => t.status === 'done' || t.status === 'cancelled')
     if (doneTasks.length === 0) continue
 
-    // Check if any of the done tasks have pr_merged — if so, no orphan
-    const anyMerged = doneTasks.some(t => {
+    // Check if any of the done tasks have pr_merged or reviewer_approved — if so, verify live
+    const anyMergedMeta = doneTasks.some(t => {
       const task = allTasks.find(at => at.id === t.taskId)
-      return task && ((task.metadata || {}) as Record<string, unknown>).pr_merged
+      if (!task) return false
+      const m = (task.metadata || {}) as Record<string, unknown>
+      return !!(m.pr_merged)
     })
-    if (anyMerged) continue
+    if (anyMergedMeta) continue
+
+    // Live check: if PR is actually merged/closed on GitHub, skip
+    const liveResult = checkLivePrState(prUrl)
+    if (liveResult.state === 'merged' || liveResult.state === 'closed') continue
 
     const oldestDone = allTasks.find(t => t.id === doneTasks[0].taskId)
     orphanEntries.push({
