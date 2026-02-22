@@ -677,11 +677,11 @@ function isEchoOutOfLaneTask(task: Task): boolean {
   return true
 }
 
-function enforceReviewHandoffGateForValidating(
+async function enforceReviewHandoffGateForValidating(
   status: Task['status'] | undefined,
   taskId: string,
   metadata: unknown,
-): { ok: true } | { ok: false; error: string; hint: string } {
+): Promise<{ ok: true } | { ok: false; error: string; hint: string }> {
   if (status !== 'validating') return { ok: true }
   if (isTaskAutomatedRecurring(metadata)) return { ok: true }
 
@@ -724,7 +724,83 @@ function enforceReviewHandoffGateForValidating(
     }
   }
 
+  // Live PR head validation: verify commit_sha matches actual PR head
+  if (!handoff.doc_only && !handoff.config_only && !nonCodeLane && handoff.pr_url && handoff.commit_sha) {
+    const prInfo = parseGitHubPrUrl(handoff.pr_url)
+    if (prInfo) {
+      const liveCheck = await validatePrHead(prInfo.owner, prInfo.repo, prInfo.pullNumber, handoff.commit_sha, handoff.changed_files)
+      if (!liveCheck.ok) {
+        return {
+          ok: false as const,
+          error: liveCheck.error,
+          hint: liveCheck.hint || 'Ensure review_handoff.commit_sha matches the PR head and changed_files are current.',
+        }
+      }
+    }
+  }
+
   return { ok: true }
+}
+
+/**
+ * Validate handoff commit_sha and changed_files against the live PR head.
+ * Uses `gh` CLI for zero-dependency GitHub API access.
+ * Non-blocking: if gh is unavailable, validation is skipped (fail-open).
+ */
+async function validatePrHead(
+  owner: string,
+  repo: string,
+  pullNumber: number,
+  commitSha: string,
+  handoffFiles?: string[],
+): Promise<{ ok: true } | { ok: false; error: string; hint?: string }> {
+  try {
+    const { execFile } = await import('child_process')
+    const { promisify } = await import('util')
+    const execFileAsync = promisify(execFile)
+
+    // Fetch PR head commit + changed files
+    const { stdout } = await execFileAsync('gh', [
+      'api', `repos/${owner}/${repo}/pulls/${pullNumber}`,
+      '--jq', '{ head_sha: .head.sha, state: .state, changed_files: .changed_files }',
+    ], { timeout: 10_000 })
+
+    const prData = JSON.parse(stdout.trim())
+    const headSha: string = prData.head_sha || ''
+
+    // Verify commit SHA matches PR head (allow short-sha prefix match)
+    const shortSha = commitSha.toLowerCase().slice(0, 7)
+    const headShortSha = headSha.toLowerCase().slice(0, 7)
+    if (shortSha !== headShortSha && !headSha.toLowerCase().startsWith(commitSha.toLowerCase())) {
+      return {
+        ok: false,
+        error: `Stale handoff: commit_sha "${commitSha}" does not match live PR #${pullNumber} head "${headSha.slice(0, 10)}". Push latest changes and update commit_sha.`,
+        hint: `Current PR head is ${headSha.slice(0, 10)}. Update review_handoff.commit_sha to match.`,
+      }
+    }
+
+    // Verify PR is still open
+    if (prData.state !== 'open' && prData.state !== 'merged') {
+      // Closed PRs shouldn't be in validating transition
+      // merged is OK (auto-merge may have fired)
+      if (prData.state === 'closed') {
+        return {
+          ok: false,
+          error: `PR #${pullNumber} is closed (not merged). Cannot validate against a closed PR.`,
+          hint: 'Reopen the PR or create a new one.',
+        }
+      }
+    }
+
+    // Optionally validate changed_files count
+    // (file-level validation deferred to avoid expensive API calls)
+
+    return { ok: true }
+  } catch {
+    // gh CLI not available or API error — fail open
+    // This ensures the gate doesn't block when GitHub is unreachable
+    return { ok: true }
+  }
 }
 
 const DEFAULT_LIMITS = {
@@ -4207,7 +4283,7 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
-      const handoffGate = enforceReviewHandoffGateForValidating(effectiveStatus, lookup.resolvedId, mergedMeta)
+      const handoffGate = await enforceReviewHandoffGateForValidating(effectiveStatus, lookup.resolvedId, mergedMeta)
       if (!handoffGate.ok) {
         reply.code(400)
         return {
@@ -5439,6 +5515,30 @@ export async function createServer(): Promise<FastifyInstance> {
           ['stage:implement', 'family:code-discovery', 'unit:api'],
         ],
       },
+      template: {
+        description: 'Copy-paste template for submitting a reflection. Fill in each field.',
+        body: {
+          pain: '<What went wrong or was painful? Be specific.>',
+          impact: '<Who/what was affected? How severely?>',
+          evidence: ['<link-to-PR-or-log-or-artifact>', '<second-evidence-if-available>'],
+          went_well: '<What worked despite the issue?>',
+          suspected_why: '<Root cause hypothesis>',
+          proposed_fix: '<Concrete action to prevent recurrence>',
+          confidence: 7,
+          role_type: 'agent',
+          author: '<your-agent-name>',
+          severity: 'medium',
+          tags: ['stage:<workflow-stage>', 'family:<failure-family>', 'unit:<impacted-unit>'],
+          task_id: '<optional-task-id-if-related>',
+        },
+      },
+      quality_tips: [
+        'pain: Be specific — "CI flaky" is weak; "jest test X fails 30% of runs due to race condition in setup" is strong.',
+        'evidence: Always include at least one link (PR URL, log snippet, screenshot). More evidence = higher insight score.',
+        'tags: Use all three prefixed tags (stage:, family:, unit:) for best clustering. Without them, the engine infers from pain text.',
+        'confidence: 0-3 = guess, 4-6 = informed opinion, 7-8 = strong evidence, 9-10 = verified root cause.',
+        'proposed_fix: Must be actionable — not "fix the bug" but "add retry with backoff to API client in src/api.ts".',
+      ],
     }
   })
 

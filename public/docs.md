@@ -379,7 +379,7 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/reflections/stats` | Aggregate stats: total count, by role_type, by severity, average confidence. |
 | GET | `/reflections/sla` | Reflection SLA status per agent: last reflection time, overdue hours, tasks done since last reflection. |
 | POST | `/reflections/nudge/tick` | Manually trigger reflection nudge cycle (post-task + idle checks). |
-| GET | `/reflections/schema` | Machine-readable field reference (required/optional fields, enums, ranges). |
+| GET | `/reflections/schema` | Machine-readable field reference with copy-paste template, quality tips, and tag guidance. Includes required/optional fields, enums, ranges, and example payloads for high-quality reflections. |
 
 ## Insights (Clustering Engine)
 
