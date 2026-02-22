@@ -450,6 +450,7 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/canvas/stream` | SSE stream of canvas render events |
 | GET | `/execution-health` | Execution sweeper status: validating queue violations, SLA breaches, escalation tracking. |
 | POST | `/pr-event` | PR state webhook. Body: `{ taskId, prState: "merged"|"closed", prUrl? }`. Auto-updates task artifacts on merge, auto-blocks on close. |
+| GET | `/pr-automerge/status` | PR auto-merge attempt log: recent merge/close attempts with summary counts (attempted, success, failed, skipped, auto-close, close-gate-fail). |
 | GET | `/drift-report` | Task/PR drift report: tasks with merged PRs still in validating, orphan PRs, state mismatches. |
 | POST | `/activation/event` | Record activation funnel event. Body: `{ type, userId, metadata? }`. Events: signup_completed, workspace_ready, first_task_started, first_task_completed, first_team_message_sent, day2_return_action. |
 | GET | `/activation/funnel` | Get funnel state. Query: `?userId=...` for single user, no params for aggregate summary. |
