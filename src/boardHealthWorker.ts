@@ -29,6 +29,8 @@ export type PolicyActionKind =
   | 'ready-queue-warning'
   | 'idle-queue-escalation'
   | 'continuity-replenish'
+  | 'auto-requeue'
+  | 'working-contract-warning'
 
 export interface PolicyAction {
   id: string
@@ -204,7 +206,31 @@ export class BoardHealthWorker {
       } catch { /* reflection automation may not be loaded */ }
     }
 
-    // 3c. Continuity loop: auto-replenish queues from promoted insights
+    // 3c. Working contract enforcement (auto-requeue stale doing tasks)
+    if (!dryRun) {
+      try {
+        const { tickWorkingContract } = await import('./working-contract.js')
+        const wcResult = await tickWorkingContract()
+        if (wcResult.requeued > 0 || wcResult.warnings > 0) {
+          for (const action of wcResult.actions) {
+            actions.push({
+              id: `wc-${action.timestamp}-${Math.random().toString(36).slice(2, 7)}`,
+              kind: (action.type === 'auto_requeue' ? 'auto-requeue' : 'working-contract-warning') as PolicyActionKind,
+              taskId: action.taskId,
+              agent: action.agent,
+              description: action.reason,
+              previousState: { type: action.type },
+              appliedAt: action.timestamp,
+              rolledBack: false,
+              rolledBackAt: null,
+              rollbackBy: null,
+            })
+          }
+        }
+      } catch { /* working-contract module may not be loaded */ }
+    }
+
+    // 3d. Continuity loop: auto-replenish queues from promoted insights
     if (!dryRun) {
       try {
         const { tickContinuityLoop } = await import('./continuity-loop.js')

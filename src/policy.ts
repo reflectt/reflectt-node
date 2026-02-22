@@ -98,6 +98,23 @@ export interface PolicyConfig {
     nudgeNeverReflected?: boolean // nudge agents who have never reflected (default: true)
   }
 
+  /** Working contract enforcement: hard gates instead of nudges */
+  workingContract: {
+    enabled: boolean
+    /** Max minutes a task can stay in 'doing' with no status comment before auto-requeue */
+    staleAutoRequeueMin: number
+    /** Minutes of grace after first warning before auto-requeue fires */
+    graceAfterWarningMin: number
+    /** Require at least one reflection before claiming a new doing task (if overdue) */
+    reflectionGateOnClaim: boolean
+    /** Agents subject to enforcement (empty = all active agents) */
+    agents: string[]
+    /** Channel for enforcement notifications */
+    channel: string
+    /** Dry-run mode: log but don't actually requeue */
+    dryRun: boolean
+  }
+
   /** Insight:promoted listener — auto-create tasks from promoted insights */
   insightListener: {
     enabled: boolean
@@ -190,6 +207,15 @@ export const DEFAULT_POLICY: PolicyConfig = {
     roleCadenceHours: {},
     excludeAgents: [],
     nudgeNeverReflected: true,
+  },
+  workingContract: {
+    enabled: true,
+    staleAutoRequeueMin: 90,
+    graceAfterWarningMin: 15,
+    reflectionGateOnClaim: true,
+    agents: [],
+    channel: 'general',
+    dryRun: false,
   },
   insightListener: {
     enabled: true,

@@ -79,6 +79,8 @@ Operationally:
 | POST | `/health/idle-nudge/tick` | Trigger idle-nudge evaluation |
 | POST | `/health/cadence-watchdog/tick` | Trigger cadence watchdog |
 | POST | `/health/mention-rescue/tick` | Trigger mention-rescue fallback |
+| POST | `/health/working-contract/tick` | Evaluate working-contract enforcement: auto-requeue stale doing tasks (90m warning → 15m grace → auto todo) and fire alerts. |
+| GET | `/health/working-contract/gate/:agent` | Dry-run claim gate check for an agent. Returns `{ allowed, reason }` — whether the agent can claim a new task given current WIP and contract status. |
 
 ### Quiet hours behavior (watchdogs)
 
