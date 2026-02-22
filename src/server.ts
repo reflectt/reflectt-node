@@ -91,6 +91,7 @@ import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns } from './insights.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
+import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
 // Schemas
@@ -5392,6 +5393,63 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/insights/recurring/candidates', async () => {
     const candidates = generateRecurringCandidates()
     return { candidates, count: candidates.length }
+  })
+
+  // ── Intake Pipeline (automated reflection→insight→task) ──────────────
+
+  app.post('/intake', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+
+    if (!body.reflection || typeof body.reflection !== 'object') {
+      reply.code(400)
+      return {
+        success: false,
+        error: 'reflection object is required',
+        hint: 'POST /intake { reflection: { pain, impact, evidence[], ... }, auto_promote?: boolean, promotion_contract?: { owner, reviewer, eta, ... } }',
+      }
+    }
+
+    const result = await runIntake({
+      reflection: body.reflection as Record<string, unknown>,
+      team_id: typeof body.team_id === 'string' ? body.team_id : undefined,
+      auto_promote: body.auto_promote === true,
+      promotion_contract: body.promotion_contract as any,
+    })
+
+    reply.code(result.success ? 201 : 400)
+    return result
+  })
+
+  app.post('/intake/batch', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const items = Array.isArray(body.items) ? body.items : []
+
+    if (items.length === 0) {
+      reply.code(400)
+      return { success: false, error: 'items array is required', hint: 'POST /intake/batch { items: [{ reflection: {...}, auto_promote?: boolean }, ...] }' }
+    }
+
+    if (items.length > 50) {
+      reply.code(400)
+      return { success: false, error: 'Maximum 50 items per batch' }
+    }
+
+    const result = await batchIntake(items.map((item: any) => ({
+      reflection: item.reflection || {},
+      team_id: typeof item.team_id === 'string' ? item.team_id : typeof body.team_id === 'string' ? body.team_id : undefined,
+      auto_promote: item.auto_promote === true || body.auto_promote === true,
+      promotion_contract: item.promotion_contract || body.promotion_contract,
+    })))
+
+    return { success: true, ...result }
+  })
+
+  app.get('/intake/stats', async () => {
+    return getPipelineStats()
+  })
+
+  app.post('/intake/maintenance', async () => {
+    return { success: true, ...pipelineMaintenance() }
   })
 
   // Get next task (pull-based assignment)
