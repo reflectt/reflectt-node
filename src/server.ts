@@ -95,6 +95,7 @@ import { createReflection, getReflection, listReflections, countReflections, ref
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus } from './insights.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
+import { listLineage, getLineage, lineageStats } from './lineage.js'
 import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
@@ -5695,6 +5696,34 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get<{ Params: { id: string } }>('/insights/:id/triage/audit', async (request) => {
     const { getTriageAudit } = await import('./insight-task-bridge.js')
     return { audit: getTriageAudit(request.params.id) }
+  })
+
+  // ── Lineage Timeline (reflection→insight→task audit trail) ───────────
+
+  app.get('/lineage', async (request) => {
+    const query = request.query as Record<string, string>
+    return listLineage({
+      status: query.status,
+      team_id: query.team_id,
+      role_type: query.role_type,
+      author: query.author,
+      has_anomaly: query.has_anomaly === 'true' ? true : query.has_anomaly === 'false' ? false : undefined,
+      limit: query.limit ? Math.min(Number(query.limit) || 50, 200) : 50,
+      offset: query.offset ? Number(query.offset) || 0 : 0,
+    })
+  })
+
+  app.get<{ Params: { id: string } }>('/lineage/:id', async (request, reply) => {
+    const entry = getLineage(request.params.id)
+    if (!entry) {
+      reply.code(404)
+      return { success: false, error: 'No lineage chain found for this ID' }
+    }
+    return { entry }
+  })
+
+  app.get('/lineage/stats', async () => {
+    return lineageStats()
   })
 
   // ── Intake Pipeline (automated reflection→insight→task) ──────────────
