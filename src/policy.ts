@@ -113,6 +113,19 @@ export interface PolicyConfig {
     criticalChannel: string
     digestChannel: string
   }
+
+  /**
+   * Status heartbeat discipline: agents must post task comment updates
+   * during long work windows (>30m). Prevents stale-working false positives.
+   *
+   * Format: progress, confidence, ETA → task comment first, #general only if action-relevant.
+   */
+  statusHeartbeat: {
+    enabled: boolean
+    intervalMin: number
+    graceMin: number
+    escalationChannel: string
+  }
 }
 
 // ── Defaults ───────────────────────────────────────────────────────────────
@@ -189,6 +202,12 @@ export const DEFAULT_POLICY: PolicyConfig = {
     defaultChannel: 'general',
     criticalChannel: 'general',
     digestChannel: 'ops',
+  },
+  statusHeartbeat: {
+    enabled: true,
+    intervalMin: 30,
+    graceMin: 10,
+    escalationChannel: 'general',
   },
 }
 

@@ -92,6 +92,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 |--------|------|-------------|
 | GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `offset`, `q` (text search), `updatedSince`. Returns `{ tasks, total, offset, limit, hasMore }`. |
 | GET | `/tasks/:id` | Get task by ID. Also accepts unambiguous ID prefixes. Ambiguous prefix returns `400` with full-ID suggestions. |
+| GET | `/tasks/:id/artifacts` | Resolve all artifact references from task metadata. Returns accessibility status (file existence, URL validation), heartbeat status (last comment age, staleness). Heartbeat threshold: 30m for doing tasks. |
 | GET | `/tasks/:id/history` | Status changelog for task lifecycle transitions. Returns `history[]` entries shaped as `{ status, changedBy, changedAt, metadata }` for each status transition. |
 | GET | `/tasks/:id/comments` | List task discussion comments. Returns `{ comments, count }` |
 | POST | `/tasks/:id/comments` | Add task comment. Body: `{ "author": "agent", "content": "text" }` |
@@ -110,6 +111,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/analytics` | Task completion analytics and velocity |
 | GET | `/tasks/instrumentation/lifecycle` | Reviewer/done-criteria gates + status-contract violations (`doing` missing ETA, `validating` missing artifact path) |
 | POST | `/tasks/batch-create` | Batch create up to 20 tasks. Body: `{ "tasks": [...], "createdBy": "agent", "deduplicate": true, "dryRun": false }`. Each task follows the same schema as `POST /tasks`. Returns per-task results (created/duplicate/error) with summary counts. Deduplication checks exact title match + fuzzy word overlap (Jaccard >0.6) against active tasks. |
+| GET | `/tasks/heartbeat-status` | All doing tasks with stale comment activity (>30m). Returns `{ threshold, doingTaskCount, staleCount, staleTasks[] }`. Use for monitoring status heartbeat discipline compliance. |
 | GET | `/tasks/board-health` | Board-level health metrics for backlog replenishment. Returns per-agent breakdown (doing, validating, todo, active counts), `needsWork`/`lowWatermark` flags, and `replenishNeeded` trigger (fires when 2+ agents idle or <3 backlog tasks). |
 | GET | `/agents/roles` | Agent role registry with live WIP status. Returns all agents with `name`, `role`, `affinityTags`, `protectedDomains`, `wipCap`, `wipCount`, `overCap`. |
 | POST | `/tasks/suggest-assignee` | Suggest best assignee for a task. Body: `{ "title": "...", "tags": [...], "done_criteria": [...] }`. Returns `suggested` agent name, `scores` array with affinity/WIP/throughput breakdown, and `protectedMatch` if a protected domain applies. |
