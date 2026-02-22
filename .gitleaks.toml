@@ -20,6 +20,8 @@ paths = [
   '''dist/''',
   '''\.git/''',
   '''\.env\.example$''',
+  '''artifacts/''',
+  '''process/''',
 ]
 
 # Documentation placeholder patterns (e.g. "your_gateway_token_here", "sk_test_xxxxx")
