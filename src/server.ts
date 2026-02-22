@@ -92,7 +92,7 @@ import { createReflection, getReflection, listReflections, countReflections, ref
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus } from './insights.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
-import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats } from './insight-task-bridge.js'
+import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
 // Schemas
@@ -5431,6 +5431,29 @@ export async function createServer(): Promise<FastifyInstance> {
   // Insight→Task bridge stats
   app.get('/insights/bridge/stats', async () => {
     return getInsightTaskBridgeStats()
+  })
+
+  // Bridge config: get/update ownership guardrail settings
+  app.get('/insights/bridge/config', async () => {
+    return getBridgeConfig()
+  })
+
+  app.patch('/insights/bridge/config', async (request) => {
+    const body = request.body as Record<string, unknown>
+    configureBridge(body as any)
+    return { success: true, config: getBridgeConfig() }
+  })
+
+  // Assignment preview: dry-run the ownership guardrail for an insight
+  app.get<{ Params: { id: string } }>('/insights/:id/assignment-preview', async (request, reply) => {
+    const insight = getInsight(request.params.id)
+    if (!insight) {
+      reply.code(404)
+      return { error: 'Insight not found' }
+    }
+    const teamId = (request.query as Record<string, string>).team_id
+    const decision = resolveAssignment(insight, teamId)
+    return { insight_id: insight.id, decision }
   })
 
   // Triage queue: list insights pending triage
