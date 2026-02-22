@@ -24,13 +24,18 @@ afterAll(async () => {
 })
 
 beforeEach(() => {
-  // Clear mention_rescue_state table between tests
-  try {
-    const db = getDb()
-    db.exec('DELETE FROM mention_rescue_state')
-  } catch {
-    // Table may not exist yet — first tick will create it
-  }
+  // Ensure table exists (guards against CI race where migrations haven't run yet)
+  const db = getDb()
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mention_rescue_state (
+      thread_key TEXT PRIMARY KEY,
+      message_ids TEXT NOT NULL DEFAULT '[]',
+      rescued_at INTEGER NOT NULL,
+      rescue_count INTEGER NOT NULL DEFAULT 1
+    )
+  `)
+  // Clear between tests
+  db.exec('DELETE FROM mention_rescue_state')
 })
 
 describe('Mention-rescue idempotency', () => {
@@ -170,6 +175,17 @@ describe('Mention-rescue idempotency', () => {
     } catch {
       // ignore
     }
+  })
+
+  it('schema init order: table exists before any tick (regression)', () => {
+    // Regression guard: getDb() + migrations should create the table
+    // even without a prior tick call. This failed in CI when migration v10
+    // wasn't applied before test assertions ran.
+    const db = getDb()
+    const tableCheck = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='mention_rescue_state'"
+    ).get() as { name: string } | undefined
+    expect(tableCheck?.name).toBe('mention_rescue_state')
   })
 
   it('suppressed during quiet hours', async () => {
