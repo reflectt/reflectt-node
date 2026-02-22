@@ -155,25 +155,68 @@ function maxSeverity(reflections: Reflection[]): string | null {
  */
 export function extractClusterKey(reflection: Reflection): InsightClusterKey {
   const tags = reflection.tags ?? []
+
+  // Accept both engineering (stage:/family:/unit:) and universal (area:/category:/scope:) prefixes
+  const processArea = tags.find(t => t.startsWith('stage:'))?.slice(6)
+    ?? tags.find(t => t.startsWith('area:'))?.slice(5)
+    ?? 'unknown'
+
+  const issueCategory = tags.find(t => t.startsWith('family:'))?.slice(7)
+    ?? tags.find(t => t.startsWith('category:'))?.slice(9)
+    ?? _inferIssueCategory(reflection.pain)
+
+  const affectedScope = tags.find(t => t.startsWith('unit:'))?.slice(5)
+    ?? tags.find(t => t.startsWith('scope:'))?.slice(6)
+    ?? reflection.team_id ?? 'unknown'
+
   return {
-    workflow_stage: tags.find(t => t.startsWith('stage:'))?.slice(6) ?? 'unknown',
-    failure_family: tags.find(t => t.startsWith('family:'))?.slice(7) ?? _inferFailureFamily(reflection.pain),
-    impacted_unit: tags.find(t => t.startsWith('unit:'))?.slice(5) ?? reflection.team_id ?? 'unknown',
+    workflow_stage: processArea,
+    failure_family: issueCategory,
+    impacted_unit: affectedScope,
   }
 }
 
-function _inferFailureFamily(pain: string): string {
+/**
+ * Infer issue category from pain text.
+ * Supports both technical and non-technical patterns.
+ */
+function _inferIssueCategory(pain: string): string {
   const lower = pain.toLowerCase()
+
+  // Technical patterns
   if (/truncat|cut.?off|missing.?text|incomplete/i.test(lower)) return 'data-loss'
   if (/crash|exception|error|fail/i.test(lower)) return 'runtime-error'
   if (/slow|timeout|latency|performance/i.test(lower)) return 'performance'
   if (/auth|permission|denied|forbidden/i.test(lower)) return 'access'
-  if (/ui|display|render|layout|style/i.test(lower)) return 'ui'
+  if (/\bui\b|display|render|layout|style/i.test(lower)) return 'ui'
   if (/config|setting|env/i.test(lower)) return 'config'
   if (/deploy|release|build|ci/i.test(lower)) return 'deployment'
   if (/test|coverage|flak/i.test(lower)) return 'testing'
+
+  // Customer & client impact (before timeline-slip — "escalated" contains "late")
+  if (/client|customer|complaint|escalat/i.test(lower)) return 'customer-impact'
+  if (/churn|cancel|lost.*account/i.test(lower)) return 'retention-risk'
+
+  // Communication & coordination
+  if (/miscommunicat|unclear|confus|misunderst/i.test(lower)) return 'communication-gap'
+  if (/\bdelayed?\b|missed.*deadline|overdue/i.test(lower)) return 'timeline-slip'
+  if (/handoff|handover|transition|follow.?up/i.test(lower)) return 'handoff-failure'
+
+  // Process & workflow
+  if (/duplicat|redundan|wast.*time/i.test(lower)) return 'waste'
+  if (/blocked|waiting|bottleneck/i.test(lower)) return 'bottleneck'
+  if (/inconsisten|differ.*standard|conflicting/i.test(lower)) return 'inconsistency'
+  if (/forgot|miss|overlook|skip/i.test(lower)) return 'oversight'
+
+  // Quality & knowledge
+  if (/quality|sloppy|rework|redo/i.test(lower)) return 'quality-gap'
+  if (/train|onboard|ramp.*up/i.test(lower)) return 'training-gap'
+
   return 'uncategorized'
 }
+
+// Keep old name as alias for backward compatibility
+const _inferFailureFamily = _inferIssueCategory
 
 // ── Promotion gate ──
 

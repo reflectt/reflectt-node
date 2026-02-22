@@ -71,6 +71,31 @@ describe('extractClusterKey', () => {
     const key = extractClusterKey(ref)
     expect(key.impacted_unit).toBe('team-alpha')
   })
+
+  // ── Universal tag aliases (non-SaaS generalization) ──
+
+  it('accepts area: as alias for stage:', () => {
+    const ref = makeReflection({ tags: ['area:client-delivery', 'category:handoff-failure', 'scope:account-mgmt'] })
+    const key = extractClusterKey(ref)
+    expect(key.workflow_stage).toBe('client-delivery')
+    expect(key.failure_family).toBe('handoff-failure')
+    expect(key.impacted_unit).toBe('account-mgmt')
+  })
+
+  it('prefers stage: over area: when both present', () => {
+    const ref = makeReflection({ tags: ['stage:deploy', 'area:operations', 'family:config', 'unit:api'] })
+    const key = extractClusterKey(ref)
+    expect(key.workflow_stage).toBe('deploy') // stage: takes priority
+  })
+
+  it('infers non-technical categories from pain text', () => {
+    expect(extractClusterKey(makeReflection({ tags: [], pain: 'The requirements were unclear due to miscommunication' })).failure_family).toBe('communication-gap')
+    expect(extractClusterKey(makeReflection({ tags: [], pain: 'The handoff between design and dev was messy' })).failure_family).toBe('handoff-failure')
+    expect(extractClusterKey(makeReflection({ tags: [], pain: 'Customer complaint escalated to manager' })).failure_family).toBe('customer-impact')
+    expect(extractClusterKey(makeReflection({ tags: [], pain: 'We wasted time doing duplicate work' })).failure_family).toBe('waste')
+    expect(extractClusterKey(makeReflection({ tags: [], pain: 'Project was delayed and missed the deadline' })).failure_family).toBe('timeline-slip')
+    expect(extractClusterKey(makeReflection({ tags: [], pain: 'Quality issues led to rework' })).failure_family).toBe('quality-gap')
+  })
 })
 
 // ── Scoring ──

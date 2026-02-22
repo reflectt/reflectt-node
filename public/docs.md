@@ -372,13 +372,13 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/reflections` | Create a structured reflection. Body: `{ pain, impact, evidence[] (array, min 1), went_well, suspected_why, proposed_fix, confidence (0-10), role_type, author }`. Optional: `severity` (low\|medium\|high\|critical), `task_id`, `tags[]`, `team_id`, `metadata {}`. Returns 400 with field-level errors on validation failure. |
+| POST | `/reflections` | Create a structured reflection. Body: `{ pain, impact, evidence[] (array, min 1), went_well, suspected_why, proposed_fix, confidence (0-10), role_type, author }`. Optional: `severity` (low\|medium\|high\|critical), `task_id`, `tags[]`, `team_id`, `domain` (engineering\|retail\|agency\|support\|ops\|general), `metadata {}`. Returns 400 with field-level errors on validation failure. |
 | GET | `/reflections` | List reflections. Query: `author`, `role_type`, `severity`, `task_id`, `team_id`, `since`, `before`, `limit` (max 200), `offset`. |
 | GET | `/reflections/:id` | Get single reflection by ID. |
 | GET | `/reflections/stats` | Aggregate stats: total count, by role_type, by severity, average confidence. |
 | GET | `/reflections/sla` | Reflection SLA status per agent: last reflection time, overdue hours, tasks done since last reflection. |
 | POST | `/reflections/nudge/tick` | Manually trigger reflection nudge cycle (post-task + idle checks). |
-| GET | `/reflections/schema` | Machine-readable field reference (required/optional fields, enums, ranges). |
+| GET | `/reflections/schema` | Machine-readable field reference (required/optional fields, enums, ranges). Query: `?domain=retail` returns domain-specific tag presets and example reflection. |
 
 ## Insights (Clustering Engine)
 

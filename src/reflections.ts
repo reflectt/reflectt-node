@@ -12,6 +12,10 @@ export type RoleType = (typeof ROLE_TYPES)[number]
 export const SEVERITY_LEVELS = ['low', 'medium', 'high', 'critical'] as const
 export type SeverityLevel = (typeof SEVERITY_LEVELS)[number]
 
+/** Domain hint for non-engineering teams. Affects tag autocomplete and inference. */
+export const DOMAINS = ['engineering', 'retail', 'agency', 'support', 'ops', 'general'] as const
+export type Domain = (typeof DOMAINS)[number]
+
 // ── Types ──
 
 export interface ReflectionInput {
@@ -28,6 +32,7 @@ export interface ReflectionInput {
   task_id?: string
   tags?: string[]
   team_id?: string
+  domain?: Domain
   metadata?: Record<string, unknown>
 }
 
@@ -104,6 +109,11 @@ export function validateReflection(body: unknown): ValidationResult {
     errors.push({ field: 'team_id', message: 'team_id must be a string if provided' })
   }
 
+  // Optional: domain
+  if (b.domain !== undefined && b.domain !== null && !DOMAINS.includes(b.domain as Domain)) {
+    errors.push({ field: 'domain', message: `domain must be one of: ${DOMAINS.join(', ')}` })
+  }
+
   // Optional: metadata
   if (b.metadata !== undefined && b.metadata !== null && (typeof b.metadata !== 'object' || Array.isArray(b.metadata))) {
     errors.push({ field: 'metadata', message: 'metadata must be a plain object if provided' })
@@ -129,6 +139,7 @@ export function validateReflection(body: unknown): ValidationResult {
   if (b.task_id) data.task_id = (b.task_id as string).trim()
   if (b.tags && Array.isArray(b.tags)) data.tags = b.tags as string[]
   if (b.team_id) data.team_id = (b.team_id as string).trim()
+  if (b.domain) data.domain = b.domain as Domain
   if (b.metadata && typeof b.metadata === 'object') data.metadata = b.metadata as Record<string, unknown>
 
   return { valid: true, data }
@@ -157,6 +168,7 @@ interface ReflectionRow {
   task_id: string | null
   tags: string | null
   team_id: string | null
+  domain: string | null
   metadata: string | null
   created_at: number
   updated_at: number
@@ -178,6 +190,7 @@ function rowToReflection(row: ReflectionRow): Reflection {
     task_id: row.task_id ?? undefined,
     tags: safeJsonParse<string[]>(row.tags),
     team_id: row.team_id ?? undefined,
+    domain: (row.domain as Domain) ?? undefined,
     metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -197,8 +210,8 @@ export function createReflection(input: ReflectionInput): Reflection {
     INSERT INTO reflections (
       id, pain, impact, evidence, went_well, suspected_why,
       proposed_fix, confidence, role_type, severity, author,
-      task_id, tags, team_id, metadata, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      task_id, tags, team_id, domain, metadata, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     reflection.pain,
@@ -214,6 +227,7 @@ export function createReflection(input: ReflectionInput): Reflection {
     reflection.task_id ?? null,
     safeJsonStringify(reflection.tags) ?? null,
     reflection.team_id ?? null,
+    reflection.domain ?? null,
     safeJsonStringify(reflection.metadata) ?? null,
     now,
     now,

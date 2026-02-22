@@ -337,6 +337,12 @@ function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_insights_score ON insights(score);
       `,
     },
+    {
+      version: 9,
+      sql: `
+        ALTER TABLE reflections ADD COLUMN domain TEXT;
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')

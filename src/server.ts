@@ -88,7 +88,7 @@ import {
   type EscalationStatus,
 } from './escalation.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
-import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
+import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS, DOMAINS } from './reflections.js'
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns } from './insights.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
@@ -5259,7 +5259,7 @@ export async function createServer(): Promise<FastifyInstance> {
         success: false,
         error: 'Validation failed',
         errors: result.errors,
-        hint: `Required fields: pain, impact, evidence[] (array), went_well, suspected_why, proposed_fix, confidence (0-10), role_type (${ROLE_TYPES.join('|')}), author. Optional: severity (${SEVERITY_LEVELS.join('|')}), task_id, tags, team_id, metadata.`,
+        hint: `Required fields: pain, impact, evidence[] (array), went_well, suspected_why, proposed_fix, confidence (0-10), role_type (${ROLE_TYPES.join('|')}), author. Optional: severity (${SEVERITY_LEVELS.join('|')}), task_id, tags, team_id, domain (${DOMAINS.join('|')}), metadata.`,
       }
     }
 
@@ -5309,15 +5309,35 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, ...result }
   })
 
-  app.get('/reflections/schema', async () => {
-    return {
+  app.get('/reflections/schema', async (request) => {
+    const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`)
+    const domain = url.searchParams.get('domain') || undefined
+
+    const base = {
       required: ['pain', 'impact', 'evidence', 'went_well', 'suspected_why', 'proposed_fix', 'confidence', 'role_type', 'author'],
-      optional: ['severity', 'task_id', 'tags', 'team_id', 'metadata'],
+      optional: ['severity', 'task_id', 'tags', 'team_id', 'domain', 'metadata'],
       role_types: ROLE_TYPES,
       severity_levels: SEVERITY_LEVELS,
+      domains: DOMAINS,
       confidence_range: { min: 0, max: 10 },
       evidence_note: 'Array of strings — at least one evidence link, path, or reference required',
     }
+
+    if (domain) {
+      const { DOMAIN_PRESETS, getDomainTags } = await import('./domain-presets.js')
+      const preset = DOMAIN_PRESETS[domain]
+      if (preset) {
+        return {
+          ...base,
+          domain_preset: preset,
+          suggested_tags: getDomainTags(domain),
+        }
+      }
+    }
+
+    // List available domains
+    const { listDomains } = await import('./domain-presets.js')
+    return { ...base, available_domains: listDomains() }
   })
 
   app.get<{ Params: { id: string } }>('/reflections/:id', async (request, reply) => {
