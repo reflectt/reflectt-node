@@ -4508,6 +4508,14 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      // ── Reflection automation: nudge agent to reflect after task completion ──
+      if (parsed.status === 'done' && existing.status !== 'done' && task.assignee) {
+        try {
+          const { onTaskDone } = await import('./reflection-automation.js')
+          onTaskDone(task)
+        } catch { /* reflection automation may not be loaded */ }
+      }
+
       // Route status-change notifications through agent preferences
       const notifMgr = getNotificationManager()
       const statusNotifTargets: Array<{ agent: string; type: 'taskAssigned' | 'taskCompleted' | 'reviewRequested' | 'statusChange' }> = []
@@ -5257,6 +5265,12 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const reflection = createReflection(result.data)
 
+    // Track reflection for automation (resets nudge timer)
+    try {
+      const { onReflectionSubmitted } = await import('./reflection-automation.js')
+      onReflectionSubmitted(reflection.author)
+    } catch { /* reflection automation may not be loaded */ }
+
     reply.code(201)
     return { success: true, reflection }
   })
@@ -5282,6 +5296,17 @@ export async function createServer(): Promise<FastifyInstance> {
 
   app.get('/reflections/stats', async () => {
     return reflectionStats()
+  })
+
+  app.get('/reflections/sla', async () => {
+    const { getReflectionSLAs } = await import('./reflection-automation.js')
+    return { slas: getReflectionSLAs() }
+  })
+
+  app.post('/reflections/nudge/tick', async () => {
+    const { tickReflectionNudges } = await import('./reflection-automation.js')
+    const result = await tickReflectionNudges()
+    return { success: true, ...result }
   })
 
   app.get('/reflections/schema', async () => {

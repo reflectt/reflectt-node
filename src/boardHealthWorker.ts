@@ -195,6 +195,14 @@ export class BoardHealthWorker {
     const rqfActions = await this.checkReadyQueueFloor(now, dryRun)
     actions.push(...rqfActions)
 
+    // 3b. Reflection automation nudges
+    if (!dryRun) {
+      try {
+        const { tickReflectionNudges } = await import('./reflection-automation.js')
+        await tickReflectionNudges()
+      } catch { /* reflection automation may not be loaded */ }
+    }
+
     // 4. Emit digest if interval elapsed
     let digest: BoardHealthDigest | null = null
     if (force || now - this.lastDigestAt >= this.config.digestIntervalMs) {

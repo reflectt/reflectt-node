@@ -376,6 +376,8 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/reflections` | List reflections. Query: `author`, `role_type`, `severity`, `task_id`, `team_id`, `since`, `before`, `limit` (max 200), `offset`. |
 | GET | `/reflections/:id` | Get single reflection by ID. |
 | GET | `/reflections/stats` | Aggregate stats: total count, by role_type, by severity, average confidence. |
+| GET | `/reflections/sla` | Reflection SLA status per agent: last reflection time, overdue hours, tasks done since last reflection. |
+| POST | `/reflections/nudge/tick` | Manually trigger reflection nudge cycle (post-task + idle checks). |
 | GET | `/reflections/schema` | Machine-readable field reference (required/optional fields, enums, ranges). |
 
 ## Insights (Clustering Engine)
@@ -454,3 +456,46 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | POST | `/escalations/:id/resolve` | Resolve an escalation. |
 | POST | `/escalations/tick` | Trigger escalation timer tick (cron/manual). |
 | POST | `/feedback/:id/respond` | Respond to a feedback/support item. |
+
+## Reflection Automation
+
+Team-wide nudging and SLA tracking for reflection cadence.
+
+### Routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/reflections/sla` | Reflection SLA status for all tracked agents. |
+| POST | `/reflections/nudge/tick` | Tick nudge engine: fire pending post-task and idle nudges. |
+
+### How It Works
+
+1. **Post-task nudges**: When a task moves to `done` or `blocked`, the assignee is queued for a reflection nudge (configurable delay, default 5min).
+2. **Idle nudges**: Agents who haven't submitted a reflection within their cadence interval (default: 8h for humans, 2h for agents) receive a reminder.
+3. **SLA breach**: Agents overdue beyond 1.5× their cadence interval are marked as `overdue`.
+4. **Cooldowns**: Nudges are throttled per-agent (default: 60min between nudges).
+5. **Tracking resets**: Submitting a reflection via `POST /reflections` resets the agent's tasks-done counter and last-reflection timestamp.
+
+### SLA Statuses
+
+- `healthy`: Reflected within cadence interval
+- `due`: Past cadence interval but within breach threshold
+- `overdue`: Beyond breach threshold (1.5× cadence)
+
+### Configuration
+
+Set via `reflectionNudge` in policy config:
+
+```json
+{
+  "reflectionNudge": {
+    "enabled": true,
+    "postTaskDelayMin": 5,
+    "idleReflectionHours": 8,
+    "cooldownMin": 60,
+    "agents": [],
+    "channel": "general",
+    "roleCadenceHours": { "engineering": 4, "ops": 8 }
+  }
+}
+```
