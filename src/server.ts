@@ -47,6 +47,7 @@ import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
+import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import { getProvisioningManager } from './provisioning.js'
@@ -6408,6 +6409,117 @@ export async function createServer(): Promise<FastifyInstance> {
     // Store telemetry data (for cloud aggregation)
     // For now, just acknowledge — storage comes with reflectt-cloud
     return { success: true, received: true, timestamp: Date.now() }
+  })
+
+  // ── Usage Tracking + Cost Guardrails ─────────────────────────────────────
+
+  // Initialize usage tables
+  ensureUsageTables()
+
+  // Report model usage (single event)
+  app.post('/usage/report', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    if (!body.agent || !body.model) {
+      reply.code(400)
+      return { success: false, error: 'agent and model are required' }
+    }
+    const event = recordUsage({
+      agent: body.agent as string,
+      task_id: body.task_id as string | undefined,
+      model: body.model as string,
+      provider: (body.provider as string) || 'unknown',
+      input_tokens: Number(body.input_tokens) || 0,
+      output_tokens: Number(body.output_tokens) || 0,
+      estimated_cost_usd: body.estimated_cost_usd != null ? Number(body.estimated_cost_usd) : undefined,
+      category: (body.category as UsageEvent['category']) || 'other',
+      timestamp: Number(body.timestamp) || Date.now(),
+      team_id: body.team_id as string | undefined,
+      metadata: body.metadata as Record<string, unknown> | undefined,
+    })
+    return { success: true, event }
+  })
+
+  // Report batch usage
+  app.post('/usage/report/batch', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const items = body.events as unknown[]
+    if (!Array.isArray(items) || items.length === 0) {
+      reply.code(400)
+      return { success: false, error: 'events array is required' }
+    }
+    const events = recordUsageBatch(items as any[])
+    return { success: true, count: events.length }
+  })
+
+  // Usage summary (total cost by period)
+  app.get('/usage/summary', async (request) => {
+    const q = request.query as Record<string, string>
+    return getUsageSummary({
+      since: q.since ? Number(q.since) : undefined,
+      until: q.until ? Number(q.until) : undefined,
+      agent: q.agent,
+      team_id: q.team_id,
+    })
+  })
+
+  // Usage by agent
+  app.get('/usage/by-agent', async (request) => {
+    const q = request.query as Record<string, string>
+    return getUsageByAgent({ since: q.since ? Number(q.since) : undefined })
+  })
+
+  // Usage by model
+  app.get('/usage/by-model', async (request) => {
+    const q = request.query as Record<string, string>
+    return getUsageByModel({ since: q.since ? Number(q.since) : undefined })
+  })
+
+  // Usage by task
+  app.get('/usage/by-task', async (request) => {
+    const q = request.query as Record<string, string>
+    return getUsageByTask({ since: q.since ? Number(q.since) : undefined, limit: q.limit ? Number(q.limit) : undefined })
+  })
+
+  // Cost estimate (dry run — no storage)
+  app.get('/usage/estimate', async (request) => {
+    const q = request.query as Record<string, string>
+    if (!q.model) return { error: 'model query parameter required' }
+    const cost = estimateCost(q.model, Number(q.input_tokens) || 0, Number(q.output_tokens) || 0)
+    return { model: q.model, input_tokens: Number(q.input_tokens) || 0, output_tokens: Number(q.output_tokens) || 0, estimated_cost_usd: cost }
+  })
+
+  // Spend caps CRUD
+  app.get('/usage/caps', async () => {
+    return { caps: listCaps(), status: checkCaps() }
+  })
+
+  app.post('/usage/caps', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    if (!body.limit_usd || Number(body.limit_usd) <= 0) {
+      reply.code(400)
+      return { success: false, error: 'limit_usd (positive number) is required' }
+    }
+    const cap = setCap({
+      scope: (body.scope as SpendCap['scope']) || 'global',
+      scope_id: body.scope_id as string | undefined,
+      period: (body.period as SpendCap['period']) || 'monthly',
+      limit_usd: Number(body.limit_usd),
+      action: (body.action as SpendCap['action']) || 'warn',
+      enabled: body.enabled !== false,
+    })
+    return { success: true, cap }
+  })
+
+  app.delete<{ Params: { id: string } }>('/usage/caps/:id', async (request, reply) => {
+    const deleted = deleteCap(request.params.id)
+    if (!deleted) { reply.code(404); return { success: false, error: 'Cap not found' } }
+    return { success: true }
+  })
+
+  // Routing suggestions (savings opportunities)
+  app.get('/usage/routing-suggestions', async (request) => {
+    const q = request.query as Record<string, string>
+    return { suggestions: getRoutingSuggestions({ since: q.since ? Number(q.since) : undefined }) }
   })
 
   // Operational metrics endpoint (lightweight dashboard contract)
