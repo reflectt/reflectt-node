@@ -63,7 +63,7 @@ function runMigrations(db: Database.Database): void {
   const currentVersion = db.prepare('SELECT MAX(version) as v FROM _migrations').get() as { v: number | null }
   const version = currentVersion?.v ?? 0
 
-  const migrations: Array<{ version: number; sql: string }> = [
+  const migrations: Array<{ version: number; sql?: string; runFn?: (db: Database.Database) => void }> = [
     {
       version: 1,
       sql: `
@@ -354,13 +354,29 @@ function runMigrations(db: Database.Database): void {
         );
       `,
     },
+    {
+      version: 11,
+      // Add task_id column to insights table for insight→task linkage
+      runFn: (db: Database.Database) => {
+        // Check if column already exists (idempotent)
+        const cols = db.prepare("PRAGMA table_info(insights)").all() as Array<{ name: string }>
+        if (!cols.some(c => c.name === 'task_id')) {
+          db.exec("ALTER TABLE insights ADD COLUMN task_id TEXT DEFAULT NULL")
+        }
+        db.exec("CREATE INDEX IF NOT EXISTS idx_insights_task_id ON insights(task_id)")
+      },
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
 
   for (const migration of migrations) {
     if (migration.version > version) {
-      db.exec(migration.sql)
+      if ('runFn' in migration && typeof migration.runFn === 'function') {
+        migration.runFn(db)
+      } else if ('sql' in migration) {
+        db.exec(migration.sql as string)
+      }
       insertMigration.run(migration.version)
       console.log(`[DB] Applied migration v${migration.version}`)
     }
