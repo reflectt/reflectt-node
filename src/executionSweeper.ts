@@ -17,6 +17,7 @@ import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import type { Task } from './types.js'
 import { execSync } from 'child_process'
+import { processAutoMerge, generateRemediation } from './prAutoMerge.js'
 
 // ── Live PR State Check ────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ export interface SweepViolation {
   type: 'validating_sla' | 'validating_critical' | 'pr_drift' | 'orphan_pr'
   age_minutes: number
   message: string
+  remediation?: string
 }
 
 export interface SweepResult {
@@ -133,6 +135,7 @@ export interface DriftReportEntry {
   prMerged?: boolean
   issue: 'stale_validating' | 'orphan_pr' | 'pr_merged_not_closed' | 'no_pr_linked' | 'clean'
   detail: string
+  remediation?: string
 }
 
 export interface DriftReport {
@@ -166,6 +169,7 @@ export function sweepValidatingQueue(): SweepResult {
     const prev = escalated.get(task.id)
 
     if (ageSinceActivity >= VALIDATING_CRITICAL_MS && prev?.level !== 'critical') {
+      const prUrl = extractPrUrl(meta)
       violations.push({
         taskId: task.id,
         title: task.title,
@@ -174,10 +178,12 @@ export function sweepValidatingQueue(): SweepResult {
         type: 'validating_critical',
         age_minutes: ageMinutes,
         message: `🚨 CRITICAL: "${task.title}" (${task.id}) stuck in validating for ${ageMinutes}m. @${task.reviewer || 'unassigned'} please review. @${task.assignee || 'unassigned'} — your PR is blocked.`,
+        remediation: generateRemediation({ taskId: task.id, issue: 'stale_validating', prUrl: prUrl || undefined, meta }),
       })
       escalated.set(task.id, { level: 'critical', at: now })
       logDryRun('validating_critical', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee}`)
     } else if (ageSinceActivity >= VALIDATING_SLA_MS && !prev) {
+      const prUrl = extractPrUrl(meta)
       violations.push({
         taskId: task.id,
         title: task.title,
@@ -186,6 +192,7 @@ export function sweepValidatingQueue(): SweepResult {
         type: 'validating_sla',
         age_minutes: ageMinutes,
         message: `⚠️ SLA breach: "${task.title}" (${task.id}) in validating ${ageMinutes}m. @${task.reviewer || 'unassigned'} — review needed. @${task.assignee || 'unassigned'} — ping if blocked.`,
+        remediation: generateRemediation({ taskId: task.id, issue: 'stale_validating', prUrl: prUrl || undefined, meta }),
       })
       escalated.set(task.id, { level: 'warning', at: now })
       logDryRun('validating_sla', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee}`)
@@ -255,6 +262,7 @@ export function sweepValidatingQueue(): SweepResult {
         type: 'orphan_pr',
         age_minutes: Math.round(completedAge / 60_000),
         message: `🔍 Orphan PR detected: ${prUrl} linked to done task "${task.title}" (${task.id}). PR may still be open — ${assigneeMention} close or merge it. ${reviewerMention} — confirm status.`,
+        remediation: generateRemediation({ taskId: task.id, issue: 'orphan_pr', prUrl }),
       })
       flaggedOrphanPRs.add(prUrl)
       logDryRun('orphan_pr', `${prUrl} on ${task.id} — task done ${Math.round(completedAge / 60_000)}m ago`)
@@ -276,11 +284,24 @@ export function sweepValidatingQueue(): SweepResult {
           type: 'pr_drift',
           age_minutes: Math.round(driftAge / 60_000),
           message: `📦 PR merged ${Math.round(driftAge / 60_000)}m ago but "${task.title}" (${task.id}) still in validating. @${task.reviewer || 'unassigned'} — approve or close. @${task.assignee || 'unassigned'} — ping if needed.`,
+          remediation: generateRemediation({ taskId: task.id, issue: 'pr_merged_not_closed', prUrl: extractPrUrl(meta) || undefined, meta }),
         })
         escalated.set(`drift:${task.id}`, { level: 'warning', at: now })
         logDryRun('pr_drift', `${task.id} — PR merged ${Math.round(driftAge / 60_000)}m ago, still validating`)
       }
     }
+  }
+
+  // ── Auto-merge processing ─────────────────────────────────────────────
+  // Attempt to auto-merge green+approved PRs and auto-close tasks
+  try {
+    const autoMergeResult = processAutoMerge(allTasks)
+    if (autoMergeResult.mergeAttempts > 0 || autoMergeResult.autoCloses > 0) {
+      logDryRun('auto_merge', `attempts=${autoMergeResult.mergeAttempts} successes=${autoMergeResult.mergeSuccesses} autoCloses=${autoMergeResult.autoCloses} skipped=${autoMergeResult.skipped}`)
+    }
+  } catch (err) {
+    console.error('[Sweeper] Auto-merge processing failed:', err)
+    logDryRun('auto_merge_error', String(err))
   }
 
   const result: SweepResult = {
@@ -459,6 +480,7 @@ export function generateDriftReport(): DriftReport {
       prMerged,
       issue,
       detail,
+      remediation: issue !== 'clean' ? generateRemediation({ taskId: task.id, issue, prUrl: prUrl || undefined, meta }) : undefined,
     })
   }
 
@@ -504,6 +526,7 @@ export function generateDriftReport(): DriftReport {
       prUrl,
       issue: 'orphan_pr',
       detail: `PR linked to ${doneTasks.length} done task(s) but not marked as merged. May still be open.`,
+      remediation: generateRemediation({ taskId: doneTasks[0].taskId, issue: 'orphan_pr', prUrl }),
     })
   }
 

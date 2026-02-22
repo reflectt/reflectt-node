@@ -24,6 +24,7 @@ import { memoryManager } from './memory.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
+import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog } from './prAutoMerge.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
 import {
   emitActivationEvent,
@@ -7677,25 +7678,34 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // If PR merged and task is validating, auto-add merged evidence
     if (prState === 'merged') {
-      const lookup = taskManager.resolveTaskId(taskId)
-      if (lookup.task) {
-        const meta = (lookup.task.metadata || {}) as Record<string, unknown>
-        const artifacts = (meta.artifacts as string[]) || []
-        if (prUrl && !artifacts.includes(prUrl)) {
-          artifacts.push(prUrl)
-        }
-        try {
-          await taskManager.updateTask(lookup.resolvedId!, {
-            metadata: {
-              ...meta,
-              artifacts,
-              pr_merged: true,
-              pr_merged_at: Date.now(),
-              pr_url: prUrl || meta.pr_url,
-            },
-          })
-        } catch {
-          // Task update might fail validation — that's ok
+      // Auto-populate close-gate metadata from PR data
+      const gateResult = autoPopulateCloseGate(taskId, prUrl)
+
+      // Try auto-close if all gates are satisfied
+      const closeResult = tryAutoCloseTask(taskId)
+
+      // Fall back to manual metadata update if autoPopulate didn't cover it
+      if (!gateResult.populated) {
+        const lookup = taskManager.resolveTaskId(taskId)
+        if (lookup.task) {
+          const meta = (lookup.task.metadata || {}) as Record<string, unknown>
+          const artifacts = (meta.artifacts as string[]) || []
+          if (prUrl && !artifacts.includes(prUrl)) {
+            artifacts.push(prUrl)
+          }
+          try {
+            await taskManager.updateTask(lookup.resolvedId!, {
+              metadata: {
+                ...meta,
+                artifacts,
+                pr_merged: true,
+                pr_merged_at: Date.now(),
+                pr_url: prUrl || meta.pr_url,
+              },
+            })
+          } catch {
+            // Task update might fail validation — that's ok
+          }
         }
       }
     }
@@ -7725,6 +7735,24 @@ export async function createServer(): Promise<FastifyInstance> {
       success: true,
       drift: drift || null,
       message: drift?.message || `PR ${prState} event recorded for ${taskId}`,
+    }
+  })
+
+  // GET /pr-automerge/status — recent merge attempt log
+  app.get('/pr-automerge/status', async (_request, reply) => {
+    const log = getMergeAttemptLog()
+    return {
+      success: true,
+      totalAttempts: log.length,
+      recentAttempts: log.slice(-50),
+      summary: {
+        mergeAttempted: log.filter(l => l.action === 'merge_attempted').length,
+        mergeSuccess: log.filter(l => l.action === 'merge_success').length,
+        mergeFailed: log.filter(l => l.action === 'merge_failed').length,
+        mergeSkipped: log.filter(l => l.action === 'merge_skipped').length,
+        autoClose: log.filter(l => l.action === 'auto_close').length,
+        closeGateFail: log.filter(l => l.action === 'close_gate_fail').length,
+      },
     }
   })
 
