@@ -227,25 +227,20 @@ export function sweepValidatingQueue(): SweepResult {
     // If metadata says merged, skip
     if (prMerged) continue
 
-    // If task is done AND reviewer approved, very likely the PR was merged — check live
-    if (taskDone && reviewerApproved) {
-      const liveResult = checkLivePrState(prUrl)
-      if (liveResult.state === 'merged' || liveResult.state === 'closed') {
-        logDryRun('orphan_pr_skipped', `${prUrl} on ${task.id} — live state: ${liveResult.state}`)
-        continue
-      }
-      if (liveResult.state === 'unknown') {
-        logDryRun('orphan_pr_live_check_failed', `${prUrl} on ${task.id} — task done+approved, gh check failed`)
-      }
-    }
-
-    // For done tasks without reviewer approval, also do live check
+    // Live-check the PR state — orphan alerts ONLY fire for confirmed OPEN PRs.
+    // Fail-closed: if live state is unknown (gh auth failure, network error),
+    // we log degraded-check but do NOT emit an alert.
     if (taskDone) {
       const liveResult = checkLivePrState(prUrl)
       if (liveResult.state === 'merged' || liveResult.state === 'closed') {
         logDryRun('orphan_pr_skipped', `${prUrl} on ${task.id} — live state: ${liveResult.state}`)
         continue
       }
+      if (liveResult.state === 'unknown') {
+        logDryRun('orphan_pr_degraded_check', `${prUrl} on ${task.id} — live state unknown (gh check failed), suppressing alert`)
+        continue
+      }
+      // At this point, liveResult.state === 'open' — proceed to alert check
     }
 
     const completedAge = now - task.updatedAt
