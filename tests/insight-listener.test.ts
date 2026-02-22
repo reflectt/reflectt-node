@@ -14,6 +14,10 @@ import {
   getInsightTaskBridgeStats,
   _resetBridgeStats,
   _handlePromotedInsight,
+  resolveAssignment,
+  configureBridge,
+  getBridgeConfig,
+  type AssignmentDecision,
 } from '../src/insight-task-bridge.js'
 import { createReflection } from '../src/reflections.js'
 import { ingestReflection, getInsight, updateInsightStatus, INSIGHT_STATUSES } from '../src/insights.js'
@@ -258,5 +262,240 @@ describe('Triage endpoints', () => {
       payload: { action: 'approve' },
     })
     expect(res.statusCode).toBe(400)
+  })
+})
+
+// ── Ownership Guardrail Tests ──
+
+describe('Ownership guardrail: resolveAssignment', () => {
+  // Save original config so we can restore after each test
+  let originalConfig: ReturnType<typeof getBridgeConfig>
+
+  beforeEach(() => {
+    originalConfig = getBridgeConfig()
+  })
+
+  afterEach(() => {
+    // Restore config
+    configureBridge(originalConfig)
+  })
+
+  it('single author: assigns non-author when guardrail enabled', () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage', 'kai'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:og1', 'family:og1', 'unit:og1'],
+    })
+
+    const decision = resolveAssignment(insight)
+    expect(decision.assignee).not.toBe('link')
+    expect(decision.guardrailApplied).toBe(true)
+    expect(decision.soleAuthorFallback).toBe(false)
+    expect(decision.insightAuthors).toContain('link')
+    expect(decision.reason).toContain('avoided')
+  })
+
+  it('single author: falls back to author when no alternatives exist', () => {
+    configureBridge({
+      assignableAgents: ['link'],  // Only the author is available
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:og2', 'family:og2', 'unit:og2'],
+    })
+
+    const decision = resolveAssignment(insight)
+    expect(decision.assignee).toBe('link')
+    expect(decision.guardrailApplied).toBe(true)
+    expect(decision.soleAuthorFallback).toBe(true)
+    expect(decision.reason).toContain('fallback')
+    // Reviewer must not be the author
+    expect(decision.reviewer).not.toBe('link')
+  })
+
+  it('multi-author: normal routing (guardrail does not fire)', () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage', 'kai'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    // Create two reflections from different authors to produce multi-author insight
+    const r1 = createReflection({
+      pain: 'Multi-author test pain',
+      impact: 'Blocks flow',
+      evidence: ['https://example.com/ma1'],
+      went_well: 'Quick detection',
+      suspected_why: 'Config drift',
+      proposed_fix: 'Pin configs',
+      confidence: 8,
+      role_type: 'agent',
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:og3', 'family:og3', 'unit:og3'],
+    })
+    const insight1 = ingestReflection(r1)
+
+    const r2 = createReflection({
+      pain: 'Multi-author test pain variant',
+      impact: 'Blocks flow too',
+      evidence: ['https://example.com/ma2'],
+      went_well: 'Good monitoring',
+      suspected_why: 'Config drift again',
+      proposed_fix: 'Pin configs v2',
+      confidence: 7,
+      role_type: 'agent',
+      author: 'sage',
+      severity: 'high',
+      tags: ['stage:og3', 'family:og3', 'unit:og3'],
+    })
+    const insight2 = ingestReflection(r2)
+
+    // Use whichever insight has multiple authors (they cluster on same key)
+    const multiInsight = getInsight(insight1.id) || getInsight(insight2.id)
+    expect(multiInsight).toBeTruthy()
+
+    // If they clustered together, authors should include both
+    if (multiInsight!.authors.length > 1) {
+      const decision = resolveAssignment(multiInsight!)
+      expect(decision.guardrailApplied).toBe(false)
+      expect(decision.soleAuthorFallback).toBe(false)
+      expect(decision.reason).toContain('Multi-author')
+    }
+  })
+
+  it('guardrail disabled: allows author assignment', () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage'],
+      ownershipGuardrail: { enabled: false, requireNonAuthorReviewer: false },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:og4', 'family:og4', 'unit:og4'],
+    })
+
+    const decision = resolveAssignment(insight)
+    expect(decision.guardrailApplied).toBe(false)
+    expect(decision.reason).toContain('disabled')
+  })
+
+  it('team override disables guardrail for specific team', () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage'],
+      ownershipGuardrail: {
+        enabled: true,
+        requireNonAuthorReviewer: true,
+        teamOverrides: { 'team-alpha': false },
+      },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:og5', 'family:og5', 'unit:og5'],
+    })
+
+    // With team override disabled, guardrail should NOT fire
+    const decision = resolveAssignment(insight, 'team-alpha')
+    expect(decision.guardrailApplied).toBe(false)
+  })
+
+  it('team override preserves guardrail for other teams', () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage', 'kai'],
+      ownershipGuardrail: {
+        enabled: true,
+        requireNonAuthorReviewer: true,
+        teamOverrides: { 'team-alpha': false },
+      },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:og6', 'family:og6', 'unit:og6'],
+    })
+
+    // Different team — guardrail should still fire
+    const decision = resolveAssignment(insight, 'team-beta')
+    expect(decision.guardrailApplied).toBe(true)
+    expect(decision.assignee).not.toBe('link')
+  })
+
+  it('records assignment_decision in task metadata on auto-create', async () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage', 'kai'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:og7', 'family:og7', 'unit:og7'],
+    })
+
+    _resetBridgeStats()
+    await _handlePromotedInsight({
+      id: `evt-guardrail-${Date.now()}`,
+      type: 'task_created',
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: insight.id },
+    })
+
+    const updated = getInsight(insight.id)
+    expect(updated?.task_id).toBeTruthy()
+
+    // Fetch the created task and verify assignment_decision metadata
+    const res = await app.inject({ method: 'GET', url: `/tasks/${updated!.task_id}` })
+    expect(res.statusCode).toBe(200)
+    const task = JSON.parse(res.body).task
+    expect(task.metadata.assignment_decision).toBeDefined()
+    expect(task.metadata.assignment_decision.insight_authors).toContain('link')
+    expect(typeof task.metadata.assignment_decision.reason).toBe('string')
+    expect(typeof task.metadata.assignment_decision.guardrail_applied).toBe('boolean')
+  })
+
+  it('sole-author fallback enforces non-author reviewer', () => {
+    configureBridge({
+      assignableAgents: ['link'],
+      defaultReviewer: 'sage',
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:og8', 'family:og8', 'unit:og8'],
+    })
+
+    const decision = resolveAssignment(insight)
+    expect(decision.soleAuthorFallback).toBe(true)
+    expect(decision.reviewer).not.toBe('link')
+  })
+
+  it('candidatesConsidered is populated for audit', () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage', 'kai', 'pixel'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:og9', 'family:og9', 'unit:og9'],
+    })
+
+    const decision = resolveAssignment(insight)
+    expect(decision.candidatesConsidered).toEqual(['link', 'sage', 'kai', 'pixel'])
+    expect(decision.insightAuthors).toEqual(['link'])
   })
 })

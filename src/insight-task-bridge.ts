@@ -14,8 +14,33 @@ import { eventBus, type Event } from './events.js'
 import { getInsight, updateInsightStatus, type Insight } from './insights.js'
 import { taskManager } from './tasks.js'
 import { getDb } from './db.js'
+import { suggestAssignee, suggestReviewer, getAgentRoles } from './assignment.js'
 
 // ── Types ──
+
+export interface OwnershipGuardrailConfig {
+  /** When true, avoid assigning auto-created tasks to sole insight author */
+  enabled: boolean
+  /** When sole author IS assigned (no alternatives), require non-author reviewer */
+  requireNonAuthorReviewer: boolean
+  /** Override: teams can disable the guardrail entirely */
+  teamOverrides?: Record<string, boolean>
+}
+
+export interface AssignmentDecision {
+  assignee: string
+  reviewer: string
+  /** Why this assignment was chosen */
+  reason: string
+  /** Whether the guardrail fired */
+  guardrailApplied: boolean
+  /** Whether sole-author fallback was used (guardrail wanted to avoid but couldn't) */
+  soleAuthorFallback: boolean
+  /** Candidates considered (for audit) */
+  candidatesConsidered: string[]
+  /** Authors of the insight */
+  insightAuthors: string[]
+}
 
 export interface BridgeConfig {
   enabled: boolean
@@ -23,6 +48,7 @@ export interface BridgeConfig {
   defaultReviewer: string
   defaultEtaDays: number
   assignableAgents: string[]
+  ownershipGuardrail: OwnershipGuardrailConfig
 }
 
 export interface BridgeStats {
@@ -51,6 +77,20 @@ let config: BridgeConfig = {
   defaultReviewer: 'sage',
   defaultEtaDays: 3,
   assignableAgents: [],
+  ownershipGuardrail: {
+    enabled: true,
+    requireNonAuthorReviewer: true,
+  },
+}
+
+/**
+ * Update bridge config at runtime (e.g., from policy or API).
+ */
+export function configureBridge(partial: Partial<BridgeConfig>): void {
+  config = { ...config, ...partial }
+  if (partial.ownershipGuardrail) {
+    config.ownershipGuardrail = { ...config.ownershipGuardrail, ...partial.ownershipGuardrail }
+  }
 }
 
 // ── Bridge Logic ──
@@ -90,8 +130,7 @@ async function handlePromotedInsight(event: Event): Promise<void> {
 async function autoCreateTask(insight: Insight): Promise<void> {
   const title = `[Insight] ${insight.title}`
   const description = buildTaskDescription(insight)
-  const assignee = pickAssignee(insight.authors)
-  const reviewer = pickReviewer(insight.authors, assignee)
+  const decision = resolveAssignment(insight)
 
   try {
     const task = await taskManager.createTask({
@@ -99,8 +138,8 @@ async function autoCreateTask(insight: Insight): Promise<void> {
       description,
       status: 'todo',
       priority: (insight.priority as 'P0' | 'P1' | 'P2' | 'P3') || 'P2',
-      assignee,
-      reviewer,
+      assignee: decision.assignee,
+      reviewer: decision.reviewer,
       createdBy: 'insight-bridge',
       done_criteria: [
         'Root cause addressed or mitigated',
@@ -114,34 +153,166 @@ async function autoCreateTask(insight: Insight): Promise<void> {
         source: 'insight-task-bridge',
         reflection_count: insight.reflection_ids.length,
         authors: insight.authors,
+        assignment_decision: {
+          reason: decision.reason,
+          guardrail_applied: decision.guardrailApplied,
+          sole_author_fallback: decision.soleAuthorFallback,
+          candidates_considered: decision.candidatesConsidered,
+          insight_authors: decision.insightAuthors,
+        },
       },
     })
 
     updateInsightStatus(insight.id, 'task_created', task.id)
     stats.tasksAutoCreated++
-    console.log(`[InsightTaskBridge] Auto-created task ${task.id} from insight ${insight.id} (severity: ${insight.severity_max}, assignee: ${assignee})`)
+    console.log(`[InsightTaskBridge] Auto-created task ${task.id} from insight ${insight.id} (severity: ${insight.severity_max}, assignee: ${decision.assignee}, guardrail: ${decision.guardrailApplied})`)
   } catch (err) {
     stats.errors++
     console.error(`[InsightTaskBridge] Failed to create task for insight ${insight.id}:`, err)
   }
 }
 
-function pickAssignee(authors: string[]): string {
-  const candidates = config.assignableAgents.length > 0
-    ? config.assignableAgents
-    : ['link', 'sage', 'kai', 'pixel', 'echo', 'scout']
+// ── Ownership Guardrail ──
 
-  const nonAuthor = candidates.find(a => !authors.includes(a))
-  return nonAuthor || authors[0] || candidates[0] || 'unassigned'
+/**
+ * Resolve assignee + reviewer with ownership guardrail.
+ *
+ * Policy:
+ * 1. If guardrail enabled and insight has single author:
+ *    a. Use suggestAssignee (scoring engine) excluding the author
+ *    b. If no non-author candidate available → fallback to author, but require non-author reviewer
+ * 2. If multi-author: normal suggestAssignee routing (authors are valid candidates)
+ * 3. Decision is fully recorded for audit trail
+ */
+export function resolveAssignment(insight: Insight, teamId?: string): AssignmentDecision {
+  const authors = insight.authors || []
+  const guardrail = config.ownershipGuardrail
+  const guardrailEnabled = guardrail.enabled &&
+    (!teamId || !guardrail.teamOverrides || guardrail.teamOverrides[teamId] !== false)
+
+  const isSingleAuthor = authors.length === 1
+  const shouldAvoidAuthor = guardrailEnabled && isSingleAuthor
+
+  // Get all tasks for WIP scoring
+  let allTasks: Array<{ status: string; assignee?: string; reviewer?: string; metadata?: Record<string, unknown> }> = []
+  try {
+    allTasks = taskManager.listTasks()
+  } catch { /* scoring works without tasks */ }
+
+  // Get role-based candidates
+  const roleNames = getAgentRoles().map(r => r.name)
+  const candidates = config.assignableAgents.length > 0 ? config.assignableAgents : roleNames
+
+  // Synthetic task for scoring
+  const syntheticTask = {
+    title: `[Insight] ${insight.title}`,
+    tags: [insight.cluster_key, insight.failure_family].filter(Boolean) as string[],
+  }
+
+  let assignee: string
+  let reason: string
+  let guardrailApplied = false
+  let soleAuthorFallback = false
+
+  if (shouldAvoidAuthor) {
+    // Try suggestAssignee — it may pick a non-author naturally
+    const suggestion = suggestAssignee(syntheticTask, allTasks as any)
+    const suggestedAgent = suggestion.suggested
+
+    if (suggestedAgent && !authors.includes(suggestedAgent)) {
+      // Scoring engine picked a non-author — great
+      assignee = suggestedAgent
+      reason = `Scoring engine selected non-author "${suggestedAgent}" (guardrail active, sole author "${authors[0]}" avoided)`
+      guardrailApplied = true
+    } else {
+      // Scoring picked author or no one — manually find non-author candidate
+      const nonAuthorCandidates = candidates.filter(c => !authors.includes(c))
+      if (nonAuthorCandidates.length > 0) {
+        // Pick best non-author from scores
+        const nonAuthorScored = (suggestion.scores || [])
+          .filter(s => !authors.includes(s.agent) && s.score > 0 && !s.overCap)
+        if (nonAuthorScored.length > 0) {
+          assignee = nonAuthorScored[0].agent
+          reason = `Best-scoring non-author "${assignee}" selected (guardrail override, sole author "${authors[0]}" avoided)`
+        } else {
+          assignee = nonAuthorCandidates[0]
+          reason = `First available non-author "${assignee}" selected (no scored candidates, guardrail active)`
+        }
+        guardrailApplied = true
+      } else {
+        // No non-author available — fall back to author with reviewer guardrail
+        assignee = authors[0]
+        reason = `Sole author fallback: "${authors[0]}" assigned (no non-author candidates available). Non-author reviewer required.`
+        guardrailApplied = true
+        soleAuthorFallback = true
+      }
+    }
+  } else if (!guardrailEnabled) {
+    // Guardrail disabled — use scoring engine normally
+    const suggestion = suggestAssignee(syntheticTask, allTasks as any)
+    assignee = suggestion.suggested || authors[0] || candidates[0] || 'unassigned'
+    reason = `Guardrail disabled. Scoring engine selected "${assignee}".`
+  } else {
+    // Multi-author — normal routing (authors are valid candidates)
+    const suggestion = suggestAssignee(syntheticTask, allTasks as any)
+    assignee = suggestion.suggested || authors[0] || candidates[0] || 'unassigned'
+    reason = `Multi-author insight (${authors.length} authors). Normal scoring applied, selected "${assignee}".`
+  }
+
+  // Resolve reviewer
+  const reviewer = resolveReviewer(insight, assignee, authors, soleAuthorFallback)
+
+  return {
+    assignee,
+    reviewer,
+    reason,
+    guardrailApplied,
+    soleAuthorFallback,
+    candidatesConsidered: candidates,
+    insightAuthors: authors,
+  }
 }
 
-function pickReviewer(authors: string[], assignee: string): string {
-  if (authors.includes(assignee)) {
-    const candidates = ['link', 'sage', 'kai', 'pixel', 'echo', 'scout']
-      .filter(a => !authors.includes(a) && a !== assignee)
-    return candidates[0] || config.defaultReviewer
+/**
+ * Pick reviewer, enforcing non-author requirement when sole-author fallback was used.
+ */
+function resolveReviewer(
+  insight: Insight,
+  assignee: string,
+  authors: string[],
+  soleAuthorFallback: boolean,
+): string {
+  // Use suggestReviewer from assignment engine
+  let allTasks: Array<{ status: string; assignee?: string; reviewer?: string; metadata?: Record<string, unknown> }> = []
+  try {
+    allTasks = taskManager.listTasks()
+  } catch { /* ok */ }
+
+  const suggestion = suggestReviewer(
+    { title: `[Insight] ${insight.title}`, assignee },
+    allTasks as any,
+  )
+
+  // If sole-author fallback, reviewer MUST NOT be an author
+  if (soleAuthorFallback && config.ownershipGuardrail.requireNonAuthorReviewer) {
+    if (suggestion.suggested && !authors.includes(suggestion.suggested)) {
+      return suggestion.suggested
+    }
+    // Find any non-author reviewer from scores
+    const nonAuthorReviewer = (suggestion.scores || [])
+      .find(s => !authors.includes(s.agent) && s.agent !== assignee)
+    if (nonAuthorReviewer) return nonAuthorReviewer.agent
+    // Hard fallback: default reviewer if not an author
+    if (!authors.includes(config.defaultReviewer) && config.defaultReviewer !== assignee) {
+      return config.defaultReviewer
+    }
+    // Last resort: any agent not the assignee
+    const roleNames = getAgentRoles().map(r => r.name)
+    const anyone = roleNames.find(r => r !== assignee && !authors.includes(r))
+    return anyone || config.defaultReviewer
   }
-  return config.defaultReviewer
+
+  return suggestion.suggested || config.defaultReviewer
 }
 
 function buildTaskDescription(insight: Insight): string {
@@ -238,6 +409,10 @@ export function getInsightTaskBridgeStats(): BridgeStats {
 
 export function _resetBridgeStats(): void {
   stats = { tasksAutoCreated: 0, insightsTriaged: 0, duplicatesSkipped: 0, errors: 0, lastEventAt: null }
+}
+
+export function getBridgeConfig(): BridgeConfig {
+  return { ...config, ownershipGuardrail: { ...config.ownershipGuardrail } }
 }
 
 export { handlePromotedInsight as _handlePromotedInsight }
