@@ -17,10 +17,14 @@ describe('Reflection Pipeline Health', () => {
 
     expect(body).toHaveProperty('status')
     expect(body).toHaveProperty('recentReflections')
-    expect(body).toHaveProperty('recentInsights')
+    expect(body).toHaveProperty('recentInsightsCreated')
+    expect(body).toHaveProperty('recentInsightsUpdated')
+    expect(body).toHaveProperty('recentInsightActivity')
     expect(body).toHaveProperty('recentPromotions')
     expect(body).toHaveProperty('signals')
     expect(body.signals).toHaveProperty('reflections_flowing')
+    expect(body.signals).toHaveProperty('insights_created')
+    expect(body.signals).toHaveProperty('insights_updated')
     expect(body.signals).toHaveProperty('insights_flowing')
   })
 
