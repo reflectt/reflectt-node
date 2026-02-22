@@ -82,6 +82,7 @@ export interface PolicyConfig {
     escalateAfterMin: number   // idle+empty-queue → escalation timer
     cooldownMin: number        // don't re-alert within this window
     channel: string            // where to post warnings
+    enforceBlock?: boolean     // if true (default), block validating/done transitions when queue drops below floor
   }
 
   /** Escalation channels for different severity levels */
