@@ -11,7 +11,7 @@ import type { Reflection } from './reflections.js'
 const COOLDOWN_MS = 24 * 60 * 60 * 1000 // 24 hours
 const PROMOTION_THRESHOLD = 2             // independent reflections needed
 
-export const INSIGHT_STATUSES = ['candidate', 'promoted', 'cooldown', 'closed'] as const
+export const INSIGHT_STATUSES = ['candidate', 'promoted', 'pending_triage', 'task_created', 'cooldown', 'closed'] as const
 export type InsightStatus = (typeof INSIGHT_STATUSES)[number]
 
 export const PROMOTION_READINESS = ['not_ready', 'ready', 'promoted', 'override'] as const
@@ -44,6 +44,7 @@ export interface Insight {
   cooldown_until: number | null
   cooldown_reason: string | null
   severity_max: string | null
+  task_id?: string | null      // linked task (set when auto-created or manually promoted)
   metadata?: Record<string, unknown>
   created_at: number
   updated_at: number
@@ -70,6 +71,7 @@ interface InsightRow {
   cooldown_until: number | null
   cooldown_reason: string | null
   severity_max: string | null
+  task_id: string | null
   metadata: string | null
   created_at: number
   updated_at: number
@@ -95,6 +97,7 @@ function rowToInsight(row: InsightRow): Insight {
     cooldown_until: row.cooldown_until,
     cooldown_reason: row.cooldown_reason,
     severity_max: row.severity_max,
+    task_id: row.task_id ?? null,
     metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -580,6 +583,30 @@ export function _clearInsightStore(): void {
     db.prepare('DELETE FROM insights').run()
   } catch {
     // Table may not exist
+  }
+}
+
+/**
+ * Update an insight's status and optionally link a task.
+ * Used by the insight→task bridge when auto-creating or triaging.
+ */
+export function updateInsightStatus(
+  insightId: string,
+  status: InsightStatus,
+  taskId?: string,
+): boolean {
+  const db = getDb()
+  const now = Date.now()
+  if (taskId) {
+    const result = db.prepare(
+      'UPDATE insights SET status = ?, task_id = ?, updated_at = ? WHERE id = ?'
+    ).run(status, taskId, now, insightId)
+    return result.changes > 0
+  } else {
+    const result = db.prepare(
+      'UPDATE insights SET status = ?, updated_at = ? WHERE id = ?'
+    ).run(status, now, insightId)
+    return result.changes > 0
   }
 }
 

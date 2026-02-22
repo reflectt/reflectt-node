@@ -47,13 +47,31 @@ interface Subscription {
   createdAt: number
 }
 
+type InternalListener = (event: Event) => void | Promise<void>
+
 class EventBus {
   private subscriptions = new Map<string, Subscription>()
+  private internalListeners = new Map<string, InternalListener>()
   private eventLog: Event[] = []
   private maxLogSize = 1000
   private batchWindowMs = 2000 // Default: 2 seconds
   private pendingEvents: Event[] = []
   private batchTimer: NodeJS.Timeout | null = null
+
+  /**
+   * Register an in-process listener for events.
+   * Used for internal automation (e.g., insight→task bridge).
+   */
+  on(listenerId: string, listener: InternalListener): void {
+    this.internalListeners.set(listenerId, listener)
+  }
+
+  /**
+   * Remove an in-process listener.
+   */
+  off(listenerId: string): void {
+    this.internalListeners.delete(listenerId)
+  }
 
   /**
    * Subscribe to events via SSE
@@ -134,6 +152,18 @@ class EventBus {
     this.eventLog.push(event)
     if (this.eventLog.length > this.maxLogSize) {
       this.eventLog.shift()
+    }
+
+    // Fire internal listeners (async, non-blocking)
+    for (const [id, listener] of this.internalListeners) {
+      try {
+        const result = listener(event)
+        if (result instanceof Promise) {
+          result.catch(err => console.error(`[EventBus] Internal listener '${id}' error:`, err))
+        }
+      } catch (err) {
+        console.error(`[EventBus] Internal listener '${id}' error:`, err)
+      }
     }
 
     // Add to pending batch
