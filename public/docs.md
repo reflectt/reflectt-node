@@ -385,7 +385,10 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/insights/ingest` | Ingest a reflection into clustering. Body: `{ reflection_id }`. Cluster key auto-derived from reflection tags/content. Promotion gate: 2 independent reflections (distinct authors) OR severity high/critical. 24h cooldown after promotion. |
-| GET | `/insights` | List insights. Query: `status` (emerging\|promoted\|cooldown\|archived), `priority` (P0-P3), `workflow_stage`, `failure_family`, `impacted_unit`, `limit`, `offset`. Sorted by score desc. |
+| GET | `/insights` | List insights. Query: `status` (candidate\|promoted\|pending_triage\|task_created\|cooldown\|closed), `priority` (P0-P3), `workflow_stage`, `failure_family`, `impacted_unit`, `limit`, `offset`. Sorted by score desc. |
+| GET | `/insights/bridge/stats` | Insight→Task bridge stats: auto-created count, triaged count, duplicates skipped, errors. |
+| GET | `/insights/triage` | List insights in `pending_triage` status (medium/low severity awaiting review). Query: `limit`. |
+| POST | `/insights/:id/triage` | Triage a pending insight. Body: `{ action: "approve"\|"dismiss", assignee? (required for approve), reviewer?, priority?, triaged_by? }`. Approve creates a linked task; dismiss closes the insight. |
 | GET | `/insights/:id` | Get single insight by ID. |
 | GET | `/insights/stats` | Aggregate stats: by status, priority, failure family. |
 | POST | `/insights/tick-cooldowns` | Advance cooldown state machine: promoted past deadline → cooldown, expired cooldown → archived. |

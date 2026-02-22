@@ -98,6 +98,15 @@ export interface PolicyConfig {
     nudgeNeverReflected?: boolean // nudge agents who have never reflected (default: true)
   }
 
+  /** Insight:promoted listener — auto-create tasks from promoted insights */
+  insightListener: {
+    enabled: boolean
+    autoCreateSeverities: string[]   // severities that auto-create tasks (default: ['critical', 'high'])
+    defaultReviewer: string
+    defaultEta: string
+    clusterCooldownMs: number        // cooldown between auto-creates for same cluster
+  }
+
   /** Escalation channels for different severity levels */
   escalation: {
     defaultChannel: string
@@ -168,6 +177,13 @@ export const DEFAULT_POLICY: PolicyConfig = {
     roleCadenceHours: {},
     excludeAgents: [],
     nudgeNeverReflected: true,
+  },
+  insightListener: {
+    enabled: true,
+    autoCreateSeverities: ['critical', 'high'],
+    defaultReviewer: 'sage',
+    defaultEta: '4h',
+    clusterCooldownMs: 30 * 60_000,
   },
   escalation: {
     defaultChannel: 'general',

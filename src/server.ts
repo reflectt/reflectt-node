@@ -89,9 +89,10 @@ import {
 } from './escalation.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
-import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns } from './insights.js'
+import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus } from './insights.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
+import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats } from './insight-task-bridge.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 
 // Schemas
@@ -1444,11 +1445,15 @@ export async function createServer(): Promise<FastifyInstance> {
   boardHealthWorker.updateConfig(policy.boardHealth)
   boardHealthWorker.start()
 
+  // Insight:promoted → auto-task bridge (severity-aware)
+  startInsightTaskBridge()
+
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
     clearInterval(cadenceWatchdogTimer)
     clearInterval(mentionRescueTimer)
     boardHealthWorker.stop()
+    stopInsightTaskBridge()
     wsHeartbeat.stop()
   })
 
@@ -5421,6 +5426,85 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/insights/recurring/candidates', async () => {
     const candidates = generateRecurringCandidates()
     return { candidates, count: candidates.length }
+  })
+
+  // Insight→Task bridge stats
+  app.get('/insights/bridge/stats', async () => {
+    return getInsightTaskBridgeStats()
+  })
+
+  // Triage queue: list insights pending triage
+  app.get('/insights/triage', async (request) => {
+    const query = request.query as Record<string, string>
+    const limit = query.limit ? Number(query.limit) : 50
+    const result = listInsights({ status: 'pending_triage', limit })
+    return { triage_queue: result.insights, total: result.total }
+  })
+
+  // Triage action: approve (create task) or dismiss
+  app.post<{ Params: { id: string } }>('/insights/:id/triage', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const action = body.action as string
+
+    if (!['approve', 'dismiss'].includes(action)) {
+      reply.code(400)
+      return { success: false, error: 'action must be "approve" or "dismiss"' }
+    }
+
+    const insight = getInsight(request.params.id)
+    if (!insight) {
+      reply.code(404)
+      return { success: false, error: 'Insight not found' }
+    }
+
+    if (insight.status !== 'pending_triage') {
+      reply.code(400)
+      return { success: false, error: `Insight is ${insight.status}, not pending_triage` }
+    }
+
+    if (action === 'dismiss') {
+      updateInsightStatus(insight.id, 'closed')
+      return { success: true, action: 'dismissed', insight_id: insight.id }
+    }
+
+    // Approve: create task
+    const assignee = typeof body.assignee === 'string' ? body.assignee : undefined
+    const reviewer = typeof body.reviewer === 'string' ? body.reviewer : 'sage'
+    const eta = typeof body.eta === 'string' ? body.eta : undefined
+    const priority = typeof body.priority === 'string' ? body.priority : insight.priority
+
+    if (!assignee) {
+      reply.code(400)
+      return { success: false, error: 'assignee required for triage approval' }
+    }
+
+    const etaDate = eta || new Date(Date.now() + 3 * 86400000).toISOString().split('T')[0]
+
+    try {
+      const task = await taskManager.createTask({
+        title: `[Insight] ${insight.title}`,
+        description: `Triaged from insight ${insight.id}.\n\nCluster: ${insight.cluster_key}\nSeverity: ${insight.severity_max}\nReflections: ${insight.reflection_ids.length}`,
+        status: 'todo',
+        priority: priority as 'P0' | 'P1' | 'P2' | 'P3',
+        assignee,
+        reviewer,
+        createdBy: typeof body.triaged_by === 'string' ? body.triaged_by : 'triage',
+        done_criteria: ['Root cause addressed', 'Evidence validated', 'Follow-up reflection submitted'],
+        metadata: {
+          insight_id: insight.id,
+          promotion_reason: 'triage_approved',
+          severity: insight.severity_max,
+          source: 'triage',
+          eta: etaDate,
+        },
+      })
+
+      updateInsightStatus(insight.id, 'task_created', task.id)
+      return { success: true, action: 'approved', insight_id: insight.id, task_id: task.id }
+    } catch (err) {
+      reply.code(500)
+      return { success: false, error: `Failed to create task: ${(err as Error).message}` }
+    }
   })
 
   // ── Intake Pipeline (automated reflection→insight→task) ──────────────
