@@ -94,6 +94,8 @@ export interface PolicyConfig {
     agents: string[]             // agents to monitor (empty = all active)
     channel: string              // delivery channel
     roleCadenceHours: Record<string, number>  // per-agent cadence overrides
+    excludeAgents?: string[]     // agent names to exclude from auto-discovery
+    nudgeNeverReflected?: boolean // nudge agents who have never reflected (default: true)
   }
 
   /** Escalation channels for different severity levels */
@@ -164,6 +166,8 @@ export const DEFAULT_POLICY: PolicyConfig = {
     agents: [],
     channel: 'general',
     roleCadenceHours: {},
+    excludeAgents: [],
+    nudgeNeverReflected: true,
   },
   escalation: {
     defaultChannel: 'general',

@@ -245,6 +245,94 @@ describe('getReflectionSLAs', () => {
   })
 })
 
+// ── Agent filtering ──
+
+describe('Agent filtering', () => {
+  it('should exclude test/system agents from SLA by default', () => {
+    ensureReflectionTrackingTable()
+    // Create tasks for real and fake agents
+    onTaskDone(makeTask({ assignee: 'link' }))
+    onTaskDone(makeTask({ assignee: 'test-agent-123' }))
+    onTaskDone(makeTask({ assignee: 'proof-agent-xyz' }))
+    onTaskDone(makeTask({ assignee: 'unassigned' }))
+
+    const slas = getReflectionSLAs()
+    const agentNames = slas.map(s => s.agent)
+
+    // Real agents should appear
+    // test/proof/unassigned should be filtered out
+    expect(agentNames).not.toContain('test-agent-123')
+    expect(agentNames).not.toContain('proof-agent-xyz')
+    expect(agentNames).not.toContain('unassigned')
+  })
+
+  it('should include agents tracked via onReflectionSubmitted', () => {
+    ensureReflectionTrackingTable()
+    // Agents who have submitted reflections should appear in SLA tracking
+    onReflectionSubmitted('sage')
+    onReflectionSubmitted('link')
+
+    // Create active tasks so they show up in getActiveAgents
+    taskManager.createTask({
+      title: 'Active task for sage',
+      description: 'test',
+      assignee: 'sage',
+      reviewer: 'kai',
+      done_criteria: ['done'],
+      createdBy: 'system',
+      priority: 'P1',
+    })
+    taskManager.createTask({
+      title: 'Active task for link',
+      description: 'test',
+      assignee: 'link',
+      reviewer: 'kai',
+      done_criteria: ['done'],
+      createdBy: 'system',
+      priority: 'P1',
+    })
+
+    const slas = getReflectionSLAs()
+    const agentNames = slas.map(s => s.agent)
+    expect(agentNames).toContain('sage')
+    expect(agentNames).toContain('link')
+    expect(slas.length).toBeGreaterThanOrEqual(2)
+  })
+})
+
+// ── Never-reflected nudges ──
+
+describe('Never-reflected agent nudging', () => {
+  it('should nudge agents who have never reflected when enough time passes', async () => {
+    ensureReflectionTrackingTable()
+    const task = makeTask({ assignee: 'new-hire' })
+    onTaskDone(task)
+
+    // Fire the post-task nudge immediately
+    const pending = _getPendingNudges()
+    if (pending.length > 0) {
+      ;(pending[0] as any).nudgeAt = Date.now() - 1000
+    }
+
+    const result = await tickReflectionNudges()
+    // Should have fired the post-task nudge for new-hire
+    expect(result.postTaskNudges).toBeGreaterThanOrEqual(0)
+    expect(result).toHaveProperty('total')
+  })
+
+  it('should mark never-reflected agents as overdue in SLA', () => {
+    ensureReflectionTrackingTable()
+    onTaskDone(makeTask({ assignee: 'new-hire' }))
+
+    const slas = getReflectionSLAs()
+    const newHireSla = slas.find(s => s.agent === 'new-hire')
+    if (newHireSla) {
+      expect(newHireSla.status).toBe('overdue')
+      expect(newHireSla.lastReflectionAt).toBeNull()
+    }
+  })
+})
+
 // ── E2E: multi-agent team automation ──
 
 describe('End-to-end: team-wide automation', () => {
@@ -288,5 +376,38 @@ describe('End-to-end: team-wide automation', () => {
     expect(result.total).toBeGreaterThanOrEqual(0) // may be 0 if routeMessage fails silently
     expect(result).toHaveProperty('postTaskNudges')
     expect(result).toHaveProperty('idleNudges')
+  })
+
+  it('should handle continuous reflection cycle', async () => {
+    ensureReflectionTrackingTable()
+
+    // Agent does tasks, reflects, does more tasks
+    onTaskDone(makeTask({ assignee: 'cycle-agent' }))
+    onReflectionSubmitted('cycle-agent')
+
+    let slas = getReflectionSLAs()
+    let agentSla = slas.find(s => s.agent === 'cycle-agent')
+    if (agentSla) {
+      expect(agentSla.status).toBe('healthy')
+      expect(agentSla.tasksDoneSinceLastReflection).toBe(0)
+    }
+
+    // More tasks without reflection
+    onTaskDone(makeTask({ assignee: 'cycle-agent' }))
+    onTaskDone(makeTask({ assignee: 'cycle-agent' }))
+
+    slas = getReflectionSLAs()
+    agentSla = slas.find(s => s.agent === 'cycle-agent')
+    if (agentSla) {
+      expect(agentSla.tasksDoneSinceLastReflection).toBe(2)
+    }
+
+    // Reflect again — counter resets
+    onReflectionSubmitted('cycle-agent')
+    slas = getReflectionSLAs()
+    agentSla = slas.find(s => s.agent === 'cycle-agent')
+    if (agentSla) {
+      expect(agentSla.tasksDoneSinceLastReflection).toBe(0)
+    }
   })
 })

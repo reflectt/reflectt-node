@@ -25,6 +25,10 @@ export interface ReflectionNudgeConfig {
   channel: string
   /** Per-role cadence overrides: { engineering: 4, ops: 8 } hours */
   roleCadenceHours: Record<string, number>
+  /** Agent names to exclude from auto-discovery (test agents, system, etc.) */
+  excludeAgents?: string[]
+  /** Nudge agents who have never reflected (default: true) */
+  nudgeNeverReflected?: boolean
 }
 
 export interface ReflectionSLA {
@@ -155,25 +159,54 @@ export async function tickReflectionNudges(): Promise<{
   // Check idle reflection SLA
   const agents = config.agents.length > 0
     ? config.agents
-    : getActiveAgents()
+    : getActiveAgents(config.excludeAgents)
+
+  const nudgeNeverReflected = config.nudgeNeverReflected !== false // default true
 
   for (const agent of agents) {
     if (lastNudgeAt[agent] && now - lastNudgeAt[agent] < cooldownMs) continue
 
+    // Seed tracking row for newly discovered agents
+    ensureAgentTracking(agent)
+
     const tracking = getAgentTracking(agent)
     const lastReflection = tracking?.last_reflection_at || 0
-    const hoursSince = (now - lastReflection) / (1000 * 60 * 60)
     const cadenceHours = config.roleCadenceHours[agent] || config.idleReflectionHours
 
-    if (hoursSince >= cadenceHours && lastReflection > 0) {
-      await sendIdleNudge(agent, Math.floor(hoursSince), tracking?.tasks_done_since_reflection || 0, config)
+    let shouldNudge = false
+    let hoursSinceDisplay = 0
+
+    if (lastReflection > 0) {
+      // Has reflected before — check if overdue
+      const hoursSince = (now - lastReflection) / (1000 * 60 * 60)
+      if (hoursSince >= cadenceHours) {
+        shouldNudge = true
+        hoursSinceDisplay = Math.floor(hoursSince)
+      }
+    } else if (nudgeNeverReflected) {
+      // Never reflected — check if tracking row is old enough (seeded_at)
+      const seededAt = tracking?.updated_at || 0
+      const hoursSinceSeeded = seededAt > 0 ? (now - seededAt) / (1000 * 60 * 60) : cadenceHours
+      if (hoursSinceSeeded >= cadenceHours) {
+        shouldNudge = true
+        hoursSinceDisplay = Math.floor(hoursSinceSeeded)
+      }
+    }
+
+    if (shouldNudge) {
+      await sendIdleNudge(agent, hoursSinceDisplay, tracking?.tasks_done_since_reflection || 0, config)
       lastNudgeAt[agent] = now
 
-      // Record nudge
+      // Record nudge in DB
       ensureReflectionTrackingTable()
       const db = getDb()
-      db.prepare('UPDATE reflection_tracking SET last_nudge_at = ?, updated_at = ? WHERE agent = ?')
-        .run(now, now, agent)
+      db.prepare(`
+        INSERT INTO reflection_tracking (agent, last_nudge_at, tasks_done_since_reflection, updated_at)
+        VALUES (?, ?, 0, ?)
+        ON CONFLICT(agent) DO UPDATE SET
+          last_nudge_at = ?,
+          updated_at = ?
+      `).run(agent, now, now, now, now)
 
       idleNudges++
     }
@@ -190,7 +223,20 @@ export function getReflectionSLAs(): ReflectionSLA[] {
   const config = getConfig()
   const now = Date.now()
 
-  const agents = config.agents.length > 0 ? config.agents : getActiveAgents()
+  // Merge active agents + agents with tracking rows (union)
+  const activeAgents = config.agents.length > 0 ? config.agents : getActiveAgents(config.excludeAgents)
+  const trackedRows = db.prepare('SELECT agent FROM reflection_tracking').all() as { agent: string }[]
+  const trackedAgents = trackedRows.map(r => r.agent)
+
+  // Union, filtered by exclude patterns
+  const excludeSet = new Set((config.excludeAgents || []).map(a => a.toLowerCase()))
+  const allAgents = new Set([...activeAgents, ...trackedAgents])
+  const agents = [...allAgents].filter(agent => {
+    const lower = agent.toLowerCase()
+    if (excludeSet.has(lower)) return false
+    return !DEFAULT_EXCLUDE_PATTERNS.some(p => p.test(agent))
+  })
+
   const slas: ReflectionSLA[] = []
 
   for (const agent of agents) {
@@ -277,6 +323,8 @@ function getConfig(): ReflectionNudgeConfig {
     agents: [],
     channel: 'general',
     roleCadenceHours: {},
+    excludeAgents: [],
+    nudgeNeverReflected: true,
   }
 }
 
@@ -284,13 +332,37 @@ function getAgentTracking(agent: string): {
   last_reflection_at: number | null
   last_nudge_at: number | null
   tasks_done_since_reflection: number
+  updated_at: number
 } | null {
   ensureReflectionTrackingTable()
   const db = getDb()
   return db.prepare('SELECT * FROM reflection_tracking WHERE agent = ?').get(agent) as any
 }
 
-function getActiveAgents(): string[] {
+/**
+ * Ensure an agent has a tracking row (seed on first discovery).
+ * This enables idle nudges for agents who have never reflected.
+ */
+function ensureAgentTracking(agent: string): void {
+  ensureReflectionTrackingTable()
+  const db = getDb()
+  db.prepare(`
+    INSERT OR IGNORE INTO reflection_tracking (agent, tasks_done_since_reflection, updated_at)
+    VALUES (?, 0, ?)
+  `).run(agent, Date.now())
+}
+
+/** Patterns that indicate non-real agents (test fixtures, system, etc.) */
+const DEFAULT_EXCLUDE_PATTERNS = [
+  /^test-/i,
+  /^proof-/i,
+  /^lane-/i,
+  /^unassigned$/i,
+  /^system$/i,
+  /^bot$/i,
+]
+
+function getActiveAgents(excludeList?: string[]): string[] {
   // Get agents that have tasks in doing/todo/validating
   const tasks = taskManager.listTasks({})
   const agents = new Set<string>()
@@ -299,7 +371,14 @@ function getActiveAgents(): string[] {
       agents.add(t.assignee)
     }
   }
-  return [...agents]
+
+  // Filter out test/system agents
+  const excludeSet = new Set((excludeList || []).map(a => a.toLowerCase()))
+  return [...agents].filter(agent => {
+    const lower = agent.toLowerCase()
+    if (excludeSet.has(lower)) return false
+    return !DEFAULT_EXCLUDE_PATTERNS.some(p => p.test(agent))
+  })
 }
 
 // ── Test helpers ──
