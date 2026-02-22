@@ -99,6 +99,7 @@ import { listLineage, getLineage, lineageStats } from './lineage.js'
 import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
+import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -6108,6 +6109,54 @@ export async function createServer(): Promise<FastifyInstance> {
 
   app.post('/intake/maintenance', async () => {
     return { success: true, ...pipelineMaintenance() }
+  })
+
+  // ── Routing Overrides (role-aware routing hardening) ─────────────────
+
+  app.post('/routing/overrides', async (request, reply) => {
+    const body = request.body as CreateOverrideInput
+    const validation = validateOverrideInput(body)
+    if (!validation.valid) {
+      reply.code(400)
+      return { success: false, errors: validation.errors }
+    }
+    const override = createOverride(body)
+    reply.code(201)
+    return { success: true, override }
+  })
+
+  app.get('/routing/overrides', async (request) => {
+    const query = request.query as Record<string, string>
+    return {
+      overrides: listOverrides({
+        target: query.target,
+        target_type: query.target_type as any,
+        status: query.status as any,
+        limit: query.limit ? Number(query.limit) : undefined,
+      }),
+    }
+  })
+
+  app.get<{ Params: { id: string } }>('/routing/overrides/:id', async (request, reply) => {
+    const override = getOverride(request.params.id)
+    if (!override) {
+      reply.code(404)
+      return { success: false, error: 'Override not found' }
+    }
+    return { override }
+  })
+
+  app.get('/routing/overrides/active/:target', async (request) => {
+    const { target } = request.params as { target: string }
+    const query = request.query as Record<string, string>
+    const targetType = (query.target_type || 'agent') as 'agent' | 'role'
+    const override = findActiveOverride(target, targetType)
+    return { override }
+  })
+
+  app.post('/routing/overrides/tick', async () => {
+    const result = tickOverrideLifecycle()
+    return { success: true, ...result }
   })
 
   // Get next task (pull-based assignment)

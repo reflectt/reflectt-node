@@ -369,6 +369,11 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/widget/feedback.js` | Embeddable feedback widget (Shadow DOM, self-contained). Embed: `<script src="/widget/feedback.js" data-token="..." data-theme="auto">`. |
 | GET | `/routing/log` | Recent routing decisions. Query: `?limit=50&since=timestamp&category=watchdog-alert&severity=warning`. |
 | POST | `/routing/resolve` | Dry-run route resolution. Body: `{ from, content, severity?, category?, taskId?, mentions? }`. Returns where message would go. |
+| POST | `/routing/overrides` | Create a routing override. Body: `CreateOverrideInput` with target, target_type, override config, TTL. Returns created override. |
+| GET | `/routing/overrides` | List routing overrides. Query: `?target=agent&target_type=agent|role&status=active|expired&limit=N`. |
+| GET | `/routing/overrides/:id` | Get a specific routing override by ID. |
+| GET | `/routing/overrides/active/:target` | Find the currently active override for a target. Query: `?target_type=agent|role`. |
+| POST | `/routing/overrides/tick` | Advance override lifecycle — expires stale overrides, applies TTL rules. |
 | POST | `/tasks/:id/precheck` | Precheck task transition. Body: `{ targetStatus }`. Returns required fields, auto-defaults, and a PATCH template. |
 | GET | `/health/watchdog/suppression` | Watchdog de-noise config: show all suppression rules, thresholds, and what activity types prevent re-firing. | Body: `{ agent, type, priority?, channel?, message? }`. Returns routing decision + reason. |
 | GET | `/runtime/truth` | Canonical environment snapshot for operators: repo/branch/SHA, runtime host+port+PID+uptime, deploy drift, cloud registration/heartbeat, and `REFLECTT_HOME` path. |
