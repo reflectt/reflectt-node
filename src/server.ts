@@ -5425,6 +5425,20 @@ export async function createServer(): Promise<FastifyInstance> {
       severity_levels: SEVERITY_LEVELS,
       confidence_range: { min: 0, max: 10 },
       evidence_note: 'Array of strings — at least one evidence link, path, or reference required',
+      tags_guide: {
+        description: 'Tags drive insight clustering. Use prefixed tags for best results.',
+        prefixed_tags: {
+          'stage:<value>': 'Workflow stage (e.g., stage:build, stage:review, stage:deploy, stage:implement, stage:test, stage:process, stage:discovery)',
+          'family:<value>': 'Failure family (e.g., family:runtime-error, family:process, family:code-discovery, family:pr-workflow, family:testing)',
+          'unit:<value>': 'Impacted unit (e.g., unit:api, unit:frontend, unit:ci, unit:cloud, unit:node)',
+        },
+        note: 'Free-form tags are also accepted and will be used for inference when prefixed tags are missing. Prefixed tags produce better clustering.',
+        examples: [
+          ['stage:build', 'family:testing', 'unit:ci'],
+          ['stage:process', 'family:pr-workflow', 'unit:node'],
+          ['stage:implement', 'family:code-discovery', 'unit:api'],
+        ],
+      },
     }
   })
 

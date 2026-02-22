@@ -155,27 +155,69 @@ function maxSeverity(reflections: Reflection[]): string | null {
 
 /**
  * Build cluster key from a reflection.
+ *
+ * Extraction priority:
+ *   1. Explicit prefixed tags: `stage:X`, `family:Y`, `unit:Z`
+ *   2. Inference from pain text + free-form tags (for workflow_stage and failure_family)
+ *   3. team_id fallback for impacted_unit
+ *   4. 'general' fallback (not 'unknown') for better clustering of untagged reflections
  */
 export function extractClusterKey(reflection: Reflection): InsightClusterKey {
   const tags = reflection.tags ?? []
+
+  const explicitStage = tags.find(t => t.startsWith('stage:'))?.slice(6)
+  const explicitFamily = tags.find(t => t.startsWith('family:'))?.slice(7)
+  const explicitUnit = tags.find(t => t.startsWith('unit:'))?.slice(5)
+
   return {
-    workflow_stage: tags.find(t => t.startsWith('stage:'))?.slice(6) ?? 'unknown',
-    failure_family: tags.find(t => t.startsWith('family:'))?.slice(7) ?? _inferFailureFamily(reflection.pain),
-    impacted_unit: tags.find(t => t.startsWith('unit:'))?.slice(5) ?? reflection.team_id ?? 'unknown',
+    workflow_stage: explicitStage ?? _inferWorkflowStage(reflection.pain, tags) ?? 'general',
+    failure_family: explicitFamily ?? _inferFailureFamily(reflection.pain, tags),
+    impacted_unit: explicitUnit ?? reflection.team_id ?? _inferUnit(tags) ?? 'general',
   }
 }
 
-function _inferFailureFamily(pain: string): string {
-  const lower = pain.toLowerCase()
-  if (/truncat|cut.?off|missing.?text|incomplete/i.test(lower)) return 'data-loss'
-  if (/crash|exception|error|fail/i.test(lower)) return 'runtime-error'
-  if (/slow|timeout|latency|performance/i.test(lower)) return 'performance'
-  if (/auth|permission|denied|forbidden/i.test(lower)) return 'access'
-  if (/ui|display|render|layout|style/i.test(lower)) return 'ui'
-  if (/config|setting|env/i.test(lower)) return 'config'
-  if (/deploy|release|build|ci/i.test(lower)) return 'deployment'
-  if (/test|coverage|flak/i.test(lower)) return 'testing'
+/**
+ * Infer workflow stage from pain text and free-form tags.
+ */
+function _inferWorkflowStage(pain: string, tags: string[]): string | null {
+  const combined = `${pain} ${tags.join(' ')}`.toLowerCase()
+  if (/review|pr\b|code.review|approval/i.test(combined)) return 'review'
+  if (/deploy|release|ship|prod|staging/i.test(combined)) return 'deploy'
+  if (/build|ci\b|pipeline|compile/i.test(combined)) return 'build'
+  if (/test|qa\b|coverage|regress/i.test(combined)) return 'test'
+  if (/design|spec|plan|architect/i.test(combined)) return 'design'
+  if (/implement|code|develop|feature|refactor/i.test(combined)) return 'implement'
+  if (/triage|intake|assign|priorit/i.test(combined)) return 'triage'
+  if (/process|workflow|discipline|drift|handoff/i.test(combined)) return 'process'
+  if (/discover|find|exist|duplicate|redundant/i.test(combined)) return 'discovery'
+  return null
+}
+
+function _inferFailureFamily(pain: string, tags?: string[]): string {
+  const combined = tags ? `${pain} ${tags.join(' ')}`.toLowerCase() : pain.toLowerCase()
+  if (/truncat|cut.?off|missing.?text|incomplete/i.test(combined)) return 'data-loss'
+  if (/crash|exception|error|fail/i.test(combined)) return 'runtime-error'
+  if (/slow|timeout|latency|performance/i.test(combined)) return 'performance'
+  if (/auth|permission|denied|forbidden/i.test(combined)) return 'access'
+  if (/ui|display|render|layout|style/i.test(combined)) return 'ui'
+  if (/config|setting|env/i.test(combined)) return 'config'
+  if (/deploy|release|build|ci\b/i.test(combined)) return 'deployment'
+  if (/test|coverage|flak/i.test(combined)) return 'testing'
+  if (/duplicate|redundant|discover|existing.*code/i.test(combined)) return 'code-discovery'
+  if (/process|discipline|drift|handoff|schema|template/i.test(combined)) return 'process'
+  if (/pr\b|merge|branch|commit|push/i.test(combined)) return 'pr-workflow'
   return 'uncategorized'
+}
+
+/**
+ * Try to infer impacted unit from free-form tags.
+ */
+function _inferUnit(tags: string[]): string | null {
+  // Common unit-like tags
+  const unitLike = tags.find(t =>
+    /^(api|frontend|backend|infra|ci|ux|docs|node|cloud|cli)$/i.test(t)
+  )
+  return unitLike?.toLowerCase() ?? null
 }
 
 // ── Promotion gate ──
