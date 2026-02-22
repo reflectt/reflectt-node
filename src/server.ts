@@ -17,6 +17,7 @@ import { serverConfig, isDev, REFLECTT_HOME } from './config.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { inboxManager } from './inbox.js'
+import { getDb } from './db.js'
 import type { AgentMessage, Task } from './types.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 import { memoryManager } from './memory.js'
@@ -1439,6 +1440,74 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 30 * 1000)
   mentionRescueTimer.unref()
 
+  // Reflection→Insight pipeline health monitor
+  const reflectionPipelineHealth = {
+    lastCheckedAt: 0,
+    lastAlertAt: 0,
+    firstZeroInsightAt: 0,
+    recentReflections: 0,
+    recentInsights: 0,
+    recentPromotions: 0,
+    windowMin: 30,
+    zeroInsightThresholdMin: 10,
+    status: 'unknown' as 'healthy' | 'at_risk' | 'broken' | 'unknown',
+  }
+
+  function computeReflectionPipelineHealth(now = Date.now()) {
+    const since = now - reflectionPipelineHealth.windowMin * 60_000
+    const db = getDb()
+
+    const recentReflections = countReflections({ since })
+    const recentInsights = (db.prepare('SELECT COUNT(*) as c FROM insights WHERE created_at >= ?').get(since) as { c: number }).c
+    const recentPromotions = listPromotionAudits(500).filter(a => a.created_at >= since).length
+
+    reflectionPipelineHealth.recentReflections = recentReflections
+    reflectionPipelineHealth.recentInsights = recentInsights
+    reflectionPipelineHealth.recentPromotions = recentPromotions
+    reflectionPipelineHealth.lastCheckedAt = now
+
+    if (recentReflections === 0) {
+      reflectionPipelineHealth.status = 'healthy'
+      reflectionPipelineHealth.firstZeroInsightAt = 0
+      return reflectionPipelineHealth
+    }
+
+    if (recentInsights > 0) {
+      reflectionPipelineHealth.status = 'healthy'
+      reflectionPipelineHealth.firstZeroInsightAt = 0
+      return reflectionPipelineHealth
+    }
+
+    if (!reflectionPipelineHealth.firstZeroInsightAt) {
+      reflectionPipelineHealth.firstZeroInsightAt = now
+    }
+
+    const zeroDurationMin = Math.round((now - reflectionPipelineHealth.firstZeroInsightAt) / 60_000)
+    reflectionPipelineHealth.status = zeroDurationMin >= reflectionPipelineHealth.zeroInsightThresholdMin ? 'broken' : 'at_risk'
+
+    return reflectionPipelineHealth
+  }
+
+  const reflectionPipelineTimer = setInterval(() => {
+    if (isQuietHours(Date.now())) return
+    const health = computeReflectionPipelineHealth(Date.now())
+
+    // Alert when reflections are flowing but insights remain zero past threshold
+    if (health.status === 'broken') {
+      const now = Date.now()
+      const cooldownMs = 30 * 60_000 // 30 minutes
+      if (now - reflectionPipelineHealth.lastAlertAt >= cooldownMs) {
+        reflectionPipelineHealth.lastAlertAt = now
+        chatManager.sendMessage({
+          channel: 'general',
+          from: 'system',
+          content: `🚨 Reflection pipeline broken: ${health.recentReflections} reflections in last ${health.windowMin}m but 0 insights created. @link @sage investigate ingestion/listener path.`,
+        }).catch(() => {})
+      }
+    }
+  }, 60 * 1000)
+  reflectionPipelineTimer.unref()
+
   // Load unified policy config (file + env overrides)
   const policy = policyManager.load()
 
@@ -1467,6 +1536,26 @@ export async function createServer(): Promise<FastifyInstance> {
       tasks: taskManager.getStats(),
       inbox: inboxManager.getStats(),
       timestamp: Date.now(),
+    }
+  })
+
+  app.get('/health/reflection-pipeline', async () => {
+    const health = computeReflectionPipelineHealth(Date.now())
+    return {
+      status: health.status,
+      windowMin: health.windowMin,
+      zeroInsightThresholdMin: health.zeroInsightThresholdMin,
+      recentReflections: health.recentReflections,
+      recentInsights: health.recentInsights,
+      recentPromotions: health.recentPromotions,
+      lastCheckedAt: health.lastCheckedAt,
+      lastAlertAt: health.lastAlertAt || null,
+      firstZeroInsightAt: health.firstZeroInsightAt || null,
+      signals: {
+        reflections_flowing: health.recentReflections > 0,
+        insights_flowing: health.recentInsights > 0,
+        promotions_flowing: health.recentPromotions > 0,
+      },
     }
   })
 
