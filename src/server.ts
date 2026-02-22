@@ -2916,6 +2916,131 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Task artifact visibility — resolves artifact paths and checks accessibility
+  app.get<{ Params: { id: string } }>('/tasks/:id/artifacts', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) return
+
+    const task = resolved.task
+    const meta = (task.metadata || {}) as Record<string, any>
+
+    // Collect all artifact references from metadata
+    const artifactRefs: Array<{ source: string; path: string }> = []
+
+    if (typeof meta.artifact_path === 'string' && meta.artifact_path.trim()) {
+      artifactRefs.push({ source: 'metadata.artifact_path', path: meta.artifact_path.trim() })
+    }
+    if (Array.isArray(meta.artifacts)) {
+      for (const a of meta.artifacts) {
+        if (typeof a === 'string') artifactRefs.push({ source: 'metadata.artifacts[]', path: a })
+        else if (a && typeof a.path === 'string') artifactRefs.push({ source: 'metadata.artifacts[]', path: a.path })
+        else if (a && typeof a.url === 'string') artifactRefs.push({ source: 'metadata.artifacts[]', path: a.url })
+      }
+    }
+    if (meta.qa_bundle?.review_packet?.artifact_path) {
+      artifactRefs.push({ source: 'metadata.qa_bundle.review_packet.artifact_path', path: meta.qa_bundle.review_packet.artifact_path })
+    }
+    if (meta.qa_bundle?.review_packet?.pr_url) {
+      artifactRefs.push({ source: 'metadata.qa_bundle.review_packet.pr_url', path: meta.qa_bundle.review_packet.pr_url })
+    }
+    if (meta.review_handoff?.artifact_path) {
+      artifactRefs.push({ source: 'metadata.review_handoff.artifact_path', path: meta.review_handoff.artifact_path })
+    }
+    if (meta.review_handoff?.pr_url) {
+      artifactRefs.push({ source: 'metadata.review_handoff.pr_url', path: meta.review_handoff.pr_url })
+    }
+
+    // Resolve each artifact: check file existence for repo-relative paths, or validate URLs
+    const repoRoot = resolve(import.meta.dirname || process.cwd(), '..')
+    const artifacts = await Promise.all(
+      artifactRefs.map(async (ref) => {
+        const isUrl = ref.path.startsWith('http://') || ref.path.startsWith('https://')
+        if (isUrl) {
+          return { ...ref, type: 'url' as const, accessible: true, resolvedPath: ref.path }
+        }
+        // Repo-relative path
+        const fullPath = resolve(repoRoot, ref.path)
+        // Security: ensure resolved path stays inside repo
+        if (!fullPath.startsWith(repoRoot + sep)) {
+          return { ...ref, type: 'file' as const, accessible: false, error: 'Path escapes repo root' }
+        }
+        try {
+          const stat = await fs.stat(fullPath)
+          return {
+            ...ref,
+            type: 'file' as const,
+            accessible: true,
+            resolvedPath: fullPath,
+            size: stat.size,
+            modified: stat.mtime.toISOString(),
+          }
+        } catch {
+          return { ...ref, type: 'file' as const, accessible: false, error: 'File not found' }
+        }
+      })
+    )
+
+    // Heartbeat: last comment timestamp for this task
+    const comments = taskManager.getTaskComments(resolved.resolvedId)
+    const lastComment = comments.length > 0 ? comments[comments.length - 1] : null
+    const lastCommentAge = lastComment ? Date.now() - lastComment.timestamp : null
+    const HEARTBEAT_THRESHOLD_MS = 30 * 60 * 1000 // 30 minutes
+
+    return {
+      taskId: resolved.resolvedId,
+      title: task.title,
+      status: task.status,
+      artifactCount: artifacts.length,
+      artifacts,
+      heartbeat: {
+        lastCommentAt: lastComment?.timestamp ?? null,
+        lastCommentAgeMs: lastCommentAge,
+        lastCommentAuthor: lastComment?.author ?? null,
+        stale: task.status === 'doing' && (lastCommentAge === null || lastCommentAge > HEARTBEAT_THRESHOLD_MS),
+        thresholdMs: HEARTBEAT_THRESHOLD_MS,
+      },
+    }
+  })
+
+  // Task heartbeat status — all doing tasks with stale comment activity
+  app.get('/tasks/heartbeat-status', async () => {
+    const HEARTBEAT_THRESHOLD_MS = 30 * 60 * 1000
+    const now = Date.now()
+    const allTasks = taskManager.listTasks({ status: 'doing' })
+    const stale: Array<{
+      taskId: string
+      title: string
+      assignee: string | null
+      lastCommentAt: number | null
+      staleSinceMs: number
+    }> = []
+
+    for (const task of allTasks) {
+      const comments = taskManager.getTaskComments(task.id)
+      const lastComment = comments.length > 0 ? comments[comments.length - 1] : null
+      const lastTs = lastComment?.timestamp ?? task.updatedAt ?? task.createdAt
+      const age = now - lastTs
+
+      if (age > HEARTBEAT_THRESHOLD_MS) {
+        stale.push({
+          taskId: task.id,
+          title: task.title,
+          assignee: task.assignee || null,
+          lastCommentAt: lastComment?.timestamp ?? null,
+          staleSinceMs: age,
+        })
+      }
+    }
+
+    return {
+      threshold: '30m',
+      thresholdMs: HEARTBEAT_THRESHOLD_MS,
+      doingTaskCount: allTasks.length,
+      staleCount: stale.length,
+      staleTasks: stale.sort((a, b) => b.staleSinceMs - a.staleSinceMs),
+    }
+  })
+
   // Task history
   app.get<{ Params: { id: string } }>('/tasks/:id/history', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
@@ -3256,7 +3381,22 @@ export async function createServer(): Promise<FastifyInstance> {
       presenceManager.recordActivity(data.author, 'message')
       presenceManager.updatePresence(data.author, 'working')
 
-      return { success: true, comment }
+      // Heartbeat discipline: compute gap since previous comment for doing tasks
+      let heartbeatWarning: string | undefined
+      if (task && task.status === 'doing') {
+        const HEARTBEAT_THRESHOLD_MS = 30 * 60 * 1000
+        const allComments = taskManager.getTaskComments(resolved.resolvedId)
+        // Look at the second-to-last comment (the one before this new one)
+        const prevComment = allComments.length > 1 ? allComments[allComments.length - 2] : null
+        const prevTs = prevComment?.timestamp ?? task.updatedAt ?? task.createdAt
+        const gap = comment.timestamp - prevTs
+        if (gap > HEARTBEAT_THRESHOLD_MS) {
+          const gapMin = Math.round(gap / 60000)
+          heartbeatWarning = `Status heartbeat gap: ${gapMin}m since last update (guideline: ≤30m for doing tasks). Consider posting progress comments more frequently.`
+        }
+      }
+
+      return { success: true, comment, ...(heartbeatWarning ? { heartbeatWarning } : {}) }
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to add comment' }
     }
@@ -4654,6 +4794,20 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
       
+      // ── Artifact mirror: copy to shared workspace on validating/done ──
+      if (
+        (parsed.status === 'validating' || parsed.status === 'done')
+        && previousStatus !== parsed.status
+      ) {
+        try {
+          const { onTaskReadyForReview } = await import('./artifact-mirror.js')
+          const mirrorResult = await onTaskReadyForReview(task.metadata as Record<string, unknown> || {})
+          if (mirrorResult?.mirrored) {
+            console.log(`[ArtifactMirror] Mirrored ${mirrorResult.filesCopied} file(s) for ${task.id} → ${mirrorResult.destination}`)
+          }
+        } catch { /* artifact mirror is non-fatal */ }
+      }
+
       return { success: true, task: enrichTaskWithComments(task) }
     } catch (err: any) {
       reply.code(400)
