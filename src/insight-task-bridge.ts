@@ -13,6 +13,7 @@
 import { eventBus, type Event } from './events.js'
 import { getInsight, updateInsightStatus, type Insight } from './insights.js'
 import { taskManager } from './tasks.js'
+import { getDb } from './db.js'
 
 // ── Types ──
 
@@ -159,6 +160,61 @@ function buildTaskDescription(insight: Insight): string {
     'Investigate root cause, validate evidence, implement fix.',
     'Submit a follow-up reflection when done.',
   ].join('\n')
+}
+
+// ── Triage Decision Audit ──
+
+export interface TriageDecision {
+  id: string
+  insight_id: string
+  action: 'approve' | 'dismiss'
+  reviewer: string
+  rationale: string
+  outcome_task_id: string | null
+  previous_status: string
+  new_status: string
+  timestamp: number
+}
+
+export function ensureTriageAuditTable(): void {
+  const db = getDb()
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS triage_audit (
+      id TEXT PRIMARY KEY,
+      insight_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      reviewer TEXT NOT NULL,
+      rationale TEXT NOT NULL DEFAULT '',
+      outcome_task_id TEXT,
+      previous_status TEXT NOT NULL,
+      new_status TEXT NOT NULL,
+      timestamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_triage_audit_insight ON triage_audit(insight_id);
+    CREATE INDEX IF NOT EXISTS idx_triage_audit_ts ON triage_audit(timestamp);
+  `)
+}
+
+export function recordTriageDecision(decision: Omit<TriageDecision, 'id'>): TriageDecision {
+  ensureTriageAuditTable()
+  const db = getDb()
+  const id = `triage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  db.prepare(`
+    INSERT INTO triage_audit (id, insight_id, action, reviewer, rationale, outcome_task_id, previous_status, new_status, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, decision.insight_id, decision.action, decision.reviewer, decision.rationale, decision.outcome_task_id, decision.previous_status, decision.new_status, decision.timestamp)
+  return { id, ...decision }
+}
+
+export function getTriageAudit(insightId?: string, limit = 50): TriageDecision[] {
+  ensureTriageAuditTable()
+  const db = getDb()
+  if (insightId) {
+    return db.prepare('SELECT * FROM triage_audit WHERE insight_id = ? ORDER BY timestamp DESC LIMIT ?')
+      .all(insightId, limit) as TriageDecision[]
+  }
+  return db.prepare('SELECT * FROM triage_audit ORDER BY timestamp DESC LIMIT ?')
+    .all(limit) as TriageDecision[]
 }
 
 // ── Lifecycle ──

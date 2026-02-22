@@ -388,7 +388,9 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/insights` | List insights. Query: `status` (candidate\|promoted\|pending_triage\|task_created\|cooldown\|closed), `priority` (P0-P3), `workflow_stage`, `failure_family`, `impacted_unit`, `limit`, `offset`. Sorted by score desc. |
 | GET | `/insights/bridge/stats` | Insight→Task bridge stats: auto-created count, triaged count, duplicates skipped, errors. |
 | GET | `/insights/triage` | List insights in `pending_triage` status (medium/low severity awaiting review). Query: `limit`. |
-| POST | `/insights/:id/triage` | Triage a pending insight. Body: `{ action: "approve"\|"dismiss", assignee? (required for approve), reviewer?, priority?, triaged_by? }`. Approve creates a linked task; dismiss closes the insight. |
+| POST | `/insights/:id/triage` | Triage a pending insight. Body: `{ action: "approve"\|"dismiss", assignee? (required for approve), reviewer?, rationale?, priority?, triaged_by? }`. Approve creates a linked task; dismiss closes the insight. Records audit decision with reviewer + rationale. |
+| GET | `/insights/triage/audit` | Triage decision audit trail (all insights). Returns timestamped decisions with reviewer, rationale, action, outcome. Query: `limit`. |
+| GET | `/insights/:id/triage/audit` | Triage audit trail for a specific insight. Returns full lifecycle: entry → decision → outcome. |
 | GET | `/insights/:id` | Get single insight by ID. |
 | GET | `/insights/stats` | Aggregate stats: by status, priority, failure family. |
 | POST | `/insights/tick-cooldowns` | Advance cooldown state machine: promoted past deadline → cooldown, expired cooldown → archived. |

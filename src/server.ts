@@ -5462,14 +5462,30 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, error: `Insight is ${insight.status}, not pending_triage` }
     }
 
+    const triageReviewer = typeof body.reviewer === 'string' ? body.reviewer : (typeof body.triaged_by === 'string' ? body.triaged_by : 'unknown')
+    const rationale = typeof body.rationale === 'string' ? body.rationale : ''
+
     if (action === 'dismiss') {
       updateInsightStatus(insight.id, 'closed')
-      return { success: true, action: 'dismissed', insight_id: insight.id }
+
+      // Record audit decision
+      const { recordTriageDecision } = await import('./insight-task-bridge.js')
+      recordTriageDecision({
+        insight_id: insight.id,
+        action: 'dismiss',
+        reviewer: triageReviewer,
+        rationale,
+        outcome_task_id: null,
+        previous_status: 'pending_triage',
+        new_status: 'closed',
+        timestamp: Date.now(),
+      })
+
+      return { success: true, action: 'dismissed', insight_id: insight.id, reviewer: triageReviewer }
     }
 
     // Approve: create task
     const assignee = typeof body.assignee === 'string' ? body.assignee : undefined
-    const reviewer = typeof body.reviewer === 'string' ? body.reviewer : 'sage'
     const eta = typeof body.eta === 'string' ? body.eta : undefined
     const priority = typeof body.priority === 'string' ? body.priority : insight.priority
 
@@ -5487,7 +5503,7 @@ export async function createServer(): Promise<FastifyInstance> {
         status: 'todo',
         priority: priority as 'P0' | 'P1' | 'P2' | 'P3',
         assignee,
-        reviewer,
+        reviewer: triageReviewer,
         createdBy: typeof body.triaged_by === 'string' ? body.triaged_by : 'triage',
         done_criteria: ['Root cause addressed', 'Evidence validated', 'Follow-up reflection submitted'],
         metadata: {
@@ -5500,11 +5516,38 @@ export async function createServer(): Promise<FastifyInstance> {
       })
 
       updateInsightStatus(insight.id, 'task_created', task.id)
-      return { success: true, action: 'approved', insight_id: insight.id, task_id: task.id }
+
+      // Record audit decision
+      const { recordTriageDecision } = await import('./insight-task-bridge.js')
+      recordTriageDecision({
+        insight_id: insight.id,
+        action: 'approve',
+        reviewer: triageReviewer,
+        rationale,
+        outcome_task_id: task.id,
+        previous_status: 'pending_triage',
+        new_status: 'task_created',
+        timestamp: Date.now(),
+      })
+
+      return { success: true, action: 'approved', insight_id: insight.id, task_id: task.id, reviewer: triageReviewer }
     } catch (err) {
       reply.code(500)
       return { success: false, error: `Failed to create task: ${(err as Error).message}` }
     }
+  })
+
+  // Triage audit trail
+  app.get('/insights/triage/audit', async (request) => {
+    const query = request.query as Record<string, string>
+    const limit = query.limit ? Number(query.limit) : 50
+    const { getTriageAudit } = await import('./insight-task-bridge.js')
+    return { audit: getTriageAudit(undefined, limit) }
+  })
+
+  app.get<{ Params: { id: string } }>('/insights/:id/triage/audit', async (request) => {
+    const { getTriageAudit } = await import('./insight-task-bridge.js')
+    return { audit: getTriageAudit(request.params.id) }
   })
 
   // ── Intake Pipeline (automated reflection→insight→task) ──────────────
