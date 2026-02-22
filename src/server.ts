@@ -98,6 +98,7 @@ import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from '.
 import { listLineage, getLineage, lineageStats } from './lineage.js'
 import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
+import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -550,6 +551,37 @@ function enforceQaBundleGateForValidating(
       ok: false,
       error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
       hint: 'Use the same canonical process/... artifact path in both fields.',
+    }
+  }
+
+  // PR integrity: validate commit SHA + changed_files against live PR head
+  if (!nonCodeLane && reviewPacket.pr_url) {
+    const overrideFlag = metadataObj.pr_integrity_override === true
+    if (!overrideFlag) {
+      const integrity = validatePrIntegrity({
+        pr_url: reviewPacket.pr_url,
+        packet_commit: reviewPacket.commit,
+        packet_changed_files: reviewPacket.changed_files,
+      })
+
+      // Store integrity result in metadata for audit trail
+      ;(metadataObj as Record<string, unknown>).pr_integrity = {
+        valid: integrity.valid,
+        skipped: integrity.skipped,
+        skip_reason: integrity.skip_reason,
+        live_head_sha: integrity.live_head_sha,
+        checked_at: Date.now(),
+        errors: integrity.errors.length > 0 ? integrity.errors : undefined,
+      }
+
+      if (!integrity.valid && !integrity.skipped) {
+        const errorMsgs = integrity.errors.map(e => e.message).join('; ')
+        return {
+          ok: false,
+          error: `PR integrity check failed: ${errorMsgs}`,
+          hint: 'Update review_packet.commit and changed_files to match the live PR head. Or set metadata.pr_integrity_override=true to bypass.',
+        }
+      }
     }
   }
 
