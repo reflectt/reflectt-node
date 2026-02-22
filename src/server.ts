@@ -2042,6 +2042,28 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Working contract enforcement tick (auto-requeue stale doing tasks)
+  app.post('/health/working-contract/tick', async (request, reply) => {
+    try {
+      const { tickWorkingContract } = await import('./working-contract.js')
+      const result = await tickWorkingContract()
+      return { success: true, ...result }
+    } catch (err) {
+      reply.code(500)
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
+  // Working contract claim gate check (dry-run)
+  app.get<{ Params: { agent: string } }>('/health/working-contract/gate/:agent', async (request) => {
+    try {
+      const { checkClaimGate } = await import('./working-contract.js')
+      return checkClaimGate(request.params.agent)
+    } catch {
+      return { allowed: true, reason: 'Working contract module not loaded' }
+    }
+  })
+
   // Team health summary (quick view)
   app.get('/health/team/summary', async (request, reply) => {
     const summary = await healthMonitor.getSummary()
@@ -4536,6 +4558,25 @@ export async function createServer(): Promise<FastifyInstance> {
         if (wipOverride) {
           mergedMeta.wip_override_used = true
         }
+      }
+
+      // ── Working contract: reflection gate on claim ──
+      if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
+        try {
+          const { checkClaimGate } = await import('./working-contract.js')
+          const claimAgent = parsed.assignee || existing.assignee || 'unknown'
+          const gate = checkClaimGate(claimAgent)
+          if (!gate.allowed) {
+            reply.code(422)
+            return {
+              success: false,
+              error: gate.reason,
+              gate: 'reflection_overdue',
+              reflectionsDue: gate.reflectionsDue,
+              hint: 'Submit a reflection via POST /reflections before claiming new work.',
+            }
+          }
+        } catch { /* working-contract module may not be loaded */ }
       }
 
       // ── Branch tracking: auto-populate on doing transition ──
