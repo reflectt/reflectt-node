@@ -508,7 +508,7 @@ export function listInsights(opts: InsightListOpts = {}): { insights: Insight[];
   const where: string[] = []
   const params: unknown[] = []
 
-  if (opts.status) { where.push('status = ?'); params.push(opts.status) }
+  if (opts.status && opts.status !== 'all') { where.push('status = ?'); params.push(opts.status) }
   if (opts.priority) { where.push('priority = ?'); params.push(opts.priority) }
   if (opts.workflow_stage) { where.push('workflow_stage = ?'); params.push(opts.workflow_stage) }
   if (opts.failure_family) { where.push('failure_family = ?'); params.push(opts.failure_family) }
