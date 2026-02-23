@@ -98,6 +98,7 @@ import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from '.
 import { listLineage, getLineage, lineageStats } from './lineage.js'
 import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
+import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 
@@ -1579,12 +1580,16 @@ export async function createServer(): Promise<FastifyInstance> {
   // Insight:promoted → auto-task bridge (severity-aware)
   startInsightTaskBridge()
 
+  // Team pulse: proactive status broadcast (trust-gap mitigation)
+  startTeamPulse()
+
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
     clearInterval(cadenceWatchdogTimer)
     clearInterval(mentionRescueTimer)
     boardHealthWorker.stop()
     stopInsightTaskBridge()
+    stopTeamPulse()
     wsHeartbeat.stop()
   })
 
@@ -6157,6 +6162,31 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/routing/overrides/tick', async () => {
     const result = tickOverrideLifecycle()
     return { success: true, ...result }
+  })
+
+  // ── Team Pulse (proactive status broadcast) ─────────────────────────
+
+  app.get('/health/team/pulse', async () => {
+    return { pulse: computeTeamPulse() }
+  })
+
+  app.post('/health/team/pulse', async () => {
+    const pulse = await postTeamPulse()
+    return { success: true, pulse }
+  })
+
+  app.get('/health/team/pulse/history', async () => {
+    return { history: getTeamPulseHistory() }
+  })
+
+  app.get('/health/team/pulse/config', async () => {
+    return { config: getTeamPulseConfig() }
+  })
+
+  app.patch('/health/team/pulse/config', async (request) => {
+    const body = request.body as Record<string, unknown>
+    configureTeamPulse(body as any)
+    return { success: true, config: getTeamPulseConfig() }
   })
 
   // Get next task (pull-based assignment)
