@@ -399,7 +399,7 @@ describe('Ownership guardrail: resolveAssignment', () => {
     expect(decision.assignee).toBe('link')
     expect(decision.guardrailApplied).toBe(true)
     expect(decision.soleAuthorFallback).toBe(true)
-    expect(decision.reason).toContain('fallback')
+    expect(decision.reason).toContain('author_exclusion_bypassed')
     // Reviewer must not be the author
     expect(decision.reviewer).not.toBe('link')
   })
@@ -514,6 +514,72 @@ describe('Ownership guardrail: resolveAssignment', () => {
     expect(decision.assignee).not.toBe('link')
   })
 
+  it('bypasses author-exclusion when author is best role-fit', () => {
+    // link has strong affinity for backend/api/integration tasks
+    configureBridge({
+      assignableAgents: ['link', 'pixel', 'echo'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    // Pain/title will contain backend keywords → link gets highest affinity
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      pain: 'Backend API integration bug in task-lifecycle server webhook',
+      tags: ['stage:rf1', 'family:backend-api', 'unit:rf1'],
+    })
+
+    const decision = resolveAssignment(insight)
+    // Author should be assigned because they have highest role-fit for backend/api tasks
+    expect(decision.assignee).toBe('link')
+    expect(decision.reason).toContain('author_exclusion_bypassed')
+    expect(decision.reason).toContain('best role-fit')
+    expect(decision.soleAuthorFallback).toBe(true) // Triggers non-author reviewer
+    // Reviewer must not be the author
+    expect(decision.reviewer).not.toBe('link')
+  })
+
+  it('emits author_exclusion_applied reason code when non-author picked', () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage', 'echo'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    // Pain about ops/deploy/CI — sage has higher affinity than link for these
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      pain: 'CI deploy pipeline release infra failure blocking ops',
+      tags: ['stage:rf2', 'family:deploy-pipeline', 'unit:rf2'],
+    })
+
+    const decision = resolveAssignment(insight)
+    // sage should be picked (ops affinity for ci/deploy/pipeline/release)
+    expect(decision.assignee).toBe('sage')
+    expect(decision.reason).toContain('author_exclusion_applied')
+    expect(decision.guardrailApplied).toBe(true)
+  })
+
+  it('bypasses author-exclusion with protected domain match', () => {
+    configureBridge({
+      assignableAgents: ['sage', 'link', 'echo'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    // sage has protectedDomains: ['deploy', 'ci', 'release']
+    const { insight } = createTestInsight({
+      author: 'sage',
+      severity: 'high',
+      pain: 'Deploy pipeline CI release failure in production',
+      tags: ['stage:rf3', 'family:deploy-ci', 'unit:rf3'],
+    })
+
+    const decision = resolveAssignment(insight)
+    expect(decision.assignee).toBe('sage')
+    expect(decision.reason).toContain('author_exclusion_bypassed')
+    expect(decision.reason).toContain('protected domain')
+  })
+
   it('records assignment_decision in task metadata on auto-create', async () => {
     configureBridge({
       assignableAgents: ['link', 'sage', 'kai'],
@@ -563,6 +629,87 @@ describe('Ownership guardrail: resolveAssignment', () => {
     const decision = resolveAssignment(insight)
     expect(decision.soleAuthorFallback).toBe(true)
     expect(decision.reviewer).not.toBe('link')
+  })
+
+  // ── Author-exclusion bypass tests (task-1771874104673-4h2ctitwp) ──
+
+  it('author-exclusion bypassed when author is best role-fit (no viable non-author)', () => {
+    configureBridge({
+      assignableAgents: ['kai'],  // Only author available
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'kai',
+      severity: 'high',
+      tags: ['stage:bypass1', 'family:bypass1', 'unit:bypass1'],
+    })
+
+    const decision = resolveAssignment(insight)
+    expect(decision.assignee).toBe('kai')
+    expect(decision.soleAuthorFallback).toBe(true)
+    expect(decision.reason).toContain('author_exclusion_bypassed')
+    // Non-author reviewer required
+    expect(decision.reviewer).not.toBe('kai')
+  })
+
+  it('reason codes use author_exclusion_applied when non-author selected', () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage', 'kai'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:bypass2', 'family:bypass2', 'unit:bypass2'],
+    })
+
+    const decision = resolveAssignment(insight)
+    // If non-author was selected, reason should contain applied
+    if (decision.assignee !== 'link') {
+      expect(decision.reason).toContain('author_exclusion_applied')
+    } else {
+      // If author was selected (best fit), reason should contain bypassed
+      expect(decision.reason).toContain('author_exclusion_bypassed')
+    }
+  })
+
+  it('reason codes always include author_exclusion_applied or author_exclusion_bypassed', () => {
+    configureBridge({
+      assignableAgents: ['link', 'sage'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'link',
+      severity: 'high',
+      tags: ['stage:bypass3', 'family:bypass3', 'unit:bypass3'],
+    })
+
+    const decision = resolveAssignment(insight)
+    const hasApplied = decision.reason.includes('author_exclusion_applied')
+    const hasBypassed = decision.reason.includes('author_exclusion_bypassed')
+    expect(hasApplied || hasBypassed).toBe(true)
+  })
+
+  it('sole-author fallback triggers before cross-role delegation when no candidates score positive', () => {
+    // Only author available, no others
+    configureBridge({
+      assignableAgents: ['kai'],
+      ownershipGuardrail: { enabled: true, requireNonAuthorReviewer: true },
+    })
+
+    const { insight } = createTestInsight({
+      author: 'kai',
+      severity: 'high',
+      tags: ['stage:bypass4', 'family:bypass4', 'unit:bypass4'],
+    })
+
+    const decision = resolveAssignment(insight)
+    // Should fall back to author, not leave unassigned
+    expect(decision.assignee).toBe('kai')
+    expect(decision.reason).toContain('author_exclusion_bypassed')
   })
 
   it('candidatesConsidered is populated for audit', () => {

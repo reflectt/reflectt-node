@@ -271,37 +271,62 @@ export function resolveAssignment(insight: Insight, teamId?: string): Assignment
   let soleAuthorFallback = false
 
   if (shouldAvoidAuthor) {
-    // Try suggestAssignee — it may pick a non-author naturally
+    // Score all agents including author for role-fit comparison
     const suggestion = suggestAssignee(syntheticTask, allTasks as any)
     const suggestedAgent = suggestion.suggested
+    const authorName = authors[0]
+    const scores = suggestion.scores || []
 
-    if (suggestedAgent && !authors.includes(suggestedAgent) && (candidates.length === 0 || candidates.includes(suggestedAgent))) {
-      // Scoring engine picked a non-author within candidates — great
+    // Compare author's role-fit score vs best non-author
+    const authorScore = scores.find(s => s.agent === authorName)
+    const nonAuthorScored = scores
+      .filter(s => !authors.includes(s.agent) && s.score > 0 && !s.overCap &&
+        (candidates.length === 0 || candidates.includes(s.agent)))
+    const bestNonAuthor = nonAuthorScored[0] // Already sorted desc
+
+    // Role-fit bypass: author-exclusion must NOT override when author is best/only fit.
+    // Bypass when:
+    //   1. No non-author candidates with positive score
+    //   2. Author significantly outscores best non-author (>1.5x or >=0.2 gap)
+    //   3. Protected domain match on author
+    const authorIsBestFit = authorScore && authorScore.score > 0 && (
+      !bestNonAuthor ||
+      (authorScore.score > bestNonAuthor.score * 1.5) ||
+      (authorScore.score - bestNonAuthor.score >= 0.2)
+    )
+    const isProtectedMatch = suggestion.protectedMatch &&
+      suggestion.suggested === authorName
+
+    if (isProtectedMatch) {
+      // Protected domain → author IS the correct owner, no guardrail needed
+      assignee = authorName
+      reason = `author_exclusion_bypassed: protected domain "${suggestion.protectedMatch}" → author "${authorName}" is correct owner`
+      guardrailApplied = false
+    } else if (authorIsBestFit && !authorScore?.overCap) {
+      // Author is best role-fit → allow self-assignment, require non-author reviewer
+      assignee = authorName
+      const gap = bestNonAuthor
+        ? `(author ${authorScore!.score.toFixed(2)} vs best non-author ${bestNonAuthor.agent} ${bestNonAuthor.score.toFixed(2)})`
+        : '(no non-author candidates with positive score)'
+      reason = `author_exclusion_bypassed: author "${authorName}" is best role-fit ${gap}. Non-author reviewer required.`
+      guardrailApplied = true
+      soleAuthorFallback = true // Triggers non-author reviewer requirement
+    } else if (suggestedAgent && !authors.includes(suggestedAgent) && (candidates.length === 0 || candidates.includes(suggestedAgent))) {
+      // Scoring engine picked a viable non-author — use it
       assignee = suggestedAgent
-      reason = `Scoring engine selected non-author "${suggestedAgent}" (guardrail active, sole author "${authors[0]}" avoided)`
+      reason = `author_exclusion_applied: non-author "${suggestedAgent}" selected (sole author "${authorName}" avoided)`
+      guardrailApplied = true
+    } else if (bestNonAuthor) {
+      // Best-scoring non-author
+      assignee = bestNonAuthor.agent
+      reason = `author_exclusion_applied: best non-author "${bestNonAuthor.agent}" selected (sole author "${authorName}" avoided)`
       guardrailApplied = true
     } else {
-      // Scoring picked author or no one — manually find non-author candidate
-      const nonAuthorCandidates = candidates.filter(c => !authors.includes(c))
-      if (nonAuthorCandidates.length > 0) {
-        // Pick best non-author from scores
-        const nonAuthorScored = (suggestion.scores || [])
-          .filter(s => !authors.includes(s.agent) && s.score > 0 && !s.overCap)
-        if (nonAuthorScored.length > 0) {
-          assignee = nonAuthorScored[0].agent
-          reason = `Best-scoring non-author "${assignee}" selected (guardrail override, sole author "${authors[0]}" avoided)`
-        } else {
-          assignee = nonAuthorCandidates[0]
-          reason = `First available non-author "${assignee}" selected (no scored candidates, guardrail active)`
-        }
-        guardrailApplied = true
-      } else {
-        // No non-author available — fall back to author with reviewer guardrail
-        assignee = authors[0]
-        reason = `Sole author fallback: "${authors[0]}" assigned (no non-author candidates available). Non-author reviewer required.`
-        guardrailApplied = true
-        soleAuthorFallback = true
-      }
+      // No non-author available at all — fall back to author
+      assignee = authorName
+      reason = `author_exclusion_bypassed: no non-author candidates available. "${authorName}" assigned as sole fallback. Non-author reviewer required.`
+      guardrailApplied = true
+      soleAuthorFallback = true
     }
   } else if (!guardrailEnabled) {
     // Guardrail disabled — use scoring engine normally
