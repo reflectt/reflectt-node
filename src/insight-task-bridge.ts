@@ -127,8 +127,62 @@ async function handlePromotedInsight(event: Event): Promise<void> {
   }
 }
 
+/**
+ * Check if a non-done task already exists for this insight's cluster/topic.
+ * Prevents duplicate tasks when multiple insights about the same topic get promoted.
+ *
+ * Match criteria (ordered by specificity):
+ * 1. Direct insight_id match (exact)
+ * 2. Exact title match (case-insensitive)
+ * 3. Same cluster_key via insight-bridge source (same stage::family::unit)
+ */
+function findExistingTaskForInsight(insight: Insight): { id: string; title: string } | null {
+  const allTasks = taskManager.listTasks({})
+  const targetTitle = `[Insight] ${insight.title}`.toLowerCase()
+
+  for (const task of allTasks) {
+    // Skip done tasks — they shouldn't block new work
+    if (task.status === 'done') continue
+
+    const meta = (task.metadata || {}) as Record<string, unknown>
+
+    // 1. Direct insight_id match
+    if (meta.insight_id === insight.id || meta.source_insight === insight.id) {
+      return { id: task.id, title: task.title }
+    }
+
+    // 2. Exact title match (case-insensitive) for insight-bridge tasks
+    if (meta.source === 'insight-task-bridge' && task.title.toLowerCase() === targetTitle) {
+      return { id: task.id, title: task.title }
+    }
+
+    // 3. Same full cluster_key (stage::family::unit) via insight-bridge source
+    if (meta.source === 'insight-task-bridge' && typeof meta.insight_id === 'string') {
+      try {
+        const sourceInsight = getInsight(meta.insight_id as string)
+        if (sourceInsight && sourceInsight.cluster_key === insight.cluster_key) {
+          return { id: task.id, title: task.title }
+        }
+      } catch { /* ignore lookup failures */ }
+    }
+  }
+
+  return null
+}
+
 async function autoCreateTask(insight: Insight): Promise<void> {
   const title = `[Insight] ${insight.title}`
+
+  // Dedup check: prevent creating duplicate tasks for the same topic
+  const existing = findExistingTaskForInsight(insight)
+  if (existing) {
+    stats.duplicatesSkipped++
+    // Link this insight to the existing task
+    updateInsightStatus(insight.id, 'task_created', existing.id)
+    console.log(`[InsightTaskBridge] Dedup: insight ${insight.id} linked to existing task ${existing.id} ("${existing.title}")`)
+    return
+  }
+
   const description = buildTaskDescription(insight)
   const decision = resolveAssignment(insight)
 

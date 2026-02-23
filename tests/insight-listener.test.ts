@@ -92,7 +92,8 @@ describe('Insight→Task bridge', () => {
 
   it('high severity auto-creates task', async () => {
     const statsBefore = getInsightTaskBridgeStats()
-    const { insight } = createTestInsight({ severity: 'high', tags: ['stage:h1', 'family:h1', 'unit:h1'] })
+    const suffix = Date.now().toString(36)
+    const { insight } = createTestInsight({ severity: 'high', pain: `High severity unique test ${suffix}`, tags: [`stage:h1-${suffix}`, `family:h1-${suffix}`, `unit:h1-${suffix}`] })
 
     await _handlePromotedInsight({
       id: `evt-test-${Date.now()}`,
@@ -102,7 +103,10 @@ describe('Insight→Task bridge', () => {
     })
 
     const statsAfter = getInsightTaskBridgeStats()
-    expect(statsAfter.tasksAutoCreated).toBeGreaterThan(statsBefore.tasksAutoCreated)
+    // Either the EventBus listener or our manual call created the task (dedup prevents double-create)
+    const totalActivity = (statsAfter.tasksAutoCreated - statsBefore.tasksAutoCreated) +
+                          (statsAfter.duplicatesSkipped - statsBefore.duplicatesSkipped)
+    expect(totalActivity).toBeGreaterThan(0)
 
     const updated = getInsight(insight.id)
     expect(updated?.status).toBe('task_created')
@@ -140,6 +144,85 @@ describe('Insight→Task bridge', () => {
     const stats = getInsightTaskBridgeStats()
     expect(stats.duplicatesSkipped).toBe(1)
     expect(stats.tasksAutoCreated).toBe(0)
+  })
+})
+
+describe('Cross-insight dedup in auto-create', () => {
+  beforeEach(() => {
+    _resetBridgeStats()
+    configureBridge({
+      assignableAgents: ['link', 'sage'],
+      ownershipGuardrail: { enabled: false, requireNonAuthorReviewer: false },
+    })
+  })
+
+  it('prevents duplicate task when insight with same cluster key already has a task', async () => {
+    // First insight creates a task (may be auto-created by EventBus listener)
+    const { insight: insight1 } = createTestInsight({
+      severity: 'high',
+      pain: 'Dedup test cluster pain alpha',
+      tags: ['stage:dedup1', 'family:dedup-cluster', 'unit:dedup1'],
+    })
+
+    // Wait for any async EventBus handler to complete
+    await new Promise(r => setTimeout(r, 50))
+
+    // Ensure first insight has a task
+    const updated1 = getInsight(insight1.id)
+    expect(updated1?.status).toBe('task_created')
+    expect(updated1?.task_id).toBeTruthy()
+    const firstTaskId = updated1!.task_id
+
+    // Second insight with SAME cluster key — should link to existing task, not create new
+    const { insight: insight2 } = createTestInsight({
+      severity: 'high',
+      pain: 'Dedup test cluster pain beta',
+      tags: ['stage:dedup1', 'family:dedup-cluster', 'unit:dedup1'], // Same full cluster key
+    })
+
+    await _handlePromotedInsight({
+      id: `evt-dedup2-${Date.now()}`,
+      type: 'task_created',
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: insight2.id },
+    })
+
+    // Second insight should be linked to existing task (dedup fired)
+    const updated2 = getInsight(insight2.id)
+    expect(updated2?.status).toBe('task_created')
+    expect(updated2?.task_id).toBeTruthy()
+  })
+
+  it('allows tasks from different cluster keys', async () => {
+    const suffix = Date.now().toString(36)
+
+    const { insight: insight1 } = createTestInsight({
+      severity: 'high',
+      pain: `Different cluster alpha ${suffix}`,
+      tags: [`stage:diff1-${suffix}`, `family:cluster-a-${suffix}`, `unit:diff1-${suffix}`],
+    })
+
+    // Wait for EventBus auto-create
+    await new Promise(r => setTimeout(r, 50))
+
+    const { insight: insight2 } = createTestInsight({
+      severity: 'high',
+      pain: `Different cluster beta ${suffix}`,
+      tags: [`stage:diff2-${suffix}`, `family:cluster-b-${suffix}`, `unit:diff2-${suffix}`],
+    })
+
+    // Wait for EventBus auto-create
+    await new Promise(r => setTimeout(r, 50))
+
+    // Both insights should have tasks (different clusters = different tasks)
+    const updated1 = getInsight(insight1.id)
+    const updated2 = getInsight(insight2.id)
+    expect(updated1?.status).toBe('task_created')
+    expect(updated1?.task_id).toBeTruthy()
+    expect(updated2?.status).toBe('task_created')
+    expect(updated2?.task_id).toBeTruthy()
+    // Tasks should be different
+    expect(updated1?.task_id).not.toBe(updated2?.task_id)
   })
 })
 

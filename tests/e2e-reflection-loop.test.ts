@@ -76,10 +76,9 @@ describe('E2E: Reflection loop closure', () => {
       data: { kind: 'insight:promoted', insightId: insight.id, priority: 'P1', score: 7 },
     })
 
-    // Step 4: Verify task was auto-created
-    // May be >1 if ingestion auto-promoted and fired event before our manual call
+    // Step 4: Verify task was auto-created (or dedup-linked if EventBus listener fired first)
     const stats = getInsightTaskBridgeStats()
-    expect(stats.tasksAutoCreated).toBeGreaterThanOrEqual(1)
+    expect(stats.tasksAutoCreated + stats.duplicatesSkipped).toBeGreaterThanOrEqual(1)
 
     // Step 5: Verify full linkage
     const updatedInsight = getInsight(insight.id)
@@ -119,7 +118,8 @@ describe('E2E: Reflection loop closure', () => {
       data: { kind: 'insight:promoted', insightId: insight.id, priority: 'P0', score: 9 },
     })
 
-    expect(getInsightTaskBridgeStats().tasksAutoCreated).toBeGreaterThanOrEqual(1)
+    const critStats = getInsightTaskBridgeStats()
+    expect(critStats.tasksAutoCreated + critStats.duplicatesSkipped).toBeGreaterThanOrEqual(1)
 
     const updated = getInsight(insight.id)
     expect(updated?.status).toBe('task_created')
@@ -210,9 +210,9 @@ describe('E2E: Reflection loop closure', () => {
       })
     }
 
-    // All 3 should have been processed (may be higher if ingestion also fires events)
+    // All 3 should have been processed (auto-created or dedup-linked by EventBus listener)
     const stats = getInsightTaskBridgeStats()
-    expect(stats.tasksAutoCreated).toBeGreaterThanOrEqual(3)
+    expect(stats.tasksAutoCreated + stats.duplicatesSkipped).toBeGreaterThanOrEqual(3)
     expect(stats.errors).toBe(0)
   })
 
