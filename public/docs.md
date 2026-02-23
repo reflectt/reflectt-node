@@ -660,3 +660,16 @@ Ensures promoted insights always have task linkage. Detects and fixes orphaned i
 |--------|------|-------------|
 | GET | `/insights/orphans` | List promoted/task_created insights with no `task_id`. Returns `orphans[]` with id, title, status, score, priority, authors. |
 | POST | `/insights/reconcile` | Scan orphaned insights and create tasks for each. Query: `dry_run=true` for preview. Returns scanned/created/skipped counts + details per insight. |
+
+## Alert-Integrity Guard (P0-2)
+
+Preflight reconciliation for system alerts — verifies live state before publishing to prevent stale/false-positive alerts.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/chat/alert-integrity` | Current guard snapshot: canary mode, total checked/rejected/passed, false-positive rate, rejection breakdown. |
+| GET | `/chat/alert-integrity/audit` | Rejection audit log. Query: `limit` (default 50), `since` (timestamp). Returns rejected alerts with reason + state diff. |
+| GET | `/chat/alert-integrity/config` | Read current guard config (enabled, canaryMode, reconcile checks, staleness thresholds). |
+| PATCH | `/chat/alert-integrity/config` | Update guard config. Body: partial config object. |
+| POST | `/chat/alert-integrity/activate` | Exit canary mode — start rejecting stale alerts (instead of log-only). |
+| GET | `/chat/alert-integrity/rollback` | Rollback evaluation metrics: false-positive rate, critical misses, whether rollback trigger is tripped. |
