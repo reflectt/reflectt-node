@@ -210,8 +210,8 @@ export const DEFAULT_POLICY: PolicyConfig = {
   },
   workingContract: {
     enabled: true,
-    staleAutoRequeueMin: 90,
-    graceAfterWarningMin: 15,
+    staleAutoRequeueMin: 45,        // Warn at 45m (before any manual 60m check)
+    graceAfterWarningMin: 10,       // 10m grace → auto-requeue at 55m
     reflectionGateOnClaim: true,
     agents: [],
     channel: 'general',

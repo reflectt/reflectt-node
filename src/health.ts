@@ -1459,7 +1459,7 @@ class TeamHealthMonitor {
         continue
       }
 
-      const content = `@${agent} @kai @pixel system watchdog: status=working with no #general update for ${staleMin}m on ${task.id}. Post required status now: 1) shipped 2) blocker 3) next+ETA.`
+      const content = `@${agent} [Product Enforcement] status=working with no update for ${staleMin}m on ${task.id}. Post status now: 1) shipped 2) blocker 3) next+ETA. (Automated — working contract ${staleMin >= 45 ? 'requeue warning imminent' : 'monitoring'}.)`
       alerts.push(content)
 
       if (!dryRun) {
