@@ -18,7 +18,7 @@ import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import { slotManager } from './canvas-slots.js'
 import { getDb } from './db.js'
-import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps } from './usage-tracking.js'
+import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions } from './usage-tracking.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
@@ -793,10 +793,11 @@ async function syncUsage(): Promise<void> {
     const byModel = getUsageByModel({ since })
     const caps = listCaps()
     const capStatuses = checkCaps()
+    const routingSuggestions = getRoutingSuggestions({ since })
 
     const result = await cloudPost<{ ok: boolean }>(
       `/api/hosts/${state.hostId}/usage/sync`,
-      { summary, byAgent, byModel, caps, capStatuses }
+      { summary, byAgent, byModel, caps, capStatuses, routingSuggestions }
     )
 
     if (result.success) {
