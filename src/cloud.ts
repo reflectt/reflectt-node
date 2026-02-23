@@ -18,6 +18,7 @@ import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import { slotManager } from './canvas-slots.js'
 import { getDb } from './db.js'
+import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps } from './usage-tracking.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
@@ -59,6 +60,7 @@ interface CloudState {
   taskSyncTimer: ReturnType<typeof setInterval> | null
   chatSyncTimer: ReturnType<typeof setInterval> | null
   canvasSyncTimer: ReturnType<typeof setInterval> | null
+  usageSyncTimer: ReturnType<typeof setInterval> | null
   heartbeatCount: number
   lastHeartbeat: number | null
   lastTaskSync: number | null
@@ -83,6 +85,7 @@ let state: CloudState = {
   taskSyncTimer: null,
   chatSyncTimer: null,
   canvasSyncTimer: null,
+  usageSyncTimer: null,
   heartbeatCount: 0,
   lastHeartbeat: null,
   lastTaskSync: null,
@@ -261,7 +264,14 @@ export async function startCloudIntegration(): Promise<void> {
     syncCanvas().catch(() => {})
   }, canvasSyncMs)
 
-  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s, chat sync every ${chatSyncMs / 1000}s, canvas sync every ${canvasSyncMs / 1000}s`)
+  // Usage sync for remote cost dashboard
+  const usageSyncMs = Number(process.env.REFLECTT_USAGE_SYNC_MS) || 15_000
+  syncUsage().catch(() => {})
+  state.usageSyncTimer = setInterval(() => {
+    syncUsage().catch(() => {})
+  }, usageSyncMs)
+
+  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s, chat sync every ${chatSyncMs / 1000}s, canvas sync every ${canvasSyncMs / 1000}s, usage sync every ${usageSyncMs / 1000}s`)
 }
 
 /**
@@ -328,6 +338,10 @@ export function stopCloudIntegration(): void {
   if (state.canvasSyncTimer) {
     clearInterval(state.canvasSyncTimer)
     state.canvasSyncTimer = null
+  }
+  if (state.usageSyncTimer) {
+    clearInterval(state.usageSyncTimer)
+    state.usageSyncTimer = null
   }
   console.log('☁️  Cloud integration: stopped')
 }
@@ -760,6 +774,46 @@ async function syncCanvas(): Promise<void> {
     canvasSyncErrors++
     if (canvasSyncErrors <= 3 || canvasSyncErrors % 20 === 0) {
       console.warn(`☁️  [Canvas] Sync failed (${canvasSyncErrors}): ${result.error}`)
+    }
+  }
+}
+
+// ---- Usage Sync ----
+
+let usageSyncErrors = 0
+
+async function syncUsage(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  try {
+    const since = Date.now() - 30 * 24 * 60 * 60 * 1000 // last 30 days
+    const summaries = getUsageSummary({ since, group_by: 'month' })
+    const summary = summaries.length > 0 ? summaries[0] : { period: 'monthly', total_cost_usd: 0, total_input_tokens: 0, total_output_tokens: 0, event_count: 0 }
+    const byAgent = getUsageByAgent({ since })
+    const byModel = getUsageByModel({ since })
+    const caps = listCaps()
+    const capStatuses = checkCaps()
+
+    const result = await cloudPost<{ ok: boolean }>(
+      `/api/hosts/${state.hostId}/usage/sync`,
+      { summary, byAgent, byModel, caps, capStatuses }
+    )
+
+    if (result.success) {
+      if (usageSyncErrors > 0) {
+        console.log(`☁️  [Usage] Sync recovered after ${usageSyncErrors} errors`)
+        usageSyncErrors = 0
+      }
+    } else {
+      usageSyncErrors++
+      if (usageSyncErrors <= 3 || usageSyncErrors % 20 === 0) {
+        console.warn(`☁️  [Usage] Sync failed (${usageSyncErrors}): ${result.error}`)
+      }
+    }
+  } catch (err) {
+    usageSyncErrors++
+    if (usageSyncErrors <= 3) {
+      console.warn(`☁️  [Usage] Sync error: ${(err as Error).message}`)
     }
   }
 }
