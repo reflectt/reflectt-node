@@ -15,8 +15,47 @@ import { getDb, closeDb } from './db.js'
 import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
 // OpenClaw connection is optional — server works for chat/tasks without it
 
+/**
+ * Build-freshness check: warn if dist/ is older than src/
+ * Prevents silently running stale compiled code after source changes.
+ */
+import { statSync, readdirSync } from 'fs'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
+
+function checkBuildFreshness(): void {
+  try {
+    const thisFile = fileURLToPath(import.meta.url)
+    const distDir = dirname(thisFile)
+    const srcDir = join(distDir, '..', 'src')
+
+    // Find newest src file
+    let newestSrc = 0
+    try {
+      const srcFiles = readdirSync(srcDir).filter(f => f.endsWith('.ts'))
+      for (const f of srcFiles) {
+        const mtime = statSync(join(srcDir, f)).mtimeMs
+        if (mtime > newestSrc) newestSrc = mtime
+      }
+    } catch { return } // src dir not accessible, skip
+
+    // Find this dist file's mtime
+    const distMtime = statSync(thisFile).mtimeMs
+
+    if (newestSrc > distMtime + 1000) { // 1s tolerance
+      const ageSec = Math.round((newestSrc - distMtime) / 1000)
+      console.warn(`⚠️  Build may be stale: src/ is ${ageSec}s newer than dist/. Run \`npm run build\` to recompile.`)
+    }
+  } catch {
+    // Non-fatal — skip check if anything goes wrong
+  }
+}
+
 async function main() {
   console.log('🚀 Starting reflectt-node...')
+
+  // Build-freshness check (non-blocking)
+  checkBuildFreshness()
 
   // Dev-mode port guard: prevent dev servers from hijacking production port
   const PRODUCTION_PORT = 4445
