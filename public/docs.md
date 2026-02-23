@@ -225,6 +225,19 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 Bypass: escalation, blocker, and critical-priority messages always pass through budget enforcement.
 Budget enforcement requires minimum 10 messages in the rolling window before activating.
 
+### Alert Integrity Guard (false-positive prevention)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/chat/alert-integrity` | Current alert integrity stats: total checked, blocked false-positives, pass-through count |
+| GET | `/chat/alert-integrity/audit` | Audit log of preflight decisions. Query: `limit`, `since` |
+| GET | `/chat/alert-integrity/config` | Read alert integrity guard configuration |
+| GET | `/chat/alert-integrity/rollback` | Rollback evaluation: false-positive rate, missed true-positives, preflight latency p95 |
+| PATCH | `/chat/alert-integrity/config` | Update config. Fields: `enabled`, `canaryMode`, `maxPreflightMs`, `reconcileFields` |
+| POST | `/chat/alert-integrity/activate` | Exit canary (log-only) mode and enable enforcement |
+
+Preflight checks reconcile live task state (status, assignee, reviewer, recent comment timestamp, queue state hash) before publishing SLA/requeue/stale alerts. Idempotent alert key: `task_id + alert_type + state_hash`.
+
 ### Chat edit/delete contract
 
 - `PATCH /chat/messages/:id` and `DELETE /chat/messages/:id` are author-only.
@@ -653,3 +666,16 @@ Ensures promoted insights always have task linkage. Detects and fixes orphaned i
 |--------|------|-------------|
 | GET | `/insights/orphans` | List promoted/task_created insights with no `task_id`. Returns `orphans[]` with id, title, status, score, priority, authors. |
 | POST | `/insights/reconcile` | Scan orphaned insights and create tasks for each. Query: `dry_run=true` for preview. Returns scanned/created/skipped counts + details per insight. |
+
+## Alert-Integrity Guard (P0-2)
+
+Preflight reconciliation for system alerts — verifies live state before publishing to prevent stale/false-positive alerts.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/chat/alert-integrity` | Current guard snapshot: canary mode, total checked/rejected/passed, false-positive rate, rejection breakdown. |
+| GET | `/chat/alert-integrity/audit` | Rejection audit log. Query: `limit` (default 50), `since` (timestamp). Returns rejected alerts with reason + state diff. |
+| GET | `/chat/alert-integrity/config` | Read current guard config (enabled, canaryMode, reconcile checks, staleness thresholds). |
+| PATCH | `/chat/alert-integrity/config` | Update guard config. Body: partial config object. |
+| POST | `/chat/alert-integrity/activate` | Exit canary mode — start rejecting stale alerts (instead of log-only). |
+| GET | `/chat/alert-integrity/rollback` | Rollback evaluation metrics: false-positive rate, critical misses, whether rollback trigger is tripped. |

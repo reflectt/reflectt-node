@@ -4417,6 +4417,47 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, flushed: entries.length }
   })
 
+  // ── Alert Integrity endpoints ────────────────────────────────────────
+
+  app.get('/chat/alert-integrity', async () => {
+    const { alertIntegrityGuard } = await import('./alert-integrity.js')
+    return { success: true, stats: alertIntegrityGuard.getStats() }
+  })
+
+  app.get('/chat/alert-integrity/audit', async (request) => {
+    const { alertIntegrityGuard } = await import('./alert-integrity.js')
+    const query = request.query as Record<string, string>
+    const log = alertIntegrityGuard.getAuditLog({
+      limit: query.limit ? Number(query.limit) : 50,
+      since: query.since ? Number(query.since) : undefined,
+      taskId: query.taskId || undefined,
+    })
+    return { success: true, count: log.length, entries: log }
+  })
+
+  app.get('/chat/alert-integrity/rollback', async () => {
+    const { alertIntegrityGuard } = await import('./alert-integrity.js')
+    return { success: true, ...alertIntegrityGuard.getRollbackSignals() }
+  })
+
+  app.get('/chat/alert-integrity/config', async () => {
+    const { alertIntegrityGuard } = await import('./alert-integrity.js')
+    return { success: true, config: alertIntegrityGuard.getConfig() }
+  })
+
+  app.patch('/chat/alert-integrity/config', async (request) => {
+    const { alertIntegrityGuard } = await import('./alert-integrity.js')
+    const body = request.body as Record<string, unknown>
+    alertIntegrityGuard.updateConfig(body as any)
+    return { success: true, config: alertIntegrityGuard.getConfig() }
+  })
+
+  app.post('/chat/alert-integrity/activate', async () => {
+    const { alertIntegrityGuard } = await import('./alert-integrity.js')
+    alertIntegrityGuard.activateEnforcement()
+    return { success: true, canaryMode: false }
+  })
+
   // ── Task transition precheck ─────────────────────────────────────────
 
   app.post<{ Params: { id: string }; Body: { targetStatus: string } }>(

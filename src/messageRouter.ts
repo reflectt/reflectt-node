@@ -23,6 +23,7 @@ import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { policyManager } from './policy.js'
 import { noiseBudgetManager } from './noise-budget.js'
+import { alertIntegrityGuard, type AlertPreflightInput } from './alert-integrity.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -88,6 +89,41 @@ export async function routeMessage(msg: RoutedMessage): Promise<RoutingResult> {
 
   let messageId: string | null = null
   let commentId: string | null = null
+
+  // ── Alert Integrity Preflight ────────────────────────────────────────
+  // For task-scoped alerts, reconcile live state before sending
+  if (msg.taskId && msg.category) {
+    const alertTypeMap: Record<string, AlertPreflightInput['alertType']> = {
+      'watchdog-alert': 'watchdog',
+      'escalation': 'escalation',
+      'mention-rescue': 'mention_rescue',
+      'status-update': 'generic',
+      'continuity-loop': 'idle_nudge',
+    }
+    const alertType = alertTypeMap[msg.category] || 'generic'
+
+    const preflightResult = alertIntegrityGuard.preflight({
+      taskId: msg.taskId,
+      alertType,
+      content: msg.content,
+      from: msg.from,
+    })
+
+    if (!preflightResult.allowed) {
+      routingLog.push({
+        timestamp: Date.now(),
+        category: msg.category || 'unknown',
+        severity: msg.severity || 'info',
+        channel: decision.channel,
+        reason: `alert_integrity_suppressed:${preflightResult.reasonCode}`,
+        taskId: msg.taskId || null,
+      })
+      if (routingLog.length > MAX_ROUTING_LOG) {
+        routingLog.splice(0, routingLog.length - MAX_ROUTING_LOG)
+      }
+      return { decision, messageId: null, commentId: null }
+    }
+  }
 
   // ── Noise Budget Pre-send Check ──────────────────────────────────────
   const budgetCheck = noiseBudgetManager.checkMessage({
