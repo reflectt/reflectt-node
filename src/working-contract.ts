@@ -108,7 +108,7 @@ export async function tickWorkingContract(): Promise<TickResult> {
       if (!config.dryRun) {
         await routeMessage({
           from: 'system',
-          content: `⚠️ Working contract warning: @${agent}, task ${task.id} ("${task.title.slice(0, 60)}") has no status update in ${Math.floor(staleDurationMs / 60_000)}m. **Post a comment within ${config.graceAfterWarningMin}m or the task will auto-requeue to todo.**`,
+          content: `⚠️ [Product Enforcement] @${agent}, task ${task.id} ("${task.title.slice(0, 60)}") has no status update in ${Math.floor(staleDurationMs / 60_000)}m. **Post a status comment within ${config.graceAfterWarningMin}m or the task will auto-requeue to todo.** (This is automated — no leadership action needed.)`,
           category: 'watchdog-alert',
           severity: 'warning',
           forceChannel: config.channel,
@@ -149,12 +149,12 @@ export async function tickWorkingContract(): Promise<TickResult> {
           // Post enforcement comment
           const commentId = `tcomment-${now}-${Math.random().toString(36).slice(2, 9)}`
           db.prepare('INSERT INTO task_comments (id, task_id, author, content, timestamp) VALUES (?, ?, ?, ?, ?)')
-            .run(commentId, task.id, 'system', `🔄 Auto-requeued: no status update from @${agent} after warning. Task moved back to todo.`, now)
+            .run(commentId, task.id, 'system', `🔄 [Product Enforcement] Auto-requeued: no status update from @${agent} after warning. Task moved back to todo. (Automated — no leadership action needed.)`, now)
           db.prepare('UPDATE tasks SET comment_count = comment_count + 1 WHERE id = ?').run(task.id)
 
           await routeMessage({
             from: 'system',
-            content: `🔄 **Auto-requeued**: ${task.id} ("${task.title.slice(0, 60)}") moved from doing → todo. @${agent} did not respond to working contract warning within ${config.graceAfterWarningMin}m.`,
+            content: `🔄 **[Product Enforcement] Auto-requeued**: ${task.id} ("${task.title.slice(0, 60)}") moved from doing → todo. @${agent} did not respond within ${config.graceAfterWarningMin}m. (Automated enforcement — no leadership intervention required.)`,
             category: 'watchdog-alert',
             severity: 'warning',
             forceChannel: config.channel,
