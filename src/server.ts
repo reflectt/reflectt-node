@@ -98,6 +98,7 @@ import { promoteInsight, validatePromotionInput, generateRecurringCandidates, li
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
 import { listLineage, getLineage, lineageStats } from './lineage.js'
 import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
+import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats } from './shipped-heartbeat.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
@@ -1599,12 +1600,16 @@ export async function createServer(): Promise<FastifyInstance> {
   // Team pulse: proactive status broadcast (trust-gap mitigation)
   startTeamPulse()
 
+  // Shipped-artifact auto-heartbeat → #general on validating/done with artifact_path
+  startShippedHeartbeat()
+
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
     clearInterval(cadenceWatchdogTimer)
     clearInterval(mentionRescueTimer)
     boardHealthWorker.stop()
     stopInsightTaskBridge()
+    stopShippedHeartbeat()
     stopTeamPulse()
     wsHeartbeat.stop()
   })
@@ -5972,6 +5977,11 @@ export async function createServer(): Promise<FastifyInstance> {
   // Insight→Task bridge stats
   app.get('/insights/bridge/stats', async () => {
     return getInsightTaskBridgeStats()
+  })
+
+  // Shipped-artifact auto-heartbeat stats
+  app.get('/shipped-heartbeat/stats', async () => {
+    return getShippedHeartbeatStats()
   })
 
   // Bridge config: get/update ownership guardrail settings

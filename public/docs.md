@@ -508,6 +508,12 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/continuity/audit` | Persistent audit trail of all continuity actions. Query: `agent`, `limit`, `since` (epoch ms). Returns timestamped actions with kind, detail, linked insight/task IDs. |
 | POST | `/continuity/tick` | Manually trigger one continuity cycle. Returns actions taken, agents checked, and replenishment count. Normally runs automatically via board health worker. |
 
+### Shipped Heartbeat
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/shipped-heartbeat/stats` | Shipped-artifact heartbeat stats: messages sent, errors, last heartbeat timestamp. |
+
 ## Team
 
 | Method | Path | Description |
