@@ -14,6 +14,7 @@ import {
   getInsightTaskBridgeStats,
   _resetBridgeStats,
   _handlePromotedInsight,
+  _extractPrReferences,
   resolveAssignment,
   configureBridge,
   getBridgeConfig,
@@ -223,6 +224,71 @@ describe('Cross-insight dedup in auto-create', () => {
     expect(updated2?.task_id).toBeTruthy()
     // Tasks should be different
     expect(updated1?.task_id).not.toBe(updated2?.task_id)
+  })
+
+  it('dedup matches same failure_family even with different stage/unit (fuzzy family)', async () => {
+    const suffix = Date.now().toString(36)
+
+    const { insight: insight1 } = createTestInsight({
+      severity: 'high',
+      pain: `Fuzzy family match alpha ${suffix}`,
+      tags: [`stage:fuzzy1-${suffix}`, `family:same-family-${suffix}`, `unit:unit-a-${suffix}`],
+    })
+
+    await new Promise(r => setTimeout(r, 50))
+    const updated1 = getInsight(insight1.id)
+    expect(updated1?.status).toBe('task_created')
+    const firstTaskId = updated1!.task_id
+
+    // Second insight: DIFFERENT stage+unit but SAME family
+    const { insight: insight2 } = createTestInsight({
+      severity: 'high',
+      pain: `Fuzzy family match beta ${suffix}`,
+      tags: [`stage:fuzzy2-${suffix}`, `family:same-family-${suffix}`, `unit:unit-b-${suffix}`],
+    })
+
+    await _handlePromotedInsight({
+      id: `evt-fuzzy-${Date.now()}`,
+      type: 'task_created',
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: insight2.id },
+    })
+
+    const updated2 = getInsight(insight2.id)
+    expect(updated2?.status).toBe('task_created')
+    // Should be linked to same task (fuzzy family match)
+    expect(updated2?.task_id).toBe(firstTaskId)
+  })
+})
+
+describe('extractPrReferences', () => {
+  it('extracts PR # references', () => {
+    expect(_extractPrReferences(['PR #253', 'PR #254'])).toEqual(['#253', '#254'])
+  })
+
+  it('extracts from pull/N URLs', () => {
+    expect(_extractPrReferences(['https://github.com/reflectt/reflectt-node/pull/253'])).toEqual(['#253'])
+  })
+
+  it('extracts from mixed formats', () => {
+    const refs = _extractPrReferences([
+      'Already shipped in PRs #253 and #254',
+      'See pull/100 for details',
+      '#42 was the original fix',
+    ])
+    expect(refs).toContain('#253')
+    expect(refs).toContain('#254')
+    expect(refs).toContain('#100')
+    expect(refs).toContain('#42')
+  })
+
+  it('deduplicates', () => {
+    const refs = _extractPrReferences(['PR #253', 'Also PR #253', '#253'])
+    expect(refs).toEqual(['#253'])
+  })
+
+  it('returns empty for no matches', () => {
+    expect(_extractPrReferences(['no pr references here'])).toEqual([])
   })
 })
 

@@ -127,43 +127,101 @@ async function handlePromotedInsight(event: Event): Promise<void> {
   }
 }
 
+/** Cooldown: don't re-create tasks for work shipped within this window */
+const DONE_TASK_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
 /**
- * Check if a non-done task already exists for this insight's cluster/topic.
+ * Extract normalized PR references from strings (e.g., "PR #253", "pull/253", "#253").
+ * Returns deduplicated array of "#N" strings for comparison.
+ */
+function extractPrReferences(strings: string[]): string[] {
+  const refs: string[] = []
+  const prPattern = /(?:PR\s*#?|pull\/|#)(\d+)/gi
+  for (const s of strings) {
+    let match
+    while ((match = prPattern.exec(s)) !== null) {
+      refs.push(`#${match[1]}`)
+    }
+  }
+  return [...new Set(refs)]
+}
+
+/**
+ * Check if a task already exists for this insight's cluster/topic.
  * Prevents duplicate tasks when multiple insights about the same topic get promoted.
  *
  * Match criteria (ordered by specificity):
- * 1. Direct insight_id match (exact)
- * 2. Exact title match (case-insensitive)
- * 3. Same cluster_key via insight-bridge source (same stage::family::unit)
+ * 1. Direct insight_id match (exact) — any status
+ * 2. Exact title match (case-insensitive) — non-done, or done within cooldown
+ * 3. Same cluster_key via insight-bridge source — non-done, or done within cooldown
+ * 4. Fuzzy family match — same failure_family component in cluster_key
+ * 5. Evidence cross-reference — insight references PRs already linked to existing tasks
  */
-function findExistingTaskForInsight(insight: Insight): { id: string; title: string } | null {
+function findExistingTaskForInsight(insight: Insight): { id: string; title: string; matchType: string } | null {
   const allTasks = taskManager.listTasks({})
   const targetTitle = `[Insight] ${insight.title}`.toLowerCase()
+  const now = Date.now()
+
+  // Extract failure_family from cluster_key (format: "reflect::family::unit")
+  const clusterParts = (insight.cluster_key || '').split('::')
+  const insightFamily = clusterParts.length >= 2 ? clusterParts[1] : null
+
+  // Extract PR references from evidence
+  const prRefs = extractPrReferences(insight.evidence_refs || [])
 
   for (const task of allTasks) {
-    // Skip done tasks — they shouldn't block new work
-    if (task.status === 'done') continue
-
     const meta = (task.metadata || {}) as Record<string, unknown>
+    const isDone = task.status === 'done'
+    const taskUpdatedAt = (meta.entered_validating_at as number) || (task as any).updatedAt || (task as any).createdAt || 0
+    const withinCooldown = isDone && (now - taskUpdatedAt) < DONE_TASK_COOLDOWN_MS
 
-    // 1. Direct insight_id match
+    // 1. Direct insight_id match — always blocks (any status)
     if (meta.insight_id === insight.id || meta.source_insight === insight.id) {
-      return { id: task.id, title: task.title }
+      return { id: task.id, title: task.title, matchType: 'direct_insight_id' }
     }
 
-    // 2. Exact title match (case-insensitive) for insight-bridge tasks
+    // For remaining checks, skip done tasks outside cooldown
+    if (isDone && !withinCooldown) continue
+
+    // 2. Exact title match (case-insensitive)
     if (meta.source === 'insight-task-bridge' && task.title.toLowerCase() === targetTitle) {
-      return { id: task.id, title: task.title }
+      return { id: task.id, title: task.title, matchType: 'exact_title' }
     }
 
-    // 3. Same full cluster_key (stage::family::unit) via insight-bridge source
+    // 3. Same full cluster_key
     if (meta.source === 'insight-task-bridge' && typeof meta.insight_id === 'string') {
       try {
         const sourceInsight = getInsight(meta.insight_id as string)
         if (sourceInsight && sourceInsight.cluster_key === insight.cluster_key) {
-          return { id: task.id, title: task.title }
+          return { id: task.id, title: task.title, matchType: 'exact_cluster_key' }
         }
       } catch { /* ignore lookup failures */ }
+    }
+
+    // 4. Fuzzy family match — same failure_family in another insight-bridge task
+    if (insightFamily && meta.source === 'insight-task-bridge' && typeof meta.insight_id === 'string') {
+      try {
+        const sourceInsight = getInsight(meta.insight_id as string)
+        if (sourceInsight) {
+          const sourceParts = (sourceInsight.cluster_key || '').split('::')
+          const sourceFamily = sourceParts.length >= 2 ? sourceParts[1] : null
+          if (sourceFamily && sourceFamily === insightFamily) {
+            return { id: task.id, title: task.title, matchType: 'fuzzy_family' }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    // 5. Evidence cross-reference — insight mentions PRs in this task's artifacts
+    if (prRefs.length > 0) {
+      const taskArtifacts = (meta.artifacts as string[] || []).concat(
+        meta.pr_url ? [meta.pr_url as string] : []
+      )
+      const taskPrRefs = extractPrReferences(taskArtifacts)
+      const overlap = prRefs.some(pr => taskPrRefs.includes(pr))
+      if (overlap) {
+        return { id: task.id, title: task.title, matchType: 'evidence_pr_crossref' }
+      }
     }
   }
 
@@ -179,7 +237,7 @@ async function autoCreateTask(insight: Insight): Promise<void> {
     stats.duplicatesSkipped++
     // Link this insight to the existing task
     updateInsightStatus(insight.id, 'task_created', existing.id)
-    console.log(`[InsightTaskBridge] Dedup: insight ${insight.id} linked to existing task ${existing.id} ("${existing.title}")`)
+    console.log(`[InsightTaskBridge] Dedup: insight ${insight.id} linked to existing task ${existing.id} (match: ${existing.matchType}, "${existing.title}")`)
     return
   }
 
@@ -524,3 +582,5 @@ export function getBridgeConfig(): BridgeConfig {
 }
 
 export { handlePromotedInsight as _handlePromotedInsight }
+export { findExistingTaskForInsight as _findExistingTaskForInsight }
+export { extractPrReferences as _extractPrReferences }
