@@ -201,14 +201,190 @@ class ChatManager {
     return Array.from(this.rooms.values())
   }
 
+  // ── Noise Budget State ──
+  // Per-channel message counts in rolling windows
+  private channelBudgetCounters = new Map<string, { count: number; windowStart: number }>()
+  // Duplicate suppression: hash → timestamp of last send
+  private recentMessageHashes = new Map<string, number>()
+  // Digest batching: queued system reminders per channel
+  private digestQueue = new Map<string, Array<{ content: string; from: string; queuedAt: number }>>()
+  private digestTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+  // Configurable limits
+  private static readonly CHANNEL_BUDGET_WINDOW_MS = 60 * 60 * 1000 // 1 hour
+  private static readonly CHANNEL_BUDGET_MAX: Record<string, number> = {
+    general: 30,    // max 30 messages per hour in #general
+    shipping: 20,
+    reviews: 20,
+    blockers: 15,
+    _default: 40,
+  }
+  private static readonly DEDUP_WINDOW_MS = 5 * 60 * 1000 // 5 minute dedup window
+  private static readonly DIGEST_BATCH_DELAY_MS = 30 * 1000 // 30s digest batching window
+  private static readonly SYSTEM_REMINDER_PATTERNS = [
+    /^⚠️ Working contract warning/,
+    /^⚠️ \[Product Enforcement\]/,
+    /^🔄.*Auto-requeued/,
+    /^⚠️ SLA breach/,
+    /^🪞 Reflection nudge/,
+  ]
+
+  /**
+   * Check if message is within per-channel budget
+   */
+  private checkChannelBudget(channel: string): { allowed: boolean; reason?: string } {
+    const now = Date.now()
+    const counter = this.channelBudgetCounters.get(channel)
+    const maxBudget = ChatManager.CHANNEL_BUDGET_MAX[channel] ?? ChatManager.CHANNEL_BUDGET_MAX._default
+
+    if (!counter || now - counter.windowStart > ChatManager.CHANNEL_BUDGET_WINDOW_MS) {
+      // New window
+      this.channelBudgetCounters.set(channel, { count: 1, windowStart: now })
+      return { allowed: true }
+    }
+
+    if (counter.count >= maxBudget) {
+      return { allowed: false, reason: `Channel #${channel} budget exceeded (${counter.count}/${maxBudget} per hour)` }
+    }
+
+    counter.count++
+    return { allowed: true }
+  }
+
+  /**
+   * Check for duplicate messages within suppression window
+   */
+  private checkDuplicate(from: string, channel: string, content: string): boolean {
+    const now = Date.now()
+    // Clean expired entries
+    for (const [key, ts] of this.recentMessageHashes) {
+      if (now - ts > ChatManager.DEDUP_WINDOW_MS) this.recentMessageHashes.delete(key)
+    }
+
+    // Hash: from + channel + normalized content (strip timestamps/IDs)
+    const normalized = content.replace(/\d{10,}/g, '').replace(/task-\S+/g, 'TASK').trim().slice(0, 200)
+    const hash = `${from}:${channel}:${normalized}`
+
+    if (this.recentMessageHashes.has(hash)) {
+      return true // duplicate
+    }
+
+    this.recentMessageHashes.set(hash, now)
+    return false
+  }
+
+  /**
+   * Check if message is a system reminder eligible for digest batching
+   */
+  private isSystemReminder(content: string): boolean {
+    return ChatManager.SYSTEM_REMINDER_PATTERNS.some(p => p.test(content))
+  }
+
+  /**
+   * Queue a system reminder for digest batching
+   * Returns true if queued (caller should skip sending), false if digest should flush now
+   */
+  private queueForDigest(channel: string, from: string, content: string): boolean {
+    const queue = this.digestQueue.get(channel) || []
+    queue.push({ content, from, queuedAt: Date.now() })
+    this.digestQueue.set(channel, queue)
+
+    // If timer already running, just add to queue
+    if (this.digestTimers.has(channel)) return true
+
+    // Start digest timer
+    const timer = setTimeout(() => {
+      this.flushDigest(channel)
+      this.digestTimers.delete(channel)
+    }, ChatManager.DIGEST_BATCH_DELAY_MS)
+    timer.unref()
+    this.digestTimers.set(channel, timer)
+
+    return true
+  }
+
+  /**
+   * Flush queued digest messages into a single batched message
+   */
+  private flushDigest(channel: string): void {
+    const queue = this.digestQueue.get(channel)
+    if (!queue || queue.length === 0) return
+    this.digestQueue.delete(channel)
+
+    if (queue.length === 1) {
+      // Single message — send as-is
+      void this.sendMessage({ from: queue[0].from, channel, content: queue[0].content })
+      return
+    }
+
+    // Batch multiple reminders into a single digest
+    const summary = `📋 **System digest** (${queue.length} reminders):\n` +
+      queue.map((q, i) => `${i + 1}. ${q.content.split('\n')[0].slice(0, 120)}`).join('\n')
+
+    void this.sendMessage({
+      from: 'system',
+      channel,
+      content: summary,
+      metadata: { digest: true, batchedCount: queue.length },
+    })
+  }
+
   async sendMessage(message: Omit<AgentMessage, 'id' | 'timestamp' | 'replyCount'>): Promise<AgentMessage> {
+    const channel = message.channel || 'general'
+
+    // ── Noise Budget Checks ──
+    // Skip budget checks for direct messages (has `to` field) and metadata.bypass_budget
+    const bypassBudget = (message.metadata as any)?.bypass_budget === true || message.to
+    if (!bypassBudget) {
+      // 1. Duplicate suppression
+      if (this.checkDuplicate(message.from, channel, message.content)) {
+        console.log(`[Chat/NoiseBudget] Suppressed duplicate from ${message.from} in #${channel}`)
+        // Return a synthetic message so callers don't break
+        return {
+          ...message,
+          id: `msg-${Date.now()}-suppressed`,
+          timestamp: Date.now(),
+          channel,
+          reactions: {},
+        } as AgentMessage
+      }
+
+      // 2. System reminder digest batching
+      if (this.isSystemReminder(message.content)) {
+        if (this.queueForDigest(channel, message.from, message.content)) {
+          console.log(`[Chat/NoiseBudget] Queued system reminder for digest in #${channel}`)
+          return {
+            ...message,
+            id: `msg-${Date.now()}-queued`,
+            timestamp: Date.now(),
+            channel,
+            reactions: {},
+          } as AgentMessage
+        }
+      }
+
+      // 3. Per-channel budget
+      const budget = this.checkChannelBudget(channel)
+      if (!budget.allowed) {
+        console.warn(`[Chat/NoiseBudget] ${budget.reason}`)
+        return {
+          ...message,
+          id: `msg-${Date.now()}-budgeted`,
+          timestamp: Date.now(),
+          channel,
+          reactions: {},
+          metadata: { ...message.metadata as Record<string, unknown>, budget_exceeded: true },
+        } as AgentMessage
+      }
+    }
+
     const fullMessage: AgentMessage = {
       ...message,
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: Date.now(),
-      channel: message.channel || 'general', // Default to general channel
-      reactions: message.reactions || {}, // Initialize empty reactions
-      threadId: message.threadId, // Preserve threadId if provided
+      channel,
+      reactions: message.reactions || {},
+      threadId: message.threadId,
     }
 
     // Store locally
