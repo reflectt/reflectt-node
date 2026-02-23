@@ -860,6 +860,27 @@ program
         process.exit(1)
       }
 
+      // Step 0: Preflight checks
+      console.log('🔍 Preflight checks...')
+      try {
+        const { runPreflight, formatPreflightReport } = await import('./preflight.js')
+        const report = await runPreflight({
+          cloudUrl: options.cloudUrl,
+          joinToken: options.joinToken,
+          apiKey: options.apiKey,
+        })
+        console.log(formatPreflightReport(report))
+        console.log('')
+        if (!report.allPassed && report.firstBlocker) {
+          console.error(`❌ Preflight failed: ${report.firstBlocker.message}`)
+          console.error('')
+          console.error('Fix the issue above and retry.')
+          process.exit(1)
+        }
+      } catch (err: any) {
+        console.log('   ⚠️  Preflight checks unavailable, proceeding...')
+      }
+
       // Step 1: Init
       console.log('📦 Step 1/3: Initializing reflectt home...')
       ensureReflecttHome()
