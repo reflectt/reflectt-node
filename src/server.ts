@@ -62,6 +62,7 @@ import { buildAgentFeed, type FeedEventKind } from './changeFeed.js'
 import { policyManager } from './policy.js'
 import { runPrecheck, applyAutoDefaults } from './taskPrecheck.js'
 import { resolveRoute, getRoutingLog, getRoutingStats, type MessageSeverity, type MessageCategory } from './messageRouter.js'
+import { noiseBudgetManager } from './noise-budget.js'
 import {
   submitFeedback,
   listFeedback,
@@ -1577,6 +1578,21 @@ export async function createServer(): Promise<FastifyInstance> {
   boardHealthWorker.updateConfig(policy.boardHealth)
   boardHealthWorker.start()
 
+  // Noise budget: wire digest flush handler to send batched messages to #ops
+  noiseBudgetManager.setDigestFlushHandler(async (channel, entries) => {
+    if (entries.length === 0) return
+    const summary = entries.map(e =>
+      `• [${e.category}] ${e.from}: ${e.content.substring(0, 120)}${e.content.length > 120 ? '…' : ''}`
+    ).join('\n')
+    const digestContent = `📦 **Noise Budget Digest** (${entries.length} batched messages for #${channel}):\n${summary}`
+    await chatManager.sendMessage({
+      from: 'system',
+      channel: 'ops',
+      content: digestContent,
+      metadata: { noiseDigest: true, originalChannel: channel, batchSize: entries.length },
+    })
+  })
+
   // Insight:promoted → auto-task bridge (severity-aware)
   startInsightTaskBridge()
 
@@ -2419,6 +2435,12 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const message = await chatManager.sendMessage(data)
     const mentionWarnings = buildMentionWarnings(data.content)
+
+    // Track content messages for noise budget denominator
+    // (agent/human messages posted via POST /chat/messages are content, not control-plane)
+    if (data.channel) {
+      noiseBudgetManager.recordContentMessage(data.channel, data.from)
+    }
 
     // Auto-update presence: if you're posting, you're active
     if (data.from) {
@@ -4302,6 +4324,55 @@ export async function createServer(): Promise<FastifyInstance> {
       mentions: body.mentions as string[] | undefined,
     })
     return { success: true, decision }
+  })
+
+  // ── Noise Budget endpoints ──────────────────────────────────────────
+
+  // Noise budget snapshot (current state for all channels)
+  app.get('/chat/noise-budget', async () => {
+    return { success: true, ...noiseBudgetManager.getSnapshot() }
+  })
+
+  // Noise budget canary metrics (rollback evaluation)
+  app.get('/chat/noise-budget/canary', async () => {
+    return { success: true, ...noiseBudgetManager.getCanaryMetrics() }
+  })
+
+  // Noise budget suppression log
+  app.get<{ Querystring: { limit?: string; since?: string } }>(
+    '/chat/noise-budget/suppression-log',
+    async (request) => {
+      const { limit, since } = request.query
+      const log = noiseBudgetManager.getSuppressionLog({
+        limit: limit ? Number(limit) : 50,
+        since: since ? Number(since) : undefined,
+      })
+      return { success: true, count: log.length, entries: log }
+    },
+  )
+
+  // Noise budget config (read)
+  app.get('/chat/noise-budget/config', async () => {
+    return { success: true, config: noiseBudgetManager.getConfig() }
+  })
+
+  // Noise budget config (update)
+  app.patch('/chat/noise-budget/config', async (request) => {
+    const body = request.body as Record<string, unknown>
+    noiseBudgetManager.updateConfig(body as any)
+    return { success: true, config: noiseBudgetManager.getConfig() }
+  })
+
+  // Exit canary mode → enforce
+  app.post('/chat/noise-budget/activate', async () => {
+    noiseBudgetManager.activateEnforcement()
+    return { success: true, canaryMode: false, message: 'Enforcement activated — suppression is now live' }
+  })
+
+  // Force digest flush
+  app.post('/chat/noise-budget/flush-digest', async () => {
+    const entries = await noiseBudgetManager.flushDigestQueue()
+    return { success: true, flushed: entries.length }
   })
 
   // ── Task transition precheck ─────────────────────────────────────────
