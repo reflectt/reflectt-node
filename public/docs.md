@@ -225,6 +225,19 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 Bypass: escalation, blocker, and critical-priority messages always pass through budget enforcement.
 Budget enforcement requires minimum 10 messages in the rolling window before activating.
 
+### Alert Integrity Guard (false-positive prevention)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/chat/alert-integrity` | Current alert integrity stats: total checked, blocked false-positives, pass-through count |
+| GET | `/chat/alert-integrity/audit` | Audit log of preflight decisions. Query: `limit`, `since` |
+| GET | `/chat/alert-integrity/config` | Read alert integrity guard configuration |
+| GET | `/chat/alert-integrity/rollback` | Rollback evaluation: false-positive rate, missed true-positives, preflight latency p95 |
+| PATCH | `/chat/alert-integrity/config` | Update config. Fields: `enabled`, `canaryMode`, `maxPreflightMs`, `reconcileFields` |
+| POST | `/chat/alert-integrity/activate` | Exit canary (log-only) mode and enable enforcement |
+
+Preflight checks reconcile live task state (status, assignee, reviewer, recent comment timestamp, queue state hash) before publishing SLA/requeue/stale alerts. Idempotent alert key: `task_id + alert_type + state_hash`.
+
 ### Chat edit/delete contract
 
 - `PATCH /chat/messages/:id` and `DELETE /chat/messages/:id` are author-only.
