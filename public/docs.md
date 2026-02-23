@@ -82,6 +82,16 @@ Operationally:
 | POST | `/health/working-contract/tick` | Evaluate working-contract enforcement: auto-requeue stale doing tasks (90m warning → 15m grace → auto todo) and fire alerts. |
 | GET | `/health/working-contract/gate/:agent` | Dry-run claim gate check for an agent. Returns `{ allowed, reason }` — whether the agent can claim a new task given current WIP and contract status. |
 
+### Team Pulse
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health/team/pulse` | Current team pulse snapshot: per-agent activity summary, team velocity, and health signals |
+| GET | `/health/team/pulse/config` | Read team pulse broadcast configuration |
+| GET | `/health/team/pulse/history` | Historical pulse snapshots. Query: `limit`, `since` |
+| PATCH | `/health/team/pulse/config` | Update pulse config. Fields: `intervalMs`, `channel`, `enabled` |
+| POST | `/health/team/pulse` | Trigger immediate team pulse broadcast |
+
 ### Quiet hours behavior (watchdogs)
 
 Watchdog endpoints currently execute whenever called (manual or scheduled). Quiet-hours suppression is not enforced by these endpoints at the API layer yet.
@@ -191,6 +201,21 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/chat/messages/:id/thread` | Get thread replies |
 | GET | `/chat/rooms` | List rooms |
 | POST | `/chat/rooms` | Create room |
+
+### Noise Budget (control-plane rate limiting)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/chat/noise-budget` | Current budget snapshot: per-channel ratios, window stats, enforcement state |
+| GET | `/chat/noise-budget/canary` | Canary rollback evaluation: ratio vs target, SLA miss delta, P95 response delta |
+| GET | `/chat/noise-budget/suppression-log` | Audit trail of suppressed/digested messages |
+| GET | `/chat/noise-budget/config` | Read current noise budget configuration |
+| PATCH | `/chat/noise-budget/config` | Update config. Fields: `budgetPercent`, `dedupWindowMs`, `digestIntervalMs`, `channelBudgets` |
+| POST | `/chat/noise-budget/activate` | Exit canary (log-only) mode and enable enforcement |
+| POST | `/chat/noise-budget/flush-digest` | Force immediate digest flush |
+
+Bypass: escalation, blocker, and critical-priority messages always pass through budget enforcement.
+Budget enforcement requires minimum 10 messages in the rolling window before activating.
 
 ### Chat edit/delete contract
 

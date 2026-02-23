@@ -22,6 +22,7 @@
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { policyManager } from './policy.js'
+import { noiseBudgetManager } from './noise-budget.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -80,12 +81,55 @@ const MAX_ROUTING_LOG = 500
 
 /**
  * Route a system message to the appropriate channel + optionally add task comment.
+ * Applies noise budget checks before sending (duplicate suppression, digest batching, per-channel budget).
  */
 export async function routeMessage(msg: RoutedMessage): Promise<RoutingResult> {
   const decision = resolveRoute(msg)
 
   let messageId: string | null = null
   let commentId: string | null = null
+
+  // ── Noise Budget Pre-send Check ──────────────────────────────────────
+  const budgetCheck = noiseBudgetManager.checkMessage({
+    from: msg.from,
+    content: msg.content,
+    channel: decision.channel,
+    category: msg.category,
+    severity: msg.severity,
+    taskId: msg.taskId,
+  })
+
+  if (!budgetCheck.allowed) {
+    // Message suppressed or queued for digest — log but don't send
+    routingLog.push({
+      timestamp: Date.now(),
+      category: msg.category || 'unknown',
+      severity: msg.severity || 'info',
+      channel: decision.channel,
+      reason: `suppressed:${budgetCheck.reason}`,
+      taskId: msg.taskId || null,
+    })
+    if (routingLog.length > MAX_ROUTING_LOG) {
+      routingLog.splice(0, routingLog.length - MAX_ROUTING_LOG)
+    }
+
+    // Still add task comment even if chat message was suppressed
+    if (decision.alsoComment && msg.taskId) {
+      try {
+        const comment = await taskManager.addTaskComment(
+          msg.taskId,
+          msg.from,
+          msg.content,
+        )
+        commentId = comment?.id || null
+      } catch {
+        // Non-fatal
+      }
+    }
+
+    return { decision, messageId: null, commentId }
+  }
+  // ── End Noise Budget Check ───────────────────────────────────────────
 
   // Send to resolved channel
   try {
