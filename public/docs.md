@@ -53,6 +53,14 @@ Operationally:
 - If `Retry-After` is present, follow that value before retrying.
 - Retry strategy recommendation: exponential backoff + jitter for idempotent reads.
 
+## Preflight
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/preflight` | Run BYOH preflight checks (auth, network, runtime). Returns JSON with per-check pass/fail, remediation guidance, and overall readiness status. Query: `host` (optional host identifier) |
+| GET | `/preflight/text` | Run preflight checks and return a plain-text formatted report for CLI/terminal display |
+| POST | `/preflight` | Run preflight checks with custom config. Body: `{ host?, checks?, timeout? }` |
+
 ## Health
 
 | Method | Path | Description |
