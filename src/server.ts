@@ -4326,6 +4326,43 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, decision }
   })
 
+  // ── Preflight Check endpoint ────────────────────────────────────────
+
+  app.get('/preflight', async (request) => {
+    const { runPreflight } = await import('./preflight.js')
+    const query = request.query as Record<string, string>
+    const report = await runPreflight({
+      cloudUrl: query.cloudUrl || undefined,
+      port: query.port ? Number(query.port) : undefined,
+      skipNetwork: query.skipNetwork === 'true',
+    })
+    return { success: true, ...report }
+  })
+
+  app.post('/preflight', async (request) => {
+    const { runPreflight } = await import('./preflight.js')
+    const body = (request.body || {}) as Record<string, unknown>
+    const report = await runPreflight({
+      cloudUrl: body.cloudUrl as string | undefined,
+      port: body.port as number | undefined,
+      skipNetwork: body.skipNetwork as boolean | undefined,
+      joinToken: body.joinToken as string | undefined,
+      apiKey: body.apiKey as string | undefined,
+    })
+    return { success: true, ...report }
+  })
+
+  app.get('/preflight/text', async (request) => {
+    const { runPreflight, formatPreflightReport } = await import('./preflight.js')
+    const query = request.query as Record<string, string>
+    const report = await runPreflight({
+      cloudUrl: query.cloudUrl || undefined,
+      port: query.port ? Number(query.port) : undefined,
+      skipNetwork: query.skipNetwork === 'true',
+    })
+    return formatPreflightReport(report)
+  })
+
   // ── Noise Budget endpoints ──────────────────────────────────────────
 
   // Noise budget snapshot (current state for all channels)
