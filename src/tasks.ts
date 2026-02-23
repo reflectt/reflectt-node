@@ -1034,6 +1034,10 @@ class TaskManager {
     return comment
   }
 
+  /** Tracks last materialization time to debounce recurring task checks */
+  private lastRecurringMaterializeAt = 0
+  private static readonly RECURRING_DEBOUNCE_MS = 60_000 // 1 minute
+
   listTasks(options?: {
     status?: Task['status']
     assignee?: string
@@ -1044,7 +1048,14 @@ class TaskManager {
     tags?: string[]
     includeBlocked?: boolean // If false, filter out blocked tasks (default: true)
   }): Task[] {
-    void this.materializeDueRecurringTasks().catch(() => {})
+    // Debounce recurring task materialization: at most once per minute
+    // This was previously called on every listTasks() invocation (~50+ callers),
+    // causing significant event loop blocking under load.
+    const now = Date.now()
+    if (now - this.lastRecurringMaterializeAt >= TaskManager.RECURRING_DEBOUNCE_MS) {
+      this.lastRecurringMaterializeAt = now
+      void this.materializeDueRecurringTasks().catch(() => {})
+    }
 
     // Helper: check if a task is blocked by incomplete dependencies
     const isBlocked = (task: Task): boolean => {
