@@ -81,6 +81,41 @@ describe('Working contract enforcement', () => {
     const result = checkClaimGate(agent)
     expect(result.allowed).toBe(true)
   })
+
+  it('checkClaimGate reconciles stale tracking when a newer reflection exists', async () => {
+    const agent = `stale-reflect-${Date.now()}`
+    const db = getDb()
+
+    // Stale tracking: looks overdue
+    const tenHoursAgo = Date.now() - 10 * 60 * 60 * 1000
+    db.prepare(`
+      INSERT OR REPLACE INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+      VALUES (?, ?, 3, ?)
+    `).run(agent, tenHoursAgo, Date.now())
+
+    // Create a reflection via direct DB insert path (createReflection) WITHOUT calling onReflectionSubmitted
+    // This simulates reflections ingested via non-HTTP sync paths.
+    const { createReflection } = await import('../src/reflections.js')
+    const reflection = createReflection({
+      pain: 'stale tracking test',
+      impact: 'gate should not block',
+      evidence: ['test'],
+      went_well: 'n/a',
+      suspected_why: 'n/a',
+      proposed_fix: 'reconcile using reflections table',
+      confidence: 7,
+      role_type: 'agent',
+      author: agent,
+    })
+
+    const result = checkClaimGate(agent)
+    expect(result.allowed).toBe(true)
+
+    const row = db.prepare('SELECT * FROM reflection_tracking WHERE agent = ?').get(agent) as any
+    expect(row).toBeDefined()
+    expect(row.tasks_done_since_reflection).toBe(0)
+    expect(row.last_reflection_at).toBe(reflection.created_at)
+  })
 })
 
 describe('Working contract API endpoints', () => {
