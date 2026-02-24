@@ -71,4 +71,5 @@ Reviewer can return verdict quickly by checking:
 
 - Canonical handoff template: `docs/REVIEWER_HANDOFF_BUNDLE_TEMPLATE.md`
 - Task creation quality rail: `docs/TASK_CREATION_TEMPLATE.md`
+- Copy acceptance checklist (activation + trust): `docs/checklists/TASK-task-1771345672442-lo7wylkzq-copy-acceptance-checklist-v1.1.md`
 - Known drift/workarounds: `docs/KNOWN_ISSUES.md`
