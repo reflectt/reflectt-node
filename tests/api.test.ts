@@ -398,7 +398,7 @@ describe('Mention Rescue', () => {
 
     const { status, body } = await req(
       'POST',
-      `/health/mention-rescue/tick?dryRun=true&force=true&nowMs=${mentionAt + 60_000}`,
+      `/health/mention-rescue/tick?dryRun=true&force=true&nowMs=${mentionAt + 2 * 60_000}`,
     )
     expect(status).toBe(200)
     expect(body.suppressed).toBe(false)

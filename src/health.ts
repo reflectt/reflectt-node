@@ -1644,7 +1644,10 @@ class TeamHealthMonitor {
     const dryRun = options?.dryRun === true
     const rescued: string[] = []
 
-    if (!this.mentionRescueEnabled) {
+    const policy = policyManager.get()
+    const cfg = policy.mentionRescue
+
+    if (!cfg?.enabled) {
       return { rescued }
     }
 
@@ -1661,9 +1664,15 @@ class TeamHealthMonitor {
     })
 
     const trioSet = new Set(this.trioAgents)
-    const delayMs = this.mentionRescueDelayMin * 60_000
-    const cooldownMs = this.mentionRescueCooldownMin * 60_000
-    const globalCooldownMs = this.mentionRescueGlobalCooldownMin * 60_000
+
+    // Guardrails: never allow instant mention-rescue (creates #general spam).
+    const delayMin = Math.max(3, Number(cfg.delayMin || 0))
+    const cooldownMin = Math.max(1, Number(cfg.cooldownMin || 0))
+    const globalCooldownMin = Math.max(1, Number(cfg.globalCooldownMin || 0))
+
+    const delayMs = delayMin * 60_000
+    const cooldownMs = cooldownMin * 60_000
+    const globalCooldownMs = globalCooldownMin * 60_000
 
     // Maximum age for mentions to be eligible for rescue (30 minutes).
     // Prevents stale mentions from hours/days ago from triggering infinite rescue loops.
@@ -1731,7 +1740,15 @@ class TeamHealthMonitor {
       rescued.push(content)
 
       if (!dryRun) {
-        await routeMessage({ from: 'system', content, category: 'mention-rescue', severity: 'warning' })
+        await routeMessage({
+          from: 'system',
+          content,
+          category: 'mention-rescue',
+          severity: 'warning',
+          mentions: mentionedAgents,
+          // Keep the fallback in the same channel as the original mention.
+          forceChannel: String((mention as any).channel || 'general'),
+        })
         this.recordThreadRescue(threadKey, mentionId, now)
       }
 

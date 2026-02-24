@@ -175,7 +175,8 @@ export const DEFAULT_POLICY: PolicyConfig = {
   staleDoingThresholdMin: 240,
   mentionRescue: {
     enabled: true,
-    delayMin: 0,
+    // Guardrail: never fire immediately; gives the trio a chance to respond naturally.
+    delayMin: 3,
     cooldownMin: 10,
     globalCooldownMin: 5,
   },
