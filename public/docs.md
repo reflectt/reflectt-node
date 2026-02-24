@@ -99,6 +99,8 @@ Operationally:
 | GET | `/health/team/pulse/history` | Historical pulse snapshots. Query: `limit`, `since` |
 | PATCH | `/health/team/pulse/config` | Update pulse config. Fields: `intervalMs`, `channel`, `enabled` |
 | POST | `/health/team/pulse` | Trigger immediate team pulse broadcast |
+| GET | `/health/team/doctor` | Run team doctor diagnostics: checks node, database, agents, gateway, model auth, chat activity. Returns overall status + fix instructions |
+| POST | `/team/starter` | Scaffold a starter team with default agents (builder + ops). Idempotent: skips existing agent directories |
 
 ### Quiet hours behavior (watchdogs)
 
