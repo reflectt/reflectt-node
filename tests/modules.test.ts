@@ -782,6 +782,8 @@ describe('PolicyConfig', () => {
     expect(res.status).toBe(200)
     expect(res.body.success).toBe(true)
     expect(res.body.policy.staleDoingThresholdMin).toBe(240)
+    // Mention-rescue default delay: 5m (clamped >=3m at runtime)
+    expect(res.body.policy.mentionRescue.delayMin).toBe(5)
   })
 
   it('policy sections have correct types', async () => {
