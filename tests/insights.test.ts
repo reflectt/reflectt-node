@@ -313,6 +313,71 @@ describe('cooldown', () => {
     expect(reopened.recurring_candidate).toBe(true)
     expect(reopened.cooldown_reason).toBe('reopened')
   })
+
+  it('routes to pending_triage after 3 reopens in 24h (v1.1 reopen cap)', () => {
+    const ref1 = makeReflection({ severity: 'critical', evidence: ['proof.log'], author: 'link' })
+    const insight = ingestReflection(ref1)
+    expect(insight.status).toBe('promoted')
+
+    const db = getDb()
+
+    // Simulate 3 reopens by setting metadata
+    db.prepare('UPDATE insights SET status = ?, cooldown_until = ?, metadata = ? WHERE id = ?')
+      .run('cooldown', Date.now() + 86400000, JSON.stringify({
+        reopen_count_24h: 3,
+        reopen_window_start: Date.now() - 1000, // within window
+      }), insight.id)
+
+    // 4th reflection should trigger pending_triage (cap exceeded)
+    const ref2 = makeReflection({ author: 'echo' })
+    const triaged = ingestReflection(ref2)
+
+    expect(triaged.id).toBe(insight.id)
+    expect(triaged.status).toBe('pending_triage')
+    expect(triaged.cooldown_reason).toBe('reopen_cap_exceeded')
+  })
+
+  it('allows reopen when count is below cap', () => {
+    const ref1 = makeReflection({ severity: 'critical', evidence: ['proof.log'], author: 'link' })
+    const insight = ingestReflection(ref1)
+
+    const db = getDb()
+
+    // Set 2 reopens (below cap of 3)
+    db.prepare('UPDATE insights SET status = ?, cooldown_until = ?, metadata = ? WHERE id = ?')
+      .run('cooldown', Date.now() + 86400000, JSON.stringify({
+        reopen_count_24h: 2,
+        reopen_window_start: Date.now() - 1000,
+      }), insight.id)
+
+    const ref2 = makeReflection({ author: 'echo' })
+    const reopened = ingestReflection(ref2)
+
+    expect(reopened.id).toBe(insight.id)
+    expect(reopened.status).toBe('promoted')
+    expect(reopened.cooldown_reason).toBe('reopened')
+  })
+
+  it('resets reopen window after 24h expires', () => {
+    const ref1 = makeReflection({ severity: 'critical', evidence: ['proof.log'], author: 'link' })
+    const insight = ingestReflection(ref1)
+
+    const db = getDb()
+
+    // Set 3 reopens but window expired (>24h ago)
+    db.prepare('UPDATE insights SET status = ?, cooldown_until = ?, metadata = ? WHERE id = ?')
+      .run('cooldown', Date.now() + 86400000, JSON.stringify({
+        reopen_count_24h: 3,
+        reopen_window_start: Date.now() - 86400001, // window expired
+      }), insight.id)
+
+    const ref2 = makeReflection({ author: 'echo' })
+    const reopened = ingestReflection(ref2)
+
+    // Should reopen because window expired (count resets)
+    expect(reopened.id).toBe(insight.id)
+    expect(reopened.status).toBe('promoted')
+  })
 })
 
 // ── List + Stats ──
