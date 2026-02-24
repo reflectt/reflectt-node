@@ -2061,16 +2061,27 @@ describe('Chat Messages', () => {
     }
   })
 
-  it('POST /chat/messages does not warn on normal approve/merge request to Ryan', async () => {
+  it('POST /chat/messages blocks approve/merge requests to Ryan unless task+permissions reason are included', async () => {
     const { status, body } = await req('POST', '/chat/messages', {
       from: 'test-runner',
       content: '@ryan can you approve/merge PR #287 when you have a sec?',
       channel: 'general',
     })
 
+    expect(status).toBe(400)
+    expect(body.success).toBe(false)
+    expect(body.gate).toBe('ryan_approval_gate')
+  })
+
+  it('POST /chat/messages allows approve/merge escalation to Ryan when blocked by permissions (task+reason)', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: '@ryan task-123 no merge rights (auth mismatch) — can you merge PR #287? https://github.com/org/repo/pull/287',
+      channel: 'general',
+    })
+
     expect(status).toBe(200)
     expect(body.success).toBe(true)
-    expect(body.autonomy_warnings).toBeUndefined()
   })
 
   it('POST /chat/messages does not warn on logistics ask to Ryan (not task-selection)', async () => {
