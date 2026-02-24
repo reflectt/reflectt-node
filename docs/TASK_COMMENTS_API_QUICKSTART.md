@@ -59,10 +59,19 @@ Expected shape:
     "taskId": "task-...",
     "author": "echo",
     "content": "...",
-    "timestamp": 1771111111111
+    "timestamp": 1771111111111,
+
+    "category": "restart",
+    "suppressed": false,
+    "suppressedReason": null,
+    "suppressedRule": null
   }
 }
 ```
+
+Notes:
+- For tasks without a `comms_policy`, `suppressed` will be `false` and suppression fields will be `null`.
+- For tasks with `silent_until_restart_or_promote_due`, missing / non-whitelisted categories return `suppressed=true` and set `suppressedReason`/`suppressedRule` (but the comment is still stored).
 
 ---
 
@@ -86,12 +95,19 @@ Expected shape:
       "taskId": "task-...",
       "author": "echo",
       "content": "...",
-      "timestamp": 1771111111111
+      "timestamp": 1771111111111,
+      "category": "restart",
+      "suppressed": false,
+      "suppressedReason": null,
+      "suppressedRule": null
     }
   ],
-  "count": 1
+  "count": 1,
+  "includeSuppressed": false
 }
 ```
+
+Tip: use `?includeSuppressed=true` (or `1`) for audit/debug views when a comms_policy may be suppressing comments.
 
 ---
 
