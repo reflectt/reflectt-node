@@ -159,9 +159,9 @@ export async function tickReflectionNudges(): Promise<{
   }
 
   // Check idle reflection SLA
-  const agents = config.agents.length > 0
-    ? config.agents
-    : getActiveAgents(config.excludeAgents)
+  // v1.1 autonomy hardening: include agents that are *tracked* (have reflection_tracking rows)
+  // even if they currently have no active tasks. This reduces human-trigger dependence.
+  const agents = getNudgeAgents(config)
 
   const nudgeNeverReflected = config.nudgeNeverReflected !== false // default true
 
@@ -382,6 +382,38 @@ function getActiveAgents(excludeList?: string[]): string[] {
   // Filter out test/system agents
   const excludeSet = new Set((excludeList || []).map(a => a.toLowerCase()))
   return [...agents].filter(agent => {
+    const lower = agent.toLowerCase()
+    if (excludeSet.has(lower)) return false
+    return !DEFAULT_EXCLUDE_PATTERNS.some(p => p.test(agent))
+  })
+}
+
+/**
+ * Return list of agents eligible for reflection nudges.
+ *
+ * If policy specifies an explicit agent allowlist, that is used.
+ * Otherwise we take the union of:
+ * - agents with active tasks (doing/todo/validating)
+ * - agents with reflection tracking rows (previously reflected / previously nudged)
+ *
+ * This closes a real autonomy gap: an agent can drift out of the active-task set,
+ * stop reflecting, and never get nudged — requiring a human to re-trigger them.
+ */
+function getNudgeAgents(config: ReflectionNudgeConfig): string[] {
+  ensureReflectionTrackingTable()
+  const db = getDb()
+
+  const tracked = (db.prepare('SELECT agent FROM reflection_tracking').all() as any[])
+    .map(r => String(r.agent))
+
+  const base = config.agents.length > 0
+    ? config.agents
+    : getActiveAgents(config.excludeAgents)
+
+  const all = [...new Set([...base, ...tracked])]
+
+  const excludeSet = new Set((config.excludeAgents || []).map(a => a.toLowerCase()))
+  return all.filter(agent => {
     const lower = agent.toLowerCase()
     if (excludeSet.has(lower)) return false
     return !DEFAULT_EXCLUDE_PATTERNS.some(p => p.test(agent))

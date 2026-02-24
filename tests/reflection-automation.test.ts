@@ -11,6 +11,8 @@ import {
 } from '../src/reflection-automation.js'
 import { createReflection, _clearReflectionStore, validateReflection } from '../src/reflections.js'
 import { taskManager } from '../src/tasks.js'
+import { getDb } from '../src/db.js'
+import { policyManager } from '../src/policy.js'
 import type { Task } from '../src/types.js'
 
 // ── Helpers ──
@@ -192,6 +194,38 @@ describe('tickReflectionNudges', () => {
     const result = await tickReflectionNudges()
     // Should skip because agent already reflected
     expect(result.postTaskNudges).toBe(0)
+  })
+
+  it('should nudge tracked agents even when they have no active tasks', async () => {
+    ensureReflectionTrackingTable()
+
+    const prev = (policyManager.get() as any).reflectionNudge
+    policyManager.patch({
+      reflectionNudge: {
+        ...prev,
+        enabled: true,
+        // Force a stable allowlist so other tests/tasks cannot influence this expectation.
+        agents: ['tracked-idle'],
+        idleReflectionHours: 1,
+        cooldownMin: 0,
+      },
+    })
+
+    try {
+      // Create tracking row without creating any active tasks.
+      onReflectionSubmitted('tracked-idle')
+
+      // Backdate last reflection to be overdue.
+      const db = getDb()
+      const past = Date.now() - 2 * 60 * 60 * 1000
+      db.prepare('UPDATE reflection_tracking SET last_reflection_at = ?, updated_at = ? WHERE agent = ?')
+        .run(past, past, 'tracked-idle')
+
+      const result = await tickReflectionNudges()
+      expect(result.idleNudges).toBeGreaterThanOrEqual(1)
+    } finally {
+      policyManager.patch({ reflectionNudge: prev })
+    }
   })
 })
 
