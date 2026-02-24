@@ -114,7 +114,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 |--------|------|-------------|
 | GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `offset`, `q` (text search), `updatedSince`. Returns `{ tasks, total, offset, limit, hasMore }`. |
 | GET | `/tasks/:id` | Get task by ID. Also accepts unambiguous ID prefixes. Ambiguous prefix returns `400` with full-ID suggestions. |
-| GET | `/tasks/:id/artifacts` | Resolve all artifact references from task metadata. Returns accessibility status (file existence, URL validation), heartbeat status (last comment age, staleness). Heartbeat threshold: 30m for doing tasks. |
+| GET | `/tasks/:id/artifacts` | Resolve all artifact references from task metadata. Returns accessibility status (file existence, URL validation), heartbeat status (last comment age, staleness). Heartbeat threshold: 30m for doing tasks. Query: `include=preview` (first 2000 chars) or `include=content` (full file, up to 400KB). Falls back to shared workspace (`~/.openclaw/workspace-shared`) when file is not in repo root. |
 | GET | `/tasks/:id/history` | Status changelog for task lifecycle transitions. Returns `history[]` entries shaped as `{ status, changedBy, changedAt, metadata }` for each status transition. |
 | GET | `/tasks/:id/comments` | List task discussion comments. Query: `includeSuppressed=true|1` to include suppressed (audit) comments. Returns `{ comments, count, includeSuppressed }` where each comment is `{ id, taskId, author, content, timestamp, category?, suppressed, suppressedReason?, suppressedRule? }`. |
 | POST | `/tasks/:id/comments` | Add task comment. Body: `{ "author": "agent", "content": "text", "category"?: "restart|rollback_trigger|promote_due_verdict" }`. If task has `metadata.comms_policy.rule = silent_until_restart_or_promote_due`, missing/non-whitelisted categories are stored but suppressed from default feeds. Returns `{ success, comment }` (same fields as GET comments). |
@@ -543,6 +543,9 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/dashboard` | HTML dashboard UI |
 | GET | `/docs` | This API reference |
 | GET | `/artifacts/view` | In-browser artifact viewer (safe). Query: `path` (repo-relative). Guardrails: repo-root only, extension allowlist (`.md .txt .json .log .yml .yaml`), max 400KB. If `path` contains an embedded `http(s)://...`, redirects to that URL. |
+| GET | `/shared/list` | List files in shared workspace directory. Query: `path` (default `process/`), `limit` (default 200, max 500). Security: prefix allowlist (`process/`), traversal protection, extension filter. |
+| GET | `/shared/read` | Read file from shared workspace. Query: `path` (required), `include=preview` (truncated), `maxChars` (default 2000). Security: same as `/shared/list` + size cap (400KB). |
+| GET | `/shared/view` | HTML viewer for shared workspace artifacts. Query: `path` (required). Dark-themed in-browser view. |
 | GET | `/openclaw/status` | OpenClaw connection status |
 | GET | `/secrets` | List all secrets (metadata only — no plaintext values) |
 | POST | `/secrets` | Create/update a secret (encrypts locally, stores ciphertext) |
