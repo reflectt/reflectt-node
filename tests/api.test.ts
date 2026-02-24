@@ -359,11 +359,12 @@ describe('Quiet Hours Watchdog Suppression', () => {
 describe('Mention Rescue', () => {
   it('nudges only the agents actually mentioned (after delay)', async () => {
     const threadId = `test-mention-rescue-${Date.now()}`
+    const token = Math.random().toString(36).slice(2, 8)
     const sent = await req('POST', '/chat/messages', {
       from: 'ryan',
       channel: 'general',
       threadId,
-      content: 'ping @pixel',
+      content: `ping @pixel ${token}`,
     })
     expect(sent.status).toBe(200)
     const mentionId = sent.body.message.id as string
@@ -378,22 +379,25 @@ describe('Mention Rescue', () => {
     expect(Array.isArray(body.rescued)).toBe(true)
     expect(body.rescued.length).toBeGreaterThan(0)
 
-    const rescueMsg = body.rescued[0] as string
-    expect(rescueMsg).toContain(`[[reply_to:${mentionId}]]`)
-    expect(rescueMsg).toContain('@pixel')
-    expect(rescueMsg).not.toContain('@kai')
-    expect(rescueMsg).not.toContain('@link')
+    const rescueMsg = (body.rescued as string[]).find((m: string) => m.includes(`[[reply_to:${mentionId}]]`))
+    expect(rescueMsg).toBeTruthy()
+    expect(rescueMsg as string).toContain(`[[reply_to:${mentionId}]]`)
+    expect(rescueMsg as string).toContain('@pixel')
+    expect(rescueMsg as string).not.toContain('@kai')
+    expect(rescueMsg as string).not.toContain('@link')
   })
 
   it('does not rescue before the delay window elapses (default behavior)', async () => {
     const threadId = `test-mention-rescue-delay-${Date.now()}`
+    const token = Math.random().toString(36).slice(2, 8)
     const sent = await req('POST', '/chat/messages', {
       from: 'ryan',
       channel: 'general',
       threadId,
-      content: 'ping @pixel',
+      content: `ping @pixel ${token}`,
     })
     expect(sent.status).toBe(200)
+    const mentionId = sent.body.message.id as string
     const mentionAt = sent.body.message.timestamp as number
 
     const { status, body } = await req(
@@ -403,18 +407,20 @@ describe('Mention Rescue', () => {
     expect(status).toBe(200)
     expect(body.suppressed).toBe(false)
     expect(Array.isArray(body.rescued)).toBe(true)
-    expect(body.rescued.length).toBe(0)
+    expect(body.rescued.some((msg: string) => msg.includes(`[[reply_to:${mentionId}]]`))).toBe(false)
   })
 
   it('does not rescue if any trio agent replied after the mention', async () => {
     const threadId = `test-mention-rescue-reply-${Date.now()}`
+    const token = Math.random().toString(36).slice(2, 8)
     const sent = await req('POST', '/chat/messages', {
       from: 'ryan',
       channel: 'general',
       threadId,
-      content: 'ping @pixel',
+      content: `ping @pixel ${token}`,
     })
     expect(sent.status).toBe(200)
+    const mentionId = sent.body.message.id as string
     const mentionAt = sent.body.message.timestamp as number
 
     const reply = await req('POST', '/chat/messages', {
@@ -432,7 +438,40 @@ describe('Mention Rescue', () => {
     expect(status).toBe(200)
     expect(body.suppressed).toBe(false)
     expect(Array.isArray(body.rescued)).toBe(true)
-    expect(body.rescued.length).toBe(0)
+    expect(body.rescued.some((msg: string) => msg.includes(`[[reply_to:${mentionId}]]`))).toBe(false)
+  })
+
+  it('does not cancel rescue on unrelated trio message elsewhere (regression)', async () => {
+    const threadId = `test-mention-rescue-false-cancel-${Date.now()}`
+    const token = Math.random().toString(36).slice(2, 8)
+    const sent = await req('POST', '/chat/messages', {
+      from: 'ryan',
+      channel: 'general',
+      threadId,
+      content: `ping @pixel ${token}`,
+    })
+    expect(sent.status).toBe(200)
+    const mentionId = sent.body.message.id as string
+    const mentionAt = sent.body.message.timestamp as number
+
+    // Trio spoke elsewhere (different thread) — should NOT cancel rescue
+    const otherThreadId = `other-${threadId}`
+    const replyElsewhere = await req('POST', '/chat/messages', {
+      from: 'kai',
+      channel: 'general',
+      threadId: otherThreadId,
+      content: 'ack elsewhere',
+    })
+    expect(replyElsewhere.status).toBe(200)
+
+    const { status, body } = await req(
+      'POST',
+      `/health/mention-rescue/tick?dryRun=true&force=true&nowMs=${mentionAt + 10 * 60_000}`,
+    )
+    expect(status).toBe(200)
+    expect(body.suppressed).toBe(false)
+    expect(Array.isArray(body.rescued)).toBe(true)
+    expect(body.rescued.some((msg: string) => msg.includes(`[[reply_to:${mentionId}]]`))).toBe(true)
   })
 })
 
