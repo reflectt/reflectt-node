@@ -1346,7 +1346,7 @@ function buildAutonomyWarnings(content: string): string[] {
   const normalized = content.toLowerCase()
 
   // Detect the specific anti-pattern: asking leadership what to do next.
-  // Keep the pattern narrow to avoid false positives on legitimate asks (e.g. approve/merge).
+  // Keep the pattern narrow to avoid false positives on legitimate asks.
   const approvalSeeking =
     /\b(what should i (do|work on) next|what(?:['’]?s) next(?: for me)?|what do i do next|what do you want me to do next|should i (do|work on)( [^\n\r]{0,80})? next)\b/i
   if (!approvalSeeking.test(normalized)) return []
@@ -1354,6 +1354,43 @@ function buildAutonomyWarnings(content: string): string[] {
   return [
     'Autonomy guardrail: avoid asking Ryan what to do next. Pull from the board (/tasks/next) or pick the highest-priority task and ship. Escalate to Ryan only if blocked on a decision only a human can make.',
   ]
+}
+
+type RyanApprovalGate = {
+  blockingError?: string
+  hint?: string
+}
+
+function validateRyanApprovalPing(content: string, from: string, channel?: string): RyanApprovalGate {
+  // Only gate messages directed at Ryan.
+  const mentions = extractMentions(content)
+  const directedAtRyan = mentions.includes('ryan') || mentions.includes('ryancampbell')
+  if (!directedAtRyan) return {}
+
+  // Don't gate Ryan/system talking to themselves.
+  const sender = String(from || '').toLowerCase()
+  if (sender === 'ryan' || sender === 'system') return {}
+
+  const normalized = content.toLowerCase()
+
+  // We only care about PR approval/merge requests.
+  const looksLikePrRequest =
+    /\b(approve|merge)\b/.test(normalized) &&
+    (/(\bpr\b|pull request|github\.com\/[^\s]+\/pull\/[0-9]+|#\d+)/i.test(normalized))
+
+  if (!looksLikePrRequest) return {}
+
+  // Allow if the message explicitly explains why Ryan is required and references a task id.
+  const hasTaskId = hasTaskIdReference(content)
+  const hasPermissionsReason = /(permission|permissions|auth|authed|rights|cannot|can\s*not|can't|blocked|branch protection|required)/i.test(normalized)
+
+  if (hasTaskId && hasPermissionsReason) return {}
+
+  const normalizedChannel = (channel || 'general').toLowerCase()
+  return {
+    blockingError: `Don't ask @ryan to approve/merge PRs by default (channel=${normalizedChannel}). Ask the assigned reviewer, or merge it yourself. Escalate to Ryan only when truly blocked by permissions/auth.`,
+    hint: 'If Ryan is genuinely required: include task-<id> and a short permissions/auth reason (e.g., "no merge rights" / "branch protection"), plus the PR link.',
+  }
 }
 
 function buildMentionWarnings(content: string): MentionWarning[] {
@@ -2534,6 +2571,17 @@ export async function createServer(): Promise<FastifyInstance> {
         error: actionValidation.blockingError,
         gate: 'action_message_contract',
         hint: actionValidation.hint,
+      }
+    }
+
+    const ryanApprovalGate = validateRyanApprovalPing(data.content, data.from, data.channel)
+    if (ryanApprovalGate.blockingError) {
+      reply.code(400)
+      return {
+        success: false,
+        error: ryanApprovalGate.blockingError,
+        gate: 'ryan_approval_gate',
+        hint: ryanApprovalGate.hint,
       }
     }
 
