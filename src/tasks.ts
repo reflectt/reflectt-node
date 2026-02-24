@@ -1195,7 +1195,7 @@ class TaskManager {
       if (meta.is_test === true) return true
       if (typeof meta.source_reflection === 'string' && meta.source_reflection.startsWith('ref-test-')) return true
       if (typeof meta.source_insight === 'string' && meta.source_insight.startsWith('ins-test-')) return true
-      if (/test run \d{13}/.test(task.title || '')) return true
+      if (/test run \d{13}/i.test(task.title || '')) return true
       return false
     }
 
@@ -1520,7 +1520,7 @@ class TaskManager {
       if (meta.is_test === true) return true
       if (typeof meta.source_reflection === 'string' && meta.source_reflection.startsWith('ref-test-')) return true
       if (typeof meta.source_insight === 'string' && meta.source_insight.startsWith('ins-test-')) return true
-      if (/test run \d{13}/.test(task.title || '')) return true
+      if (/test run \d{13}/i.test(task.title || '')) return true
       return false
     }
 
