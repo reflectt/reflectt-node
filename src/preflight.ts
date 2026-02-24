@@ -17,6 +17,7 @@
 import { existsSync, accessSync, constants, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { REFLECTT_HOME } from './config.js'
+import { emitActivationEvent } from './activationEvents.js'
 
 // ── Types ──
 
@@ -458,6 +459,8 @@ export interface PreflightOptions {
   port?: number
   /** Skip network checks (for offline/air-gapped setups) */
   skipNetwork?: boolean
+  /** User/host ID for onboarding drop-off tracking */
+  userId?: string
 }
 
 /**
@@ -493,6 +496,29 @@ export async function runPreflight(opts: PreflightOptions = {}): Promise<Preflig
   const summary = allPassed
     ? `All ${results.length} preflight checks passed ✓`
     : `${failures.length}/${results.length} check(s) failed`
+
+  // ── Onboarding drop-off instrumentation ──
+  // Emit activation events so the funnel tracks preflight pass/fail.
+  // Uses userId (from cloud auth) or a host-level fallback.
+  const trackingId = opts.userId || `host-${process.pid}`
+  const failedCheckIds = failures.map(f => f.check.id)
+  const passedCheckIds = results.filter(r => r.passed).map(r => r.check.id)
+
+  if (allPassed) {
+    emitActivationEvent('host_preflight_passed', trackingId, {
+      checks_run: results.length,
+      passed_checks: passedCheckIds,
+      total_duration_ms: results.reduce((sum, r) => sum + r.durationMs, 0),
+    }).catch(() => {}) // best-effort, never block preflight
+  } else {
+    emitActivationEvent('host_preflight_failed', trackingId, {
+      checks_run: results.length,
+      failed_checks: failedCheckIds,
+      first_blocker: firstBlocker?.check.id,
+      passed_checks: passedCheckIds,
+      total_duration_ms: results.reduce((sum, r) => sum + r.durationMs, 0),
+    }).catch(() => {}) // best-effort, never block preflight
+  }
 
   return {
     timestamp: Date.now(),

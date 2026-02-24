@@ -62,8 +62,8 @@ const MAX_LOG_SIZE = 10_000
 const FUNNEL_ORDER: ActivationEventType[] = [
   'signup_completed',
   'host_preflight_passed',
-  // host_preflight_failed is tracked but NOT a funnel step —
-  // users who never fail preflight should still complete the funnel.
+  // Note: host_preflight_failed is tracked in the event log but is NOT a
+  // forward funnel step — failure doesn't represent onboarding progress.
   'workspace_ready',
   'first_task_started',
   'first_task_completed',
