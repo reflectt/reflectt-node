@@ -368,19 +368,11 @@ class ChatManager {
         }
       }
 
-      // 3. Per-channel budget
-      const budget = this.checkChannelBudget(channel)
-      if (!budget.allowed) {
-        console.warn(`[Chat/NoiseBudget] ${budget.reason}`)
-        return {
-          ...message,
-          id: `msg-${Date.now()}-budgeted`,
-          timestamp: Date.now(),
-          channel,
-          reactions: {},
-          metadata: { ...message.metadata as Record<string, unknown>, budget_exceeded: true },
-        } as AgentMessage
-      }
+      // 3. Per-channel budget — DISABLED
+      // Was silently dropping messages after 30/hr with a fake success response.
+      // Dedup + watchdog are sufficient noise controls.
+      // const budget = this.checkChannelBudget(channel)
+      // if (!budget.allowed) { ... }
     }
 
     const fullMessage: AgentMessage = {
