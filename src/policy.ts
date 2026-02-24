@@ -175,8 +175,9 @@ export const DEFAULT_POLICY: PolicyConfig = {
   staleDoingThresholdMin: 240,
   mentionRescue: {
     enabled: true,
-    // Guardrail: never fire immediately; gives the trio a chance to respond naturally.
-    delayMin: 3,
+    // Default: wait a bit before nudging so normal human/agent replies happen first.
+    // Guardrail: runtime clamps to >=3m even if misconfigured.
+    delayMin: 5,
     cooldownMin: 10,
     globalCooldownMin: 5,
   },
