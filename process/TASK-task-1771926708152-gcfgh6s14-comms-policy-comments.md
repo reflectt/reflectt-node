@@ -2,7 +2,7 @@
 
 **Task:** task-1771926708152-gcfgh6s14
 **PR:** https://github.com/reflectt/reflectt-node/pull/319
-**Commit:** 297ca3d
+**Commit:** 5416e33
 **Branch:** link/task-gcfgh6s14
 **Reviewer:** kai
 
@@ -21,7 +21,7 @@ When a task opts into strict comms control via:
   - Whitelist: `restart | rollback_trigger | promote_due_verdict`
   - Missing or non-whitelisted category → `suppressed=true` + `suppressedReason` set.
 - Default comment feeds exclude suppressed comments.
-- Suppressed comments are retrievable via `GET /tasks/:id/comments?includeSuppressed=true`.
+- Suppressed comments are retrievable via `GET /tasks/:id/comments?includeSuppressed=true|1`.
 - Suppressed comments do not relay to the `task-comments` chat channel.
 - Activity signal (staleness) ignores suppressed comments.
 
@@ -42,6 +42,8 @@ When a task opts into strict comms control via:
 - `src/working-contract.ts`
 - `src/reflections.ts`
 - `tests/comms-policy-comments.test.ts`
+- `docs/TASK_COMMENTS_API_QUICKSTART.md`
+- `public/docs.md`
 
 ## Test Proof
 - `npm test --silent`
