@@ -406,11 +406,17 @@ function getNudgeAgents(config: ReflectionNudgeConfig): string[] {
   const tracked = (db.prepare('SELECT agent FROM reflection_tracking').all() as any[])
     .map(r => String(r.agent))
 
-  const base = config.agents.length > 0
+  // Allowlist semantics: if policy specifies explicit agents[], treat it as strict.
+  // Only when agents[] is empty do we auto-discover and union in tracked rows.
+  const hasAllowlist = config.agents.length > 0
+
+  const base = hasAllowlist
     ? config.agents
     : getActiveAgents(config.excludeAgents)
 
-  const all = [...new Set([...base, ...tracked])]
+  const all = hasAllowlist
+    ? base
+    : [...new Set([...base, ...tracked])]
 
   const excludeSet = new Set((config.excludeAgents || []).map(a => a.toLowerCase()))
   return all.filter(agent => {
@@ -419,6 +425,7 @@ function getNudgeAgents(config: ReflectionNudgeConfig): string[] {
     return !DEFAULT_EXCLUDE_PATTERNS.some(p => p.test(agent))
   })
 }
+
 
 // ── Test helpers ──
 

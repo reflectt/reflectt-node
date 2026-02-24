@@ -17,7 +17,7 @@ Idle reflection nudges now target the union of:
 
 ## Proof
 - PR: https://github.com/reflectt/reflectt-node/pull/289
-- Commit: a514cac97e9a87fe421aeda9919a7e4b58a1b438
+- Head commit: (see PR #289; SHA may change as patches land)
 - Tests: `npm test` green; regression test added ensuring tracked-but-idle agents receive idle nudges when overdue.
 
 ## Notes
