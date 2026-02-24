@@ -311,7 +311,9 @@ class TeamHealthMonitor {
 
   // Mention rescue fallback: if Ryan pings trio and nobody replies quickly, emit a direct system ack.
   private readonly mentionRescueEnabled = process.env.MENTION_RESCUE_ENABLED !== 'false'
-  private readonly mentionRescueDelayMin = Number(process.env.MENTION_RESCUE_DELAY_MIN || 0)
+  // Default delay is intentionally non-zero to avoid noisy immediate fallback nudges.
+  // Override with MENTION_RESCUE_DELAY_MIN if you want a different threshold.
+  private readonly mentionRescueDelayMin = Number(process.env.MENTION_RESCUE_DELAY_MIN || 5)
   private readonly mentionRescueCooldownMin = Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10)
   private readonly mentionRescueGlobalCooldownMin = Number(process.env.MENTION_RESCUE_GLOBAL_COOLDOWN_MIN || 5)
   /** Maps mentionId → { lastRescueAt, rescueCount }. Once rescued, won't rescue again (one-shot). */
@@ -1699,7 +1701,18 @@ class TeamHealthMonitor {
       const anyFocused = this.trioAgents.some(a => presenceManager.isInFocus(a) !== null)
       if (anyFocused) continue
 
-      const mentionList = this.trioAgents.map(a => `@${a}`).join(' ')
+      // Only nudge the agents that were actually mentioned (not the whole trio).
+      const contentText = typeof mention.content === 'string' ? mention.content : ''
+      const mentioned = new Set(
+        (contentText.match(/@(kai|link|pixel)\b/gi) || [])
+          .map(m => m.slice(1).toLowerCase()),
+      )
+      const mentionList = this.trioAgents
+        .filter(a => mentioned.has(a))
+        .map(a => `@${a}`)
+        .join(' ')
+      if (!mentionList) continue
+
       const content = `[[reply_to:${mentionId}]] system fallback: mention received. ${mentionList} are being nudged to respond.`
       rescued.push(content)
 
