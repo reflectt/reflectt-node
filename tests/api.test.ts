@@ -1935,6 +1935,19 @@ describe('Chat Messages', () => {
     expect(Array.isArray(body.action_warnings)).toBe(true)
     expect(body.action_warnings.length).toBeGreaterThan(0)
   })
+
+  it('POST /chat/messages warns on autonomy anti-pattern: asking Ryan what to do next', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'hey @ryan what should I do next?',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.autonomy_warnings)).toBe(true)
+    expect(body.autonomy_warnings[0]).toContain('Autonomy guardrail')
+  })
 })
 
 // Clean up all tasks for a given agent to prevent cross-test pollution.

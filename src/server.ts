@@ -1285,6 +1285,26 @@ function extractMentions(content: string): string[] {
   return Array.from(new Set(matches.map(token => token.slice(1).toLowerCase()).filter(Boolean)))
 }
 
+function buildAutonomyWarnings(content: string): string[] {
+  const mentions = extractMentions(content)
+  if (mentions.length === 0) return []
+
+  // Only warn when the message is explicitly directed at Ryan.
+  const directedAtRyan = mentions.includes('ryan') || mentions.includes('ryancampbell')
+  if (!directedAtRyan) return []
+
+  const normalized = content.toLowerCase()
+
+  // Detect the specific anti-pattern: asking leadership what to do next.
+  // Keep the pattern narrow to avoid false positives on legitimate asks (e.g. approve/merge).
+  const approvalSeeking = /\b(what should i do next|what should i do|what's next for me|what do you want me to do|do you want me to|should i work on|should i do next)\b/i
+  if (!approvalSeeking.test(normalized)) return []
+
+  return [
+    'Autonomy guardrail: avoid asking Ryan what to do next. Pull from the board (/tasks/next) or pick the highest-priority task and ship. Escalate to Ryan only if blocked on a decision only a human can make.',
+  ]
+}
+
 function buildMentionWarnings(content: string): MentionWarning[] {
   const mentions = extractMentions(content)
   if (mentions.length === 0) return []
@@ -2452,6 +2472,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const message = await chatManager.sendMessage(data)
     const mentionWarnings = buildMentionWarnings(data.content)
+    const autonomyWarnings = buildAutonomyWarnings(data.content)
 
     // Track content messages for noise budget denominator
     // (agent/human messages posted via POST /chat/messages are content, not control-plane)
@@ -2498,6 +2519,7 @@ export async function createServer(): Promise<FastifyInstance> {
       message,
       ...(mentionWarnings.length > 0 ? { warnings: mentionWarnings } : {}),
       ...(actionValidation.warnings.length > 0 ? { action_warnings: actionValidation.warnings } : {}),
+      ...(autonomyWarnings.length > 0 ? { autonomy_warnings: autonomyWarnings } : {}),
     }
   })
 
