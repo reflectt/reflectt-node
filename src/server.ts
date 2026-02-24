@@ -53,6 +53,7 @@ import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsa
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import type { GitHubIdentityProvider } from './github-identity.js'
+import { computeCiFromCheckRuns, computeCiFromCombinedStatus } from './github-ci.js'
 import { createGitHubIdentityProvider } from './github-identity.js'
 import { getProvisioningManager } from './provisioning.js'
 import { getWebhookDeliveryManager } from './webhooks.js'
@@ -1139,7 +1140,7 @@ async function resolvePrAndCi(prUrl: string): Promise<{
   } | null
   ci: {
     state: 'success' | 'failure' | 'pending' | 'error' | 'unknown'
-    source: 'github-status' | 'unavailable'
+    source: 'github-check-runs' | 'github-status' | 'unavailable'
     details?: string
   }
 }> {
@@ -1179,29 +1180,60 @@ async function resolvePrAndCi(prUrl: string): Promise<{
     const prJson = await prRes.json() as any
     const headSha = typeof prJson?.head?.sha === 'string' ? prJson.head.sha : undefined
 
-    let ci: { state: 'success' | 'failure' | 'pending' | 'error' | 'unknown'; source: 'github-status' | 'unavailable'; details?: string } = {
+    let ci: { state: 'success' | 'failure' | 'pending' | 'error' | 'unknown'; source: 'github-check-runs' | 'github-status' | 'unavailable'; details?: string } = {
       state: 'unknown',
       source: 'unavailable',
       details: 'No commit SHA resolved',
     }
 
     if (headSha) {
-      const statusRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits/${headSha}/status`, {
-        headers: await githubHeaders(),
-      })
-      if (statusRes.ok) {
-        const statusJson = await statusRes.json() as any
-        const state = (statusJson?.state || 'unknown') as 'success' | 'failure' | 'pending' | 'error' | 'unknown'
-        ci = {
-          state,
-          source: 'github-status',
+      // Prefer check-runs (modern CI signal). Many repos do not publish commit statuses.
+      try {
+        const checksRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits/${headSha}/check-runs?per_page=100`, {
+          headers: await githubHeaders(),
+        })
+
+        if (checksRes.ok) {
+          const checksJson = await checksRes.json() as any
+          const checkRuns = Array.isArray(checksJson?.check_runs) ? checksJson.check_runs : []
+          const computed = computeCiFromCheckRuns(checkRuns)
+          if (computed.state !== 'unknown') {
+            ci = {
+              state: computed.state,
+              source: 'github-check-runs',
+              ...(computed.details ? { details: computed.details } : {}),
+            }
+          }
         }
-      } else {
-        ci = {
-          state: 'unknown',
-          source: 'unavailable',
-          details: `GitHub status lookup failed (${statusRes.status})`,
+      } catch {
+        // ignore and fall back
+      }
+
+      // Fall back to combined status API if we couldn't determine via check-runs.
+      if (ci.source === 'unavailable') {
+        const statusRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits/${headSha}/status`, {
+          headers: await githubHeaders(),
+        })
+        if (statusRes.ok) {
+          const statusJson = await statusRes.json() as any
+          const computed = computeCiFromCombinedStatus(statusJson?.state)
+          ci = {
+            state: computed.state,
+            source: 'github-status',
+            ...(computed.details ? { details: computed.details } : {}),
+          }
+        } else {
+          ci = {
+            state: 'unknown',
+            source: 'unavailable',
+            details: `GitHub status lookup failed (${statusRes.status})`,
+          }
         }
+      }
+
+      // If check-runs returned but were unknown and status API is empty/pending, preserve check-runs source.
+      if (ci.source === 'unavailable') {
+        ci.details = ci.details || 'CI lookup unavailable'
       }
     }
 
