@@ -316,8 +316,8 @@ class TeamHealthMonitor {
   // Override with MENTION_RESCUE_DELAY_MIN to increase (values <3 are treated as 3).
   private readonly mentionRescueDelayMin = (() => {
     const raw = process.env.MENTION_RESCUE_DELAY_MIN
-    const parsed = (raw === undefined || raw.trim() === '') ? 3 : Number(raw)
-    const val = Number.isFinite(parsed) ? parsed : 3
+    const parsed = (raw === undefined || raw.trim() === '') ? 5 : Number(raw)
+    const val = Number.isFinite(parsed) ? parsed : 5
     return Math.max(3, val)
   })()
   private readonly mentionRescueCooldownMin = Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10)
