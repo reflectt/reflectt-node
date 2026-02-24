@@ -1,8 +1,18 @@
-# Copy Acceptance Checklist (v1)
+# Copy Acceptance Checklist (v1.1)
 
 Use this for **any copy/content artifact** before asking for review. Goal: make review deterministic and activation-oriented.
 
 If any **BLOCKER** fails, do **not** move the task to `validating`.
+
+---
+
+## 0) 10-second clarity (recommended)
+
+Fill this first. If you can’t answer these in 10 seconds, the rest of the checklist won’t save the copy.
+
+- **Who it’s for:** _<one short phrase>_
+- **One-sentence promise:** _<what they get / what changes>_
+- **Primary CTA:** _<exact label + intended action>_
 
 ---
 
@@ -35,6 +45,7 @@ Common states:
 - connected / online
 - error / degraded / offline
 - queued / executing
+- **auth / permission failure** (unauthorized, forbidden, missing role)
 
 Rules:
 - Use concrete signals ("ONLINE", “heartbeat visible”, “task appears in list”).
@@ -46,8 +57,11 @@ Rules:
 
 ## 3) Metric hypothesis per section (**BLOCKER**)
 
-| Section | User action targeted | Metric | Baseline | Target | Why this copy should move it |
-|---|---|---|---|---|---|
+| Section | User action targeted | Metric | Baseline | Target | Instrumentation/source | Why this copy should move it |
+|---|---|---|---|---|---|---|
+
+Rules:
+- Baseline/Target may be `unknown`, but you must say **where the metric will come from** (event name, dashboard, query, support tag, etc.).
 
 Examples:
 - Empty hosts → host connect starts
