@@ -3306,7 +3306,7 @@ export async function createServer(): Promise<FastifyInstance> {
       return { available: false, message: 'Invalid PR URL format', taskId: resolved.resolvedId }
     }
 
-    const hdrs = githubHeaders()
+    const hdrs = await githubHeaders()
 
     // Fetch PR details (including files changed)
     let prData: any = null
