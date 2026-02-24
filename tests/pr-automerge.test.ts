@@ -291,6 +291,57 @@ describe('PR Auto-Merge', () => {
       expect(result.failedGates).toContain('pr_merged')
     })
 
+    it('does not close when review_state is changes_requested', async () => {
+      const taskId = await createValidatingTask('close-changes-requested', {
+        pr_merged: true,
+        reviewer_approved: true, // Stale approval from prior cycle
+        review_state: 'changes_requested',
+      })
+
+      const result = tryAutoCloseTask(taskId)
+      expect(result.closed).toBe(false)
+      expect(result.failedGates.some(g => g.includes('review_state_blocked'))).toBe(true)
+
+      const updated = taskManager.getTask(taskId)
+      expect(updated?.status).toBe('validating')
+    })
+
+    it('does not close when review_state is rejected', async () => {
+      const taskId = await createValidatingTask('close-rejected-state', {
+        pr_merged: true,
+        reviewer_approved: true,
+        review_state: 'rejected',
+      })
+
+      const result = tryAutoCloseTask(taskId)
+      expect(result.closed).toBe(false)
+      expect(result.failedGates.some(g => g.includes('review_state_blocked'))).toBe(true)
+    })
+
+    it('does not close when reviewer_decision is rejected', async () => {
+      const taskId = await createValidatingTask('close-reviewer-rejected', {
+        pr_merged: true,
+        reviewer_approved: true,
+        reviewer_decision: { decision: 'rejected', reviewer: 'sage', comment: 'Not ready' },
+      })
+
+      const result = tryAutoCloseTask(taskId)
+      expect(result.closed).toBe(false)
+      expect(result.failedGates).toContain('reviewer_decision_rejected')
+    })
+
+    it('closes normally when review_state is approved', async () => {
+      const taskId = await createValidatingTask('close-approved-state', {
+        pr_merged: true,
+        reviewer_approved: true,
+        review_state: 'approved',
+      })
+
+      const result = tryAutoCloseTask(taskId)
+      expect(result.closed).toBe(true)
+      expect(result.failedGates).toHaveLength(0)
+    })
+
     it('does not close non-validating tasks', async () => {
       const taskId = await createDoingTask('close-doing', {
         pr_merged: true,
