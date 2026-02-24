@@ -4075,3 +4075,39 @@ describe('task comment notification - no truncation', () => {
     await req('DELETE', `/tasks/${taskId}`)
   })
 })
+
+// ── Regression: task updatedAt advances on comment ────────────────────────
+
+describe('task comment activity updates task.updatedAt', () => {
+  it('bumps updatedAt when a comment is added', async () => {
+    const uniqueSuffix = Date.now()
+    const { status: createStatus, body: taskBody } = await req('POST', '/tasks', {
+      title: `TEST: updatedAt bump on comment ${uniqueSuffix}`,
+      createdBy: 'test-runner',
+      assignee: 'activity-agent',
+      reviewer: 'activity-reviewer',
+      done_criteria: ['updatedAt advances on comment'],
+      eta: '~15m',
+    })
+    expect(createStatus).toBe(200)
+    const taskId = taskBody.task.id
+
+    const { body: beforeBody } = await req('GET', `/tasks/${taskId}`)
+    const beforeUpdatedAt = beforeBody.task.updatedAt
+
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    const { status: commentStatus } = await req('POST', `/tasks/${taskId}/comments`, {
+      author: 'activity-agent',
+      content: `Progress update ${uniqueSuffix}`,
+    })
+    expect(commentStatus).toBe(200)
+
+    const { body: afterBody } = await req('GET', `/tasks/${taskId}`)
+    const afterUpdatedAt = afterBody.task.updatedAt
+
+    expect(afterUpdatedAt).toBeGreaterThan(beforeUpdatedAt)
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+})

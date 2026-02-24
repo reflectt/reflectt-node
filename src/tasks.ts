@@ -503,13 +503,16 @@ class TaskManager {
         comment.timestamp
       )
 
-      // Update comment count for the task
-      const updateCount = db.prepare(`
+      // Update comment count + updated_at for the task.
+      // Comments are material activity and should advance updated_at to avoid autonomy/heartbeat false positives.
+      const updateTask = db.prepare(`
         UPDATE tasks
-        SET comment_count = (SELECT COUNT(*) FROM task_comments WHERE task_id = ?)
+        SET
+          comment_count = (SELECT COUNT(*) FROM task_comments WHERE task_id = ?),
+          updated_at = ?
         WHERE id = ?
       `)
-      updateCount.run(comment.taskId, comment.taskId)
+      updateTask.run(comment.taskId, comment.timestamp, comment.taskId)
 
       // Append to JSONL (audit log)
       await fs.mkdir(DATA_DIR, { recursive: true })
