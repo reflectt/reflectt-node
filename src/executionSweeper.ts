@@ -155,8 +155,11 @@ export interface DriftReport {
 
 export function sweepValidatingQueue(): SweepResult {
   const now = Date.now()
-  const allTasks = taskManager.listTasks()
-  const validating = allTasks.filter((t: Task) => t.status === 'validating')
+  const validating = taskManager.listTasks({ status: 'validating' })
+  const doneTasks = taskManager.listTasks({ status: 'done' })
+  const doingTasks = taskManager.listTasks({ status: 'doing' })
+  const todoTasks = taskManager.listTasks({ status: 'todo' })
+  const totalScanned = validating.length + doneTasks.length + doingTasks.length + todoTasks.length
   const violations: SweepViolation[] = []
 
   for (const task of validating) {
@@ -201,8 +204,8 @@ export function sweepValidatingQueue(): SweepResult {
 
   // Clean up escalation tracking for tasks no longer validating
   for (const [taskId] of escalated) {
-    const task = allTasks.find((t: Task) => t.id === taskId)
-    if (!task || task.status !== 'validating') {
+    const lookup = taskManager.resolveTaskId(taskId)
+    if (!lookup.task || lookup.task.status !== 'validating') {
       escalated.delete(taskId)
       logDryRun('escalation_cleared', `${taskId} — no longer validating`)
     }
@@ -211,16 +214,17 @@ export function sweepValidatingQueue(): SweepResult {
   // ── Orphan PR detection ──────────────────────────────────────────────
   // Scan all tasks with PR URLs where the task is done/cancelled but the PR
   // was linked — these represent potential orphan open PRs
-  const doneTasks = allTasks.filter((t: Task) => t.status === 'done' || (t.status as string) === 'cancelled')
-  for (const task of doneTasks) {
+  const cancelledTasks = taskManager.listTasks({ status: 'cancelled' as any })
+  const doneAndCancelled = [...doneTasks, ...cancelledTasks]
+  for (const task of doneAndCancelled) {
     const meta = (task.metadata || {}) as Record<string, unknown>
     const prUrl = extractPrUrl(meta)
     if (!prUrl || flaggedOrphanPRs.has(prUrl)) continue
 
     // Check if this PR is also referenced by an active task — if so, it's not orphan
-    const activeRef = allTasks.find((t: Task) =>
+    const activeTasks = [...doingTasks, ...validating, ...todoTasks]
+    const activeRef = activeTasks.find((t: Task) =>
       t.id !== task.id &&
-      ['doing', 'validating', 'todo'].includes(t.status) &&
       extractPrUrl((t.metadata || {}) as Record<string, unknown>) === prUrl
     )
     if (activeRef) continue
@@ -295,7 +299,7 @@ export function sweepValidatingQueue(): SweepResult {
   // ── Auto-merge processing ─────────────────────────────────────────────
   // Attempt to auto-merge green+approved PRs and auto-close tasks
   try {
-    const autoMergeResult = processAutoMerge(allTasks)
+    const autoMergeResult = processAutoMerge([...validating, ...doingTasks, ...todoTasks])
     if (autoMergeResult.mergeAttempts > 0 || autoMergeResult.autoCloses > 0) {
       logDryRun('auto_merge', `attempts=${autoMergeResult.mergeAttempts} successes=${autoMergeResult.mergeSuccesses} autoCloses=${autoMergeResult.autoCloses} skipped=${autoMergeResult.skipped}`)
     }
@@ -307,14 +311,14 @@ export function sweepValidatingQueue(): SweepResult {
   const result: SweepResult = {
     timestamp: now,
     violations,
-    tasksScanned: allTasks.length,
+    tasksScanned: totalScanned,
     validatingCount: validating.length,
   }
 
   lastSweepAt = now
   lastSweepResults = result
 
-  logDryRun('sweep_complete', `scanned=${allTasks.length} validating=${validating.length} violations=${violations.length}`)
+  logDryRun('sweep_complete', `scanned=${totalScanned} validating=${validating.length} violations=${violations.length}`)
 
   return result
 }
@@ -426,8 +430,7 @@ export function flagPrDrift(taskId: string, prState: 'merged' | 'closed'): Sweep
  */
 export function generateDriftReport(): DriftReport {
   const now = Date.now()
-  const allTasks = taskManager.listTasks()
-  const validating = allTasks.filter((t: Task) => t.status === 'validating')
+  const validating = taskManager.listTasks({ status: 'validating' })
 
   const validatingEntries: DriftReportEntry[] = []
   const orphanEntries: DriftReportEntry[] = []
@@ -485,8 +488,15 @@ export function generateDriftReport(): DriftReport {
   }
 
   // Collect all PR URLs from all tasks to find orphans
+  // Query only statuses that matter for orphan detection
+  const driftDone = taskManager.listTasks({ status: 'done' })
+  const driftDoing = taskManager.listTasks({ status: 'doing' })
+  const driftTodo = taskManager.listTasks({ status: 'todo' })
+  const driftBlocked = taskManager.listTasks({ status: 'blocked' })
+  const driftAll = [...validating, ...driftDone, ...driftDoing, ...driftTodo, ...driftBlocked]
+
   const prToTasks = new Map<string, { taskId: string; status: string }[]>()
-  for (const task of allTasks) {
+  for (const task of driftAll) {
     const meta = (task.metadata || {}) as Record<string, unknown>
     const prUrl = extractPrUrl(meta)
     if (!prUrl || prUrl.includes('workspace://')) continue
@@ -504,7 +514,7 @@ export function generateDriftReport(): DriftReport {
 
     // Check if any of the done tasks have pr_merged or reviewer_approved — if so, verify live
     const anyMergedMeta = doneTasks.some(t => {
-      const task = allTasks.find(at => at.id === t.taskId)
+      const task = driftAll.find(at => at.id === t.taskId)
       if (!task) return false
       const m = (task.metadata || {}) as Record<string, unknown>
       return !!(m.pr_merged)
@@ -515,7 +525,7 @@ export function generateDriftReport(): DriftReport {
     const liveResult = checkLivePrState(prUrl)
     if (liveResult.state === 'merged' || liveResult.state === 'closed') continue
 
-    const oldestDone = allTasks.find(t => t.id === doneTasks[0].taskId)
+    const oldestDone = driftAll.find(t => t.id === doneTasks[0].taskId)
     orphanEntries.push({
       taskId: doneTasks[0].taskId,
       title: oldestDone?.title || 'Unknown',
