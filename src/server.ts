@@ -4462,6 +4462,7 @@ export async function createServer(): Promise<FastifyInstance> {
       skipNetwork: body.skipNetwork as boolean | undefined,
       joinToken: body.joinToken as string | undefined,
       apiKey: body.apiKey as string | undefined,
+      userId: body.userId as string | undefined,
     })
     return { success: true, ...report }
   })
