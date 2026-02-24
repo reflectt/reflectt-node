@@ -542,6 +542,7 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 |--------|------|-------------|
 | GET | `/dashboard` | HTML dashboard UI |
 | GET | `/docs` | This API reference |
+| GET | `/artifacts/view` | In-browser artifact viewer (safe). Query: `path` (repo-relative). Guardrails: repo-root only, extension allowlist (`.md .txt .json .log .yml .yaml`), max 400KB. If `path` contains an embedded `http(s)://...`, redirects to that URL. |
 | GET | `/openclaw/status` | OpenClaw connection status |
 | GET | `/secrets` | List all secrets (metadata only — no plaintext values) |
 | POST | `/secrets` | Create/update a secret (encrypts locally, stores ciphertext) |
