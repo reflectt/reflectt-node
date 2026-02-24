@@ -1,6 +1,7 @@
 # task-1771959182464-9syvaps01 — Signal-vs-noise gap: test-harness tasks polluting live backlog
 
-**PR:** (pending)  
+**PR:** https://github.com/reflectt/reflectt-node/pull/336  
+**Commit:** e9cf1f3ba7e4626145068fcb5acc62e425778071  
 **Owner:** link  
 **Reviewer:** pixel  
 **Date:** 2026-02-24
