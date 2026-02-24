@@ -1297,7 +1297,8 @@ function buildAutonomyWarnings(content: string): string[] {
 
   // Detect the specific anti-pattern: asking leadership what to do next.
   // Keep the pattern narrow to avoid false positives on legitimate asks (e.g. approve/merge).
-  const approvalSeeking = /\b(what should i do next|what should i do|what(?:['’]?s) next(?: for me)?|what do i do next|what do you want me to do|do you want me to|should i work on|should i do next)\b/i
+  const approvalSeeking =
+    /\b(what should i (do|work on) next|what(?:['’]?s) next(?: for me)?|what do i do next|what do you want me to do next|should i (do|work on)( [^\n\r]{0,80})? next)\b/i
   if (!approvalSeeking.test(normalized)) return []
 
   return [

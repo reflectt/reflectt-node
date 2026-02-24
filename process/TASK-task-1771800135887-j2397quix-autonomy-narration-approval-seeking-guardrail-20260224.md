@@ -30,7 +30,9 @@ Warning text directs agents to:
 This is intentionally a **warning** (not a hard block) to avoid breaking legitimate comms.
 
 ### 2) Regression test
-Added API test ensuring the warning appears for the anti-pattern.
+Added API tests:
+- positive: warns for explicit task-selection phrases ("what should I do/work on next", "what's next for me", "what do I do next")
+- negative: does **not** warn for legit asks like "@ryan can you approve/merge PR #…" or logistics ("send you the link")
 
 ## Proof
 - PR: https://github.com/reflectt/reflectt-node/pull/294
