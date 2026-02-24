@@ -1935,6 +1935,67 @@ describe('Chat Messages', () => {
     expect(Array.isArray(body.action_warnings)).toBe(true)
     expect(body.action_warnings.length).toBeGreaterThan(0)
   })
+
+  it('POST /chat/messages warns on autonomy anti-pattern: asking Ryan what to do next', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'hey @ryan what should I do next?',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.autonomy_warnings)).toBe(true)
+    expect(body.autonomy_warnings[0]).toContain('Autonomy guardrail')
+  })
+
+  it("POST /chat/messages warns on autonomy anti-pattern: whats next variants", async () => {
+    const variants = [
+      'hey @ryan whats next for me?',
+      "hey @ryan what's next for me?",
+      'hey @ryan what do I do next?',
+      'hey @ryan what should I work on next?',
+      'hey @ryan should I work on the router bug next?',
+    ]
+
+    for (const content of variants) {
+      const { status, body } = await req('POST', '/chat/messages', {
+        from: 'test-runner',
+        content,
+        channel: 'general',
+      })
+
+      expect(status).toBe(200)
+      expect(body.success).toBe(true)
+      expect(Array.isArray(body.autonomy_warnings)).toBe(true)
+      expect(body.autonomy_warnings[0]).toContain('Autonomy guardrail')
+    }
+  })
+
+  it('POST /chat/messages does not warn on normal approve/merge request to Ryan', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: '@ryan can you approve/merge PR #287 when you have a sec?',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.autonomy_warnings).toBeUndefined()
+  })
+
+  it('POST /chat/messages does not warn on logistics ask to Ryan (not task-selection)', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: '@ryan do you want me to send you the link?',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.autonomy_warnings).toBeUndefined()
+  })
+
 })
 
 // Clean up all tasks for a given agent to prevent cross-test pollution.
