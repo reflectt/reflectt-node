@@ -65,7 +65,7 @@ export function closeDb(): void {
 /**
  * Schema version tracking + migrations
  */
-function runMigrations(db: Database.Database): void {
+export function runMigrations(db: Database.Database): void {
   // Create migration tracking table
   db.exec(`
     CREATE TABLE IF NOT EXISTS _migrations (
