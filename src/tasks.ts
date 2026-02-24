@@ -1411,8 +1411,19 @@ class TaskManager {
     }
   }
 
-  getNextTask(agent?: string): Task | undefined {
+  getNextTask(agent?: string, opts?: { includeTest?: boolean }): Task | undefined {
     void this.materializeDueRecurringTasks().catch(() => {})
+
+    // Filter out test-harness-generated tasks (ref-test-* / ins-test-* / "test run <timestamp>")
+    const isTestHarnessTask = (task: Task): boolean => {
+      if (opts?.includeTest) return false
+      const meta = (task.metadata || {}) as Record<string, unknown>
+      if (meta.is_test === true) return true
+      if (typeof meta.source_reflection === 'string' && meta.source_reflection.startsWith('ref-test-')) return true
+      if (typeof meta.source_insight === 'string' && meta.source_insight.startsWith('ins-test-')) return true
+      if (/test run \d{13}/.test(task.title || '')) return true
+      return false
+    }
 
     // Priority order: P0 > P1 > P2 > P3
     const priorityOrder: Record<string, number> = {
@@ -1446,7 +1457,7 @@ class TaskManager {
       const doingRows = db.prepare(
         'SELECT * FROM tasks WHERE status = ? AND assignee = ?'
       ).all('doing', agent) as TaskRow[]
-      const doingTasks = doingRows.map(rowToTask).filter(t => !isBlocked(t)).sort(sortByPriority)
+      const doingTasks = doingRows.map(rowToTask).filter(t => !isBlocked(t) && !isTestHarnessTask(t)).sort(sortByPriority)
 
       if (doingTasks.length > 0) {
         return doingTasks[0]
@@ -1457,13 +1468,13 @@ class TaskManager {
     const todoUnassignedRows = db.prepare(
       'SELECT * FROM tasks WHERE status = ? AND assignee IS NULL'
     ).all('todo') as TaskRow[]
-    let tasks = todoUnassignedRows.map(rowToTask).filter(t => !isBlocked(t))
+    let tasks = todoUnassignedRows.map(rowToTask).filter(t => !isBlocked(t) && !isTestHarnessTask(t))
 
     if (agent) {
       const agentTodoRows = db.prepare(
         'SELECT * FROM tasks WHERE status = ? AND assignee = ?'
       ).all('todo', agent) as TaskRow[]
-      tasks = [...tasks, ...agentTodoRows.map(rowToTask).filter(t => !isBlocked(t))]
+      tasks = [...tasks, ...agentTodoRows.map(rowToTask).filter(t => !isBlocked(t) && !isTestHarnessTask(t))]
     }
 
     if (tasks.length === 0) return undefined

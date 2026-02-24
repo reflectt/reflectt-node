@@ -4120,3 +4120,99 @@ describe('task comment activity updates task.updatedAt', () => {
     await req('DELETE', `/tasks/${taskId}`)
   })
 })
+
+/* ── Test harness noise filter on /tasks/next ──────────────────────── */
+describe('Test harness task filtering on /tasks/next', () => {
+  const testTaskIds: string[] = []
+
+  afterAll(async () => {
+    for (const id of testTaskIds) {
+      await req('DELETE', `/tasks/${id}`)
+    }
+  })
+
+  it('excludes tasks with ref-test-* source_reflection from /tasks/next', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: harness noise ref-test filter',
+      createdBy: 'test-runner',
+      assignee: 'filter-test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Filtered from next'],
+      eta: '30m',
+      priority: 'P0',
+      metadata: {
+        source_reflection: 'ref-test-artifact-vis',
+        source_insight: 'ins-test-artifact-vis',
+      },
+    })
+    testTaskIds.push(created.task.id)
+
+    const { status, body } = await req('GET', '/tasks/next?agent=filter-test-agent')
+    expect(status).toBe(200)
+    // Should NOT return the test-harness task even though it's P0
+    if (body.task) {
+      expect(body.task.id).not.toBe(created.task.id)
+    }
+  })
+
+  it('excludes tasks with "test run <timestamp>" title pattern from /tasks/next', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'Implement artifact visibility endpoint with heartbeat validation for test run 1771944154373',
+      createdBy: 'test-runner',
+      assignee: 'filter-test-agent-2',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Filtered from next'],
+      eta: '30m',
+      priority: 'P0',
+    })
+    testTaskIds.push(created.task.id)
+
+    const { status, body } = await req('GET', '/tasks/next?agent=filter-test-agent-2')
+    expect(status).toBe(200)
+    if (body.task) {
+      expect(body.task.id).not.toBe(created.task.id)
+    }
+  })
+
+  it('excludes tasks with metadata.is_test=true from /tasks/next', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: is_test flag filter',
+      createdBy: 'test-runner',
+      assignee: 'filter-test-agent-3',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Filtered from next'],
+      eta: '30m',
+      priority: 'P0',
+      metadata: { is_test: true },
+    })
+    testTaskIds.push(created.task.id)
+
+    const { status, body } = await req('GET', '/tasks/next?agent=filter-test-agent-3')
+    expect(status).toBe(200)
+    if (body.task) {
+      expect(body.task.id).not.toBe(created.task.id)
+    }
+  })
+
+  it('includes test tasks when ?include_test=1 is passed', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: include_test override',
+      createdBy: 'test-runner',
+      assignee: 'filter-test-agent-4',
+      reviewer: 'test-reviewer',
+      done_criteria: ['Visible with override'],
+      eta: '30m',
+      priority: 'P0',
+      metadata: {
+        source_reflection: 'ref-test-override',
+        is_test: true,
+      },
+    })
+    testTaskIds.push(created.task.id)
+
+    const { status, body } = await req('GET', '/tasks/next?agent=filter-test-agent-4&include_test=1')
+    expect(status).toBe(200)
+    expect(body.task).toBeDefined()
+    expect(body.task.id).toBe(created.task.id)
+  })
+})
