@@ -66,7 +66,19 @@ describe('extractClusterKey', () => {
     expect(key.failure_family).toBe('uncategorized')
   })
 
-  it('uses team_id as impacted_unit fallback', () => {
+  it('uses first non-reserved tag as impacted_unit fallback (prevents unknown clustering)', () => {
+    const ref = makeReflection({ tags: ['stage:build', 'chat', 'performance'] })
+    const key = extractClusterKey(ref)
+    expect(key.impacted_unit).toBe('chat')
+  })
+
+  it('derives a topic signature from pain when unit is missing', () => {
+    const ref = makeReflection({ tags: [], team_id: undefined })
+    const key = extractClusterKey(ref)
+    expect(key.impacted_unit).toBe('topic-chat-messages-truncated')
+  })
+
+  it('uses team_id as impacted_unit fallback when no unit/tag hint exists', () => {
     const ref = makeReflection({ tags: ['stage:build'], team_id: 'team-alpha' })
     const key = extractClusterKey(ref)
     expect(key.impacted_unit).toBe('team-alpha')
