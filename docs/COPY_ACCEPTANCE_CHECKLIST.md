@@ -1,6 +1,11 @@
 # Copy Acceptance Checklist (v1.1)
 
-Use this for **any copy/content artifact** before asking for review. Goal: make review deterministic and activation-oriented.
+Use this for **any user-facing text** (docs, onboarding, UI strings, empty/error states, marketing pages) before asking for review.
+
+## 10-second clarity
+- **Who:** anyone shipping user-facing text
+- **When:** before moving a copy/content task to `validating`
+- **Output:** filled tables + evidence links + explicit **PASS/FAIL** for each BLOCKER
 
 If any **BLOCKER** fails, do **not** move the task to `validating`.
 
@@ -16,65 +21,83 @@ Fill this first. If you can’t answer these in 10 seconds, the rest of the chec
 
 ---
 
-## 1) CTA validity (**BLOCKER**)
+## Definitions
+- **Copy/content artifact:** any document, page, PR, screenshot pack, or UI string set that changes what users read.
+- **CTA:** any clickable “next step” (button/link/command) that asks the user to do something.
 
-### 1.1 CTA inventory
-List every CTA exactly as it appears:
+---
 
-| Surface | CTA label | Intended action/route | Exists? (Y/N) | Notes |
-|---|---|---|---|---|
+## 1) CTA validity + intent (**BLOCKER**)
+
+### 1.1 CTA inventory (must be complete)
+List every CTA exactly as it appears.
+
+| Surface | Section | CTA copy (exact) | Destination (nav label + route/slug if known) | Expected user intent | Pass criteria | Exists + works? (Y/N) | Proof (link/screenshot/code ref) | Notes |
+|---|---|---|---|---|---|---|---|---|
 
 ### 1.2 Rules
 - Primary CTA is singular and action-first.
 - Label matches the *real* next step (avoid vague “Get started”).
 - CTA does not promise behavior that is not implemented.
-- Prefer **nav labels** (e.g., “Dashboard → Hosts”) over hard-coded routes unless routes are validated.
+- Prefer **nav labels** (“Hosts page”, “Tasks page”) over hard-coded routes unless you can prove routes are canonical.
 
-**BLOCKER PASS/FAIL:** ____
+**BLOCKER PASS/FAIL (explain if FAIL):** ____
 
 ---
 
 ## 2) State-text consistency (**BLOCKER**)
 
-| State | What user sees | Copy claim | Consistent? (Y/N) | Fix |
-|---|---|---|---|---|
+Copy must not contradict UI reality.
 
-Common states:
+| Surface | State | What user sees (screenshot OR exact UI strings) | Copy claim | Consistent? (Y/N) | Proof (link/screenshot) | Fix |
+|---|---|---|---|---|---|---|
+
+Minimum states to cover (where applicable):
 - empty / no data
 - loading / connecting
-- connected / online
+- success / connected / online
 - error / degraded / offline
 - queued / executing
-- **auth / permission failure** (unauthorized, forbidden, missing role)
+- auth/permission failure (401/403, missing role, missing host permission)
 
 Rules:
 - Use concrete signals ("ONLINE", “heartbeat visible”, “task appears in list”).
 - Avoid implied guarantees (“instant”, “always”, “automatic”) unless proven.
 
-**BLOCKER PASS/FAIL:** ____
+**BLOCKER PASS/FAIL (explain if FAIL):** ____
 
 ---
 
-## 3) Metric hypothesis per section (**BLOCKER**)
+## 3) Metric hypothesis + instrumentation (**BLOCKER**)
 
-| Section | User action targeted | Metric | Baseline | Target | Instrumentation/source | Why this copy should move it |
-|---|---|---|---|---|---|---|
+Without instrumentation proof, metric debates become opinion. If an event does not exist yet, you must either:
+- add it in the same PR, **or**
+- open a follow-on instrumentation task and link it here.
 
-Rules:
-- Baseline/Target may be `unknown`, but you must say **where the metric will come from** (event name, dashboard, query, support tag, etc.).
+Baseline/Target may be `unknown`, but you must specify **how it is measured**.
+
+| Section | User action targeted | Primary metric | Event name(s) / source | Where it fires (screen/action OR file/handler) | How to verify (<2 min) | Baseline (ok: unknown) | Target (ok: directional) | Why this copy should move it |
+|---|---|---|---|---|---|---|---|---|
+
+**BLOCKER PASS/FAIL (explain if FAIL):** ____
+
+---
+
+## 4) Guardrail + rollback (**BLOCKER**)
+
+| Change area | Guardrail metric (must not regress) | Source (event/log/dashboard) | Rollback trigger (exact threshold) | Rollback plan |
+|---|---|---|---|---|
 
 Examples:
-- Empty hosts → host connect starts
-- Help FAQ → fewer “where does execution run?” tickets
-- Support banner → fewer misrouted DMs / faster triage
+- Guardrail: host connect completion rate, task creation success rate, error rate, support ticket volume.
 
-**BLOCKER PASS/FAIL:** ____
+**BLOCKER PASS/FAIL (explain if FAIL):** ____
 
 ---
 
-## 4) Trust + ambiguity audit (non-blocker unless misleading)
+## 5) Trust + ambiguity audit (non-blocker unless misleading)
 
-### 4.1 Local vs cloud runtime location
+### 5.1 Local vs cloud runtime location
 If runtime location matters, use canonical nouns:
 - “cloud control plane”
 - “local host runtime”
@@ -84,13 +107,24 @@ Avoid unqualified ambiguity:
 - “serverless execution”
 - “we execute tasks for you”
 
-### 4.2 Support/SLA clarity
+### 5.2 Support/SLA clarity
 - No hidden rules: disclose ticket-first if true.
 - Escalation expectations are explicit.
 
 ---
 
-## 5) Required review request format
+## 6) Open risks + proof (required)
+
+- [ ] **Invite label exists as written** (attach proof):
+  - UI label text (exact): ____
+  - Route slug (if applicable): ____
+  - Proof: ____ (screenshot/link)
+
+- [ ] Any other route/label drift risk called out + mitigated (nav labels preferred over hardcoded paths).
+
+---
+
+## 7) Required review request format
 
 Paste into task comment:
 1) shipped: `<artifact_path> + checklist filled + timestamp`
@@ -99,7 +133,14 @@ Paste into task comment:
 
 ---
 
-## Worked example
+## 8) Mini worked example (for clarity)
 
-See process artifact example (task-scoped):
-- `process/TASK-task-1771345672442-lo7wylkzq-copy-acceptance-checklist-v1-20260223.md`
+CTA row example:
+| Surface | Section | CTA copy | Destination | Intent | Pass criteria | Exists + works | Proof | Notes |
+|---|---|---|---|---|---|---|---|---|
+| Web app | Empty Hosts | Generate Join Token | Hosts page (`/hosts`) | start host connect | token appears; copy button works | Y | screenshot + route file path | — |
+
+Metric row example:
+| Section | Action | Metric | Event/source | Where | Verify | Baseline | Target | Why |
+|---|---|---|---|---|---|---|---|---|
+| Hosts empty | click token | host_connect_started | `analytics.host_connect_started` | token modal CTA | click + see event in logs | unknown | + | removes ambiguity |
