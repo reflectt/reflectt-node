@@ -3220,9 +3220,9 @@ export async function createServer(): Promise<FastifyInstance> {
     const repoRoot = resolve(import.meta.dirname || process.cwd(), '..')
     const artifacts = await Promise.all(
       artifactRefs.map(async (ref) => {
-        const isUrl = ref.path.startsWith('http://') || ref.path.startsWith('https://')
-        if (isUrl) {
-          return { ...ref, type: 'url' as const, accessible: true, resolvedPath: ref.path }
+        const urlMatch = ref.path.match(/https?:\/\/[^\s)]+/i)
+        if (urlMatch) {
+          return { ...ref, type: 'url' as const, accessible: true, resolvedPath: urlMatch[0] }
         }
         // Repo-relative path
         const fullPath = resolve(repoRoot, ref.path)
@@ -3265,6 +3265,95 @@ export async function createServer(): Promise<FastifyInstance> {
         stale: task.status === 'doing' && (lastCommentAge === null || lastCommentAge > HEARTBEAT_THRESHOLD_MS),
         thresholdMs: HEARTBEAT_THRESHOLD_MS,
       },
+    }
+  })
+
+  // Artifact viewer — safe in-browser view for repo-relative proof docs (process/ etc.)
+  app.get('/artifacts/view', async (request, reply) => {
+    const parsed = z.object({ path: z.string().min(1).max(500) }).safeParse(request.query || {})
+    if (!parsed.success) {
+      reply.code(400)
+      return { error: 'path is required', hint: 'GET /artifacts/view?path=process/...' }
+    }
+
+    const rawPath = String(parsed.data.path || '').trim()
+
+    // Convenience: if a URL is embedded in the path string, redirect.
+    const urlMatch = rawPath.match(/https?:\/\/[^\s)]+/i)
+    if (urlMatch) {
+      reply.redirect(urlMatch[0])
+      return
+    }
+
+    const { promises: fs } = await import('node:fs')
+    const { resolve, sep, extname } = await import('node:path')
+
+    const repoRoot = resolve(import.meta.dirname || process.cwd(), '..')
+    const fullPath = resolve(repoRoot, rawPath)
+
+    // Security: ensure resolved path stays inside repo root
+    if (!fullPath.startsWith(repoRoot + sep)) {
+      reply.code(400)
+      return { error: 'Invalid path (escapes repo root)' }
+    }
+
+    const allowedExt = new Set(['.md', '.txt', '.json', '.log', '.yml', '.yaml'])
+    const ext = extname(fullPath).toLowerCase()
+    if (!allowedExt.has(ext)) {
+      reply.code(415)
+      return { error: 'Unsupported file type', ext, allowed: Array.from(allowedExt) }
+    }
+
+    const escapeHtml = (s: string) => s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+
+    try {
+      const stat = await fs.stat(fullPath)
+      const maxBytes = 400_000
+      if (stat.size > maxBytes) {
+        reply.code(413)
+        return { error: 'File too large', size: stat.size, maxBytes }
+      }
+
+      const content = await fs.readFile(fullPath, 'utf-8')
+      const title = rawPath.split('/').pop() || rawPath
+
+      reply.type('text/html; charset=utf-8').send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(title)} — artifact view</title>
+<style>
+  :root { --bg:#0a0e14; --surface:#141920; --border:#252d38; --text:#d4dae3; --text-muted:#6b7a8d; --accent:#4da6ff; }
+  body { margin:0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:14px 18px; border-bottom:1px solid var(--border); background:var(--surface); display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .path { font-size:12px; color:var(--text-muted); }
+  a { color: var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  main { padding:18px; }
+  pre { white-space: pre-wrap; word-wrap: break-word; background:#0f141a; border:1px solid var(--border); border-radius:10px; padding:14px; line-height:1.55; font-size:12px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <div style="font-weight:700">Artifact</div>
+    <div class="path"><code>${escapeHtml(rawPath)}</code></div>
+  </div>
+  <div><a href="/dashboard" rel="noreferrer">← dashboard</a></div>
+</header>
+<main>
+  <pre><code>${escapeHtml(content)}</code></pre>
+</main>
+</body>
+</html>`)
+    } catch {
+      reply.code(404)
+      return { error: 'File not found', path: rawPath }
     }
   })
 

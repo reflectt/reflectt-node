@@ -1775,6 +1775,57 @@ async function saveRoutingPolicy() {
   } catch (e) { console.error('Save policy failed:', e); }
 }
 
+// ---- Task Search (Office Suite Spine) ----
+async function runTaskSearch() {
+  const input = document.getElementById('task-search-input');
+  const resultsEl = document.getElementById('task-search-results');
+  const countEl = document.getElementById('search-count');
+  if (!input || !resultsEl || !countEl) return;
+
+  const q = (input.value || '').trim();
+  if (!q) {
+    countEl.textContent = '';
+    resultsEl.innerHTML = '<div class="empty" style="color:var(--text-muted)">Type a query and press Enter…</div>';
+    return;
+  }
+
+  resultsEl.innerHTML = '<div class="empty" style="color:var(--text-muted)">Searching…</div>';
+
+  try {
+    const res = await fetch(BASE + '/tasks/search?q=' + encodeURIComponent(q) + '&limit=12');
+    if (!res.ok) throw new Error('status ' + res.status);
+    const data = await res.json();
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+
+    countEl.textContent = tasks.length + ' result' + (tasks.length === 1 ? '' : 's');
+
+    if (tasks.length === 0) {
+      resultsEl.innerHTML = '<div class="empty" style="color:var(--text-muted)">No matches</div>';
+      return;
+    }
+
+    resultsEl.innerHTML = tasks.map(t => {
+      const assignee = t.assignee ? '@' + esc(t.assignee) : '<span style="color:var(--yellow)">unassigned</span>';
+      const pri = t.priority ? '<span class="priority-badge ' + esc(t.priority) + '">' + esc(t.priority) + '</span>' : '';
+      const title = esc(truncate(t.title || t.id, 80));
+      const id = esc(t.id);
+      const status = esc(t.status || 'todo');
+      return '<div class="backlog-item" style="padding:10px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="openTaskModal(\'' + id + '\')">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'
+        + pri
+        + '<span style="color:var(--text-bright);font-size:13px;font-weight:500">' + title + '</span>'
+        + '</div>'
+        + '<div style="font-size:11px;color:var(--text-muted)">'
+        + '<span>' + id + '</span> · <span>' + status + '</span> · <span>' + assignee + '</span>'
+        + '</div>'
+        + '</div>';
+    }).join('');
+  } catch (err) {
+    countEl.textContent = 'error';
+    resultsEl.innerHTML = '<div class="empty" style="color:var(--red)">Search failed</div>';
+  }
+}
+
 async function refresh() {
   refreshCount += 1;
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
