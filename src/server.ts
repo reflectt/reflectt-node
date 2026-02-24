@@ -283,6 +283,8 @@ const UpdateTaskSchema = z.object({
 const CreateTaskCommentSchema = z.object({
   author: z.string().trim().min(1),
   content: z.string().trim().min(1),
+  // Optional categorization for comms_policy enforcement
+  category: z.string().trim().min(1).optional(),
 })
 
 const TaskOutcomeBodySchema = z.object({
@@ -3294,7 +3296,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Task comments
-  app.get<{ Params: { id: string } }>('/tasks/:id/comments', async (request, reply) => {
+  app.get<{ Params: { id: string }; Querystring: { includeSuppressed?: string } }>('/tasks/:id/comments', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
     if (!resolved) {
       const match = taskManager.resolveTaskId(request.params.id)
@@ -3311,8 +3313,11 @@ export async function createServer(): Promise<FastifyInstance> {
       return { error: 'Task not found', details: { input: request.params.id, suggestions: match.suggestions } }
     }
 
-    const comments = taskManager.getTaskComments(resolved.resolvedId)
-    return { comments, count: comments.length, resolvedId: resolved.resolvedId }
+    const includeSuppressed = String(request.query?.includeSuppressed || '').toLowerCase()
+    const shouldIncludeSuppressed = includeSuppressed === 'true' || includeSuppressed === '1'
+
+    const comments = taskManager.getTaskComments(resolved.resolvedId, { includeSuppressed: shouldIncludeSuppressed })
+    return { comments, count: comments.length, resolvedId: resolved.resolvedId, includeSuppressed: shouldIncludeSuppressed }
   })
 
   // PR review quality panel data
@@ -3536,13 +3541,18 @@ export async function createServer(): Promise<FastifyInstance> {
 
     try {
       const data = CreateTaskCommentSchema.parse(request.body)
-      const comment = await taskManager.addTaskComment(resolved.resolvedId, data.author, data.content)
+      const comment = await taskManager.addTaskComment(
+        resolved.resolvedId,
+        data.author,
+        data.content,
+        { category: (data as any).category ?? null },
+      )
 
       // Task-comments are now primary execution comms:
       // fan out inbox-visible notifications to assignee/reviewer + explicit @mentions.
       // Notification routing respects per-agent preferences (quiet hours, mute, filters).
       const task = taskManager.getTask(resolved.resolvedId)
-      if (task) {
+      if (task && !comment.suppressed) {
         const targets = new Set<string>()
 
         if (task.assignee) targets.add(task.assignee)
@@ -3599,7 +3609,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // Heartbeat discipline: compute gap since previous comment for doing tasks
       let heartbeatWarning: string | undefined
-      if (task && task.status === 'doing') {
+      if (task && task.status === 'doing' && !comment.suppressed) {
         const HEARTBEAT_THRESHOLD_MS = 30 * 60 * 1000
         const allComments = taskManager.getTaskComments(resolved.resolvedId)
         // Look at the second-to-last comment (the one before this new one)

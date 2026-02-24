@@ -68,10 +68,10 @@ export function getEffectiveActivity(
   try {
     const commentQuery = agent
       ? db.prepare(
-          'SELECT MAX(timestamp) as latest FROM task_comments WHERE task_id = ? AND author = ?'
+          'SELECT MAX(timestamp) as latest FROM task_comments WHERE task_id = ? AND author = ? AND (suppressed IS NULL OR suppressed = 0)'
         ).get(taskId, agent) as { latest: number | null } | undefined
       : db.prepare(
-          'SELECT MAX(timestamp) as latest FROM task_comments WHERE task_id = ?'
+          'SELECT MAX(timestamp) as latest FROM task_comments WHERE task_id = ? AND (suppressed IS NULL OR suppressed = 0)'
         ).get(taskId) as { latest: number | null } | undefined
     lastCommentAt = commentQuery?.latest ?? null
   } catch (err) {

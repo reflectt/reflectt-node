@@ -396,6 +396,29 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_tasks_status_priority ON tasks(status, priority);
       `,
     },
+    {
+      version: 13,
+      // Task comment comms_policy suppression metadata
+      runFn: (db: Database.Database) => {
+        const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='task_comments'").get() as { name: string } | undefined
+        if (!table) {
+          // Some synthetic migration tests construct partial pre-v1 schemas.
+          // If task_comments does not exist, skip this migration safely.
+          return
+        }
+
+        const cols = db.prepare('PRAGMA table_info(task_comments)').all() as Array<{ name: string }>
+        const has = (name: string) => cols.some(c => c.name === name)
+
+        if (!has('category')) db.exec('ALTER TABLE task_comments ADD COLUMN category TEXT')
+        if (!has('suppressed')) db.exec('ALTER TABLE task_comments ADD COLUMN suppressed INTEGER NOT NULL DEFAULT 0')
+        if (!has('suppressed_reason')) db.exec('ALTER TABLE task_comments ADD COLUMN suppressed_reason TEXT')
+        if (!has('suppressed_rule')) db.exec('ALTER TABLE task_comments ADD COLUMN suppressed_rule TEXT')
+
+        db.exec('CREATE INDEX IF NOT EXISTS idx_task_comments_task_id_ts ON task_comments(task_id, timestamp ASC)')
+        db.exec('CREATE INDEX IF NOT EXISTS idx_task_comments_task_id_suppressed ON task_comments(task_id, suppressed)')
+      },
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')

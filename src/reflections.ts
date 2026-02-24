@@ -323,10 +323,41 @@ function _linkToTask(reflection: Reflection): void {
       `**Confidence:** ${reflection.confidence}/10\n` +
       `**Evidence:** ${reflection.evidence.join(', ')}`
 
+    // Apply comms_policy suppression if present on the task
+    let category: string | null = null
+    let suppressed = 0
+    let suppressedReason: string | null = null
+    let suppressedRule: string | null = null
+
+    try {
+      const taskRow = db.prepare('SELECT metadata FROM tasks WHERE id = ?').get(reflection.task_id) as { metadata: string | null } | undefined
+      const meta = taskRow?.metadata ? JSON.parse(taskRow.metadata) : null
+      const rule = meta?.comms_policy?.rule
+      if (rule === 'silent_until_restart_or_promote_due') {
+        suppressed = 1
+        suppressedReason = 'missing_category'
+        suppressedRule = rule
+      }
+    } catch {
+      // Best-effort only
+    }
+
     db.prepare(`
-      INSERT OR IGNORE INTO task_comments (id, task_id, author, content, timestamp)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(commentId, reflection.task_id, reflection.author, content, reflection.created_at)
+      INSERT OR IGNORE INTO task_comments (
+        id, task_id, author, content, timestamp,
+        category, suppressed, suppressed_reason, suppressed_rule
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      commentId,
+      reflection.task_id,
+      reflection.author,
+      content,
+      reflection.created_at,
+      category,
+      suppressed,
+      suppressedReason,
+      suppressedRule,
+    )
 
     db.prepare(`
       UPDATE tasks SET comment_count = comment_count + 1, updated_at = ?
