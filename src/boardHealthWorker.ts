@@ -732,13 +732,20 @@ export class BoardHealthWorker {
   // ── Helpers ───────────────────────────────────────────────────────────
 
   private getTaskLastActivityAt(task: Task): number {
-    const updatedAt = typeof task.updatedAt === 'number' ? task.updatedAt : 0
-    const comments = taskManager.getTaskComments(task.id)
-    const latestCommentAt = comments.reduce((max, c) => {
-      const ts = typeof c.timestamp === 'number' ? c.timestamp : 0
-      return Math.max(max, ts)
-    }, 0)
-    return Math.max(updatedAt, latestCommentAt)
+    try {
+      const { getEffectiveActivity } = require('./activity-signal.js') as typeof import('./activity-signal.js')
+      const signal = getEffectiveActivity(task.id, task.assignee, task.createdAt)
+      return signal.effectiveActivityTs
+    } catch {
+      // Fallback if activity-signal not available
+      const updatedAt = typeof task.updatedAt === 'number' ? task.updatedAt : 0
+      const comments = taskManager.getTaskComments(task.id)
+      const latestCommentAt = comments.reduce((max, c) => {
+        const ts = typeof c.timestamp === 'number' ? c.timestamp : 0
+        return Math.max(max, ts)
+      }, 0)
+      return Math.max(updatedAt, latestCommentAt)
+    }
   }
 
   private isQuietHours(now: number): boolean {

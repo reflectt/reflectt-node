@@ -14,6 +14,8 @@ export type IdleNudgeLaneTask = {
   status?: string
   createdAt?: number
   updatedAt?: number
+  /** Canonical activity signal — if set, used instead of updatedAt for stale detection */
+  effectiveActivityTs?: number
 }
 
 export type IdleNudgeLaneState = {
@@ -42,7 +44,11 @@ export function resolveIdleNudgeLane(
   const presenceTaskId = normalizeTaskId(presenceTaskRaw)
   const doingTasks = tasks
     .filter((t) => (t.assignee || '').toLowerCase() === agent && t.status === 'doing')
-    .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+    .sort((a, b) => {
+      const aTs = Number(a.effectiveActivityTs || a.updatedAt || a.createdAt || 0)
+      const bTs = Number(b.effectiveActivityTs || b.updatedAt || b.createdAt || 0)
+      return bTs - aTs
+    })
 
   const doingTaskIds = doingTasks
     .map(t => normalizeTaskId(t.id))
@@ -54,8 +60,8 @@ export function resolveIdleNudgeLane(
   for (const task of doingTasks) {
     const taskId = normalizeTaskId(task.id)
     if (!taskId) continue
-    const taskUpdatedAt = Number(task.updatedAt || task.createdAt || 0)
-    const taskAgeMin = taskUpdatedAt > 0 ? Math.floor((now - taskUpdatedAt) / 60_000) : Number.MAX_SAFE_INTEGER
+    const taskActivityAt = Number(task.effectiveActivityTs || task.updatedAt || task.createdAt || 0)
+    const taskAgeMin = taskActivityAt > 0 ? Math.floor((now - taskActivityAt) / 60_000) : Number.MAX_SAFE_INTEGER
     if (taskAgeMin > activeTaskMaxAgeMin) {
       staleDoingTaskIds.push(taskId)
     } else {
@@ -67,9 +73,9 @@ export function resolveIdleNudgeLane(
   const selectedTask = selectedTaskId
     ? doingTasks.find((task) => task.id === selectedTaskId)
     : null
-  const selectedTaskUpdatedAt = Number(selectedTask?.updatedAt || selectedTask?.createdAt || 0)
-  const selectedTaskAgeMin = selectedTaskUpdatedAt > 0
-    ? Math.floor((now - selectedTaskUpdatedAt) / 60_000)
+  const selectedTaskActivityAt = Number(selectedTask?.effectiveActivityTs || selectedTask?.updatedAt || selectedTask?.createdAt || 0)
+  const selectedTaskAgeMin = selectedTaskActivityAt > 0
+    ? Math.floor((now - selectedTaskActivityAt) / 60_000)
     : null
 
   if (freshDoingTaskIds.length === 0) {
