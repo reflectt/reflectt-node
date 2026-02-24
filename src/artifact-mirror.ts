@@ -6,8 +6,17 @@
 
 import { promises as fs } from 'fs'
 import { join, resolve, basename, dirname } from 'path'
+import { homedir } from 'os'
 
 // ── Config (lazy for testability — env is read at call time) ──
+
+/**
+ * Canonical shared workspace: ~/.openclaw/workspace-shared
+ *
+ * Override with REFLECTT_SHARED_WORKSPACE env var.
+ * The previous default (../workspace-shared relative to project root)
+ * was wrong when running from a nested project directory.
+ */
 
 function getWorkspaceRoot(): string {
   return process.env.REFLECTT_WORKSPACE || resolve(process.cwd())
@@ -15,7 +24,7 @@ function getWorkspaceRoot(): string {
 
 function getSharedWorkspace(): string {
   return process.env.REFLECTT_SHARED_WORKSPACE
-    || resolve(getWorkspaceRoot(), '..', 'workspace-shared')
+    || resolve(homedir(), '.openclaw', 'workspace-shared')
 }
 
 export function WORKSPACE_ROOT(): string { return getWorkspaceRoot() }
