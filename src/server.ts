@@ -3269,11 +3269,12 @@ export async function createServer(): Promise<FastifyInstance> {
             source: resolved.source,
             resolvedPath: resolved.resolvedPath,
           }
-          // Optionally include content/preview
-          if (includeMode === 'preview' && resolved.preview) {
+          const isProcessArtifact = String(ref.path || '').trim().startsWith('process/')
+          // Optionally include content/preview (process/ only)
+          if (isProcessArtifact && includeMode === 'preview' && resolved.preview) {
             result.preview = resolved.preview
             result.previewTruncated = true
-          } else if (includeMode === 'content' && resolved.preview) {
+          } else if (isProcessArtifact && includeMode === 'content' && resolved.preview) {
             // For full content, re-read the file (resolveTaskArtifact returns preview-length)
             try {
               const fullContent = await fs.readFile(resolved.resolvedPath!, 'utf-8')
@@ -3411,7 +3412,12 @@ export async function createServer(): Promise<FastifyInstance> {
     const limit = Math.min(Math.max(1, parseInt(query.limit || '200', 10) || 200), 500)
     const result = await listSharedFiles(path, limit)
     if (!result.success) {
-      reply.code(result.error?.includes('not allowed') || result.error?.includes('not found') ? 400 : 500)
+      const msg = String(result.error || '')
+      const lower = msg.toLowerCase()
+      if (lower.includes('does not exist') || lower.includes('not found')) reply.code(404)
+      else if (lower.includes('inaccessible')) reply.code(503)
+      else if (lower.includes('escapes') || lower.includes('symlink')) reply.code(403)
+      else reply.code(400)
     }
     return result
   })
@@ -3427,7 +3433,13 @@ export async function createServer(): Promise<FastifyInstance> {
     const maxChars = parseInt(query.maxChars || '2000', 10) || 2000
     const result = await readSharedFile(path, { preview, maxChars })
     if (!result.success) {
-      reply.code(result.error?.includes('not allowed') || result.error?.includes('not found') ? 400 : 404)
+      const msg = String(result.error || '')
+      const lower = msg.toLowerCase()
+      if (lower.includes('does not exist') || lower.includes('not found')) reply.code(404)
+      else if (lower.includes('size limit')) reply.code(413)
+      else if (lower.includes('inaccessible')) reply.code(503)
+      else if (lower.includes('escapes') || lower.includes('symlink')) reply.code(403)
+      else reply.code(400)
     }
     return result
   })
@@ -3441,7 +3453,13 @@ export async function createServer(): Promise<FastifyInstance> {
     }
     const result = await readSharedFile(path)
     if (!result.success || !result.file) {
-      reply.code(404)
+      const msg = String(result.error || '')
+      const lower = msg.toLowerCase()
+      if (lower.includes('does not exist') || lower.includes('not found')) reply.code(404)
+      else if (lower.includes('size limit')) reply.code(413)
+      else if (lower.includes('inaccessible')) reply.code(503)
+      else if (lower.includes('escapes') || lower.includes('symlink')) reply.code(403)
+      else reply.code(400)
       return { error: result.error || 'File not found' }
     }
     const escapeHtml = (s: string) => s
