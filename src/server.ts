@@ -33,6 +33,10 @@ import {
   hasCompletedEvent,
   isDay2Eligible,
   loadActivationFunnel,
+  getConversionFunnel,
+  getFailureDistribution,
+  getWeeklyTrends,
+  getOnboardingDashboard,
   type ActivationEventType,
 } from './activationEvents.js'
 import { alertUnauthorizedApproval, alertFlipAttempt, getMutationAlertStatus, pruneOldAttempts } from './mutationAlert.js'
@@ -7173,7 +7177,8 @@ export async function createServer(): Promise<FastifyInstance> {
     const metadata = body.metadata as Record<string, unknown> | undefined
 
     const validTypes = [
-      'signup_completed', 'workspace_ready', 'first_task_started',
+      'signup_completed', 'host_preflight_passed', 'host_preflight_failed',
+      'workspace_ready', 'first_task_started',
       'first_task_completed', 'first_team_message_sent', 'day2_return_action',
     ]
 
@@ -7188,6 +7193,46 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const isNew = await emitActivationEvent(type as any, userId, metadata)
     return { success: true, isNew, funnel: getUserFunnelState(userId) }
+  })
+
+  // ── Onboarding Telemetry Dashboard ──────────────────────────────────
+
+  /**
+   * GET /activation/dashboard — Full onboarding telemetry dashboard.
+   * Returns conversion funnel, failure distribution, and weekly trends.
+   * Query: ?weeks=12 (number of weeks for trend history)
+   */
+  app.get('/activation/dashboard', async (request) => {
+    const query = request.query as Record<string, string>
+    const weeks = query.weeks ? parseInt(query.weeks, 10) : 12
+    return { success: true, dashboard: getOnboardingDashboard({ weeks }) }
+  })
+
+  /**
+   * GET /activation/funnel/conversions — Step-by-step conversion rates.
+   * Returns per-step reach count, conversion rate, and median step time.
+   */
+  app.get('/activation/funnel/conversions', async () => {
+    return { success: true, conversions: getConversionFunnel() }
+  })
+
+  /**
+   * GET /activation/funnel/failures — Failure-reason distribution per step.
+   * Shows where users drop off and why (from event metadata).
+   */
+  app.get('/activation/funnel/failures', async () => {
+    return { success: true, failures: getFailureDistribution() }
+  })
+
+  /**
+   * GET /activation/funnel/weekly — Weekly trend snapshots for planning.
+   * Query: ?weeks=12 (default 12 weeks of history)
+   * Exportable JSON for planning dashboards.
+   */
+  app.get('/activation/funnel/weekly', async (request) => {
+    const query = request.query as Record<string, string>
+    const weeks = query.weeks ? parseInt(query.weeks, 10) : 12
+    return { success: true, trends: getWeeklyTrends(weeks) }
   })
 
   // Get task analytics

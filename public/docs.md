@@ -569,8 +569,12 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | POST | `/pr-event` | PR state webhook. Body: `{ taskId, prState: "merged"|"closed", prUrl? }`. Auto-updates task artifacts on merge, auto-blocks on close. |
 | GET | `/pr-automerge/status` | PR auto-merge attempt log: recent merge/close attempts with summary counts (attempted, success, failed, skipped, auto-close, close-gate-fail). |
 | GET | `/drift-report` | Task/PR drift report: tasks with merged PRs still in validating, orphan PRs, state mismatches. |
-| POST | `/activation/event` | Record activation funnel event. Body: `{ type, userId, metadata? }`. Events: signup_completed, workspace_ready, first_task_started, first_task_completed, first_team_message_sent, day2_return_action. |
+| POST | `/activation/event` | Record activation funnel event. Body: `{ type, userId, metadata? }`. Events: signup_completed, host_preflight_passed, host_preflight_failed, workspace_ready, first_task_started, first_task_completed, first_team_message_sent, day2_return_action. |
 | GET | `/activation/funnel` | Get funnel state. Query: `?userId=...` for single user, no params for aggregate summary. |
+| GET | `/activation/dashboard` | Full onboarding telemetry dashboard: conversion funnel, failure distribution, weekly trends. Query: `?weeks=12`. |
+| GET | `/activation/funnel/conversions` | Step-by-step conversion rates with per-step reach count, conversion rate, and median step timing. |
+| GET | `/activation/funnel/failures` | Failure-reason distribution per step. Shows where users drop off and why (from event metadata). |
+| GET | `/activation/funnel/weekly` | Weekly trend snapshots for planning. Query: `?weeks=12`. Exportable JSON with per-week step counts, new users, completion rate. |
 | GET | `/audit/reviews` | Audit ledger for review-field mutations: actor trace, before/after diffs, timestamps. |
 | GET | `/audit/mutation-alerts` | Suspicious mutation alert status and history. |
 | GET | `/escalations` | List active escalations. |
