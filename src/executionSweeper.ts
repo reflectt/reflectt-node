@@ -553,9 +553,15 @@ export function startSweeper(): void {
 
   console.log(`[Sweeper] Starting execution sweeper (interval: ${SWEEP_INTERVAL_MS / 1000}s, SLA: ${VALIDATING_SLA_MS / 60_000}m, critical: ${VALIDATING_CRITICAL_MS / 60_000}m)`)
 
-  // Run once immediately
-  const initial = sweepValidatingQueue()
-  escalateViolations(initial.violations)
+  // Defer initial sweep to avoid blocking server startup
+  setTimeout(() => {
+    try {
+      const initial = sweepValidatingQueue()
+      escalateViolations(initial.violations)
+    } catch (err) {
+      console.error('[Sweeper] Initial sweep failed:', err)
+    }
+  }, 5000)
   logDryRun('sweeper_started', `interval=${SWEEP_INTERVAL_MS / 1000}s SLA=${VALIDATING_SLA_MS / 60_000}m critical=${VALIDATING_CRITICAL_MS / 60_000}m`)
 
   sweepTimer = setInterval(() => {

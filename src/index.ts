@@ -94,6 +94,7 @@ async function main() {
     startTeamConfigLinter()
 
     const app = await createServer()
+
     
     await app.listen({
       port: serverConfig.port,
