@@ -316,8 +316,8 @@ class TeamHealthMonitor {
   // Override with MENTION_RESCUE_DELAY_MIN to increase (values <3 are treated as 3).
   private readonly mentionRescueDelayMin = (() => {
     const raw = process.env.MENTION_RESCUE_DELAY_MIN
-    const parsed = (raw === undefined || raw.trim() === '') ? 5 : Number(raw)
-    const val = Number.isFinite(parsed) ? parsed : 5
+    const parsed = (raw === undefined || raw.trim() === '') ? 3 : Number(raw)
+    const val = Number.isFinite(parsed) ? parsed : 3
     return Math.max(3, val)
   })()
   private readonly mentionRescueCooldownMin = Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10)
@@ -1522,6 +1522,21 @@ class TeamHealthMonitor {
   }
 
   /**
+   * Extract which trio agents were actually mentioned in a message.
+   * Returns lowercase agent ids (subset of this.trioAgents).
+   */
+  private extractMentionedTrioAgents(content: string): Array<typeof this.trioAgents[number]> {
+    if (!content) return []
+    const matches = content.match(/@(kai|link|pixel)\b/gi) || []
+    const uniq = new Set<typeof this.trioAgents[number]>()
+    for (const m of matches) {
+      const name = m.replace('@', '').toLowerCase() as typeof this.trioAgents[number]
+      if (this.trioAgents.includes(name)) uniq.add(name)
+    }
+    return Array.from(uniq)
+  }
+
+  /**
    * Build a thread-level idempotency key for mention-rescue.
    * Groups mentions by thread context so that multiple messages in the same
    * thread/channel with the same mentioned agents produce one rescue, not many.
@@ -1532,8 +1547,8 @@ class TeamHealthMonitor {
     const channel = String(mention.channel || 'general')
     const threadId = String(mention.threadId || mention.thread_id || 'root')
     const content = typeof mention.content === 'string' ? mention.content : ''
-    const agents = (content.match(/@(kai|link|pixel)/gi) || [])
-      .map(a => a.toLowerCase())
+    const agents = this.extractMentionedTrioAgents(content)
+      .slice()
       .sort()
       .join(',')
     return `${channel}:${threadId}:${agents}`
@@ -1672,6 +1687,10 @@ class TeamHealthMonitor {
       // Global cooldown to avoid duplicate fallback nudges across near-identical mentions.
       if (now - this.mentionRescueLastAt < globalCooldownMs) continue
 
+      const mentionContent = typeof mention.content === 'string' ? mention.content : ''
+      const mentionedAgents = this.extractMentionedTrioAgents(mentionContent)
+      if (mentionedAgents.length === 0) continue
+
       // ── Thread-level idempotency ─────────────────────────────────────
       // Build a thread key that groups mentions by channel + thread + mentioned agents.
       // This prevents duplicate rescues when Ryan sends multiple messages in the
@@ -1704,21 +1723,10 @@ class TeamHealthMonitor {
       }
 
       // Focus mode is a hard suppressor for fallback nudges.
-      const anyFocused = this.trioAgents.some(a => presenceManager.isInFocus(a) !== null)
+      const anyFocused = mentionedAgents.some(a => presenceManager.isInFocus(a) !== null)
       if (anyFocused) continue
 
-      // Only nudge the agents that were actually mentioned (not the whole trio).
-      const contentText = typeof mention.content === 'string' ? mention.content : ''
-      const mentioned = new Set(
-        (contentText.match(/@(kai|link|pixel)\b/gi) || [])
-          .map(m => m.slice(1).toLowerCase()),
-      )
-      const mentionList = this.trioAgents
-        .filter(a => mentioned.has(a))
-        .map(a => `@${a}`)
-        .join(' ')
-      if (!mentionList) continue
-
+      const mentionList = mentionedAgents.map(a => `@${a}`).join(' ')
       const content = `[[reply_to:${mentionId}]] system fallback: mention received. ${mentionList} are being nudged to respond.`
       rescued.push(content)
 
