@@ -108,7 +108,10 @@ class ChatManager {
       importJsonlIfNeeded(db, MESSAGES_FILE, 'chat_messages', importMessages)
       importJsonlIfNeeded(db, LEGACY_MESSAGES_FILE, 'chat_messages', importMessages)
 
-      const rows = db.prepare('SELECT * FROM chat_messages ORDER BY timestamp ASC').all() as Array<{
+      // Only load recent messages into memory (24h) to avoid OOM with 90k+ messages.
+      // Older messages are queried from SQLite on demand.
+      const recentCutoff = Date.now() - 24 * 60 * 60 * 1000
+      const rows = db.prepare('SELECT * FROM chat_messages WHERE timestamp > ? ORDER BY timestamp ASC').all(recentCutoff) as Array<{
         id: string
         from: string
         to: string | null
@@ -716,8 +719,11 @@ class ChatManager {
   }
 
   getStats() {
+    const db = getDb()
+    const totalRow = db.prepare('SELECT COUNT(*) as count FROM chat_messages').get() as { count: number } | undefined
     return {
-      totalMessages: this.messages.length,
+      totalMessages: totalRow?.count ?? this.messages.length,
+      recentMessages: this.messages.length,
       rooms: this.rooms.size,
       subscribers: this.subscribers.size,
     }
