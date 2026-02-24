@@ -1058,6 +1058,50 @@ describe('Non-code validating contract (design/docs)', () => {
   })
 })
 
+describe('Non-code validating without qa_bundle', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: non-code validating without qa_bundle',
+      createdBy: 'test-runner',
+      assignee: 'pixel',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Validating accepted with non_code review_handoff and no qa_bundle'],
+      eta: '1h',
+      metadata: {
+        lane: 'analysis',
+      },
+    })
+    taskId = body.task.id
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('accepts validating without qa_bundle when review_handoff.non_code=true', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-non-code-no-qabundle.md',
+        review_handoff: {
+          task_id: taskId,
+          artifact_path: 'process/TASK-non-code-no-qabundle.md',
+          test_proof: 'Strategic/non-code proof (manual checklist) complete.',
+          known_caveats: 'No PR/commit for this task type.',
+          non_code: true,
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('validating')
+  })
+})
+
 describe('Backlog', () => {
   let taskId: string
 

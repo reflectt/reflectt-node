@@ -515,12 +515,24 @@ function enforceQaBundleGateForValidating(
   expectedTaskId?: string,
 ): { ok: true } | { ok: false; error: string; hint: string } {
   if (status !== 'validating') return { ok: true }
+  if (isTaskAutomatedRecurring(metadata)) return { ok: true }
+
+  const root = ((metadata ?? {}) as Record<string, unknown>)
+
+  // Non-code/doc-only/config-only tasks can satisfy validating via review_handoff alone.
+  // Requiring a code-shaped qa_bundle.review_packet (PR/commit/files) blocks strategic tasks.
+  const handoff = ReviewHandoffSchema.safeParse(root.review_handoff ?? {})
+  if (handoff.success) {
+    const h = handoff.data
+    const nonCodeLane = h.doc_only === true || h.config_only === true || h.non_code === true || isDesignOrDocsLane(root)
+    if (nonCodeLane) return { ok: true }
+  }
 
   const parsed = z
     .object({
       qa_bundle: QaBundleSchema,
     })
-    .safeParse(metadata ?? {})
+    .safeParse(root)
 
   if (!parsed.success) {
     const missing = parsed.error.issues
