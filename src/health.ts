@@ -20,6 +20,7 @@ import { routeMessage } from './messageRouter.js'
 import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
 import { getDb } from './db.js'
+import { policyManager } from './policy.js'
 
 /**
  * Validate a task timestamp is within reasonable bounds.
@@ -1266,10 +1267,11 @@ class TeamHealthMonitor {
       .slice(0, 8)
   }
 
-  private shouldEmitCadenceAlert(key: string, now: number): boolean {
+  private shouldEmitCadenceAlert(key: string, now: number, cooldownMin?: number): boolean {
     const lastAt = this.cadenceAlertState.get(key)
     if (!lastAt) return true
-    const cooldownMs = this.cadenceAlertCooldownMin * 60_000
+    const cooldown = Number(cooldownMin ?? this.cadenceAlertCooldownMin)
+    const cooldownMs = cooldown * 60_000
     return now - lastAt >= cooldownMs
   }
 
@@ -1341,7 +1343,16 @@ class TeamHealthMonitor {
     const dryRun = options?.dryRun === true
     const alerts: string[] = []
 
-    if (!this.cadenceWatchdogEnabled) {
+    // Source of truth: unified policy config (file + env overlays).
+    // Fallback: legacy env-based flags.
+    const cadenceCfg = policyManager.get().cadenceWatchdog
+    const cadenceEnabled = cadenceCfg?.enabled ?? this.cadenceWatchdogEnabled
+    const silenceMin = Number(cadenceCfg?.silenceMin ?? this.cadenceSilenceMin)
+    const workingStaleMin = Number(cadenceCfg?.workingStaleMin ?? this.cadenceWorkingStaleMin)
+    const workingTaskMaxAgeMin = Number(cadenceCfg?.workingTaskMaxAgeMin ?? this.cadenceWorkingTaskMaxAgeMin)
+    const alertCooldownMin = Number(cadenceCfg?.alertCooldownMin ?? this.cadenceAlertCooldownMin)
+
+    if (!cadenceEnabled) {
       return { alerts }
     }
 
@@ -1357,9 +1368,9 @@ class TeamHealthMonitor {
     const lastTrioGeneralUpdate = this.findLastTrioGeneralUpdate(messages)
     const trioSilenceMin = Math.floor((now - lastTrioGeneralUpdate) / 60_000)
 
-    if (trioSilenceMin >= this.cadenceSilenceMin) {
+    if (trioSilenceMin >= silenceMin) {
       const key = 'trio_general_silence'
-      if (this.shouldEmitCadenceAlert(key, now)) {
+      if (this.shouldEmitCadenceAlert(key, now, alertCooldownMin)) {
         // Enhanced suppression: skip if any trio member has had activity since last alert
         const anyTrioActive = this.trioAgents.some(a => this.hasRecentActivitySinceLastAlert(a, key, now))
         if (anyTrioActive) {
@@ -1369,7 +1380,7 @@ class TeamHealthMonitor {
           // Rate-limit failure suppressor: trio is silent due to provider outage, not genuine inactivity
           this.markCadenceAlert(key, now)
         } else {
-          const content = `@kai @link @pixel system watchdog: no #general update from trio for ${trioSilenceMin}m (threshold ${this.cadenceSilenceMin}m). Post status now using 1) shipped 2) blocker 3) next+ETA.`
+          const content = `🔁 **[Product Enforcement] Cadence reset**: no #general update from trio for ${trioSilenceMin}m (threshold ${silenceMin}m). @kai @link @pixel post status now: 1) shipped 2) blocker 3) next+ETA. *(Automated — no leadership action needed.)*`
           alerts.push(content)
 
           if (!dryRun) {
@@ -1377,7 +1388,7 @@ class TeamHealthMonitor {
             await this.logWatchdogIncident({
               type: 'trio_general_silence',
               at: now,
-              thresholdMs: this.cadenceSilenceMin * 60_000,
+              thresholdMs: silenceMin * 60_000,
               lastUpdateAt: lastTrioGeneralUpdate,
             })
             this.markCadenceAlert(key, now)
@@ -1398,7 +1409,7 @@ class TeamHealthMonitor {
 
       const taskTs = Number(task.updatedAt || task.createdAt || 0)
       const taskAgeMin = taskTs > 0 ? Math.floor((now - taskTs) / 60_000) : Number.MAX_SAFE_INTEGER
-      if (taskAgeMin > this.cadenceWorkingTaskMaxAgeMin) {
+      if (taskAgeMin > workingTaskMaxAgeMin) {
         continue
       }
 
@@ -1429,14 +1440,14 @@ class TeamHealthMonitor {
       const maxStaleMin = Math.floor(TeamHealthMonitor.MAX_INCIDENT_AGE_MS / 60_000)
       const staleMin = Math.min(rawStaleMin, maxStaleMin)
 
-      if (staleMin < this.cadenceWorkingStaleMin) continue
+      if (staleMin < workingStaleMin) continue
 
       // Also check task comments as activity signal
       const taskCommentAge = this.getTaskCommentAgeForAgent(task.id, agent, now)
-      if (taskCommentAge !== null && taskCommentAge < this.cadenceWorkingStaleMin) continue
+      if (taskCommentAge !== null && taskCommentAge < workingStaleMin) continue
 
       const key = `stale_working:${agent}:${task.id}`
-      if (!this.shouldEmitCadenceAlert(key, now)) continue
+      if (!this.shouldEmitCadenceAlert(key, now, alertCooldownMin)) continue
 
       // Enhanced suppression: skip if agent has had ANY activity since last alert
       if (this.hasRecentActivitySinceLastAlert(agent, key, now)) {
@@ -1448,7 +1459,7 @@ class TeamHealthMonitor {
       const agentLastGeneralAt = this.getLatestGeneralMessageAt(messages, agent)
       if (agentLastGeneralAt > 0) {
         const sinceGeneralMin = Math.floor((now - agentLastGeneralAt) / 60_000)
-        if (sinceGeneralMin < this.cadenceWorkingStaleMin) continue
+        if (sinceGeneralMin < workingStaleMin) continue
       }
 
       // Rate-limit failure suppressor: if the agent's silence is caused by infra failures
@@ -1459,7 +1470,7 @@ class TeamHealthMonitor {
         continue
       }
 
-      const content = `@${agent} [Product Enforcement] status=working with no update for ${staleMin}m on ${task.id}. Post status now: 1) shipped 2) blocker 3) next+ETA. (Automated — working contract ${staleMin >= 45 ? 'requeue warning imminent' : 'monitoring'}.)`
+      const content = `@${agent} [Product Enforcement] status=working with no update for ${staleMin}m on ${task.id}. Post status now: 1) shipped 2) blocker 3) next+ETA. *(Automated — no leadership action needed.)*`
       alerts.push(content)
 
       if (!dryRun) {
@@ -1469,7 +1480,7 @@ class TeamHealthMonitor {
           at: now,
           agent,
           taskId: task.id,
-          thresholdMs: this.cadenceWorkingStaleMin * 60_000,
+          thresholdMs: workingStaleMin * 60_000,
           lastUpdateAt: lastAt || null,
           workingSinceAt: task.updatedAt || task.createdAt || null,
         })
