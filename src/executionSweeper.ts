@@ -122,6 +122,7 @@ export interface SweepResult {
   violations: SweepViolation[]
   tasksScanned: number
   validatingCount: number
+  autoClosedCount?: number
 }
 
 export interface DriftReportEntry {
@@ -151,6 +152,34 @@ export interface DriftReport {
   }
 }
 
+// ── Auto-close eligibility ─────────────────────────────────────────────────
+
+/**
+ * Determines if a validating task can be auto-closed (no manual reviewer action needed).
+ * 
+ * Conditions (ALL must be true):
+ * 1. metadata.reconciled === true (task was created from insight reconciliation)
+ * 2. Review is approved (reviewer_approved=true OR review_state='approved')
+ * 3. No code delta is required (no pr_url, or PR is already merged)
+ */
+export function isAutoClosable(task: Task, meta: Record<string, unknown>): boolean {
+  // Must be reconciled
+  if (!meta.reconciled) return false
+
+  // Must have reviewer approval or approved review state
+  const reviewApproved = meta.reviewer_approved === true || meta.review_state === 'approved'
+  if (!reviewApproved) return false
+
+  // If there's a PR URL, it must already be merged to auto-close
+  const prUrl = extractPrUrl(meta)
+  if (prUrl) {
+    const prMerged = meta.pr_merged === true || meta.merge_commit
+    if (!prMerged) return false
+  }
+
+  return true
+}
+
 // ── Core Sweep Logic ───────────────────────────────────────────────────────
 
 export function sweepValidatingQueue(): SweepResult {
@@ -162,7 +191,49 @@ export function sweepValidatingQueue(): SweepResult {
   const totalScanned = validating.length + doneTasks.length + doingTasks.length + todoTasks.length
   const violations: SweepViolation[] = []
 
+  // ── Auto-close reconciled validating tasks ────────────────────────────
+  // Reconciled tasks (metadata.reconciled=true) with an approved review
+  // or evidence packet and no code delta required can be auto-closed
+  // to prevent SLA noise.
+  const autoClosedIds = new Set<string>()
+
   for (const task of validating) {
+    const meta = (task.metadata || {}) as Record<string, unknown>
+    if (isAutoClosable(task, meta)) {
+      try {
+        taskManager.updateTask(task.id, {
+          status: 'done',
+          metadata: {
+            ...meta,
+            auto_closed: true,
+            auto_closed_at: now,
+            auto_close_reason: 'reconciled_no_code_delta',
+            source_insight: meta.source_insight || meta.insight_id || null,
+            source_reflection: meta.source_reflection || null,
+          },
+        } as any)
+        autoClosedIds.add(task.id)
+        escalated.delete(task.id)
+        logDryRun('auto_closed_reconciled', `${task.id} — reconciled + approved, no code delta required`)
+
+        // Notify in chat
+        chatManager.sendMessage({
+          from: 'system',
+          channel: 'task-notifications',
+          content: `✅ Auto-closed reconciled task "${task.title}" (${task.id}) — no code delta required. Insight: ${meta.source_insight || meta.insight_id || 'N/A'}`,
+        }).catch(() => {})
+
+        continue
+      } catch (err) {
+        logDryRun('auto_close_failed', `${task.id} — ${String(err)}`)
+      }
+    }
+  }
+
+  // Filter out auto-closed tasks from SLA checks
+  const remainingValidating = validating.filter(t => !autoClosedIds.has(t.id))
+
+  for (const task of remainingValidating) {
     const meta = (task.metadata || {}) as Record<string, unknown>
     const enteredAt = (meta.entered_validating_at as number) || task.updatedAt
     const lastActivity = (meta.review_last_activity_at as number) || enteredAt
@@ -301,6 +372,7 @@ export function sweepValidatingQueue(): SweepResult {
     violations,
     tasksScanned: totalScanned,
     validatingCount: validating.length,
+    autoClosedCount: autoClosedIds.size,
   }
 
   lastSweepAt = now
