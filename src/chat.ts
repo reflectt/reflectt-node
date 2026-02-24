@@ -17,6 +17,9 @@ import type Database from 'better-sqlite3'
 const MESSAGES_FILE = join(DATA_DIR, 'messages.jsonl')
 const LEGACY_MESSAGES_FILE = join(LEGACY_DATA_DIR, 'messages.jsonl')
 
+// All reads go directly to SQLite — no in-memory message cache.
+// JSONL file is kept as an append-only audit trail.
+
 function importMessages(db: Database.Database, records: unknown[]): number {
   const byId = new Map<string, AgentMessage>()
 
@@ -118,20 +121,17 @@ class ChatManager {
     for (const channel of CHANNEL_DEFINITIONS) {
       this.createRoom(channel.id, channel.name)
     }
-    
-    // Load persisted messages
-    this.loadMessages().catch(err => {
-      console.error('[Chat] Failed to load messages:', err)
+
+    // Run one-time JSONL → SQLite migration
+    this.migrateJsonl().catch(err => {
+      console.error('[Chat] Failed to migrate JSONL:', err)
     })
   }
 
-  private async loadMessages(): Promise<void> {
+  private async migrateJsonl(): Promise<void> {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
-
       const db = getDb()
-
-      // One-time JSONL -> SQLite import (current + legacy paths)
       importJsonlIfNeeded(db, MESSAGES_FILE, 'chat_messages', importMessages)
       importJsonlIfNeeded(db, LEGACY_MESSAGES_FILE, 'chat_messages', importMessages)
 
@@ -394,7 +394,6 @@ class ChatManager {
     eventBus.emitMessagePosted(fullMessage)
 
     // Route to agent inboxes (auto-routing)
-    // Note: We'll import inboxManager in a way that avoids circular dependency
     this.routeToInboxes(fullMessage)
 
     // TODO: Send via OpenClaw when connected
@@ -408,18 +407,18 @@ class ChatManager {
    */
   private routeToInboxes(message: AgentMessage): void {
     // Import here to avoid circular dependency at module level
-    import('./inbox.js').then(({ inboxManager }) => {
-      // Get list of all agents from presence or a registry
-      // For now, we'll extract agents from message history
-      const agents = this.getKnownAgents()
-      inboxManager.routeMessage(message, agents)
-    }).catch(err => {
-      console.error('[Chat] Failed to route message to inboxes:', err)
-    })
+    import('./inbox.js')
+      .then(({ inboxManager }) => {
+        const agents = this.getKnownAgents()
+        inboxManager.routeMessage(message, agents)
+      })
+      .catch(err => {
+        console.error('[Chat] Failed to route message to inboxes:', err)
+      })
   }
 
   /**
-   * Get list of all known agents from message history
+   * Get list of all known agents from SQLite.
    */
   private getKnownAgents(): string[] {
     const db = getDb()
@@ -427,14 +426,38 @@ class ChatManager {
       SELECT DISTINCT "from" as agent FROM chat_messages
       UNION
       SELECT DISTINCT "to" as agent FROM chat_messages WHERE "to" IS NOT NULL
-    `).all() as Array<{ agent: string }>
-    return rows.map(r => r.agent)
+    `).all() as Array<{ agent: string | null }>
+    return rows.map(r => r.agent).filter((v): v is string => Boolean(v))
   }
 
   private handleIncomingMessage(message: AgentMessage) {
     // Persist to DB (INSERT OR REPLACE handles dedup)
     this.writeMessageToDb(message)
     this.notifySubscribers(message)
+  }
+
+  private hydrateRows(rows: Array<{
+    id: string
+    from: string
+    to: string | null
+    content: string
+    timestamp: number
+    channel: string | null
+    reactions: string | null
+    thread_id: string | null
+    metadata: string | null
+  }>): AgentMessage[] {
+    return rows.map((row) => ({
+      id: row.id,
+      from: row.from,
+      to: row.to ?? undefined,
+      content: row.content,
+      timestamp: row.timestamp,
+      channel: row.channel || 'general',
+      reactions: safeJsonParse<Record<string, string[]>>(row.reactions) || {},
+      threadId: row.thread_id ?? undefined,
+      metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
+    }))
   }
 
   getMessages(options?: {
@@ -478,7 +501,7 @@ class ChatManager {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
     const limit = options?.limit !== undefined ? options.limit : 20
 
-    // Use subquery to get last N messages then order ascending
+    // Fetch newest-first for efficiency, then return ascending.
     const sql = limit > 0
       ? `SELECT * FROM (SELECT * FROM chat_messages ${where} ORDER BY timestamp DESC LIMIT ?) ORDER BY timestamp ASC`
       : `SELECT * FROM chat_messages ${where} ORDER BY timestamp ASC`
@@ -491,22 +514,25 @@ class ChatManager {
     return this.addReplyCounts(messages)
   }
 
-  /**
-   * Add replyCount field to messages
-   */
   private addReplyCounts(messages: AgentMessage[]): AgentMessage[] {
     if (messages.length === 0) return messages
+
     const db = getDb()
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM chat_messages WHERE thread_id = ?')
-    return messages.map(msg => {
-      const row = stmt.get(msg.id) as { count: number }
-      return { ...msg, replyCount: row.count }
-    })
+    const ids = messages.map(m => m.id)
+
+    // Build `IN (?, ?, ...)` safely.
+    const placeholders = ids.map(() => '?').join(',')
+    const rows = db.prepare(`
+      SELECT thread_id as id, COUNT(*) as c
+      FROM chat_messages
+      WHERE thread_id IN (${placeholders})
+      GROUP BY thread_id
+    `).all(...ids) as Array<{ id: string; c: number }>
+
+    const map = new Map(rows.map(r => [r.id, r.c]))
+    return messages.map(m => ({ ...m, replyCount: map.get(m.id) ?? 0 }))
   }
 
-  /**
-   * Get all messages in a thread (parent + replies)
-   */
   getThread(messageId: string): AgentMessage[] | null {
     const db = getDb()
     const parentRow = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(messageId) as ChatMessageRow | undefined
@@ -534,9 +560,6 @@ class ChatManager {
     })
   }
 
-  /**
-   * Get all channels with message counts
-   */
   getChannels(): Array<{ channel: string; count: number; lastActivity: number }> {
     const db = getDb()
     const rows = db.prepare(`
@@ -558,63 +581,41 @@ class ChatManager {
       .sort((a, b) => b.lastActivity - a.lastActivity)
   }
 
-  /**
-   * Add reaction to a message
-   */
   async addReaction(messageId: string, emoji: string, from: string): Promise<AgentMessage | null> {
     const db = getDb()
     const row = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(messageId) as ChatMessageRow | undefined
     if (!row) return null
     const message = rowToMessage(row)
-    if (!message) {
-      return null
-    }
-    
+
     // Initialize reactions if needed
-    if (!message.reactions) {
-      message.reactions = {}
-    }
-    
-    // Add agent to reaction list (toggle off if already present)
-    if (!message.reactions[emoji]) {
-      message.reactions[emoji] = []
-    }
-    
+    if (!message.reactions) message.reactions = {}
+    if (!message.reactions[emoji]) message.reactions[emoji] = []
+
     const agents = message.reactions[emoji]
     const index = agents.indexOf(from)
-    
+
     if (index >= 0) {
-      // Remove reaction (toggle off)
       agents.splice(index, 1)
-      if (agents.length === 0) {
-        delete message.reactions[emoji]
-      }
+      if (agents.length === 0) delete message.reactions[emoji]
     } else {
-      // Add reaction
       agents.push(from)
     }
-    
-    // Persist updated message to SQLite + JSONL audit
+
     this.writeMessageToDb(message)
     await this.appendAuditRecord(message)
 
-    // Notify subscribers
     this.notifySubscribers(message)
-    
-    // Emit event
+
     eventBus.emit({
       id: `evt-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      type: 'message_posted', // Using existing event type for now
+      type: 'message_posted',
       timestamp: Date.now(),
       data: { ...message, reactionUpdate: true },
     })
-    
+
     return message
   }
 
-  /**
-   * Get reactions for a message
-   */
   getReactions(messageId: string): Record<string, string[]> | null {
     const db = getDb()
     const row = db.prepare('SELECT reactions FROM chat_messages WHERE id = ?').get(messageId) as { reactions: string | null } | undefined
@@ -624,9 +625,7 @@ class ChatManager {
 
   async editMessage(messageId: string, editor: string, content: string): Promise<{ ok: true; message: AgentMessage } | { ok: false; error: 'not_found' | 'forbidden' | 'invalid_content' }> {
     const trimmed = content.trim()
-    if (!trimmed) {
-      return { ok: false, error: 'invalid_content' }
-    }
+    if (!trimmed) return { ok: false, error: 'invalid_content' }
 
     const db = getDb()
     const row = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(messageId) as ChatMessageRow | undefined
@@ -648,6 +647,9 @@ class ChatManager {
 
     this.writeMessageToDb(message)
     await this.appendAuditRecord(message)
+
+    // No in-memory cache to update.
+
     this.notifySubscribers(message)
 
     eventBus.emit({
@@ -673,6 +675,7 @@ class ChatManager {
     }
 
     this.deleteMessageFromDb(messageId)
+
     await this.appendAuditRecord({
       id: messageId,
       from: actor,
@@ -695,13 +698,11 @@ class ChatManager {
     return { ok: true }
   }
 
-  /**
-   * Search messages by content
-   */
   search(query: string, options?: { limit?: number }): AgentMessage[] {
     const db = getDb()
     const likePattern = `%${query}%`
     const limit = options?.limit ?? 50
+
     const rows = db.prepare(`
       SELECT * FROM chat_messages
       WHERE content LIKE ? COLLATE NOCASE
@@ -718,10 +719,12 @@ class ChatManager {
   getStats() {
     const db = getDb()
     const totalRow = db.prepare('SELECT COUNT(*) as count FROM chat_messages').get() as { count: number } | undefined
+
     return {
       totalMessages: totalRow?.count ?? 0,
       rooms: this.rooms.size,
       subscribers: this.subscribers.size,
+      initialized: this.initialized,
     }
   }
 }
