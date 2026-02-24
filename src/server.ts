@@ -3718,10 +3718,13 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const decidedAt = Date.now()
-    const decisionLabel = body.decision === 'approve' ? 'approved' : 'rejected'
+    const isApprove = body.decision === 'approve'
+    const decisionLabel = isApprove ? 'approved' : 'rejected'
     const mergedMetadata = {
       ...(task.metadata || {}),
-      reviewer_approved: body.decision === 'approve',
+
+      // Reviewer decision (single canonical place)
+      reviewer_approved: isApprove,
       reviewer_decision: {
         decision: decisionLabel,
         reviewer: body.reviewer,
@@ -3729,6 +3732,13 @@ export async function createServer(): Promise<FastifyInstance> {
         decidedAt,
       },
       reviewer_notes: body.comment,
+
+      // Stamp actor so downstream gates can assert reviewer identity.
+      actor: body.reviewer,
+
+      // Keep review queue state coherent even when approving via /tasks/:id/review
+      review_state: isApprove ? 'approved' : 'needs_author',
+      review_last_activity_at: decidedAt,
     }
 
     const updated = await taskManager.updateTask(task.id, {
@@ -4722,7 +4732,7 @@ export async function createServer(): Promise<FastifyInstance> {
               success: false,
               error: `Task-close gate: reviewer sign-off required from "${existing.reviewer}"`,
               gate: 'reviewer_signoff',
-              hint: `Reviewer "${existing.reviewer}" must approve via: PATCH with metadata.reviewer_approved: true`,
+              hint: `Reviewer "${existing.reviewer}" must approve via: POST /tasks/:id/review (decision=approve) (or PATCH as reviewer with actor set).`, 
             }
           }
         }
