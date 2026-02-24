@@ -1970,6 +1970,159 @@ function setTaskModalInteractivity(enabled) {
   if (assigneeInput) assigneeInput.disabled = !enabled;
 }
 
+// --- Artifacts (task modal) ---
+let taskArtifactsPreviewCache = new Map(); // taskId -> Map(path -> artifact)
+
+function renderTaskArtifactsLoading() {
+  const el = document.getElementById('modal-task-artifacts');
+  if (!el) return;
+  el.innerHTML = '<div class="empty" style="color:var(--text-muted)">Loading artifacts…</div>';
+}
+
+function renderTaskArtifactsEmpty(message) {
+  const el = document.getElementById('modal-task-artifacts');
+  if (!el) return;
+  el.innerHTML = '<div class="empty" style="color:var(--text-muted)">' + esc(message || 'No artifacts attached') + '</div>';
+}
+
+function renderTaskArtifactsError(message) {
+  const el = document.getElementById('modal-task-artifacts');
+  if (!el) return;
+  el.innerHTML = '<div class="empty" style="color:var(--red)">' + esc(message || 'Failed to load artifacts') + '</div>';
+}
+
+async function fetchTaskArtifacts(taskId, includeMode) {
+  const qs = includeMode ? ('?include=' + encodeURIComponent(includeMode)) : '';
+  const url = BASE + '/tasks/' + encodeURIComponent(taskId) + '/artifacts' + qs;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error('HTTP ' + res.status);
+  }
+  return await res.json();
+}
+
+function renderArtifactRow(taskId, a, idx) {
+  const path = String(a.path || '');
+  const source = String(a.source || '');
+  const type = String(a.type || '');
+  const accessible = Boolean(a.accessible);
+
+  const pill = '<span class="artifact-pill ' + (accessible ? 'ok' : 'missing') + '">' + (accessible ? 'OK' : 'MISSING') + '</span>';
+
+  const metaParts = [];
+  if (type) metaParts.push(type);
+  if (source) metaParts.push(source);
+  if (!accessible && a.error) metaParts.push(String(a.error));
+
+  const previewElId = 'artifact-preview-' + idx;
+  const encTaskId = encodeURIComponent(taskId);
+  const encPath = encodeURIComponent(path);
+
+  let actions = '';
+  if (accessible) {
+    if (type === 'file' && path.startsWith('process/')) {
+      actions += '<button class="artifact-btn" onclick="toggleArtifactPreview(\'' + encTaskId + '\',\'' + encPath + '\',\'' + previewElId + '\')">Preview</button>';
+    }
+    if (type === 'url') {
+      const url = String(a.resolvedPath || a.path || '');
+      if (url) {
+        actions += '<a class="artifact-btn" href="' + esc(url) + '" target="_blank" rel="noreferrer noopener">Open ↗</a>';
+      }
+    }
+  }
+
+  const actionsHtml = actions ? '<div class="artifact-actions">' + actions + '</div>' : '';
+
+  const previewBox = '<pre id="' + esc(previewElId) + '" class="artifact-preview" style="display:none;margin-top:10px;white-space:pre-wrap;word-break:break-word;background:#0f141a;border:1px solid var(--border-subtle);border-radius:10px;padding:10px;font-size:12px;line-height:1.5"></pre>';
+
+  return '<div class="artifact-row">'
+    + '<div class="artifact-top">'
+    + '<div class="artifact-path">' + esc(path || '(missing path)') + '</div>'
+    + pill
+    + '</div>'
+    + '<div class="artifact-meta">' + esc(metaParts.filter(Boolean).join(' · ') || '—') + '</div>'
+    + actionsHtml
+    + previewBox
+    + '</div>';
+}
+
+async function loadTaskArtifacts(taskId) {
+  const el = document.getElementById('modal-task-artifacts');
+  if (!el) return;
+
+  if (!taskId) {
+    renderTaskArtifactsEmpty('Not available');
+    return;
+  }
+
+  renderTaskArtifactsLoading();
+  taskArtifactsPreviewCache.delete(taskId);
+
+  try {
+    const data = await fetchTaskArtifacts(taskId);
+    const artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
+
+    if (artifacts.length === 0) {
+      renderTaskArtifactsEmpty();
+      return;
+    }
+
+    el.innerHTML = artifacts.map((a, i) => renderArtifactRow(taskId, a, i)).join('');
+  } catch (err) {
+    renderTaskArtifactsError('Failed to load artifacts');
+  }
+}
+
+async function getPreviewMapForTask(taskId) {
+  if (taskArtifactsPreviewCache.has(taskId)) return taskArtifactsPreviewCache.get(taskId);
+
+  const data = await fetchTaskArtifacts(taskId, 'preview');
+  const artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
+  const m = new Map();
+  artifacts.forEach(a => {
+    if (a && a.path) m.set(String(a.path), a);
+  });
+  taskArtifactsPreviewCache.set(taskId, m);
+  return m;
+}
+
+async function toggleArtifactPreview(encTaskId, encPath, previewElId) {
+  const taskId = decodeURIComponent(encTaskId || '');
+  const path = decodeURIComponent(encPath || '');
+  const el = document.getElementById(previewElId);
+  if (!el) return;
+
+  // toggle
+  const isHidden = el.style.display === 'none' || !el.style.display;
+  if (!isHidden) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+
+  // already loaded
+  if (el.dataset.loaded === '1') return;
+
+  el.textContent = 'Loading preview…';
+
+  try {
+    const m = await getPreviewMapForTask(taskId);
+    const a = m.get(path);
+
+    if (!a || !a.preview) {
+      el.textContent = 'Preview not available (only process/* file artifacts are previewable).';
+      el.dataset.loaded = '1';
+      return;
+    }
+
+    const truncated = Boolean(a.previewTruncated);
+    el.textContent = String(a.preview) + (truncated ? '\n\n[truncated]' : '');
+    el.dataset.loaded = '1';
+  } catch (err) {
+    el.textContent = 'Failed to load preview';
+  }
+}
+
 function openTaskModal(taskId) {
   currentTask = allTasks.find(t => t.id === taskId);
 
@@ -1983,6 +2136,7 @@ function openTaskModal(taskId) {
     document.getElementById('modal-task-created').textContent = 'Not available';
     const blockerEl = document.getElementById('modal-task-blockers');
     if (blockerEl) blockerEl.textContent = 'Not available';
+    renderTaskArtifactsEmpty('Not available');
     document.querySelectorAll('.status-btn').forEach(btn => btn.classList.remove('active'));
     document.getElementById('task-modal').classList.add('show');
     return;
@@ -2027,6 +2181,9 @@ function openTaskModal(taskId) {
   });
 
   document.getElementById('task-modal').classList.add('show');
+
+  // Load artifacts section
+  loadTaskArtifacts(currentTask.id);
 
   // Load PR review quality panel
   loadPrReviewPanel(currentTask);
