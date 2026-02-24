@@ -6471,7 +6471,8 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/tasks/next', async (request) => {
     const query = request.query as Record<string, string>
     const agent = query.agent
-    const task = taskManager.getNextTask(agent)
+    const includeTest = query.include_test === '1' || query.include_test === 'true'
+    const task = taskManager.getNextTask(agent, { includeTest })
     if (!task) {
       return { task: null, message: 'No available tasks' }
     }
