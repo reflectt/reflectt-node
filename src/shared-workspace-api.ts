@@ -282,13 +282,16 @@ export async function resolveTaskArtifact(
     return { type: 'missing', accessible: false, source: null, resolvedPath: null }
   }
 
+  const trimmed = String(artifactPath).trim()
+  const normalizedPath = trimmed.startsWith('shared/') ? trimmed.slice('shared/'.length) : trimmed
+
   // Reject obviously unsafe paths early
-  if (isAbsolute(artifactPath) || artifactPath.includes('..')) {
+  if (isAbsolute(normalizedPath) || normalizedPath.includes('..') || normalizedPath.includes('\0')) {
     return { type: 'missing', accessible: false, source: null, resolvedPath: null }
   }
 
-  // Try workspace root first
-  const wsPath = resolve(workspaceRoot, artifactPath)
+  // Try workspace root first (repo-local)
+  const wsPath = resolve(workspaceRoot, normalizedPath)
   // Containment check for workspace root too
   const wsRel = relative(workspaceRoot, wsPath)
   if (!wsRel.startsWith('..') && !isAbsolute(wsRel)) {
@@ -307,32 +310,32 @@ export async function resolveTaskArtifact(
     }
   }
 
-  // Fallback to shared workspace — use realpath containment
-  const sharedRoot = SHARED_WORKSPACE()
-  let rootReal: string
-  try {
-    rootReal = await fs.realpath(sharedRoot)
-  } catch {
+  // Fallback to shared workspace — locked down (prefix + extension allowlist)
+  // V1 safety: only allow shared fallback for process/* artifacts.
+  if (!normalizedPath.startsWith('process/')) {
     return { type: 'missing', accessible: false, source: null, resolvedPath: null }
   }
 
-  const sharedPath = resolve(sharedRoot, artifactPath)
+  // Use the hardened shared-workspace validator (prefix allowlist + traversal + realpath containment).
   let sharedReal: string
   try {
-    sharedReal = await fs.realpath(sharedPath)
+    sharedReal = await validatePathWithRealpath(normalizedPath)
   } catch {
-    return { type: 'missing', accessible: false, source: null, resolvedPath: null }
-  }
-
-  // Containment via path.relative on real paths
-  const rel = relative(rootReal, sharedReal)
-  if (rel.startsWith('..') || isAbsolute(rel)) {
     return { type: 'missing', accessible: false, source: null, resolvedPath: null }
   }
 
   const sharedStat = await fs.stat(sharedReal).catch(() => null)
   if (sharedStat) {
     const type = sharedStat.isDirectory() ? 'directory' : 'file'
+
+    // For files, enforce extension allowlist before exposing as accessible.
+    if (type === 'file') {
+      const ext = extname(sharedReal).toLowerCase()
+      if (!ALLOWED_EXTENSIONS.has(ext)) {
+        return { type: 'missing', accessible: false, source: null, resolvedPath: null }
+      }
+    }
+
     let preview: string | undefined
     if (type === 'file' && sharedStat.size <= MAX_FILE_SIZE) {
       const ext = extname(sharedReal).toLowerCase()
@@ -341,6 +344,7 @@ export async function resolveTaskArtifact(
         preview = raw.slice(0, MAX_PREVIEW_CHARS)
       }
     }
+
     return { type, accessible: true, source: 'shared-workspace', resolvedPath: sharedReal, preview }
   }
 
