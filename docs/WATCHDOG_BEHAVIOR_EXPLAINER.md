@@ -99,6 +99,61 @@ Escalate only if:
 
 ---
 
+## Activity Signal (effective_activity_ts)
+
+**Added:** task-1771907836654-txobnxkmc
+
+All enforcement paths now use a canonical activity signal instead of raw `task.updatedAt`:
+
+```
+effective_activity_ts = max(
+  last_status_comment_at,    -- most recent task comment by assigned agent
+  last_state_transition_at,  -- most recent status change in task_history
+  task_created_at,           -- fallback for brand-new tasks
+)
+```
+
+### Why not updatedAt?
+
+`task.updatedAt` is bumped by any edit — metadata changes, reviewer assignment, tag updates.
+This causes false "not stale" readings (hiding real inactivity) and false "stale" readings
+(when a non-activity edit is old).
+
+### Source tracking
+
+Every enforcement warning now includes the signal source and threshold:
+
+```
+⚠️ [Product Enforcement] @link, task task-123 ("Fix auth") —
+last activity: 95m ago (status comment at 2025-07-05 14:23 UTC), threshold: 90m.
+Post a status comment within 30m or the task will auto-requeue to todo.
+```
+
+### Monotonic guard
+
+The signal uses `max()` across all sources. Older signals cannot overwrite newer ones.
+This prevents a scenario where a state transition from hours ago regresses a recent comment timestamp.
+
+### Affected paths
+
+| Path | File | Before | After |
+|------|------|--------|-------|
+| Board health (stale doing) | `boardHealthWorker.ts` | `max(updatedAt, latestComment)` | `getEffectiveActivity()` |
+| Working contract (auto-requeue) | `working-contract.ts` | `getLastActivityForAgent()` or `updatedAt` | `getEffectiveActivity(taskId, agent)` |
+| Idle nudge (stale lane) | `idleNudgeLane.ts` | raw `updatedAt` | `effectiveActivityTs` field (when populated) |
+
+### Debug
+
+```bash
+# Check a task's activity signal
+curl -s http://localhost:4445/tasks/<taskId> | jq '.task.metadata'
+# Or from the DB:
+# SELECT MAX(timestamp) FROM task_comments WHERE task_id = ? AND author = ?
+# SELECT MAX(timestamp) FROM task_history WHERE task_id = ?
+```
+
+---
+
 ## Verification checklist
 
 - [ ] All three watchdog paths are documented

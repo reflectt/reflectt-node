@@ -17,6 +17,7 @@ import { chatManager } from './chat.js'
 import { routeMessage } from './messageRouter.js'
 import { validateTaskTimestamp, verifyTaskExists } from './health.js'
 import { policyManager } from './policy.js'
+import { getEffectiveActivity } from './activity-signal.js'
 import type { Task } from './types.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -732,13 +733,9 @@ export class BoardHealthWorker {
   // ── Helpers ───────────────────────────────────────────────────────────
 
   private getTaskLastActivityAt(task: Task): number {
-    const updatedAt = typeof task.updatedAt === 'number' ? task.updatedAt : 0
-    const comments = taskManager.getTaskComments(task.id)
-    const latestCommentAt = comments.reduce((max, c) => {
-      const ts = typeof c.timestamp === 'number' ? c.timestamp : 0
-      return Math.max(max, ts)
-    }, 0)
-    return Math.max(updatedAt, latestCommentAt)
+    // getEffectiveActivity() has internal DB-availability guards + createdAt fallback
+    const signal = getEffectiveActivity(task.id, task.assignee, task.createdAt)
+    return signal.effectiveActivityTs
   }
 
   private isQuietHours(now: number): boolean {

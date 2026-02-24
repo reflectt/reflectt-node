@@ -13,6 +13,7 @@ import { taskManager } from './tasks.js'
 import { policyManager } from './policy.js'
 import { routeMessage } from './messageRouter.js'
 import { countReflections } from './reflections.js'
+import { getEffectiveActivity, formatActivityWarning, type ActivitySignal } from './activity-signal.js'
 
 // ── Types ──
 
@@ -79,10 +80,9 @@ export async function tickWorkingContract(): Promise<TickResult> {
     if (config.agents.length > 0 && !config.agents.includes(agent)) continue
     if (isExcludedAgent(agent)) continue
 
-    // Find last activity: task comment from this agent
-    const lastActivityAt = getLastActivityForAgent(task.id, agent)
-    const taskStartedAt = task.updatedAt || task.createdAt || now
-    const effectiveLastAt = lastActivityAt || taskStartedAt
+    // Use canonical activity signal (comments + state transitions, not updatedAt)
+    const activitySignal = getEffectiveActivity(task.id, agent, task.createdAt || now)
+    const effectiveLastAt = activitySignal.effectiveActivityTs
     const staleDurationMs = now - effectiveLastAt
 
     if (staleDurationMs < staleThresholdMs) continue
@@ -93,12 +93,13 @@ export async function tickWorkingContract(): Promise<TickResult> {
     if (!warnedAt) {
       // Phase 1: Issue warning
       warningTimestamps.set(warningKey, now)
+      const signalInfo = formatActivityWarning(activitySignal, config.staleAutoRequeueMin, now)
       const action: EnforcementAction = {
         type: 'warning',
         agent,
         taskId: task.id,
         taskTitle: task.title,
-        reason: `No status update in ${Math.floor(staleDurationMs / 60_000)}m. Task will auto-requeue in ${config.graceAfterWarningMin}m if no update.`,
+        reason: `Stale: ${signalInfo}. Task will auto-requeue in ${config.graceAfterWarningMin}m if no update.`,
         timestamp: now,
         dryRun: config.dryRun,
       }
@@ -108,7 +109,7 @@ export async function tickWorkingContract(): Promise<TickResult> {
       if (!config.dryRun) {
         await routeMessage({
           from: 'system',
-          content: `⚠️ [Product Enforcement] @${agent}, task ${task.id} ("${task.title.slice(0, 60)}") has no status update in ${Math.floor(staleDurationMs / 60_000)}m. **Post a status comment within ${config.graceAfterWarningMin}m or the task will auto-requeue to todo.** (This is automated — no leadership action needed.)`,
+          content: `⚠️ [Product Enforcement] @${agent}, task ${task.id} ("${task.title.slice(0, 60)}") — ${signalInfo}. **Post a status comment within ${config.graceAfterWarningMin}m or the task will auto-requeue to todo.** (This is automated — no leadership action needed.)`,
           category: 'watchdog-alert',
           severity: 'warning',
           forceChannel: config.channel,
