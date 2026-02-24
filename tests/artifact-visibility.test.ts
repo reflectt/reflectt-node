@@ -80,7 +80,7 @@ describe('GET /tasks/:id/artifacts', () => {
     const res = await fetch(`${BASE}/tasks/${id}/artifacts`)
     const data = await res.json() as any
     expect(data.artifactCount).toBeGreaterThanOrEqual(1)
-    const artRef = data.artifacts.find((a: any) => a.source === 'metadata.artifact_path')
+    const artRef = data.artifacts.find((a: any) => a.path === 'process/test-artifact.md')
     expect(artRef).toBeDefined()
     expect(artRef.type).toBe('file')
     expect(artRef.path).toBe('process/test-artifact.md')

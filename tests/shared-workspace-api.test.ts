@@ -25,6 +25,7 @@ beforeAll(async () => {
   await fs.mkdir(processDir, { recursive: true })
 
   // Create test files
+  await fs.writeFile(join(testRoot, 'root.md'), '# Root\nThis should NOT be accessible via shared fallback.\n')
   await fs.writeFile(join(processDir, 'task-abc-proof.md'), '# Proof\nThis is a proof artifact.\n')
   await fs.writeFile(join(processDir, 'task-abc-qa.json'), '{"passed": true}')
   await fs.writeFile(join(processDir, 'task-abc-notes.txt'), 'Some plain text notes')
@@ -348,6 +349,18 @@ describe('resolveTaskArtifact', () => {
   it('falls back to shared workspace when not in workspace root', async () => {
     // task-abc-proof.md exists in shared workspace but not in wsRoot
     const result = await resolveTaskArtifact('process/task-abc-proof.md', wsRoot)
+    expect(result.accessible).toBe(true)
+    expect(result.source).toBe('shared-workspace')
+  })
+
+  it('does not allow shared fallback outside process/', async () => {
+    const result = await resolveTaskArtifact('root.md', wsRoot)
+    expect(result.accessible).toBe(false)
+    expect(result.type).toBe('missing')
+  })
+
+  it('normalizes shared/ prefix for shared fallback', async () => {
+    const result = await resolveTaskArtifact('shared/process/task-abc-proof.md', wsRoot)
     expect(result.accessible).toBe(true)
     expect(result.source).toBe('shared-workspace')
   })

@@ -3287,7 +3287,7 @@ export async function createServer(): Promise<FastifyInstance> {
           }
           return result
         }
-        return { ...ref, type: 'file' as const, accessible: false, source: null, error: 'File not found (checked workspace + shared-workspace)' }
+        return { ...ref, type: 'file' as const, accessible: false, error: 'File not found (checked workspace + shared-workspace)' }
       })
     )
 
