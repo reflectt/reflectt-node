@@ -238,21 +238,9 @@ export function sweepValidatingQueue(): SweepResult {
     // If metadata says merged, skip
     if (prMerged) continue
 
-    // Live-check the PR state — orphan alerts ONLY fire for confirmed OPEN PRs.
-    // Fail-closed: if live state is unknown (gh auth failure, network error),
-    // we log degraded-check but do NOT emit an alert.
-    if (taskDone) {
-      const liveResult = checkLivePrState(prUrl)
-      if (liveResult.state === 'merged' || liveResult.state === 'closed') {
-        logDryRun('orphan_pr_skipped', `${prUrl} on ${task.id} — live state: ${liveResult.state}`)
-        continue
-      }
-      if (liveResult.state === 'unknown') {
-        logDryRun('orphan_pr_degraded_check', `${prUrl} on ${task.id} — live state unknown (gh check failed), suppressing alert`)
-        continue
-      }
-      // At this point, liveResult.state === 'open' — proceed to alert check
-    }
+    // Skip live PR checks during periodic sweep — execSync blocks the event loop.
+    // Orphan PR detection relies on metadata flags only; live checks available via /drift-report.
+    if (prMerged || reviewerApproved) continue
 
     const completedAge = now - task.updatedAt
     if (completedAge >= ORPHAN_PR_THRESHOLD_MS) {
@@ -521,9 +509,8 @@ export function generateDriftReport(): DriftReport {
     })
     if (anyMergedMeta) continue
 
-    // Live check: if PR is actually merged/closed on GitHub, skip
-    const liveResult = checkLivePrState(prUrl)
-    if (liveResult.state === 'merged' || liveResult.state === 'closed') continue
+    // NOTE: Live PR checks removed from periodic sweep — execSync blocks event loop.
+    // Rely on metadata flags; use /drift-report for on-demand live checks.
 
     const oldestDone = driftAll.find(t => t.id === doneTasks[0].taskId)
     orphanEntries.push({
