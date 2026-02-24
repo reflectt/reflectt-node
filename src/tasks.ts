@@ -171,8 +171,7 @@ class TaskManager {
   private tasks = new Map<string, Task>()
   private subscribers = new Set<(task: Task, action: 'created' | 'updated' | 'deleted') => void>()
   private recurringTasks = new Map<string, RecurringTask>()
-  private taskHistory = new Map<string, TaskHistoryEvent[]>()
-  private taskComments = new Map<string, TaskComment[]>()
+  // taskHistory and taskComments are queried from SQLite on demand — no in-memory cache
   private initialized = false
   private recurringInitialized = false
   private recurringTicker: NodeJS.Timeout
@@ -220,8 +219,8 @@ class TaskManager {
 
   constructor() {
     this.loadTasks()
-      .then(() => this.loadTaskHistory())
-      .then(() => this.loadTaskComments())
+      .then(() => this.importLegacyHistory())
+      .then(() => this.importLegacyComments())
       .then(() => this.loadRecurringTasks())
       .then(() => this.materializeDueRecurringTasks())
       .catch(err => {
@@ -389,92 +388,33 @@ class TaskManager {
     }
   }
 
-  private async loadTaskHistory(): Promise<void> {
+  /** One-time JSONL → SQLite import for task history (no in-memory loading) */
+  private async importLegacyHistory(): Promise<void> {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
-
       const db = getDb()
-
-      // Import JSONL → SQLite if needed
       importJsonlIfNeeded(db, TASK_HISTORY_FILE, 'task_history', importTaskHistory)
-
-      // Load from SQLite into in-memory Map
-      const rows = db.prepare('SELECT * FROM task_history ORDER BY timestamp ASC').all() as Array<{
-        id: string
-        task_id: string
-        type: TaskHistoryEvent['type']
-        actor: string
-        timestamp: number
-        data: string | null
-      }>
-
-      for (const row of rows) {
-        const event: TaskHistoryEvent = {
-          id: row.id,
-          taskId: row.task_id,
-          type: row.type,
-          actor: row.actor,
-          timestamp: row.timestamp,
-          data: safeJsonParse<Record<string, unknown>>(row.data),
-        }
-
-        const existing = this.taskHistory.get(event.taskId) || []
-        existing.push(event)
-        this.taskHistory.set(event.taskId, existing)
-      }
-
-      const loadedCount = Array.from(this.taskHistory.values()).reduce((sum, events) => sum + events.length, 0)
-      console.log(`[Tasks] Loaded ${loadedCount} task history events from SQLite`)
+      const countRow = db.prepare('SELECT COUNT(*) as count FROM task_history').get() as { count: number }
+      console.log(`[Tasks] SQLite has ${countRow.count} task history events (queried on demand)`)
     } catch (err) {
-      console.error('[Tasks] Failed to load task history:', err)
+      console.error('[Tasks] Failed to import task history:', err)
     }
   }
 
-  private async loadTaskComments(): Promise<void> {
+  /** One-time JSONL → SQLite import for task comments (no in-memory loading) */
+  private async importLegacyComments(): Promise<void> {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
-
       const db = getDb()
-
-      // Import JSONL → SQLite if needed
       importJsonlIfNeeded(db, TASK_COMMENTS_FILE, 'task_comments', importTaskComments)
-
-      // Load from SQLite into in-memory Map
-      const rows = db.prepare('SELECT * FROM task_comments ORDER BY timestamp ASC').all() as Array<{
-        id: string
-        task_id: string
-        author: string
-        content: string
-        timestamp: number
-      }>
-
-      for (const row of rows) {
-        const comment: TaskComment = {
-          id: row.id,
-          taskId: row.task_id,
-          author: row.author,
-          content: row.content,
-          timestamp: row.timestamp,
-        }
-
-        const existing = this.taskComments.get(comment.taskId) || []
-        existing.push(comment)
-        this.taskComments.set(comment.taskId, existing)
-      }
-
-      const loadedCount = Array.from(this.taskComments.values()).reduce((sum, comments) => sum + comments.length, 0)
-      console.log(`[Tasks] Loaded ${loadedCount} task comments from SQLite`)
+      const countRow = db.prepare('SELECT COUNT(*) as count FROM task_comments').get() as { count: number }
+      console.log(`[Tasks] SQLite has ${countRow.count} task comments (queried on demand)`)
     } catch (err) {
-      console.error('[Tasks] Failed to load task comments:', err)
+      console.error('[Tasks] Failed to import task comments:', err)
     }
   }
 
   private async appendTaskHistory(event: TaskHistoryEvent): Promise<void> {
-    const existing = this.taskHistory.get(event.taskId) || []
-    existing.push(event)
-    existing.sort((a, b) => a.timestamp - b.timestamp)
-    this.taskHistory.set(event.taskId, existing)
-
     try {
       const db = getDb()
 
@@ -519,11 +459,6 @@ class TaskManager {
   }
 
   private async appendTaskComment(comment: TaskComment): Promise<void> {
-    const existing = this.taskComments.get(comment.taskId) || []
-    existing.push(comment)
-    existing.sort((a, b) => a.timestamp - b.timestamp)
-    this.taskComments.set(comment.taskId, existing)
-
     try {
       const db = getDb()
 
@@ -730,7 +665,7 @@ class TaskManager {
 
       const upsertAll = db.transaction(() => {
         for (const task of this.tasks.values()) {
-          const commentCount = (this.taskComments.get(task.id) || []).length
+          const commentCount = this.getTaskCommentCount(task.id)
           upsert.run(
             task.id,
             task.title,
@@ -997,17 +932,38 @@ class TaskManager {
   }
 
   getTaskHistory(id: string): TaskHistoryEvent[] {
-    const events = this.taskHistory.get(id) || []
-    return [...events].sort((a, b) => a.timestamp - b.timestamp)
+    const db = getDb()
+    const rows = db.prepare(
+      'SELECT * FROM task_history WHERE task_id = ? ORDER BY timestamp ASC'
+    ).all(id) as Array<{ id: string; task_id: string; type: TaskHistoryEvent['type']; actor: string; timestamp: number; data: string | null }>
+    return rows.map(row => ({
+      id: row.id,
+      taskId: row.task_id,
+      type: row.type,
+      actor: row.actor,
+      timestamp: row.timestamp,
+      data: safeJsonParse<Record<string, unknown>>(row.data),
+    }))
   }
 
   getTaskComments(id: string): TaskComment[] {
-    const comments = this.taskComments.get(id) || []
-    return [...comments].sort((a, b) => a.timestamp - b.timestamp)
+    const db = getDb()
+    const rows = db.prepare(
+      'SELECT * FROM task_comments WHERE task_id = ? ORDER BY timestamp ASC'
+    ).all(id) as Array<{ id: string; task_id: string; author: string; content: string; timestamp: number }>
+    return rows.map(row => ({
+      id: row.id,
+      taskId: row.task_id,
+      author: row.author,
+      content: row.content,
+      timestamp: row.timestamp,
+    }))
   }
 
   getTaskCommentCount(id: string): number {
-    return this.taskComments.get(id)?.length || 0
+    const db = getDb()
+    const row = db.prepare('SELECT COUNT(*) as count FROM task_comments WHERE task_id = ?').get(id) as { count: number }
+    return row.count
   }
 
   async addTaskComment(taskId: string, author: string, content: string): Promise<TaskComment> {
@@ -1353,9 +1309,6 @@ class TaskManager {
     } catch (err) {
       console.error(`[Tasks] SQLite delete failed for ${id}:`, err)
     }
-
-    // Also clean up in-memory comments
-    this.taskComments.delete(id)
 
     await this.syncTaskDeleteToCloud(id)
     this.notifySubscribers(task, 'deleted')
