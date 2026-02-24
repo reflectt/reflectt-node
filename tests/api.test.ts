@@ -4345,6 +4345,75 @@ describe('Test harness task filtering on /tasks/next', () => {
     expect(body.task).toBeDefined()
     expect(body.task.id).toBe(created.task.id)
   })
+
+  it('excludes test-harness tasks from /tasks list by default (unless include_test=1)', async () => {
+    const agent = `filter-list-agent-${Date.now()}`
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'Harness list filter task',
+      createdBy: 'test-runner',
+      assignee: agent,
+      reviewer: 'test-reviewer',
+      done_criteria: ['Filtered from /tasks list by default'],
+      eta: '30m',
+      priority: 'P2',
+      status: 'todo',
+      metadata: {
+        source_reflection: 'ref-test-list-filter',
+        source_insight: 'ins-test-list-filter',
+      },
+    })
+    testTaskIds.push(created.task.id)
+
+    const { status: s1, body: b1 } = await req('GET', `/tasks?assignee=${agent}&status=todo`)
+    expect(s1).toBe(200)
+    expect((b1.tasks || []).some((t: any) => t.id === created.task.id)).toBe(false)
+
+    const { status: s2, body: b2 } = await req('GET', `/tasks?assignee=${agent}&status=todo&include_test=1`)
+    expect(s2).toBe(200)
+    expect((b2.tasks || []).some((t: any) => t.id === created.task.id)).toBe(true)
+  })
+
+  it('excludes test-harness tasks from /tasks/board-health counts', async () => {
+    const agent = `filter-board-health-agent-${Date.now()}`
+
+    const { body: realTask } = await req('POST', '/tasks', {
+      title: 'Real backlog task',
+      createdBy: 'test-runner',
+      assignee: agent,
+      reviewer: 'test-reviewer',
+      done_criteria: ['Counts in board health'],
+      eta: '30m',
+      priority: 'P2',
+      status: 'todo',
+      metadata: {
+        reflection_exempt: true,
+        reflection_exempt_reason: 'test: board-health counts',
+      },
+    })
+    testTaskIds.push(realTask.task.id)
+
+    const { body: testTask } = await req('POST', '/tasks', {
+      title: 'Harness board-health noise task',
+      createdBy: 'test-runner',
+      assignee: agent,
+      reviewer: 'test-reviewer',
+      done_criteria: ['Should NOT count in board health'],
+      eta: '30m',
+      priority: 'P2',
+      status: 'todo',
+      metadata: {
+        source_reflection: 'ref-test-board-health',
+        source_insight: 'ins-test-board-health',
+      },
+    })
+    testTaskIds.push(testTask.task.id)
+
+    const { status, body } = await req('GET', '/tasks/board-health')
+    expect(status).toBe(200)
+    const agentRow = (body.agents || []).find((a: any) => a.agent === agent)
+    expect(agentRow).toBeDefined()
+    expect(agentRow.todo).toBe(1) // only the real task
+  })
 })
 
 // ── Shared Workspace Read API (HTTP) ─────────────────────
