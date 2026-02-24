@@ -1943,11 +1943,43 @@ describe('Chat Messages', () => {
       channel: 'general',
     })
 
-  it('POST /chat/messages warns on autonomy anti-pattern: 'whats next' variants', async () => {
+  it('POST /chat/messages does not warn on autonomy pattern: PR approval request', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'hey @ryan can you approve + merge PR #123?',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.autonomy_warnings).toBeUndefined()
+  })
+
+  it('POST /chat/messages does not warn on autonomy pattern: logistics ask', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: 'hey @ryan do you want me to send you the link?',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.autonomy_warnings).toBeUndefined()
+  })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(Array.isArray(body.autonomy_warnings)).toBe(true)
+    expect(body.autonomy_warnings[0]).toContain('Autonomy guardrail')
+  })
+
+  it("POST /chat/messages warns on autonomy anti-pattern: whats next variants", async () => {
     const variants = [
       'hey @ryan whats next for me?',
-      'hey @ryan what's next for me?',
+      "hey @ryan what's next for me?",
       'hey @ryan what do I do next?',
+      'hey @ryan what should I work on next?',
+      'hey @ryan should I work on the router bug next?',
     ]
 
     for (const content of variants) {
@@ -1964,11 +1996,30 @@ describe('Chat Messages', () => {
     }
   })
 
+  it('POST /chat/messages does not warn on normal approve/merge request to Ryan', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: '@ryan can you approve/merge PR #287 when you have a sec?',
+      channel: 'general',
+    })
+
     expect(status).toBe(200)
     expect(body.success).toBe(true)
-    expect(Array.isArray(body.autonomy_warnings)).toBe(true)
-    expect(body.autonomy_warnings[0]).toContain('Autonomy guardrail')
+    expect(body.autonomy_warnings).toBeUndefined()
   })
+
+  it('POST /chat/messages does not warn on logistics ask to Ryan (not task-selection)', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'test-runner',
+      content: '@ryan do you want me to send you the link?',
+      channel: 'general',
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.autonomy_warnings).toBeUndefined()
+  })
+
 })
 
 // Clean up all tasks for a given agent to prevent cross-test pollution.
