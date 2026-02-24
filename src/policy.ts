@@ -166,7 +166,8 @@ export const DEFAULT_POLICY: PolicyConfig = {
   },
   cadenceWatchdog: {
     enabled: true,
-    silenceMin: 60,
+    // Fire before the common “manual 60m cadence reset” pattern so the product enforces first.
+    silenceMin: 55,
     workingStaleMin: 45,
     workingTaskMaxAgeMin: 240,
     alertCooldownMin: 30,
