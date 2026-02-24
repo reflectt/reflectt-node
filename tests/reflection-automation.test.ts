@@ -11,6 +11,8 @@ import {
 } from '../src/reflection-automation.js'
 import { createReflection, _clearReflectionStore, validateReflection } from '../src/reflections.js'
 import { taskManager } from '../src/tasks.js'
+import { getDb } from '../src/db.js'
+import { policyManager } from '../src/policy.js'
 import type { Task } from '../src/types.js'
 
 // ── Helpers ──
@@ -192,6 +194,48 @@ describe('tickReflectionNudges', () => {
     const result = await tickReflectionNudges()
     // Should skip because agent already reflected
     expect(result.postTaskNudges).toBe(0)
+  })
+
+  it('should nudge tracked agents even when they have no active tasks', async () => {
+    ensureReflectionTrackingTable()
+
+    // Failure mode we are guarding against:
+    // - policy allowlist is empty (auto-discovery)
+    // - there are no active tasks
+    // - agent exists only in reflection_tracking
+    // Expected: tracked agent is still eligible and gets nudged when overdue.
+
+    // Force no active tasks by stubbing listTasks (avoids DB-wide deletes).
+    const originalListTasks = (taskManager as any).listTasks
+    ;(taskManager as any).listTasks = () => []
+
+    const prev = (policyManager.get() as any).reflectionNudge
+    policyManager.patch({
+      reflectionNudge: {
+        ...prev,
+        enabled: true,
+        agents: [],
+        idleReflectionHours: 1,
+        cooldownMin: 0,
+      },
+    })
+
+    try {
+      // Create tracking row without creating any active tasks.
+      onReflectionSubmitted('tracked-idle')
+
+      // Backdate last reflection to be overdue.
+      const db = getDb()
+      const past = Date.now() - 2 * 60 * 60 * 1000
+      db.prepare('UPDATE reflection_tracking SET last_reflection_at = ?, updated_at = ? WHERE agent = ?')
+        .run(past, past, 'tracked-idle')
+
+      const result = await tickReflectionNudges()
+      expect(result.idleNudges).toBe(1)
+    } finally {
+      ;(taskManager as any).listTasks = originalListTasks
+      policyManager.patch({ reflectionNudge: prev })
+    }
   })
 })
 
