@@ -26,6 +26,7 @@ import { presenceManager } from './presence.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
 import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog } from './prAutoMerge.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
+import { listSharedFiles, readSharedFile, resolveTaskArtifact, validatePath, ALLOWED_EXTENSIONS } from './shared-workspace-api.js'
 import {
   emitActivationEvent,
   getUserFunnelState,
@@ -3218,6 +3219,9 @@ export async function createServer(): Promise<FastifyInstance> {
     const resolved = resolveTaskFromParam(request.params.id, reply)
     if (!resolved) return
 
+    const query = request.query as Record<string, string>
+    const includeMode = query.include as 'content' | 'preview' | undefined
+
     const task = resolved.task
     const meta = (task.metadata || {}) as Record<string, any>
 
@@ -3255,25 +3259,34 @@ export async function createServer(): Promise<FastifyInstance> {
         if (urlMatch) {
           return { ...ref, type: 'url' as const, accessible: true, resolvedPath: urlMatch[0] }
         }
-        // Repo-relative path
-        const fullPath = resolve(repoRoot, ref.path)
-        // Security: ensure resolved path stays inside repo
-        if (!fullPath.startsWith(repoRoot + sep)) {
-          return { ...ref, type: 'file' as const, accessible: false, error: 'Path escapes repo root' }
-        }
-        try {
-          const stat = await fs.stat(fullPath)
-          return {
+        // Repo-relative path: try repo root first, then shared-workspace fallback
+        const resolved = await resolveTaskArtifact(ref.path, repoRoot)
+        if (resolved.accessible) {
+          const result: Record<string, unknown> = {
             ...ref,
-            type: 'file' as const,
+            type: resolved.type as 'file' | 'directory',
             accessible: true,
-            resolvedPath: fullPath,
-            size: stat.size,
-            modified: stat.mtime.toISOString(),
+            source: resolved.source,
+            resolvedPath: resolved.resolvedPath,
           }
-        } catch {
-          return { ...ref, type: 'file' as const, accessible: false, error: 'File not found' }
+          // Optionally include content/preview
+          if (includeMode === 'preview' && resolved.preview) {
+            result.preview = resolved.preview
+            result.previewTruncated = true
+          } else if (includeMode === 'content' && resolved.preview) {
+            // For full content, re-read the file (resolveTaskArtifact returns preview-length)
+            try {
+              const fullContent = await fs.readFile(resolved.resolvedPath!, 'utf-8')
+              result.content = fullContent.slice(0, 400_000) // 400KB cap
+              result.contentTruncated = fullContent.length > 400_000
+            } catch {
+              result.content = resolved.preview
+              result.contentTruncated = true
+            }
+          }
+          return result
         }
+        return { ...ref, type: 'file' as const, accessible: false, source: null, error: 'File not found (checked workspace + shared-workspace)' }
       })
     )
 
@@ -3386,6 +3399,64 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.code(404)
       return { error: 'File not found', path: rawPath }
     }
+  })
+
+  // ── Shared Workspace Read API ──────────────────────────────────────
+  // Read-only access to shared artifacts (process/ under ~/.openclaw/workspace-shared).
+  // Security: path validation, traversal protection, extension + size limits.
+
+  app.get('/shared/list', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const path = query.path || 'process/'
+    const limit = Math.min(Math.max(1, parseInt(query.limit || '200', 10) || 200), 500)
+    const result = await listSharedFiles(path, limit)
+    if (!result.success) {
+      reply.code(result.error?.includes('not allowed') || result.error?.includes('not found') ? 400 : 500)
+    }
+    return result
+  })
+
+  app.get('/shared/read', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const path = query.path
+    if (!path) {
+      reply.code(400)
+      return { success: false, error: 'path query parameter is required' }
+    }
+    const preview = query.include === 'preview'
+    const maxChars = parseInt(query.maxChars || '2000', 10) || 2000
+    const result = await readSharedFile(path, { preview, maxChars })
+    if (!result.success) {
+      reply.code(result.error?.includes('not allowed') || result.error?.includes('not found') ? 400 : 404)
+    }
+    return result
+  })
+
+  app.get('/shared/view', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const path = query.path
+    if (!path) {
+      reply.code(400)
+      return { error: 'path query parameter is required', hint: 'GET /shared/view?path=process/...' }
+    }
+    const result = await readSharedFile(path)
+    if (!result.success || !result.file) {
+      reply.code(404)
+      return { error: result.error || 'File not found' }
+    }
+    const escapeHtml = (s: string) => s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+    const title = path.split('/').pop() || path
+    reply.type('text/html; charset=utf-8').send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${escapeHtml(title)} — shared artifact</title>
+<style>:root{--bg:#0a0e14;--surface:#141920;--border:#252d38;--text:#d4dae3;--muted:#6b7a8d;--accent:#4da6ff}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}header{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:space-between}a{color:var(--accent);text-decoration:none}main{padding:18px}pre{white-space:pre-wrap;background:#0f141a;border:1px solid var(--border);border-radius:10px;padding:14px;line-height:1.55;font-size:12px}code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}</style>
+</head><body>
+<header><div><b>Shared Artifact</b><div style="font-size:12px;color:var(--muted)">${escapeHtml(path)}</div></div><div><a href="/dashboard">← dashboard</a></div></header>
+<main><pre><code>${escapeHtml(result.file.content)}</code></pre></main>
+</body></html>`)
   })
 
   // Task heartbeat status — all doing tasks with stale comment activity
