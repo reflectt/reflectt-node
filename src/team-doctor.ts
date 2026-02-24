@@ -2,6 +2,9 @@
 // Team Doctor — diagnostic checks for onboarding and ongoing health.
 
 import { getDb } from './db.js'
+import { DATA_DIR } from './config.js'
+import { readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 
 export type CheckStatus = 'pass' | 'fail' | 'warn'
 
@@ -86,22 +89,45 @@ function checkAgentsPresent(): DoctorCheck {
   try {
     const db = getDb()
 
-    // Check if any agents have posted messages (proxy for "agents exist")
+    // Check if any agents have posted messages (proxy for "agents are active")
     const row = db.prepare('SELECT COUNT(DISTINCT "from") as count FROM chat_messages').get() as { count: number } | undefined
-    const agentCount = row?.count ?? 0
+    const chatAgentCount = row?.count ?? 0
+
+    // Also check filesystem for agent dirs (avoids bootstrap paradox:
+    // agents created by starter team won't have chat messages yet)
+    let dirAgentCount = 0
+    try {
+      const agentsDir = join(DATA_DIR, 'agents')
+      const entries = readdirSync(agentsDir)
+      dirAgentCount = entries.filter(name => {
+        try {
+          return statSync(join(agentsDir, name)).isDirectory()
+        } catch { return false }
+      }).length
+    } catch {
+      // agents dir may not exist yet — that's fine
+    }
+
+    const agentCount = Math.max(chatAgentCount, dirAgentCount)
+    const source = chatAgentCount >= dirAgentCount ? 'chat history' : 'agent directories'
 
     if (agentCount >= 2) {
-      return { name: 'agents_present', status: 'pass', message: `${agentCount} agents detected in chat history` }
+      return { name: 'agents_present', status: 'pass', message: `${agentCount} agents detected (via ${source})` }
     }
 
     if (agentCount === 1) {
-      return { name: 'agents_present', status: 'warn', message: 'Only 1 agent detected — teams work best with 2+', fix: 'Add another agent workspace or use the starter team template' }
+      return {
+        name: 'agents_present',
+        status: 'warn',
+        message: `Only 1 agent detected (via ${source}) — teams work best with 2+`,
+        fix: 'Add another agent workspace or use the starter team template',
+      }
     }
 
     return {
       name: 'agents_present',
       status: 'fail',
-      message: 'No agents detected in chat history',
+      message: 'No agents detected (checked chat history + agent directories)',
       fix: 'Run the starter team template to create default agents, or manually create agent workspaces',
     }
   } catch {
