@@ -17,10 +17,8 @@ import type Database from 'better-sqlite3'
 const MESSAGES_FILE = join(DATA_DIR, 'messages.jsonl')
 const LEGACY_MESSAGES_FILE = join(LEGACY_DATA_DIR, 'messages.jsonl')
 
-// Mitigation: do not load entire chat history into memory.
-// Keep a bounded cache for real-time subscriptions + quick UI reads.
-const DEFAULT_CACHE_WINDOW_MS = 24 * 60 * 60 * 1000
-const DEFAULT_MAX_CACHED_MESSAGES = 5_000
+// All reads go directly to SQLite — no in-memory message cache.
+// JSONL file is kept as an append-only audit trail.
 
 function importMessages(db: Database.Database, records: unknown[]): number {
   const byId = new Map<string, AgentMessage>()
@@ -115,7 +113,6 @@ class ChatManager {
   private initialized = false
 
   constructor() {
-
     // OpenClaw listener disabled for now — chat works standalone
     // TODO: re-enable when OpenClaw connection is configured
     // openclawClient.on('message', ...)
@@ -125,19 +122,16 @@ class ChatManager {
       this.createRoom(channel.id, channel.name)
     }
 
-    // Load persisted messages (bounded)
-    this.loadMessages().catch(err => {
-      console.error('[Chat] Failed to load messages:', err)
+    // Run one-time JSONL → SQLite migration
+    this.migrateJsonl().catch(err => {
+      console.error('[Chat] Failed to migrate JSONL:', err)
     })
   }
 
-  private async loadMessages(): Promise<void> {
+  private async migrateJsonl(): Promise<void> {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
-
       const db = getDb()
-
-      // One-time JSONL -> SQLite import (current + legacy paths)
       importJsonlIfNeeded(db, MESSAGES_FILE, 'chat_messages', importMessages)
       importJsonlIfNeeded(db, LEGACY_MESSAGES_FILE, 'chat_messages', importMessages)
 
@@ -148,8 +142,6 @@ class ChatManager {
       this.initialized = true
     }
   }
-
-  // No in-memory cache; all reads come from SQLite.
 
   private writeMessageToDb(message: AgentMessage): void {
     const db = getDb()
@@ -426,8 +418,7 @@ class ChatManager {
   }
 
   /**
-   * Get list of all known agents.
-   * Uses SQLite distinct list.
+   * Get list of all known agents from SQLite.
    */
   private getKnownAgents(): string[] {
     const db = getDb()
@@ -435,8 +426,8 @@ class ChatManager {
       SELECT DISTINCT "from" as agent FROM chat_messages
       UNION
       SELECT DISTINCT "to" as agent FROM chat_messages WHERE "to" IS NOT NULL
-    `).all() as Array<{ agent: string }>
-    return rows.map(r => r.agent)
+    `).all() as Array<{ agent: string | null }>
+    return rows.map(r => r.agent).filter((v): v is string => Boolean(v))
   }
 
   private handleIncomingMessage(message: AgentMessage) {
