@@ -3,12 +3,18 @@ import Database from 'better-sqlite3'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdirSync, rmSync, existsSync } from 'node:fs'
+import { runMigrations } from '../src/db.js'
 
 /**
  * Schema migration coverage for the reflection/insight pipeline.
  *
- * These tests simulate upgrading from older DB states to verify that
- * insight→task linkage fields survive migration across all code paths.
+ * Tests come in two tiers:
+ * 1. **Unit tests** — replicate migration SQL locally to verify logic
+ * 2. **Integration tests** — call the real `runMigrations()` from src/db.ts
+ *    to ensure the actual code path produces the expected schema
+ *
+ * The integration tier closes the gap where local helpers could drift
+ * from the real migration code (the root cause of ins-1771944724516-d3dbxwwxg).
  */
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -340,6 +346,173 @@ describe('schema migration: insight→task linkage', () => {
 
     expect(insight.task_id).toBe('task-chain-1')
     expect(reflection.task_id).toBe('task-chain-1')
+
+    db.close()
+  })
+})
+
+// ── Integration tests: real runMigrations() code path ─────────────────
+// These call the actual runMigrations() from src/db.ts rather than
+// local helper functions, ensuring the production migration code
+// produces the expected schema. This is the key gap identified by
+// insight ins-1771944724516-d3dbxwwxg.
+
+describe('schema migration integration: real runMigrations()', () => {
+
+  it('fresh DB: runMigrations() creates insights table with task_id column', () => {
+    const dbPath = tmpDbPath()
+    const db = new Database(dbPath)
+    cleanupPaths.push(join(dbPath, '..'))
+    db.pragma('journal_mode = WAL')
+
+    // Run the REAL migration code
+    runMigrations(db)
+
+    // Verify insights table exists with task_id
+    const cols = db.pragma('table_info(insights)') as Array<{ name: string; type: string }>
+    expect(cols.some(c => c.name === 'task_id')).toBe(true)
+
+    // Verify index exists
+    const indexes = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='insights'"
+    ).all() as Array<{ name: string }>
+    expect(indexes.some(i => i.name === 'idx_insights_task_id')).toBe(true)
+
+    // Verify we can INSERT + read back task_id
+    db.prepare(`
+      INSERT INTO insights (id, cluster_key, workflow_stage, failure_family, impacted_unit,
+        title, reflection_ids, evidence_refs, authors, task_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('ins-fresh-1', 'cluster', 'testing', 'schema', 'db',
+      'Fresh DB insight', '[]', '[]', '["link"]', 'task-fresh-1',
+      Date.now(), Date.now())
+
+    const row = db.prepare('SELECT task_id FROM insights WHERE id = ?').get('ins-fresh-1') as any
+    expect(row.task_id).toBe('task-fresh-1')
+
+    db.close()
+  })
+
+  it('v8 DB upgraded via real runMigrations(): task_id column added', () => {
+    const dbPath = tmpDbPath()
+    // Create a v8-era DB manually (simulates old install)
+    const db = createDbAtVersion(dbPath, 8)
+
+    // Verify task_id does NOT exist at v8
+    const colsBefore = db.pragma('table_info(insights)') as Array<{ name: string }>
+    expect(colsBefore.some(c => c.name === 'task_id')).toBe(false)
+
+    // Insert a pre-migration insight
+    db.prepare(`
+      INSERT INTO insights (id, cluster_key, workflow_stage, failure_family, impacted_unit,
+        title, status, score, priority, reflection_ids, independent_count, evidence_refs,
+        authors, promotion_readiness, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('ins-v8-upgrade', 'cluster-x', 'testing', 'schema', 'db',
+      'Pre-migration insight', 'candidate', 6.0, 'P2', '[]', 1, '[]',
+      '["link"]', 'not_ready', Date.now(), Date.now())
+
+    // Run the REAL migration code — should apply v9+ idempotently
+    runMigrations(db)
+
+    // Verify task_id now exists
+    const colsAfter = db.pragma('table_info(insights)') as Array<{ name: string }>
+    expect(colsAfter.some(c => c.name === 'task_id')).toBe(true)
+
+    // Verify pre-existing data survives
+    const row = db.prepare('SELECT id, task_id FROM insights WHERE id = ?').get('ins-v8-upgrade') as any
+    expect(row.id).toBe('ins-v8-upgrade')
+    expect(row.task_id).toBeNull()
+
+    // Verify UPDATE task_id works (the original failure mode)
+    db.prepare('UPDATE insights SET task_id = ? WHERE id = ?').run('task-upgraded', 'ins-v8-upgrade')
+    const updated = db.prepare('SELECT task_id FROM insights WHERE id = ?').get('ins-v8-upgrade') as any
+    expect(updated.task_id).toBe('task-upgraded')
+
+    db.close()
+  })
+
+  it('v8 DB: real runMigrations() is idempotent on double-call', () => {
+    const dbPath = tmpDbPath()
+    const db = createDbAtVersion(dbPath, 8)
+
+    // Run migrations twice — must not throw
+    runMigrations(db)
+    expect(() => runMigrations(db)).not.toThrow()
+
+    // Schema still correct
+    const cols = db.pragma('table_info(insights)') as Array<{ name: string }>
+    expect(cols.some(c => c.name === 'task_id')).toBe(true)
+
+    db.close()
+  })
+
+  it('real runMigrations() on v8 DB: promotion UPDATE succeeds post-migration', () => {
+    const dbPath = tmpDbPath()
+    const db = createDbAtVersion(dbPath, 8)
+
+    // Insert insight at v8 (no task_id column)
+    db.prepare(`
+      INSERT INTO insights (id, cluster_key, workflow_stage, failure_family, impacted_unit,
+        title, status, score, priority, reflection_ids, independent_count, evidence_refs,
+        authors, promotion_readiness, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('ins-real-promote', 'cluster-rp', 'testing', 'migration', 'db',
+      'Promotable insight', 'candidate', 9.0, 'P0', '["ref-rp"]', 2,
+      '["ev-rp"]', '["sage","link"]', 'ready', Date.now(), Date.now())
+
+    // Before migration: UPDATE task_id should fail
+    expect(() => {
+      db.prepare('UPDATE insights SET task_id = ? WHERE id = ?').run('task-x', 'ins-real-promote')
+    }).toThrow()
+
+    // Apply REAL migrations
+    runMigrations(db)
+
+    // After migration: UPDATE task_id should succeed
+    expect(() => {
+      db.prepare('UPDATE insights SET task_id = ?, status = ? WHERE id = ?')
+        .run('task-promoted-real', 'promoted', 'ins-real-promote')
+    }).not.toThrow()
+
+    const row = db.prepare('SELECT task_id, status FROM insights WHERE id = ?')
+      .get('ins-real-promote') as any
+    expect(row.task_id).toBe('task-promoted-real')
+    expect(row.status).toBe('promoted')
+
+    db.close()
+  })
+
+  it('real runMigrations() applies all expected versions', () => {
+    const dbPath = tmpDbPath()
+    const db = new Database(dbPath)
+    cleanupPaths.push(join(dbPath, '..'))
+    db.pragma('journal_mode = WAL')
+
+    runMigrations(db)
+
+    // Check migration versions recorded
+    const versions = db.prepare('SELECT version FROM _migrations ORDER BY version')
+      .all() as Array<{ version: number }>
+    const versionNums = versions.map(v => v.version)
+
+    // Should have at least v1 through v12
+    expect(versionNums).toContain(1)
+    expect(versionNums).toContain(8) // insights table
+    expect(versionNums).toContain(9) // task_id ALTER
+    expect(versionNums).toContain(11) // task_id idempotent + index
+    expect(versionNums).toContain(12) // compound indexes
+
+    // All tables should exist
+    const tables = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations'"
+    ).all() as Array<{ name: string }>
+    const tableNames = tables.map(t => t.name)
+
+    expect(tableNames).toContain('tasks')
+    expect(tableNames).toContain('insights')
+    expect(tableNames).toContain('reflections')
+    expect(tableNames).toContain('chat_messages')
 
     db.close()
   })
