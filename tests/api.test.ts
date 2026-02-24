@@ -2044,6 +2044,23 @@ describe('Idle Nudge lane-state transitions', () => {
     expect(decision.lane.selectedTaskId).toBeNull()
   })
 
+  it('nudges queue-clear agents to pull /tasks/next after warn threshold', async () => {
+    const agent = 'lane-queue-clear-nudge'
+    await cleanupAgentTasks(agent)
+    await req('POST', `/presence/${agent}`, { status: 'working' })
+
+    const tickNowMs = Date.now() + (50 * 60_000) // > warnMin (45m)
+    const { status, body } = await req('POST', `/health/idle-nudge/tick?dryRun=true&force=true&nowMs=${tickNowMs}`)
+    expect(status).toBe(200)
+
+    const decision = (body.decisions || []).find((d: any) => d.agent === agent)
+    expect(decision).toBeDefined()
+    expect(decision.lane.laneReason).toBe('no-active-lane')
+    expect(decision.decision).toBe('warn')
+    expect(decision.reason).toBe('queue-clear')
+    expect(String(decision.renderedMessage || '')).toContain('/tasks/next')
+  })
+
   it('shows ambiguous-lane when agent has multiple fresh doing tasks', async () => {
     const agent = 'lane-ambiguous'
     await cleanupAgentTasks(agent)
