@@ -8257,16 +8257,11 @@ export async function createServer(): Promise<FastifyInstance> {
         alertCooldownMin: Number(process.env.CADENCE_ALERT_COOLDOWN_MIN || 30),
       },
       mentionRescue: {
-        enabled: process.env.MENTION_RESCUE_ENABLED !== 'false',
-        // Keep default + clamp consistent with runtime (TeamHealthMonitor)
-        delayMin: (() => {
-          const raw = process.env.MENTION_RESCUE_DELAY_MIN
-          const parsed = (raw === undefined || raw.trim() === '') ? 5 : Number(raw)
-          const val = Number.isFinite(parsed) ? parsed : 5
-          return Math.max(3, val)
-        })(),
-        cooldownMin: Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10),
-        globalCooldownMin: Number(process.env.MENTION_RESCUE_GLOBAL_COOLDOWN_MIN || 5),
+        enabled: policyManager.get().mentionRescue.enabled,
+        // Guardrail: never allow instant mention-rescue.
+        delayMin: Math.max(3, Number(policyManager.get().mentionRescue.delayMin || 0)),
+        cooldownMin: Number(policyManager.get().mentionRescue.cooldownMin || 10),
+        globalCooldownMin: Number(policyManager.get().mentionRescue.globalCooldownMin || 5),
       },
       deNoise: {
         description: 'Enhanced suppression: checks for any agent activity (messages, task comments, status changes) since last alert before re-firing',

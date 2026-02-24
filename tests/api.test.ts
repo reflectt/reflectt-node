@@ -356,6 +356,86 @@ describe('Quiet Hours Watchdog Suppression', () => {
   })
 })
 
+describe('Mention Rescue', () => {
+  it('nudges only the agents actually mentioned (after delay)', async () => {
+    const threadId = `test-mention-rescue-${Date.now()}`
+    const sent = await req('POST', '/chat/messages', {
+      from: 'ryan',
+      channel: 'general',
+      threadId,
+      content: 'ping @pixel',
+    })
+    expect(sent.status).toBe(200)
+    const mentionId = sent.body.message.id as string
+    const mentionAt = sent.body.message.timestamp as number
+
+    const { status, body } = await req(
+      'POST',
+      `/health/mention-rescue/tick?dryRun=true&force=true&nowMs=${mentionAt + 10 * 60_000}`,
+    )
+    expect(status).toBe(200)
+    expect(body.suppressed).toBe(false)
+    expect(Array.isArray(body.rescued)).toBe(true)
+    expect(body.rescued.length).toBeGreaterThan(0)
+
+    const rescueMsg = body.rescued[0] as string
+    expect(rescueMsg).toContain(`[[reply_to:${mentionId}]]`)
+    expect(rescueMsg).toContain('@pixel')
+    expect(rescueMsg).not.toContain('@kai')
+    expect(rescueMsg).not.toContain('@link')
+  })
+
+  it('does not rescue before the delay window elapses (default behavior)', async () => {
+    const threadId = `test-mention-rescue-delay-${Date.now()}`
+    const sent = await req('POST', '/chat/messages', {
+      from: 'ryan',
+      channel: 'general',
+      threadId,
+      content: 'ping @pixel',
+    })
+    expect(sent.status).toBe(200)
+    const mentionAt = sent.body.message.timestamp as number
+
+    const { status, body } = await req(
+      'POST',
+      `/health/mention-rescue/tick?dryRun=true&force=true&nowMs=${mentionAt + 2 * 60_000}`,
+    )
+    expect(status).toBe(200)
+    expect(body.suppressed).toBe(false)
+    expect(Array.isArray(body.rescued)).toBe(true)
+    expect(body.rescued.length).toBe(0)
+  })
+
+  it('does not rescue if any trio agent replied after the mention', async () => {
+    const threadId = `test-mention-rescue-reply-${Date.now()}`
+    const sent = await req('POST', '/chat/messages', {
+      from: 'ryan',
+      channel: 'general',
+      threadId,
+      content: 'ping @pixel',
+    })
+    expect(sent.status).toBe(200)
+    const mentionAt = sent.body.message.timestamp as number
+
+    const reply = await req('POST', '/chat/messages', {
+      from: 'kai',
+      channel: 'general',
+      threadId,
+      content: 'ack',
+    })
+    expect(reply.status).toBe(200)
+
+    const { status, body } = await req(
+      'POST',
+      `/health/mention-rescue/tick?dryRun=true&force=true&nowMs=${mentionAt + 10 * 60_000}`,
+    )
+    expect(status).toBe(200)
+    expect(body.suppressed).toBe(false)
+    expect(Array.isArray(body.rescued)).toBe(true)
+    expect(body.rescued.length).toBe(0)
+  })
+})
+
 describe('Validation Error Shape', () => {
   it('returns structured fields for malformed POST /tasks payload', async () => {
     const { status, body } = await req('POST', '/tasks', {
