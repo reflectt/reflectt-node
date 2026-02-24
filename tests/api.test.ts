@@ -1400,6 +1400,11 @@ describe('Task review endpoint', () => {
     expect(body.task.metadata.reviewer_approved).toBe(true)
     expect(body.task.metadata.reviewer_decision.reviewer).toBe('assigned-reviewer')
     expect(body.task.metadata.reviewer_decision.comment).toBe('Ship it')
+
+    // reviewer actions should stamp actor + keep queue state coherent
+    expect(body.task.metadata.actor).toBe('assigned-reviewer')
+    expect(body.task.metadata.review_state).toBe('approved')
+    expect(body.task.metadata.review_last_activity_at).toBeTruthy()
   })
 
   it('POST /tasks/:id/review supports reject and flips reviewer_approved false', async () => {
@@ -1414,6 +1419,10 @@ describe('Task review endpoint', () => {
     expect(body.decision.decision).toBe('rejected')
     expect(body.task.metadata.reviewer_approved).toBe(false)
     expect(body.task.metadata.reviewer_decision.comment).toBe('Missing validation evidence')
+
+    expect(body.task.metadata.actor).toBe('assigned-reviewer')
+    expect(body.task.metadata.review_state).toBe('needs_author')
+    expect(body.task.metadata.review_last_activity_at).toBeTruthy()
   })
 })
 
