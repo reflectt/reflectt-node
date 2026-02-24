@@ -3224,6 +3224,12 @@ export async function createServer(): Promise<FastifyInstance> {
         if (urlMatch) {
           return { ...ref, type: 'url' as const, accessible: true, resolvedPath: urlMatch[0] }
         }
+
+        const reflectionMatch = ref.path.match(/^reflection:(ref-[\w-]+)$/)
+        if (reflectionMatch) {
+          return { ...ref, type: 'url' as const, accessible: true, resolvedPath: `/reflections/${reflectionMatch[1]}` }
+        }
+
         // Repo-relative path
         const fullPath = resolve(repoRoot, ref.path)
         // Security: ensure resolved path stays inside repo
