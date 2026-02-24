@@ -9,7 +9,13 @@ import type { Reflection } from './reflections.js'
 // ── Constants ──
 
 const COOLDOWN_MS = 24 * 60 * 60 * 1000 // 24 hours
+
+// v1.1: 2-unique-authors gate is tuned for a small team (~6-8 agents).
+// At scale, replace with a ratio/volume gate: max(2, ceil(team_size * X%))
 const PROMOTION_THRESHOLD = 2             // independent reflections needed
+
+// v1.1: max reopen count per 24h sliding window. After this, route to pending_triage.
+const MAX_REOPEN_COUNT_24H = 3
 
 /** Scoring engine version — increment on any rule change for audit trail */
 export const SCORING_ENGINE_VERSION = '1.1.0'
@@ -184,6 +190,7 @@ export function computeScore(reflections: Reflection[]): number {
     return max
   }, 0)
 
+  // v1.1: volumeBoost cap=2 — flag for day-7 review (n=10 and n=5 score similarly)
   const volumeBoost = Math.min((reflections.length - 1) * 0.5, 2)
 
   return Math.min(10, Math.round((maxConf + severityBoost + volumeBoost) * 10) / 10)
@@ -340,9 +347,14 @@ export function ingestReflection(reflection: Reflection): Insight {
   let existing = findByCluster(clusterKeyStr)
 
   if (existing) {
-    // Cooldown: if in cooldown and new reflection arrives, reopen
+    // Cooldown: if in cooldown and new reflection arrives, check reopen cap then reopen
     if (existing.status === 'cooldown') {
       if (existing.cooldown_until && now < existing.cooldown_until) {
+        // v1.1: enforce max reopen count (3 per 24h) — route to pending_triage if exceeded
+        const reopenCount = countRecentReopens(existing)
+        if (reopenCount >= MAX_REOPEN_COUNT_24H) {
+          return routeToPendingTriage(existing, reflection, 'reopen_cap_exceeded')
+        }
         return reopenInsight(existing, reflection)
       }
       // Cooldown expired → close and create fresh
@@ -543,7 +555,29 @@ function addReflectionToInsight(existing: Insight, reflection: Reflection): Insi
   }
 }
 
-function reopenInsight(existing: Insight, reflection: Reflection): Insight {
+/**
+ * Count recent reopens for an insight within a 24h sliding window.
+ * Uses reopen_count and reopen_window_start stored directly on the insight row.
+ * Resets window if >24h has passed since the window started.
+ */
+function countRecentReopens(existing: Insight): number {
+  const now = Date.now()
+  const meta = (existing.metadata ?? {}) as Record<string, unknown>
+  const windowStart = (meta.reopen_window_start as number) ?? 0
+  const count = (meta.reopen_count_24h as number) ?? 0
+
+  // If window has expired (>24h), count resets
+  if (now - windowStart > COOLDOWN_MS) {
+    return 0
+  }
+  return count
+}
+
+/**
+ * Route an insight to pending_triage when reopen cap is exceeded.
+ * v1.1: prevents repeated auto-promote loops while capturing recurrence signal.
+ */
+function routeToPendingTriage(existing: Insight, reflection: Reflection, reason: string): Insight {
   const db = getDb()
   const now = Date.now()
 
@@ -560,11 +594,76 @@ function reopenInsight(existing: Insight, reflection: Reflection): Insight {
 
   db.prepare(`
     UPDATE insights SET
+      status = 'pending_triage', reflection_ids = ?, independent_count = ?,
+      evidence_refs = ?, authors = ?, score = ?, priority = ?,
+      promotion_readiness = 'promoted', recurring_candidate = 1,
+      cooldown_reason = ?, severity_max = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    safeJsonStringify(updatedIds),
+    updatedAuthors.length,
+    safeJsonStringify(updatedEvidence),
+    safeJsonStringify(updatedAuthors),
+    score, priority,
+    reason, sevMax, now,
+    existing.id,
+  )
+
+  eventBus.emit({
+    id: `evt-insight-triage-${existing.id}-${now}`,
+    type: 'task_updated' as const,
+    timestamp: now,
+    data: { kind: 'insight:reopen_cap_exceeded', insightId: existing.id, reopenReason: reason },
+  })
+
+  return {
+    ...existing,
+    status: 'pending_triage',
+    reflection_ids: updatedIds,
+    independent_count: updatedAuthors.length,
+    evidence_refs: updatedEvidence,
+    authors: updatedAuthors,
+    score,
+    priority,
+    promotion_readiness: 'promoted',
+    recurring_candidate: true,
+    cooldown_reason: reason,
+    severity_max: sevMax,
+    updated_at: now,
+  }
+}
+
+function reopenInsight(existing: Insight, reflection: Reflection): Insight {
+  const db = getDb()
+  const now = Date.now()
+
+  const updatedIds = existing.reflection_ids.includes(reflection.id)
+    ? existing.reflection_ids
+    : [...existing.reflection_ids, reflection.id]
+  const updatedAuthors = [...new Set([...existing.authors, reflection.author])]
+  const updatedEvidence = [...new Set([...existing.evidence_refs, ...reflection.evidence])]
+
+  const allReflections = loadReflectionsById(updatedIds)
+  const score = computeScore(allReflections)
+  const priority = scoreToPriority(score)
+  const sevMax = maxSeverity(allReflections)
+
+  // v1.1: track reopen count in metadata for cap enforcement
+  const meta = (existing.metadata ?? {}) as Record<string, unknown>
+  const windowStart = (meta.reopen_window_start as number) ?? 0
+  const prevCount = (meta.reopen_count_24h as number) ?? 0
+  const windowExpired = now - windowStart > COOLDOWN_MS
+  const newCount = windowExpired ? 1 : prevCount + 1
+  const newWindowStart = windowExpired ? now : windowStart
+  const updatedMetadata = { ...meta, reopen_count_24h: newCount, reopen_window_start: newWindowStart }
+
+  db.prepare(`
+    UPDATE insights SET
       status = 'promoted', reflection_ids = ?, independent_count = ?,
       evidence_refs = ?, authors = ?, score = ?, priority = ?,
       promotion_readiness = 'promoted', recurring_candidate = 1,
       cooldown_until = ?, cooldown_reason = 'reopened',
-      severity_max = ?, updated_at = ?
+      severity_max = ?, metadata = ?, updated_at = ?
     WHERE id = ?
   `).run(
     safeJsonStringify(updatedIds),
@@ -573,7 +672,7 @@ function reopenInsight(existing: Insight, reflection: Reflection): Insight {
     safeJsonStringify(updatedAuthors),
     score, priority,
     now + COOLDOWN_MS,
-    sevMax, now,
+    sevMax, safeJsonStringify(updatedMetadata), now,
     existing.id,
   )
 
@@ -581,7 +680,7 @@ function reopenInsight(existing: Insight, reflection: Reflection): Insight {
     id: `evt-insight-reopened-${existing.id}`,
     type: 'task_updated' as const,
     timestamp: Date.now(),
-    data: { kind: 'insight:reopened', insightId: existing.id },
+    data: { kind: 'insight:reopened', insightId: existing.id, reopenCount: newCount },
   })
 
   return {
@@ -598,6 +697,7 @@ function reopenInsight(existing: Insight, reflection: Reflection): Insight {
     cooldown_until: now + COOLDOWN_MS,
     cooldown_reason: 'reopened',
     severity_max: sevMax,
+    metadata: updatedMetadata,
     updated_at: now,
   }
 }
