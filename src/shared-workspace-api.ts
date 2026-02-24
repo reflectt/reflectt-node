@@ -307,26 +307,17 @@ export async function resolveTaskArtifact(
     }
   }
 
-  // Fallback to shared workspace — use realpath containment
-  const sharedRoot = SHARED_WORKSPACE()
-  let rootReal: string
-  try {
-    rootReal = await fs.realpath(sharedRoot)
-  } catch {
+  // Fallback to shared workspace — v1 contract is process/ only.
+  // Keep task-artifact content/preview aligned with the shared-workspace API allowlist.
+  const normalized = normalize(artifactPath).replace(/\\/g, '/')
+  if (!ALLOWED_PREFIXES.some(prefix => normalized.startsWith(prefix))) {
     return { type: 'missing', accessible: false, source: null, resolvedPath: null }
   }
 
-  const sharedPath = resolve(sharedRoot, artifactPath)
   let sharedReal: string
   try {
-    sharedReal = await fs.realpath(sharedPath)
+    sharedReal = await validatePathWithRealpath(artifactPath)
   } catch {
-    return { type: 'missing', accessible: false, source: null, resolvedPath: null }
-  }
-
-  // Containment via path.relative on real paths
-  const rel = relative(rootReal, sharedReal)
-  if (rel.startsWith('..') || isAbsolute(rel)) {
     return { type: 'missing', accessible: false, source: null, resolvedPath: null }
   }
 

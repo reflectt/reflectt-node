@@ -39,6 +39,9 @@ beforeAll(async () => {
   await fs.writeFile(join(processDir, 'evil.exe'), 'not really')
   await fs.writeFile(join(processDir, 'script.sh'), '#!/bin/bash')
 
+  // Create an allowed-extension file OUTSIDE process/ (should NOT be accessible via task artifact fallback)
+  await fs.writeFile(join(testRoot, 'root.md'), '# Root\nShould not be readable via /tasks/:id/artifacts fallback\n')
+
   // Create outside-root directory for symlink tests
   await fs.mkdir(join(testRoot, '..', `outside-root-${Date.now()}`), { recursive: true }).catch(() => {})
 
@@ -350,6 +353,14 @@ describe('resolveTaskArtifact', () => {
     const result = await resolveTaskArtifact('process/task-abc-proof.md', wsRoot)
     expect(result.accessible).toBe(true)
     expect(result.source).toBe('shared-workspace')
+  })
+
+  it('does NOT fall back to shared workspace for non-process/ paths', async () => {
+    // root.md exists at the shared workspace root (outside process/)
+    // Old behavior: would be accessible; new behavior: must be missing.
+    const result = await resolveTaskArtifact('root.md', wsRoot)
+    expect(result.accessible).toBe(false)
+    expect(result.type).toBe('missing')
   })
 
   it('returns missing for nonexistent artifacts', async () => {
