@@ -1076,7 +1076,7 @@ class TaskManager {
     }
 
     if (options?.teamId) {
-      conditions.push('(team_id = ? OR json_extract(metadata, "$.teamId") = ?)')
+      conditions.push("(team_id = ? OR json_extract(metadata, '$.teamId') = ?)")
       params.push(options.teamId, options.teamId)
     }
 
@@ -1337,9 +1337,7 @@ class TaskManager {
     const task = queryTask(id)
     if (!task) return false
 
-    getDb().prepare("DELETE FROM tasks WHERE id = ?").run(id)
-
-    // Delete from SQLite directly (persistTasks only upserts, won't remove rows)
+    // Delete from SQLite
     try {
       const db = getDb()
       db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
