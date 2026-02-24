@@ -1,83 +1,53 @@
 # Shared Workspace Read API
 
-Read-only access to shared artifacts under the canonical shared workspace (`~/.openclaw/workspace-shared`).
+Read-only HTTP endpoints for accessing mirrored artifacts in the shared workspace (`~/.openclaw/workspace-shared`).
 
----
+## Overview
 
-## Architecture
+When a task transitions to `validating` or `done`, the artifact mirror (`src/artifact-mirror.ts`) copies process artifacts from the agent's workspace to `~/.openclaw/workspace-shared/process/`. This shared workspace API provides safe, read-only access for reviewers across workspaces.
 
-```
-reflectt-node workspace          shared workspace              other agent workspaces
-┌────────────────────┐          ┌──────────────────────┐      ┌──────────────────────┐
-│ process/            │  mirror  │ process/              │ read │                      │
-│   TASK-xxx-spec.md  │ ──────→ │   TASK-xxx-spec.md    │ ←──  │ (via /shared/* API)  │
-│   TASK-yyy-proof.md │         │   TASK-yyy-proof.md   │      │                      │
-└────────────────────┘          └──────────────────────┘      └──────────────────────┘
-       (source)                  (~/.openclaw/workspace-shared)       (consumer)
-```
-
-**Artifact mirror** (`src/artifact-mirror.ts`) copies `process/` artifacts from the workspace to the shared workspace on task transitions (→ `validating` or → `done`).
-
-**Shared workspace API** (`src/shared-workspace-api.ts`) provides safe read-only access to files under the shared workspace.
-
-**Task artifact resolution** (`resolveTaskArtifact()`) tries the workspace root first, then falls back to the shared workspace — so reviewers in other workspaces can access artifacts without manual copying.
-
----
-
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `REFLECTT_SHARED_WORKSPACE` | `~/.openclaw/workspace-shared` | Override shared workspace path |
-| `REFLECTT_WORKSPACE` | `process.cwd()` | Override workspace root (source for mirror) |
-
----
-
-## HTTP Endpoints
+## Endpoints
 
 ### `GET /shared/list`
 
-List files in a shared workspace directory.
+List files and directories in the shared workspace.
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `path` | query string | `process/` | Relative path (must start with `process/`) |
-| `limit` | query number | `200` | Max entries to return (capped at 500) |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `path` | string | `process/` | Relative path under shared workspace root |
+| `limit` | number | `200` | Max entries to return (capped at 500) |
 
 **Response:**
 ```json
 {
   "success": true,
-  "root": "/Users/me/.openclaw/workspace-shared",
+  "root": "/Users/you/.openclaw/workspace-shared",
   "path": "process/",
   "entries": [
-    { "name": "subdir", "path": "process/subdir", "type": "directory" },
-    { "name": "TASK-xxx-spec.md", "path": "process/TASK-xxx-spec.md", "type": "file", "size": 4096, "extension": ".md" }
+    { "name": "task-deep", "path": "process/task-deep", "type": "directory" },
+    { "name": "task-abc-proof.md", "path": "process/task-abc-proof.md", "type": "file", "size": 1234, "extension": ".md" }
   ]
 }
 ```
 
-- Directories are sorted before files.
-- Files with disallowed extensions are filtered out.
-
 ### `GET /shared/read`
 
-Read a file's contents from the shared workspace.
+Read file contents from the shared workspace.
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `path` | query string | *required* | Relative file path |
-| `include` | query string | — | Set to `preview` for first N characters |
-| `maxChars` | query number | `2000` | Max characters when `include=preview` |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `path` | string | *required* | Relative path to file |
+| `include` | string | — | `preview` for truncated first 2000 chars |
+| `maxChars` | number | `2000` | Max chars when `include=preview` |
 
 **Response:**
 ```json
 {
   "success": true,
   "file": {
-    "path": "process/TASK-xxx-spec.md",
-    "content": "# Spec\n...",
-    "size": 4096,
+    "path": "process/task-abc-proof.md",
+    "content": "# Proof\n...",
+    "size": 1234,
     "truncated": false,
     "source": "shared-workspace"
   }
@@ -86,132 +56,66 @@ Read a file's contents from the shared workspace.
 
 ### `GET /shared/view`
 
-HTML viewer for shared artifacts (browser-friendly).
+HTML viewer for shared artifacts (rendered in browser).
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `path` | query string | Relative file path |
-
-Returns an HTML page with the file content in a dark-themed code viewer.
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `path` | string | Relative path to file |
 
 ### `GET /tasks/:id/artifacts`
 
-Resolve all artifact references for a task. Checks workspace root first, falls back to shared workspace.
+Lists all artifact references for a task. **Automatically falls back to the shared workspace** if an artifact is not found in the workspace root.
 
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| `include` | query string | — | `preview` (first 2000 chars) or `content` (full, up to 400KB) |
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `include` | string | `preview` or `content` to include file contents |
 
-**Response:**
-```json
-{
-  "taskId": "task-xxx",
-  "title": "Feature: ...",
-  "status": "validating",
-  "artifactCount": 2,
-  "artifacts": [
-    {
-      "source": "metadata.artifact_path",
-      "path": "process/TASK-xxx-spec.md",
-      "type": "file",
-      "accessible": true,
-      "source": "shared-workspace",
-      "resolvedPath": "/Users/me/.openclaw/workspace-shared/process/TASK-xxx-spec.md",
-      "preview": "# Spec\n..."
-    },
-    {
-      "source": "metadata.qa_bundle.review_packet.pr_url",
-      "path": "https://github.com/reflectt/reflectt-node/pull/330",
-      "type": "url",
-      "accessible": true,
-      "resolvedPath": "https://github.com/reflectt/reflectt-node/pull/330"
-    }
-  ],
-  "heartbeat": {
-    "lastCommentAt": 1771960904685,
-    "lastCommentAgeMs": 3600000,
-    "lastCommentAuthor": "link",
-    "stale": false,
-    "thresholdMs": 1800000
-  }
-}
-```
+Response artifacts include a `source` field: `"workspace"` or `"shared-workspace"`.
 
-### `GET /artifacts/view`
+## Configuration
 
-HTML viewer for workspace-local artifacts (similar to `/shared/view` but resolves against the repo root).
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `REFLECTT_SHARED_WORKSPACE` | `~/.openclaw/workspace-shared` | Override shared workspace root |
 
----
+**Note:** The env var supports `~/` prefix (manually expanded).
 
-## Security Model
-
-### Path Validation (`validatePath()`)
-
-1. **No absolute paths** — rejects `/`, `\`, and Windows drive letters (`C:\`)
-2. **No traversal** — rejects any path containing `..` (checked before normalization)
-3. **Prefix allowlist** — path must start with `process/` (extensible via `ALLOWED_PREFIXES`)
-4. **Containment check** — resolved absolute path must be under the shared workspace root
-5. **Extension allowlist** — only `.md`, `.txt`, `.json`, `.log`, `.yml`, `.yaml` are served
-6. **Size cap** — files larger than 400KB are rejected
-
-### Traversal Attack Examples (All Rejected)
-
-| Attack | Rejection Reason |
-|--------|-----------------|
-| `../../etc/passwd` | `..` traversal detected |
-| `/etc/passwd` | Absolute path |
-| `process/../../etc/passwd` | `..` traversal detected |
-| `process/secret.exe` | Extension not in allowlist |
-| `src/server.ts` | Not in `process/` prefix |
-| `C:\Windows\System32` | Drive letter / absolute path |
-
-### Artifact Resolution Priority
-
-1. **Workspace root** (`REFLECTT_WORKSPACE` / cwd) — checked first
-2. **Shared workspace** (`REFLECTT_SHARED_WORKSPACE` / `~/.openclaw/workspace-shared`) — fallback
-3. **Missing** — neither location has the file
-
-This means the workspace-local copy always wins, and the shared workspace is used when reviewers don't have the file locally (e.g., different agent workspaces).
-
----
-
-## Integration with Artifact Mirror
-
-The artifact mirror (`src/artifact-mirror.ts`) is the **write** side. It copies process artifacts to the shared workspace on task state transitions:
+## How It Interacts with Artifact Mirror
 
 ```
-Task → validating  →  mirrorArtifacts(metadata.artifact_path)
-Task → done        →  mirrorArtifacts(metadata.artifact_path)
+Agent workspace                     Shared workspace
+process/task-abc-proof.md  ──copy──> process/task-abc-proof.md
+                                         │
+                                    GET /shared/read?path=process/task-abc-proof.md
+                                    GET /tasks/:id/artifacts (fallback)
 ```
 
-The shared workspace API is the **read** side. Together they form a publish/subscribe pattern:
+1. Agent completes task (status → `validating`/`done`)
+2. `artifact-mirror.ts` copies `process/` artifacts to shared workspace
+3. Reviewers in other workspaces can read via `/shared/*` endpoints
+4. `/tasks/:id/artifacts` checks workspace root first, then shared workspace
 
-```
-Agent A (author)          Agent B (reviewer)
-    │                          │
-    ├── writes process/TASK-xxx.md
-    ├── task → validating
-    ├── artifact mirror → copies to shared workspace
-    │                          │
-    │                          ├── GET /tasks/:id/artifacts?include=preview
-    │                          ├── sees artifact via shared-workspace fallback
-    │                          ├── GET /shared/read?path=process/TASK-xxx.md
-    │                          └── reviews content
-```
+## Security
 
----
+### Path validation
+- Only relative paths accepted (no absolute, no drive letters)
+- `..` segments rejected before and after normalization
+- Prefix allowlist: only `process/` paths (extensible)
 
-## Testing
+### Realpath containment (symlink defense)
+- Both root and candidate paths resolved via `fs.realpath()`
+- Containment verified via `path.relative()` (not string prefix)
+- On macOS: handles APFS case-insensitivity and `/var` → `/private/var` canonicalization
+- Listing uses `lstat` to detect symlinks; symlinks pointing outside root are silently skipped
 
-```bash
-# Run shared workspace API tests
-npx vitest run tests/shared-workspace-api.test.ts
+### Extension allowlist
+`.md`, `.txt`, `.json`, `.log`, `.yml`, `.yaml`
 
-# Run artifact mirror tests
-npx vitest run tests/artifact-mirror.test.ts
+### Size cap
+400KB per file read (truncated if exceeded in preview mode, rejected otherwise).
 
-# Run all tests
-npm test --silent
-```
+### Why not string prefix checks?
+String prefix (`startsWith(root)`) can be fooled by sibling paths (`/allowed-root` vs `/allowed-root-evil`). We use `path.relative()` on `realpath`-resolved paths instead.
 
-Test coverage: 21 tests covering path validation (5 security vectors), extension validation (2 types), list/read (8 scenarios), and artifact resolution (5 scenarios).
+### Future: host-credential scoped access
+We do **not** attempt to model host-credential scoped access at this layer. Access is gated at the HTTP API level (localhost binding for reflectt-node). If direct Supabase access is ever needed, a host JWT with `host_id`/`team_id` claims would be required.

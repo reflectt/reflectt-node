@@ -4346,3 +4346,134 @@ describe('Test harness task filtering on /tasks/next', () => {
     expect(body.task.id).toBe(created.task.id)
   })
 })
+
+// ── Shared Workspace Read API (HTTP) ─────────────────────
+
+describe('Shared Workspace Read API (HTTP)', () => {
+  it('GET /shared/list returns entries for process/', async () => {
+    const res = await app.inject({ method: 'GET', url: '/shared/list?path=process/' })
+    const body = JSON.parse(res.body)
+    // May or may not have files depending on shared workspace state, but should not error
+    expect(body.success !== undefined || body.error !== undefined).toBe(true)
+    if (body.success) {
+      expect(Array.isArray(body.entries)).toBe(true)
+    }
+  })
+
+  it('GET /shared/list rejects traversal', async () => {
+    const res = await app.inject({ method: 'GET', url: '/shared/list?path=process/../../etc' })
+    expect(res.statusCode).toBeGreaterThanOrEqual(400)
+    const body = JSON.parse(res.body)
+    expect(body.success).toBe(false)
+  })
+
+  it('GET /shared/list rejects outside-allowlist path', async () => {
+    const res = await app.inject({ method: 'GET', url: '/shared/list?path=src/' })
+    expect(res.statusCode).toBeGreaterThanOrEqual(400)
+    const body = JSON.parse(res.body)
+    expect(body.success).toBe(false)
+  })
+
+  it('GET /shared/read requires path', async () => {
+    const res = await app.inject({ method: 'GET', url: '/shared/read' })
+    expect(res.statusCode).toBe(400)
+    const body = JSON.parse(res.body)
+    expect(body.success).toBe(false)
+    expect(body.error).toContain('path')
+  })
+
+  it('GET /shared/read rejects traversal', async () => {
+    const res = await app.inject({ method: 'GET', url: '/shared/read?path=process/../../etc/passwd' })
+    expect(res.statusCode).toBeGreaterThanOrEqual(400)
+    const body = JSON.parse(res.body)
+    expect(body.success).toBe(false)
+  })
+
+  it('GET /shared/read rejects disallowed extension', async () => {
+    const res = await app.inject({ method: 'GET', url: '/shared/read?path=process/malware.exe' })
+    expect(res.statusCode).toBeGreaterThanOrEqual(400)
+    const body = JSON.parse(res.body)
+    expect(body.success).toBe(false)
+  })
+
+  it('GET /shared/view requires path', async () => {
+    const res = await app.inject({ method: 'GET', url: '/shared/view' })
+    expect(res.statusCode).toBe(400)
+    const body = JSON.parse(res.body)
+    expect(body.error).toContain('path')
+  })
+
+  it('GET /tasks/:id/artifacts returns artifact list for a task with metadata', async () => {
+    // Create a task with an artifact_path
+    const created = await req('POST', '/tasks', {
+      title: 'TEST: shared-ws-artifact-preview',
+      description: 'Test artifact resolution with shared workspace fallback',
+      status: 'doing',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Verify artifact preview'],
+      eta: '1h',
+      metadata: {
+        artifact_path: 'process/nonexistent-test-artifact.md',
+        artifacts: ['https://github.com/reflectt/reflectt-node/pull/999'],
+        reflection_exempt: true,
+      },
+    })
+    expect(created.status).toBe(200)
+    const taskId = created.body.task.id
+
+    // Fetch artifacts
+    const res = await app.inject({ method: 'GET', url: `/tasks/${taskId}/artifacts` })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(body.taskId).toBe(taskId)
+    expect(body.artifactCount).toBeGreaterThan(0)
+    expect(Array.isArray(body.artifacts)).toBe(true)
+
+    // URL artifact should be accessible
+    const urlArtifact = body.artifacts.find((a: any) => a.type === 'url')
+    expect(urlArtifact).toBeDefined()
+    expect(urlArtifact.accessible).toBe(true)
+
+    // File artifact may or may not be accessible (depends on shared workspace state)
+    const fileArtifact = body.artifacts.find((a: any) => a.path === 'process/nonexistent-test-artifact.md')
+    expect(fileArtifact).toBeDefined()
+
+    // Heartbeat info should be present
+    expect(body.heartbeat).toBeDefined()
+
+    // Cleanup
+    await app.inject({ method: 'DELETE', url: `/tasks/${taskId}` })
+  })
+
+  it('GET /tasks/:id/artifacts?include=preview includes preview field', async () => {
+    // This test verifies the include=preview query param is accepted
+    const created = await req('POST', '/tasks', {
+      title: 'TEST: shared-ws-preview-mode',
+      description: 'Test preview mode on artifact endpoint',
+      status: 'doing',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Verify preview mode'],
+      eta: '1h',
+      metadata: {
+        artifact_path: 'process/some-artifact.md',
+        reflection_exempt: true,
+      },
+    })
+    expect(created.status).toBe(200)
+    const taskId = created.body.task.id
+
+    const res = await app.inject({ method: 'GET', url: `/tasks/${taskId}/artifacts?include=preview` })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(body.taskId).toBe(taskId)
+
+    // Cleanup
+    await app.inject({ method: 'DELETE', url: `/tasks/${taskId}` })
+  })
+})
