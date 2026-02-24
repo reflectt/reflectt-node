@@ -38,3 +38,6 @@ Added API test ensuring the warning appears for the anti-pattern.
 
 ## Follow-up
 If this warning reduces the anti-pattern but doesn’t eliminate it, next step is making it stricter in specific channels (e.g., action-required channels) or auto-suggesting `/tasks/next` with a clickable action.
+
+## Follow-up reflection (evidence)
+- reflection:ref-1771919443998-pp7u5vpab
