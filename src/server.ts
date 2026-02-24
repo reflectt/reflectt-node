@@ -104,6 +104,8 @@ import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStat
 import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats } from './shipped-heartbeat.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
+import { runTeamDoctor } from './team-doctor.js'
+import { createStarterTeam } from './starter-team.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 
@@ -6449,6 +6451,20 @@ export async function createServer(): Promise<FastifyInstance> {
     const body = request.body as Record<string, unknown>
     configureTeamPulse(body as any)
     return { success: true, config: getTeamPulseConfig() }
+  })
+
+  // ── Team Doctor (onboarding + ongoing diagnostics) ──────────────────
+
+  app.get('/health/team/doctor', async () => {
+    const report = runTeamDoctor()
+    return report
+  })
+
+  // ── Starter Team (onboarding scaffold) ──────────────────────────────
+
+  app.post('/team/starter', async () => {
+    const result = await createStarterTeam()
+    return { success: true, ...result }
   })
 
   // Get next task (pull-based assignment)
