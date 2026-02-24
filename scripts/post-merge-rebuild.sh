@@ -125,7 +125,7 @@ while [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; do
   ATTEMPT=$((ATTEMPT + 1))
   log "post-merge: start attempt $ATTEMPT/$MAX_ATTEMPTS..."
 
-  nohup node dist/index.js >> "$SERVICE_LOG" 2>&1 &
+  NODE_ENV=production nohup node dist/index.js >> "$SERVICE_LOG" 2>&1 &
   NEW_PID=$!
 
   # Wait with progressive backoff: 4s, 6s, 8s
@@ -151,8 +151,8 @@ while [ "$ATTEMPT" -lt "$MAX_ATTEMPTS" ]; do
 
   if [ "$ATTEMPT" -eq "$MAX_ATTEMPTS" ]; then
     log "post-merge: FAILED after $MAX_ATTEMPTS attempts — service may be down"
-    log "post-merge: manual restart required: cd $REPO_DIR && node dist/index.js"
-    nohup node dist/index.js >> "$SERVICE_LOG" 2>&1 &
+    log "post-merge: manual restart required: cd $REPO_DIR && NODE_ENV=production node dist/index.js"
+    NODE_ENV=production nohup node dist/index.js >> "$SERVICE_LOG" 2>&1 &
     NEW_PID=$!
     log "post-merge: last-resort spawn (pid $NEW_PID)"
   fi

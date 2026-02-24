@@ -334,6 +334,18 @@ export function tryAutoCloseTask(taskId: string): AutoCloseResult {
     failedGates.push('reviewer_approved')
   }
 
+  // Gate: review_state must not be rejected/changes_requested
+  // This prevents auto-close when a reviewer has explicitly rejected,
+  // even if reviewer_approved was set from a prior approval cycle.
+  const reviewState = meta.review_state as string | undefined
+  const reviewerDecision = meta.reviewer_decision as { decision?: string } | undefined
+  if (reviewState === 'changes_requested' || reviewState === 'rejected') {
+    failedGates.push(`review_state_blocked:${reviewState}`)
+  }
+  if (reviewerDecision?.decision === 'rejected') {
+    failedGates.push('reviewer_decision_rejected')
+  }
+
   // Gate: artifact_path must exist
   if (!meta.artifact_path) {
     failedGates.push('artifact_path')
