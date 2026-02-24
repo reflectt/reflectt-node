@@ -1719,11 +1719,40 @@ class TeamHealthMonitor {
       const rescueEntry = this.mentionRescueState.get(mentionId)
       if (rescueEntry && rescueEntry.rescueCount > 0) continue
 
+      // Cancel mention-rescue only when the trio reply is in the same channel and
+      // (when applicable) the same thread context as the original mention.
+      //
+      // Without this scoping, any trio chatter anywhere after the mention timestamp
+      // can incorrectly suppress the rescue.
+      const mentionChannel = String((mention as any).channel || 'general')
+      const mentionThreadId = (
+        (typeof (mention as any).threadId === 'string' ? (mention as any).threadId : null) ||
+        (typeof (mention as any).thread_id === 'string' ? (mention as any).thread_id : null) ||
+        null
+      )
+
       const replied = messages.some((m: any) => {
         const from = (m.from || '').toLowerCase()
         if (!trioSet.has(from as typeof this.trioAgents[number])) return false
+
         const ts = Number(m.timestamp || 0)
-        return ts > mentionAt
+        if (!(ts > mentionAt)) return false
+
+        const channel = String(m.channel || 'general')
+        if (channel !== mentionChannel) return false
+
+        const threadId =
+          (typeof m.threadId === 'string' ? m.threadId : null) ||
+          (typeof m.thread_id === 'string' ? m.thread_id : null) ||
+          null
+
+        // If the mention itself is inside a thread, only count replies inside that same thread.
+        if (mentionThreadId) return threadId === mentionThreadId
+
+        // Root mention: count either a root reply (no thread) or a reply in the thread
+        // directly attached to the mention (threadId === mentionId).
+        if (threadId) return threadId === mentionId
+        return true
       })
 
       if (replied) {
