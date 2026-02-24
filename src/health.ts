@@ -1476,12 +1476,7 @@ class TeamHealthMonitor {
         continue
       }
 
-      // Suppress nudges for agents with no assigned work (queue-clear)
-      const activeLane = computeActiveLane(agent, tasks, presence.status, undefined, undefined, now)
-      if (activeLane === 'queue-clear') {
-        decisions.push({ ...baseDecision, decision: 'none', reason: 'queue-clear', renderedMessage: null })
-        continue
-      }
+      // Queue-clear (no doing/blocked/validating task) is eligible for engagement nudges — see no-active-lane handler below.
 
       if (presence.status === 'blocked') {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'blocked-task-suppressed', renderedMessage: null })
@@ -1560,8 +1555,56 @@ class TeamHealthMonitor {
         continue
       }
 
+      // Engagement nudge: if agent is idle and has no active doing lane, prompt them to pull/claim work.
       if (lane.laneReason === 'no-active-lane') {
-        decisions.push({ ...baseDecision, decision: 'none', reason: 'missing-active-task', renderedMessage: null })
+        const signature = `queue-clear:${agent}`
+        if (state && state.lastSignature === signature && state.unchangedNudgeCount >= 2) {
+          decisions.push({ ...baseDecision, decision: 'none', reason: 'max-repeat-reached', renderedMessage: null })
+          continue
+        }
+
+        const intro = tier === 1
+          ? `@${agent} system reminder: you appear idle for ${inactivityMin}m and have no active task. Pull work now.`
+          : `@${agent} @kai system escalation: ${inactivityMin}m idle and no active task. Pull work now.`
+
+        const template = [
+          `1) Pull: GET /tasks/next?agent=${agent}`,
+          `2) Claim: PATCH /tasks/<id> { "status": "doing", "assignee": "${agent}" }`,
+          '3) Post: /tasks/<id>/comments with 1) shipped 2) blocker 3) next+ETA',
+        ].join('\n')
+
+        const renderedMessage = `${intro}\n${template}`
+
+        decisions.push({
+          ...baseDecision,
+          decision: tier === 1 ? 'warn' : 'escalate',
+          reason: 'queue-clear',
+          renderedMessage,
+        })
+
+        if (dryRun) {
+          continue
+        }
+
+        await routeMessage({
+          from: 'system',
+          content: renderedMessage,
+          category: 'watchdog-alert',
+          severity: tier === 2 ? 'warning' : 'info',
+          mentions: tier === 2 ? [agent, 'kai'] : [agent],
+        })
+
+        const unchangedNudgeCount = state && state.lastSignature === signature
+          ? state.unchangedNudgeCount + 1
+          : 1
+
+        this.idleNudgeState.set(agent, {
+          lastNudgeAt: now,
+          lastTier: tier,
+          lastSignature: signature,
+          unchangedNudgeCount,
+        })
+        nudged.push(agent)
         continue
       }
 
