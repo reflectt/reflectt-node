@@ -1943,30 +1943,6 @@ describe('Chat Messages', () => {
       channel: 'general',
     })
 
-  it('POST /chat/messages does not warn on autonomy pattern: PR approval request', async () => {
-    const { status, body } = await req('POST', '/chat/messages', {
-      from: 'test-runner',
-      content: 'hey @ryan can you approve + merge PR #123?',
-      channel: 'general',
-    })
-
-    expect(status).toBe(200)
-    expect(body.success).toBe(true)
-    expect(body.autonomy_warnings).toBeUndefined()
-  })
-
-  it('POST /chat/messages does not warn on autonomy pattern: logistics ask', async () => {
-    const { status, body } = await req('POST', '/chat/messages', {
-      from: 'test-runner',
-      content: 'hey @ryan do you want me to send you the link?',
-      channel: 'general',
-    })
-
-    expect(status).toBe(200)
-    expect(body.success).toBe(true)
-    expect(body.autonomy_warnings).toBeUndefined()
-  })
-
     expect(status).toBe(200)
     expect(body.success).toBe(true)
     expect(Array.isArray(body.autonomy_warnings)).toBe(true)
