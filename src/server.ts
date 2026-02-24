@@ -52,6 +52,8 @@ import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as tra
 import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
+import type { GitHubIdentityProvider } from './github-identity.js'
+import { createGitHubIdentityProvider } from './github-identity.js'
 import { getProvisioningManager } from './provisioning.js'
 import { getWebhookDeliveryManager } from './webhooks.js'
 import { exportBundle, importBundle } from './portability.js'
@@ -1110,10 +1112,18 @@ async function resolveArtifactEvidence(paths: string[]): Promise<Array<{ path: s
   return results
 }
 
-function githubHeaders(): Record<string, string> {
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN
-  const h: Record<string, string> = { Accept: 'application/vnd.github+json' }
-  if (token) h.Authorization = `Bearer ${token}`
+// (github identity imports moved to top)
+
+let githubIdentityProvider: GitHubIdentityProvider | null = null
+
+async function githubHeaders(): Promise<Record<string, string>> {
+  const h: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+  }
+
+  const token = await githubIdentityProvider?.getToken()
+  if (token?.token) h.Authorization = `Bearer ${token.token}`
   return h
 }
 
@@ -1147,7 +1157,7 @@ async function resolvePrAndCi(prUrl: string): Promise<{
 
   try {
     const prRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.pullNumber}`, {
-      headers: githubHeaders(),
+      headers: await githubHeaders(),
     })
 
     if (!prRes.ok) {
@@ -1177,7 +1187,7 @@ async function resolvePrAndCi(prUrl: string): Promise<{
 
     if (headSha) {
       const statusRes = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits/${headSha}/status`, {
-        headers: githubHeaders(),
+        headers: await githubHeaders(),
       })
       if (statusRes.ok) {
         const statusJson = await statusRes.json() as any
@@ -1499,6 +1509,22 @@ export async function createServer(): Promise<FastifyInstance> {
   } catch (err) {
     console.error('[Vault] Failed to initialize:', (err as Error).message)
   }
+
+  // Initialize GitHub identity provider (PAT env fallback + optional GitHub App installation token mode)
+  // v1: per-node/team configuration via env vars; secrets stored in SecretVault.
+  const githubMode = (process.env.REFLECTT_GITHUB_IDENTITY_MODE || 'pat') as 'pat' | 'app_installation'
+  githubIdentityProvider = createGitHubIdentityProvider({
+    config: {
+      mode: githubMode,
+      app: {
+        privateKeySecretName: process.env.REFLECTT_GITHUB_APP_PRIVATE_KEY_SECRET || 'github.app.private_key_pem',
+        appIdSecretName: process.env.REFLECTT_GITHUB_APP_ID_SECRET || 'github.app.app_id',
+        installationIdSecretName: process.env.REFLECTT_GITHUB_APP_INSTALLATION_ID_SECRET || 'github.app.installation_id',
+      },
+    },
+    vault,
+  })
+  console.log(`[GitHubIdentity] mode=${githubIdentityProvider.getMode()}`)
 
   // Initialize telemetry (opt-in via REFLECTT_TELEMETRY=true)
   initTelemetry({
@@ -3280,7 +3306,7 @@ export async function createServer(): Promise<FastifyInstance> {
       return { available: false, message: 'Invalid PR URL format', taskId: resolved.resolvedId }
     }
 
-    const hdrs = githubHeaders()
+    const hdrs = await githubHeaders()
 
     // Fetch PR details (including files changed)
     let prData: any = null
