@@ -72,3 +72,17 @@ Reviewer can return verdict quickly by checking:
 - Canonical handoff template: `docs/REVIEWER_HANDOFF_BUNDLE_TEMPLATE.md`
 - Task creation quality rail: `docs/TASK_CREATION_TEMPLATE.md`
 - Known drift/workarounds: `docs/KNOWN_ISSUES.md`
+
+---
+
+## Addendum: content/copy tasks
+
+For content/copy lanes, include a filled copy checklist with your reviewer packet:
+- `docs/COPY_ACCEPTANCE_CHECKLIST.md`
+
+Minimum evidence:
+- CTA inventory + validity (routes or nav labels validated)
+- state-text consistency table
+- metric hypothesis table
+
+If you can’t validate routes, **remove explicit paths** and reference UI labels instead.
