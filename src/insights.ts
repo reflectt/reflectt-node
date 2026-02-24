@@ -210,14 +210,88 @@ function maxSeverity(reflections: Reflection[]): string | null {
 
 /**
  * Build cluster key from a reflection.
+ *
+ * NOTE: When a reflection lacks explicit `unit:` / `stage:` tags, we try to
+ * avoid collapsing everything into `unknown::*::unknown` by:
+ *  - deriving unit from the first non-reserved tag (e.g. `chat`, `status-discipline`)
+ *  - as a last resort, deriving a short topic signature from the pain text
  */
 export function extractClusterKey(reflection: Reflection): InsightClusterKey {
   const tags = reflection.tags ?? []
-  return {
-    workflow_stage: tags.find(t => t.startsWith('stage:'))?.slice(6) ?? 'unknown',
-    failure_family: tags.find(t => t.startsWith('family:'))?.slice(7) ?? _inferFailureFamily(reflection.pain),
-    impacted_unit: tags.find(t => t.startsWith('unit:'))?.slice(5) ?? reflection.team_id ?? 'unknown',
+
+  const stageRaw = tags.find(t => t.startsWith('stage:'))?.slice(6) ?? 'unknown'
+  const familyRaw = tags.find(t => t.startsWith('family:'))?.slice(7) ?? _inferFailureFamily(reflection.pain)
+
+  const explicitUnit = tags.find(t => t.startsWith('unit:'))?.slice(5)
+  let unitRaw = explicitUnit
+    ?? _inferImpactedUnitFromTags(tags)
+    ?? reflection.team_id
+    ?? 'unknown'
+
+  // If we still have no unit, derive a small topic signature so unrelated
+  // reflections don't cluster into the same `unknown::*::unknown` bucket.
+  if (!explicitUnit && (!unitRaw || unitRaw === 'unknown')) {
+    const topic = _inferTopicFromPain(reflection.pain)
+    if (topic) unitRaw = topic
   }
+
+  return {
+    workflow_stage: _sanitizeClusterPart(stageRaw) || 'unknown',
+    failure_family: _sanitizeClusterPart(familyRaw) || 'uncategorized',
+    impacted_unit: _sanitizeClusterPart(unitRaw) || 'unknown',
+  }
+}
+
+function _sanitizeClusterPart(part: string | null | undefined): string {
+  if (!part) return ''
+  return part
+    .trim()
+    .toLowerCase()
+    // prevent delimiter collisions
+    .replace(/::+/g, '-')
+    .replace(/:+/g, '-')
+    .replace(/\s+/g, '-')
+    // keep keys compact + url/db friendly
+    .replace(/[^a-z0-9._-]/g, '')
+    .slice(0, 64)
+}
+
+function _inferImpactedUnitFromTags(tags: string[]): string | null {
+  if (!tags || tags.length === 0) return null
+
+  const reservedPrefixes = ['stage:', 'family:', 'unit:', 'team:']
+  const candidates = tags
+    .map(t => t.trim())
+    .filter(Boolean)
+    .filter(t => !reservedPrefixes.some(p => t.startsWith(p)))
+
+  if (candidates.length === 0) return null
+
+  // Prefer a non-generic tag if possible, but keep deterministic ordering.
+  const generic = new Set([
+    'performance', 'data-loss', 'runtime-error', 'access', 'ui', 'config', 'deployment', 'testing', 'uncategorized',
+    'memory', 'latency', 'timeout',
+  ])
+
+  return candidates.find(t => !generic.has(t.toLowerCase())) ?? candidates[0]
+}
+
+function _inferTopicFromPain(pain: string): string | null {
+  const lower = (pain || '').toLowerCase()
+  if (!lower.trim()) return null
+
+  // Simple, stable signature: first 3 meaningful words (len>=4), stopword-filtered.
+  const stop = new Set(['this', 'that', 'with', 'from', 'into', 'onto', 'when', 'then', 'than', 'over', 'under', 'only', 'just', 'some', 'much', 'very', 'more', 'most', 'less', 'have', 'has', 'had', 'been', 'were', 'was', 'are', 'and', 'the', 'for', 'but', 'not', 'too', 'yet'])
+  const words = lower
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/\s+/)
+    .map(w => w.trim())
+    .filter(w => w.length >= 4)
+    .filter(w => !stop.has(w))
+
+  if (words.length === 0) return null
+  const sig = words.slice(0, 3).join('-')
+  return `topic-${sig}`
 }
 
 function _inferFailureFamily(pain: string): string {
