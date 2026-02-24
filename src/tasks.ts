@@ -167,8 +167,78 @@ function importTaskComments(db: Database.Database, records: unknown[]): number {
   return records.length
 }
 
+/** Row shape from SQLite tasks table */
+interface TaskRow {
+  id: string
+  title: string
+  description: string | null
+  status: Task['status']
+  assignee: string | null
+  reviewer: string | null
+  done_criteria: string | null
+  created_by: string
+  created_at: number
+  updated_at: number
+  priority: string | null
+  blocked_by: string | null
+  epic_id: string | null
+  tags: string | null
+  metadata: string | null
+  team_id: string | null
+  comment_count: number
+}
+
+function rowToTask(row: TaskRow): Task {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description ?? undefined,
+    status: row.status,
+    assignee: row.assignee ?? undefined,
+    reviewer: row.reviewer ?? undefined,
+    done_criteria: safeJsonParse<string[]>(row.done_criteria),
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    priority: (row.priority as Task['priority']) ?? undefined,
+    blocked_by: safeJsonParse<string[]>(row.blocked_by),
+    epic_id: row.epic_id ?? undefined,
+    tags: safeJsonParse<string[]>(row.tags),
+    metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
+    teamId: row.team_id ?? undefined,
+  }
+}
+
+/** Query all tasks from SQLite */
+function queryAllTasks(): Task[] {
+  const db = getDb()
+  const rows = db.prepare('SELECT * FROM tasks').all() as TaskRow[]
+  return rows.map(rowToTask)
+}
+
+/** Query single task by ID from SQLite */
+function queryTask(id: string): Task | undefined {
+  const db = getDb()
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRow | undefined
+  return row ? rowToTask(row) : undefined
+}
+
+/** Check if task exists in SQLite */
+function taskExists(id: string): boolean {
+  const db = getDb()
+  const row = db.prepare('SELECT 1 FROM tasks WHERE id = ? LIMIT 1').get(id) as { 1: number } | undefined
+  return !!row
+}
+
+/** Get count of tasks */
+function taskCount(): number {
+  const db = getDb()
+  const row = db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number }
+  return row.count
+}
+
 class TaskManager {
-  private tasks = new Map<string, Task>()
+  // No in-memory tasks Map — all reads go to SQLite
   private subscribers = new Set<(task: Task, action: 'created' | 'updated' | 'deleted') => void>()
   private recurringTasks = new Map<string, RecurringTask>()
   // taskHistory and taskComments are queried from SQLite on demand — no in-memory cache
@@ -248,61 +318,19 @@ class TaskManager {
       // Also check legacy location for migration
       importJsonlIfNeeded(db, LEGACY_TASKS_FILE, 'tasks', importTasks)
 
-      // Load tasks from SQLite into in-memory Map
-      const rows = db.prepare('SELECT * FROM tasks').all() as Array<{
-        id: string
-        title: string
-        description: string | null
-        status: Task['status']
-        assignee: string | null
-        reviewer: string | null
-        done_criteria: string | null
-        created_by: string
-        created_at: number
-        updated_at: number
-        priority: string | null
-        blocked_by: string | null
-        epic_id: string | null
-        tags: string | null
-        metadata: string | null
-        team_id: string | null
-        comment_count: number
-      }>
-
-      for (const row of rows) {
-        const task: Task = {
-          id: row.id,
-          title: row.title,
-          description: row.description ?? undefined,
-          status: row.status,
-          assignee: row.assignee ?? undefined,
-          reviewer: row.reviewer ?? undefined,
-          done_criteria: safeJsonParse<string[]>(row.done_criteria),
-          createdBy: row.created_by,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-          priority: (row.priority as Task['priority']) ?? undefined,
-          blocked_by: safeJsonParse<string[]>(row.blocked_by),
-          epic_id: row.epic_id ?? undefined,
-          tags: safeJsonParse<string[]>(row.tags),
-          metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
-          teamId: row.team_id ?? undefined,
-        }
-        this.tasks.set(task.id, task)
-      }
-
-      console.log(`[Tasks] Loaded ${this.tasks.size} tasks from SQLite`)
+      // All tasks queried from SQLite on demand — no in-memory Map
+      const count = taskCount()
+      console.log(`[Tasks] SQLite has ${count} tasks (all queries go to DB)`)
 
       // Cloud hydration if empty
-      if (this.tasks.size === 0 && this.taskStateAdapter) {
+      if (count === 0 && this.taskStateAdapter) {
         try {
           const remoteTasks = await this.taskStateAdapter.pullTasks()
           for (const task of remoteTasks) {
-            this.tasks.set(task.id, task)
+            this.writeTaskToDb(task)
           }
 
           if (remoteTasks.length > 0) {
-            await this.persistTasks()
             console.log(`[Tasks] Hydrated ${remoteTasks.length} tasks from cloud state`)
           }
         } catch (err) {
@@ -572,21 +600,26 @@ class TaskManager {
   }
 
   private hasMaterializedRun(recurringId: string, scheduledFor: number): boolean {
-    for (const task of this.tasks.values()) {
-      const recurringMeta = (task.metadata as any)?.recurring
-      if (recurringMeta?.id === recurringId && recurringMeta?.scheduledFor === scheduledFor) {
-        return true
-      }
-    }
-    return false
+    const db = getDb()
+    // Use JSON extract to check recurring metadata without loading all tasks
+    const row = db.prepare(`
+      SELECT 1 FROM tasks
+      WHERE json_extract(metadata, '$.recurring.id') = ?
+        AND json_extract(metadata, '$.recurring.scheduledFor') = ?
+      LIMIT 1
+    `).get(recurringId, scheduledFor)
+    return !!row
   }
 
   private getLatestRecurringInstance(recurringId: string): Task | undefined {
-    const instances = Array.from(this.tasks.values())
-      .filter(task => (task.metadata as any)?.recurring?.id === recurringId)
-      .sort((a, b) => b.createdAt - a.createdAt)
-
-    return instances[0]
+    const db = getDb()
+    const row = db.prepare(`
+      SELECT * FROM tasks
+      WHERE json_extract(metadata, '$.recurring.id') = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(recurringId) as TaskRow | undefined
+    return row ? rowToTask(row) : undefined
   }
 
   async materializeDueRecurringTasks(now = Date.now(), options?: { force?: boolean }): Promise<{ created: number; skipped: number }> {
@@ -652,51 +685,50 @@ class TaskManager {
     return { created, skipped }
   }
 
-  private async persistTasks(): Promise<void> {
+  /** Write a single task to SQLite + JSONL audit */
+  private writeTaskToDb(task: Task): void {
     try {
       const db = getDb()
-      const upsert = db.prepare(`
+      const commentCount = this.getTaskCommentCount(task.id)
+      db.prepare(`
         INSERT OR REPLACE INTO tasks (
           id, title, description, status, assignee, reviewer, done_criteria,
           created_by, created_at, updated_at, priority, blocked_by, epic_id,
           tags, metadata, team_id, comment_count
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-
-      const upsertAll = db.transaction(() => {
-        for (const task of this.tasks.values()) {
-          const commentCount = this.getTaskCommentCount(task.id)
-          upsert.run(
-            task.id,
-            task.title,
-            task.description ?? null,
-            task.status,
-            task.assignee ?? null,
-            task.reviewer ?? null,
-            safeJsonStringify(task.done_criteria),
-            task.createdBy,
-            task.createdAt,
-            task.updatedAt,
-            task.priority ?? null,
-            safeJsonStringify(task.blocked_by),
-            task.epic_id ?? null,
-            safeJsonStringify(task.tags),
-            safeJsonStringify(task.metadata),
-            task.teamId ?? null,
-            commentCount
-          )
-        }
-      })
-
-      upsertAll()
+      `).run(
+        task.id,
+        task.title,
+        task.description ?? null,
+        task.status,
+        task.assignee ?? null,
+        task.reviewer ?? null,
+        safeJsonStringify(task.done_criteria),
+        task.createdBy,
+        task.createdAt,
+        task.updatedAt,
+        task.priority ?? null,
+        safeJsonStringify(task.blocked_by),
+        task.epic_id ?? null,
+        safeJsonStringify(task.tags),
+        safeJsonStringify(task.metadata),
+        task.teamId ?? null,
+        commentCount
+      )
     } catch (err) {
-      console.error('[Tasks] Failed to persist tasks to SQLite:', err)
+      console.error(`[Tasks] Failed to write task ${task.id} to SQLite:`, err)
     }
 
-    // JSONL audit log (append-only, best-effort)
+    // JSONL audit (best-effort, async)
+    fs.appendFile(TASKS_FILE, JSON.stringify(task) + '\n', 'utf-8').catch(() => {})
+  }
+
+  /** Legacy bulk persist — now just writes all tasks from DB to JSONL */
+  private async persistTasks(): Promise<void> {
     try {
       await fs.mkdir(DATA_DIR, { recursive: true })
-      const lines = Array.from(this.tasks.values()).map(task => JSON.stringify(task))
+      const tasks = queryAllTasks()
+      const lines = tasks.map(task => JSON.stringify(task))
       await fs.writeFile(TASKS_FILE, lines.join('\n') + '\n', 'utf-8')
     } catch (err) {
       console.error('[Tasks] Failed to write JSONL audit log:', err)
@@ -751,7 +783,7 @@ class TaskManager {
     // Validate blocked_by references
     if (normalizedData.blocked_by && normalizedData.blocked_by.length > 0) {
       for (const blockerId of normalizedData.blocked_by) {
-        if (!this.tasks.has(blockerId)) {
+        if (!taskExists(blockerId)) {
           throw new Error(`Invalid blocked_by reference: task ${blockerId} does not exist`)
         }
       }
@@ -764,8 +796,7 @@ class TaskManager {
       updatedAt: Date.now(),
     }
 
-    this.tasks.set(task.id, task)
-    await this.persistTasks()
+    this.writeTaskToDb(task)
     await this.syncTaskToCloud(task)
     await this.recordTaskHistoryEvent(task.id, 'created', task.createdBy, {
       status: task.status,
@@ -807,7 +838,7 @@ class TaskManager {
   }): Promise<RecurringTask> {
     if (data.blocked_by && data.blocked_by.length > 0) {
       for (const blockerId of data.blocked_by) {
-        if (!this.tasks.has(blockerId)) {
+        if (!taskExists(blockerId)) {
           throw new Error(`Invalid blocked_by reference: task ${blockerId} does not exist`)
         }
       }
@@ -884,7 +915,7 @@ class TaskManager {
   }
 
   getTask(id: string): Task | undefined {
-    return this.tasks.get(id)
+    return queryTask(id)
   }
 
   resolveTaskId(inputId: string): {
@@ -898,19 +929,20 @@ class TaskManager {
       return { matchType: 'not_found', suggestions: [] }
     }
 
-    const exact = this.tasks.get(raw)
+    const exact = queryTask(raw)
     if (exact) {
       return { task: exact, resolvedId: raw, matchType: 'exact', suggestions: [] }
     }
 
     const lowerRaw = raw.toLowerCase()
-    const ids = Array.from(this.tasks.keys())
-    const prefixMatches = ids.filter(id => id.toLowerCase().startsWith(lowerRaw))
+    const db = getDb()
+    const allIds = (db.prepare('SELECT id FROM tasks').all() as Array<{ id: string }>).map(r => r.id)
+    const prefixMatches = allIds.filter(id => id.toLowerCase().startsWith(lowerRaw))
 
     if (prefixMatches.length === 1) {
       const resolvedId = prefixMatches[0]
       return {
-        task: this.tasks.get(resolvedId),
+        task: queryTask(resolvedId),
         resolvedId,
         matchType: 'prefix',
         suggestions: [],
@@ -924,7 +956,7 @@ class TaskManager {
       }
     }
 
-    const containsMatches = ids.filter(id => id.toLowerCase().includes(lowerRaw)).slice(0, 8)
+    const containsMatches = allIds.filter((id: string) => id.toLowerCase().includes(lowerRaw)).slice(0, 8)
     return {
       matchType: 'not_found',
       suggestions: containsMatches,
@@ -967,7 +999,7 @@ class TaskManager {
   }
 
   async addTaskComment(taskId: string, author: string, content: string): Promise<TaskComment> {
-    const task = this.tasks.get(taskId)
+    const task = queryTask(taskId)
     if (!task) {
       throw new Error('Task not found')
     }
@@ -1018,41 +1050,48 @@ class TaskManager {
       if (!task.blocked_by || task.blocked_by.length === 0) return false
       
       return task.blocked_by.some(blockerId => {
-        const blocker = this.tasks.get(blockerId)
+        const blocker = queryTask(blockerId)
         return blocker && blocker.status !== 'done'
       })
     }
 
-    let tasks = Array.from(this.tasks.values())
+    const db = getDb()
+    const conditions: string[] = []
+    const params: unknown[] = []
 
     if (options?.status) {
-      tasks = tasks.filter(t => t.status === options.status)
+      conditions.push('status = ?')
+      params.push(options.status)
     }
 
-    // Support both assignee and assignedTo for backward compatibility
     const assigneeFilter = options?.assignee || options?.assignedTo
     if (assigneeFilter) {
-      tasks = tasks.filter(t => t.assignee === assigneeFilter)
+      conditions.push('assignee = ?')
+      params.push(assigneeFilter)
     }
 
     if (options?.createdBy) {
-      tasks = tasks.filter(t => t.createdBy === options.createdBy)
+      conditions.push('created_by = ?')
+      params.push(options.createdBy)
     }
 
     if (options?.teamId) {
-      tasks = tasks.filter(t => {
-        if (t.teamId === options.teamId) return true
-        const metadataTeamId = (t.metadata as Record<string, unknown> | undefined)?.teamId
-        return typeof metadataTeamId === 'string' && metadataTeamId === options.teamId
-      })
+      conditions.push("(team_id = ? OR json_extract(metadata, '$.teamId') = ?)")
+      params.push(options.teamId, options.teamId)
     }
 
     if (options?.priority) {
-      tasks = tasks.filter(t => t.priority === options.priority)
+      conditions.push('priority = ?')
+      params.push(options.priority)
     }
 
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+    const sql = `SELECT * FROM tasks ${where} ORDER BY updated_at DESC`
+    let tasks = (db.prepare(sql).all(...params) as TaskRow[]).map(rowToTask)
+
+    // Tag filtering requires JSON parsing (can't easily do in SQL)
     if (options?.tags && options.tags.length > 0) {
-      tasks = tasks.filter(t => 
+      tasks = tasks.filter(t =>
         t.tags && options.tags!.some(tag => t.tags!.includes(tag))
       )
     }
@@ -1062,20 +1101,21 @@ class TaskManager {
       tasks = tasks.filter(t => !isBlocked(t))
     }
 
-    return tasks.sort((a, b) => b.updatedAt - a.updatedAt)
+    return tasks
   }
 
   searchTasks(query: string): Task[] {
     const normalized = query.trim().toLowerCase()
     if (!normalized) return []
 
-    return Array.from(this.tasks.values())
-      .filter(task => {
-        const title = task.title.toLowerCase()
-        const description = (task.description || '').toLowerCase()
-        return title.includes(normalized) || description.includes(normalized)
-      })
-      .sort((a, b) => b.updatedAt - a.updatedAt)
+    const db = getDb()
+    const pattern = `%${normalized}%`
+    const rows = db.prepare(`
+      SELECT * FROM tasks
+      WHERE title LIKE ? COLLATE NOCASE OR description LIKE ? COLLATE NOCASE
+      ORDER BY updated_at DESC
+    `).all(pattern, pattern) as TaskRow[]
+    return rows.map(rowToTask)
   }
 
   private resolveHistoryActor(task: Task, updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>): string {
@@ -1199,7 +1239,7 @@ class TaskManager {
   }
 
   async updateTask(id: string, updates: Partial<Omit<Task, 'id' | 'createdAt' | 'createdBy'>>): Promise<Task | undefined> {
-    const task = this.tasks.get(id)
+    const task = queryTask(id)
     if (!task) return undefined
 
     // Validate blocked_by references if being updated
@@ -1208,7 +1248,7 @@ class TaskManager {
         if (blockerId === id) {
           throw new Error('Task cannot be blocked by itself')
         }
-        if (!this.tasks.has(blockerId)) {
+        if (!taskExists(blockerId)) {
           throw new Error(`Invalid blocked_by reference: task ${blockerId} does not exist`)
         }
       }
@@ -1225,7 +1265,7 @@ class TaskManager {
         visited.add(taskId)
         
         // Get the task and check its dependencies
-        const t = this.tasks.get(taskId)
+        const t = queryTask(taskId)
         if (!t || !t.blocked_by) return false
         
         // Recursively check each dependency
@@ -1254,8 +1294,7 @@ class TaskManager {
 
     this.validateLifecycleGates(updated)
 
-    this.tasks.set(id, updated)
-    await this.persistTasks()
+    this.writeTaskToDb(updated)
     await this.syncTaskToCloud(updated)
 
     if (updates.assignee !== undefined && updates.assignee !== task.assignee) {
@@ -1295,12 +1334,10 @@ class TaskManager {
   }
 
   async deleteTask(id: string): Promise<boolean> {
-    const task = this.tasks.get(id)
+    const task = queryTask(id)
     if (!task) return false
 
-    this.tasks.delete(id)
-
-    // Delete from SQLite directly (persistTasks only upserts, won't remove rows)
+    // Delete from SQLite
     try {
       const db = getDb()
       db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
@@ -1334,14 +1371,17 @@ class TaskManager {
     // Find all tasks that were blocked by this completed task
     const unblockedTasks: Task[] = []
     
-    for (const task of this.tasks.values()) {
+    const db = getDb()
+    const blockedRows = db.prepare(
+      `SELECT * FROM tasks WHERE blocked_by LIKE ?`
+    ).all(`%${completedTaskId}%`) as TaskRow[]
+    
+    for (const task of blockedRows.map(rowToTask)) {
       if (task.blocked_by && task.blocked_by.includes(completedTaskId)) {
-        // Check if all blocking tasks are done
         const stillBlocked = task.blocked_by.some(blockerId => {
-          const blocker = this.tasks.get(blockerId)
+          const blocker = queryTask(blockerId)
           return blocker && blocker.status !== 'done'
         })
-        
         if (!stillBlocked) {
           unblockedTasks.push(task)
         }
@@ -1384,7 +1424,7 @@ class TaskManager {
       if (!task.blocked_by || task.blocked_by.length === 0) return false
       
       return task.blocked_by.some(blockerId => {
-        const blocker = this.tasks.get(blockerId)
+        const blocker = queryTask(blockerId)
         return blocker && blocker.status !== 'done'
       })
     }
@@ -1398,12 +1438,12 @@ class TaskManager {
 
     // If agent specified, first return their highest-priority doing task
     // This ensures agents resume in-progress work before picking up new tasks
+    const db = getDb()
     if (agent) {
-      const doingTasks = Array.from(this.tasks.values())
-        .filter(t => t.status === 'doing')
-        .filter(t => t.assignee === agent)
-        .filter(t => !isBlocked(t))
-        .sort(sortByPriority)
+      const doingRows = db.prepare(
+        'SELECT * FROM tasks WHERE status = ? AND assignee = ?'
+      ).all('doing', agent) as TaskRow[]
+      const doingTasks = doingRows.map(rowToTask).filter(t => !isBlocked(t)).sort(sortByPriority)
 
       if (doingTasks.length > 0) {
         return doingTasks[0]
@@ -1411,17 +1451,16 @@ class TaskManager {
     }
 
     // Then check todo tasks: unassigned or assigned to this agent
-    let tasks = Array.from(this.tasks.values())
-      .filter(t => t.status === 'todo')
-      .filter(t => !t.assignee)
-      .filter(t => !isBlocked(t))
+    const todoUnassignedRows = db.prepare(
+      'SELECT * FROM tasks WHERE status = ? AND assignee IS NULL'
+    ).all('todo') as TaskRow[]
+    let tasks = todoUnassignedRows.map(rowToTask).filter(t => !isBlocked(t))
 
     if (agent) {
-      const agentTodoTasks = Array.from(this.tasks.values())
-        .filter(t => t.status === 'todo')
-        .filter(t => t.assignee === agent)
-        .filter(t => !isBlocked(t))
-      tasks = [...tasks, ...agentTodoTasks]
+      const agentTodoRows = db.prepare(
+        'SELECT * FROM tasks WHERE status = ? AND assignee = ?'
+      ).all('todo', agent) as TaskRow[]
+      tasks = [...tasks, ...agentTodoRows.map(rowToTask).filter(t => !isBlocked(t))]
     }
 
     if (tasks.length === 0) return undefined
@@ -1432,8 +1471,11 @@ class TaskManager {
   }
 
   getLifecycleInstrumentation() {
-    const tasks = Array.from(this.tasks.values())
-    const active = tasks.filter(t => t.status !== 'todo' && t.status !== 'done')
+    const db = getDb()
+    const activeRows = db.prepare(
+      `SELECT * FROM tasks WHERE status NOT IN ('todo', 'done')`
+    ).all() as TaskRow[]
+    const active = activeRows.map(rowToTask)
     const missingReviewer = active.filter(t => !t.reviewer || t.reviewer.trim().length === 0)
     const missingDoneCriteria = active.filter(t => !t.done_criteria || t.done_criteria.length === 0)
     const missingEtaOnDoing = active.filter(t => {
@@ -1467,19 +1509,19 @@ class TaskManager {
   }
 
   getStats() {
-    const tasks = Array.from(this.tasks.values())
-    return {
-      total: tasks.length,
-      byStatus: {
-        todo: tasks.filter(t => t.status === 'todo').length,
-        doing: tasks.filter(t => t.status === 'doing').length,
-        blocked: tasks.filter(t => t.status === 'blocked').length,
-        validating: tasks.filter(t => t.status === 'validating').length,
-        done: tasks.filter(t => t.status === 'done').length,
-        // Backward compatibility
-        'in-progress': tasks.filter(t => t.status === 'doing').length,
-      },
+    const db = getDb()
+    const total = (db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number }).count
+    const byStatusRows = db.prepare(
+      'SELECT status, COUNT(*) as count FROM tasks GROUP BY status'
+    ).all() as Array<{ status: string; count: number }>
+    const byStatus: Record<string, number> = {
+      todo: 0, doing: 0, blocked: 0, validating: 0, done: 0, 'in-progress': 0,
     }
+    for (const row of byStatusRows) {
+      byStatus[row.status] = row.count
+    }
+    byStatus['in-progress'] = byStatus.doing // Backward compatibility
+    return { total, byStatus }
   }
 }
 
