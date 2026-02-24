@@ -14,7 +14,7 @@ BASE="http://localhost:4445"
 |---|---|
 | `todo` | `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria[]`, `eta` |
 | `doing` | `reviewer` + `metadata.eta` |
-| `validating` | `metadata.artifact_path` + `metadata.qa_bundle { lane, summary, pr_link, commit_shas[], changed_files[], artifact_links[], checks[], screenshot_proof[] }`. For code lanes, include `metadata.qa_bundle.review_packet { task_id, pr_url, commit, changed_files[], artifact_path, caveats? }`. For design/docs/non-code validations, set `metadata.qa_bundle.non_code=true` and review-packet path checks are skipped. |
+| `validating` | `metadata.artifact_path` + `metadata.review_handoff { task_id, artifact_path, test_proof, known_caveats, (pr_url+commit_sha unless doc_only/config_only/non_code) }`. **Code lanes** additionally require `metadata.qa_bundle.review_packet { task_id, pr_url, commit, changed_files[], artifact_path, caveats }` + bundle fields. **Non-code/doc-only/config-only** tasks may omit `metadata.qa_bundle` entirely (set `review_handoff.doc_only=true` or `review_handoff.non_code=true` or `review_handoff.config_only=true`). |
 | `done` | No extra required field (recommended: reviewer sign-off comment) |
 
 ## 1) Create a task
@@ -79,7 +79,7 @@ curl -s -X POST "$BASE/tasks/$TASK_ID/comments" \
   -H 'Content-Type: application/json' \
   -d '{
     "author": "echo",
-    "content": "QA bundle: PR #123, tests pass, artifact=process/demo.md"
+    "content": "Review handoff: artifact=process/demo.md, doc_only=true, checks complete."
   }'
 ```
 
@@ -92,20 +92,21 @@ curl -s -X PATCH "$BASE/tasks/$TASK_ID" \
     "status": "validating",
     "metadata": {
       "artifact_path": "process/demo.md",
-      "qa_bundle": {
-        "lane": "docs",
-        "summary": "Quickstart updated with validating QA bundle contract",
-        "pr_link": "https://github.com/reflectt/reflectt-node/pull/123",
-        "commit_shas": ["abc1234"],
-        "changed_files": ["docs/TASKS_API_QUICKSTART.md"],
-        "artifact_links": ["process/demo.md"],
-        "checks": ["npm run -s check:route-docs-contract"],
-        "screenshot_proof": ["docs/images/quickstart-validating.png"]
+      "review_handoff": {
+        "task_id": "task-REPLACE_ME",
+        "repo": "reflectt/reflectt-node",
+        "artifact_path": "process/demo.md",
+        "test_proof": "Docs-only proof complete (manual checklist).",
+        "known_caveats": "Docs-only; no PR/commit required.",
+        "doc_only": true
       }
     },
     "actor": "echo"
   }'
 ```
+
+> Replace `task-REPLACE_ME` with your actual `$TASK_ID`.
+> For code-lane tasks, include `metadata.qa_bundle` + `metadata.qa_bundle.review_packet` (PR/commit/files) as well.
 
 ## 5) Complete as `done`
 
