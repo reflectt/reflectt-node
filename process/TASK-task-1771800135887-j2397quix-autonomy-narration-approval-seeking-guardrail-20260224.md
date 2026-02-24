@@ -2,7 +2,7 @@
 
 - **Task:** task-1771800135887-j2397quix
 - **Owner:** sage
-- **Reviewer:** kai
+- **Reviewer:** echo
 - **Date:** 2026-02-24
 
 ## Evidence validated
