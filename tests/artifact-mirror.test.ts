@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { promises as fs } from 'fs'
 import { join, resolve } from 'path'
-import { tmpdir } from 'os'
+import { tmpdir, homedir } from 'os'
 
 describe('Artifact Mirror', () => {
   let tempDir: string
@@ -62,6 +62,100 @@ describe('Artifact Mirror', () => {
     const result = await mod.mirrorArtifacts('process/does-not-exist')
     expect(result.mirrored).toBe(false)
     expect(result.error).toContain('not found')
+  })
+})
+
+describe('Shared Workspace Canonical Path', () => {
+  it('defaults to ~/.openclaw/workspace-shared when REFLECTT_SHARED_WORKSPACE is unset', async () => {
+    const savedWs = process.env.REFLECTT_SHARED_WORKSPACE
+    const savedWorkspace = process.env.REFLECTT_WORKSPACE
+    delete process.env.REFLECTT_SHARED_WORKSPACE
+    delete process.env.REFLECTT_WORKSPACE
+    try {
+      // Dynamic re-import to pick up env changes
+      const mod = await import('../src/artifact-mirror.js')
+      const canonical = mod.SHARED_WORKSPACE()
+      const expected = resolve(homedir(), '.openclaw', 'workspace-shared')
+      expect(canonical).toBe(expected)
+    } finally {
+      // Restore env for other tests
+      if (savedWs !== undefined) process.env.REFLECTT_SHARED_WORKSPACE = savedWs
+      if (savedWorkspace !== undefined) process.env.REFLECTT_WORKSPACE = savedWorkspace
+    }
+  })
+
+  it('respects REFLECTT_SHARED_WORKSPACE override', async () => {
+    const savedWs = process.env.REFLECTT_SHARED_WORKSPACE
+    process.env.REFLECTT_SHARED_WORKSPACE = '/custom/shared'
+    try {
+      const mod = await import('../src/artifact-mirror.js')
+      expect(mod.SHARED_WORKSPACE()).toBe('/custom/shared')
+    } finally {
+      if (savedWs !== undefined) {
+        process.env.REFLECTT_SHARED_WORKSPACE = savedWs
+      } else {
+        delete process.env.REFLECTT_SHARED_WORKSPACE
+      }
+    }
+  })
+
+  it('isSharedWorkspaceReady returns true when directory exists', async () => {
+    const tmpShared = await fs.mkdtemp(join(tmpdir(), 'shared-ready-'))
+    const saved = process.env.REFLECTT_SHARED_WORKSPACE
+    process.env.REFLECTT_SHARED_WORKSPACE = tmpShared
+    try {
+      const mod = await import('../src/artifact-mirror.js')
+      const ready = await mod.isSharedWorkspaceReady()
+      expect(ready).toBe(true)
+    } finally {
+      if (saved !== undefined) process.env.REFLECTT_SHARED_WORKSPACE = saved
+      else delete process.env.REFLECTT_SHARED_WORKSPACE
+      await fs.rm(tmpShared, { recursive: true, force: true }).catch(() => {})
+    }
+  })
+
+  it('isSharedWorkspaceReady returns false when directory missing', async () => {
+    const saved = process.env.REFLECTT_SHARED_WORKSPACE
+    process.env.REFLECTT_SHARED_WORKSPACE = '/nonexistent/workspace-shared-test-xyz'
+    try {
+      const mod = await import('../src/artifact-mirror.js')
+      const ready = await mod.isSharedWorkspaceReady()
+      expect(ready).toBe(false)
+    } finally {
+      if (saved !== undefined) process.env.REFLECTT_SHARED_WORKSPACE = saved
+      else delete process.env.REFLECTT_SHARED_WORKSPACE
+    }
+  })
+
+  it('mirrorArtifacts writes to the canonical shared workspace path', async () => {
+    // This is the key integration test: ensure mirroring actually writes
+    // to the shared workspace path (not some relative sibling)
+    const tmpBase = await fs.mkdtemp(join(tmpdir(), 'canonical-mirror-'))
+    const wsDir = join(tmpBase, 'workspace')
+    const sharedDir = join(tmpBase, 'shared')
+    await fs.mkdir(join(wsDir, 'process', 'task-canonical-test'), { recursive: true })
+    await fs.writeFile(join(wsDir, 'process', 'task-canonical-test', 'artifact.md'), '# Test')
+    await fs.mkdir(sharedDir, { recursive: true })
+
+    const savedWs = process.env.REFLECTT_WORKSPACE
+    const savedShared = process.env.REFLECTT_SHARED_WORKSPACE
+    process.env.REFLECTT_WORKSPACE = wsDir
+    process.env.REFLECTT_SHARED_WORKSPACE = sharedDir
+    try {
+      const mod = await import('../src/artifact-mirror.js')
+      const result = await mod.mirrorArtifacts('process/task-canonical-test')
+      expect(result.mirrored).toBe(true)
+      expect(result.destination).toBe(resolve(sharedDir, 'process', 'task-canonical-test'))
+      // Verify file actually exists at destination
+      const content = await fs.readFile(join(sharedDir, 'process', 'task-canonical-test', 'artifact.md'), 'utf-8')
+      expect(content).toBe('# Test')
+    } finally {
+      if (savedWs !== undefined) process.env.REFLECTT_WORKSPACE = savedWs
+      else delete process.env.REFLECTT_WORKSPACE
+      if (savedShared !== undefined) process.env.REFLECTT_SHARED_WORKSPACE = savedShared
+      else delete process.env.REFLECTT_SHARED_WORKSPACE
+      await fs.rm(tmpBase, { recursive: true, force: true }).catch(() => {})
+    }
   })
 })
 

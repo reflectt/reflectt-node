@@ -157,15 +157,19 @@ describe('Cross-insight dedup in auto-create', () => {
   })
 
   it('prevents duplicate task when insight with same cluster key already has a task', async () => {
-    // First insight creates a task (may be auto-created by EventBus listener)
+    // First insight creates a task via explicit handler call (deterministic, no race)
     const { insight: insight1 } = createTestInsight({
       severity: 'high',
       pain: 'Dedup test cluster pain alpha',
       tags: ['stage:dedup1', 'family:dedup-cluster', 'unit:dedup1'],
     })
 
-    // Wait for any async EventBus handler to complete
-    await new Promise(r => setTimeout(r, 50))
+    await _handlePromotedInsight({
+      id: `evt-dedup1-${Date.now()}`,
+      type: 'task_created',
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: insight1.id },
+    })
 
     // Ensure first insight has a task
     const updated1 = getInsight(insight1.id)
