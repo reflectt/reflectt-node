@@ -386,6 +386,34 @@ program
       }
     }
 
+    // Copy starter templates into ~/.reflectt/templates
+    const templatesSrcDir = join(__dirname, '..', 'templates')
+    const templatesDestDir = join(REFLECTT_HOME, 'templates')
+    mkdirSync(templatesDestDir, { recursive: true })
+
+    const templates = [
+      { src: 'task-template.md', desc: 'Task template' },
+      { src: 'review-packet.md', desc: 'Review packet template' },
+      { src: 'incident-template.md', desc: 'Incident template' },
+    ]
+
+    for (const file of templates) {
+      const destPath = join(templatesDestDir, file.src)
+      const srcPath = join(templatesSrcDir, file.src)
+
+      if (existsSync(destPath) && !opts.force) {
+        filesSkipped++
+        console.log(`  ⏭️  templates/${file.src} (exists)`)
+      } else if (existsSync(srcPath)) {
+        const content = readFileSync(srcPath, 'utf-8')
+        writeFileSync(destPath, content)
+        filesCreated++
+        console.log(`  ✅ templates/${file.src} — ${file.desc}`)
+      } else {
+        console.log(`  ⚠️  templates/${file.src} — template not found in package`)
+      }
+    }
+
     // Git init
     if (opts.git !== false) {
       const gitDir = join(REFLECTT_HOME, '.git')
