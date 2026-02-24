@@ -28,21 +28,48 @@ Node **never** depends on cloud availability for local execution.
 |--------|----------|------|---------|
 | GET | `/health`, `/api/health` | None | Service health |
 | GET | `/api/connect/bootstrap` | None | Agent-executable bootstrap instructions |
-| POST | `/api/hosts/claim` | Join token (self-auth) | Claim host with join token |
-| POST | `/api/connect/complete` | Connect token | Exchange token for host credentials |
-| POST | `/api/hosts/enroll` | API key (Bearer) | Single-step agent enrollment |
+| POST | `/api/connect/init` | JWT | **MVP**: dashboard user initiates connect (generates token) |
+| POST | `/api/connect/complete` | Connect token | **MVP**: agent exchanges token for host credentials |
+| POST | `/api/hosts/claim` | Join token (self-auth) | *Not-MVP* — legacy alias for `/connect/complete` |
+| POST | `/api/hosts/enroll` | API key (Bearer) | *Not-MVP* — future machine-to-machine enrollment |
+| POST | `/api/hosts/register-token` | JWT | *Not-MVP* — generates join token (use `/connect/init` instead) |
 | GET | `/api/me` | JWT | Current user profile |
 | POST | `/api/orgs` | JWT | Create org |
 | GET | `/api/orgs` | JWT | List user orgs |
 | POST | `/api/teams` | JWT | Create team in org |
 | GET | `/api/teams` | JWT | List teams for org |
-| POST | `/api/hosts/register-token` | JWT | Generate host join token |
-| POST | `/api/connect/init` | JWT | Dashboard-initiated connect flow |
 | GET | `/api/hosts` | JWT | List hosts for team (w/ drift + convergence) |
 | GET | `/api/me/teams` | JWT | List user's teams |
 | POST | `/api/hosts/:id/heartbeat` | Host credential | Host heartbeat + status |
 | POST | `/api/hosts/:id/tasks/sync` | Host credential / JWT | One-way task sync (node → cloud) |
 | POST | `/api/hosts/:id/revoke-credential` | JWT | Rotate host credential |
+
+### Canonical MVP Host Enrollment (the one we ship)
+
+```
+Step 1 — Human clicks "Add Host" in dashboard
+         → POST /api/connect/init  (auth: user JWT)
+         ← returns { connectToken, cloudUrl, expiresAt }
+
+Step 2 — Human copies command to terminal on the target machine
+
+Step 3 — Agent runs:  reflectt host connect --join-token <token> --cloud-url <url>
+         → POST /api/connect/complete  (auth: connect token, no JWT)
+         ← returns { hostId, credential, teamId, cloudUrl }
+
+Step 4 — Agent writes cloud config to ~/.reflectt/config.json and restarts node
+
+Step 5 — Node begins heartbeat cycle → host appears in dashboard as "connected"
+```
+
+### Non-MVP / Future Enrollment Flows (exist but not used in MVP onboarding)
+
+| Endpoint | Why not-MVP | When to revisit |
+|----------|------------|-----------------|
+| `POST /api/hosts/claim` | Legacy alias for `/connect/complete`; same semantics | Remove or redirect after MVP |
+| `POST /api/hosts/enroll` | Single-step API-key enrollment; skips browser | Ship when we support headless/CI provisioning |
+| `POST /api/hosts/register-token` | Generates join token outside `/connect/init` | Merge into `/connect/init` or keep for admin tooling |
+| `GET /api/connect/bootstrap` | Machine-readable instructions; useful but not required for MVP | Keep as documentation endpoint |
 
 ### 2b. Web App API Routes (`apps/web/src/app/api/` — Next.js routes on Vercel)
 
@@ -244,7 +271,7 @@ These are the **~12 endpoints** we need live and tested for a paying customer. E
 | # | Endpoint | Why MVP |
 |---|----------|---------|
 | 1 | `GET /api/health` | Monitoring; already works |
-| 2 | `POST /api/hosts/enroll` | Single-step host enrollment (replaces 3-step claim/complete) |
+| 2 | `POST /api/connect/init` + `POST /api/connect/complete` | **Canonical MVP enrollment** (see Section 2a) |
 | 3 | `POST /api/hosts/:id/heartbeat` | Host liveness + agent roster sync |
 | 4 | `POST /api/hosts/:id/tasks/sync` | Task state → cloud for dashboard |
 | 5 | `POST /api/hosts/:id/chat/sync` | Chat relay (bidirectional) |
@@ -270,8 +297,8 @@ These are the **~12 endpoints** we need live and tested for a paying customer. E
 
 These routes exist in `apps/api` or `apps/web` but can be consolidated or removed without blocking the first paying customer:
 
-- **Multi-step enrollment** (`/api/connect/init`, `/api/hosts/claim`, `/api/connect/complete`, `/api/connect/bootstrap`) → replaced by single-step `POST /api/hosts/enroll`
-- **Register-token flow** (`/api/hosts/register-token`) → can use enroll directly
+- **Legacy enrollment aliases** (`/api/hosts/claim`, `/api/hosts/enroll`, `/api/hosts/register-token`) → not-MVP; see "Non-MVP Enrollment Flows" table in Section 2a
+- **Bootstrap endpoint** (`/api/connect/bootstrap`) → documentation-only; useful but not required
 - **Canvas relay** (`/api/hosts/:id/canvas`) → nice-to-have, not revenue-blocking
 - **Command queue** (`/api/hosts/:id/commands`, `commands/:id/ack`) → deferred until write-back is critical
 - **Usage sync** (`/api/hosts/:id/usage/sync`, `/api/hosts/:id/usage`) → P2 post-revenue
@@ -284,7 +311,7 @@ These routes exist in `apps/api` or `apps/web` but can be consolidated or remove
 
 ---
 
-## 8. Recommendations
+## 8. Recommendations & Next Steps
 
 1. **Ship Stripe first** (P0): wire `billing/checkout`, `billing/portal`, `billing/subscription` to real Stripe API; add webhook handler for `customer.subscription.*` events; gate Pro features behind `team.plan` check.
 
@@ -298,7 +325,7 @@ These routes exist in `apps/api` or `apps/web` but can be consolidated or remove
 
 ---
 
-## 8. Open Questions & Decisions Needed
+## 9. Open Questions & Decisions Needed
 
 ### Billing & Revenue
 1. **Billing tiers**: Free tier limits? Pro at $19/mo — what features are gated? Team tier pricing?
