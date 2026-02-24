@@ -201,6 +201,49 @@ export function getDashboardHTML(): string {
   .modal-body { padding: 20px; }
   .modal-section { margin-bottom: 20px; }
   .modal-section:last-child { margin-bottom: 0; }
+
+  /* Artifact list (task modal) */
+  .artifact-list { display: flex; flex-direction: column; gap: 10px; }
+  .artifact-row {
+    background: var(--bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+  }
+  .artifact-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .artifact-path { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 12px; color: var(--text-bright); }
+  .artifact-meta { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .artifact-actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .artifact-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .artifact-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .artifact-pill {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    background: var(--surface-raised);
+    flex-shrink: 0;
+  }
+  .artifact-pill.ok { border-color: var(--green); color: #9de6a8; background: var(--green-dim); }
+  .artifact-pill.missing { border-color: var(--red); color: #ff9a94; background: var(--red-dim); }
   .modal-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
     color: var(--text-muted); font-weight: 600; margin-bottom: 8px;
   }
@@ -1056,6 +1099,17 @@ export function getDashboardHTML(): string {
     <div class="kanban" id="kanban"></div>
   </div>
 
+  <div class="panel focus-collapse">
+    <div class="panel-header">🔎 Task Search <span class="count" id="search-count"></span></div>
+    <div class="panel-body" style="max-height:280px;overflow-y:auto">
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input type="text" id="task-search-input" class="modal-input" placeholder="Search tasks (title, id, assignee)…" autocomplete="off" />
+        <button class="modal-copy-btn" onclick="runTaskSearch()">Search</button>
+      </div>
+      <div id="task-search-results"><div class="empty" style="color:var(--text-muted)">Type a query and press Enter…</div></div>
+    </div>
+  </div>
+
   <div class="panel" id="review-queue-panel">
     <div class="panel-header">👀 Review Queue <span class="count" id="review-queue-count"></span></div>
     <div class="panel-body" id="review-queue-body" style="max-height:350px;overflow-y:auto"></div>
@@ -1188,6 +1242,11 @@ export function getDashboardHTML(): string {
       <div class="modal-section">
         <div class="modal-label">Blocked by</div>
         <div class="modal-value" id="modal-task-blockers"></div>
+      </div>
+
+      <div class="modal-section">
+        <div class="modal-label">Artifacts</div>
+        <div id="modal-task-artifacts" class="artifact-list"><div class="empty" style="color:var(--text-muted)">No artifacts loaded</div></div>
       </div>
 
       <!-- PR Review Quality Panel -->
