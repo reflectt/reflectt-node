@@ -1943,6 +1943,27 @@ describe('Chat Messages', () => {
       channel: 'general',
     })
 
+  it('POST /chat/messages warns on autonomy anti-pattern: 'whats next' variants', async () => {
+    const variants = [
+      'hey @ryan whats next for me?',
+      'hey @ryan what's next for me?',
+      'hey @ryan what do I do next?',
+    ]
+
+    for (const content of variants) {
+      const { status, body } = await req('POST', '/chat/messages', {
+        from: 'test-runner',
+        content,
+        channel: 'general',
+      })
+
+      expect(status).toBe(200)
+      expect(body.success).toBe(true)
+      expect(Array.isArray(body.autonomy_warnings)).toBe(true)
+      expect(body.autonomy_warnings[0]).toContain('Autonomy guardrail')
+    }
+  })
+
     expect(status).toBe(200)
     expect(body.success).toBe(true)
     expect(Array.isArray(body.autonomy_warnings)).toBe(true)
