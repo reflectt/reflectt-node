@@ -57,7 +57,11 @@ export function getEffectiveActivity(
 ): ActivitySignal {
   const db = getDb()
   const now = Date.now()
-  const created = taskCreatedAt || now
+  if (taskCreatedAt === undefined) {
+    // Warn: callers should always pass task.createdAt to avoid masking staleness
+    console.warn(`[activity-signal] taskCreatedAt not provided for task ${taskId} — falling back to now (may mask staleness)`)
+  }
+  const created = taskCreatedAt ?? now
 
   // 1. Last comment by the agent (or any author)
   let lastCommentAt: number | null = null
@@ -70,8 +74,9 @@ export function getEffectiveActivity(
           'SELECT MAX(timestamp) as latest FROM task_comments WHERE task_id = ?'
         ).get(taskId) as { latest: number | null } | undefined
     lastCommentAt = commentQuery?.latest ?? null
-  } catch {
-    // DB not available — fall through
+  } catch (err) {
+    // DB not available — fall through to createdAt (may revert to updatedAt-like behavior)
+    console.warn(`[activity-signal] comment query failed for task ${taskId}, falling back:`, (err as Error).message)
   }
 
   // 2. Last state transition from task_history
@@ -81,8 +86,9 @@ export function getEffectiveActivity(
       'SELECT MAX(timestamp) as latest FROM task_history WHERE task_id = ?'
     ).get(taskId) as { latest: number | null } | undefined
     lastStateTransitionAt = historyRow?.latest ?? null
-  } catch {
-    // DB not available — fall through
+  } catch (err) {
+    // DB not available — fall through to createdAt
+    console.warn(`[activity-signal] history query failed for task ${taskId}, falling back:`, (err as Error).message)
   }
 
   // 3. Determine winner (monotonic: highest timestamp wins)
@@ -123,7 +129,7 @@ export function formatActivityWarning(
   now?: number,
 ): string {
   const ts = now || Date.now()
-  const ageMin = Math.floor((ts - signal.effectiveActivityTs) / 60_000)
+  const ageMin = Math.max(0, Math.floor((ts - signal.effectiveActivityTs) / 60_000))
   const sourceLabel = signal.source.replace(/_/g, ' ')
   const timeStr = new Date(signal.effectiveActivityTs).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
 
