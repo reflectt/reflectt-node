@@ -112,7 +112,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `offset`, `q` (text search), `updatedSince`. Returns `{ tasks, total, offset, limit, hasMore }`. |
+| GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `offset`, `q` (text search), `updatedSince`, `include_test=1|true` (include test-harness tasks; default excluded). Returns `{ tasks, total, offset, limit, hasMore }`. |
 | GET | `/tasks/:id` | Get task by ID. Also accepts unambiguous ID prefixes. Ambiguous prefix returns `400` with full-ID suggestions. |
 | GET | `/tasks/:id/artifacts` | Resolve all artifact references from task metadata. Returns accessibility status (file existence, URL validation), heartbeat status (last comment age, staleness). Heartbeat threshold: 30m for doing tasks. Query: `include=preview` (first 2000 chars) or `include=content` (full file, up to 400KB). Falls back to shared workspace (`~/.openclaw/workspace-shared`) when file is not in repo root. |
 | GET | `/tasks/:id/history` | Status changelog for task lifecycle transitions. Returns `history[]` entries shaped as `{ status, changedBy, changedAt, metadata }` for each status transition. |
@@ -129,7 +129,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action |
 | GET | `/tasks/intake-schema` | Task intake schema discovery — returns required/optional fields and per-type templates |
 | GET | `/tasks/templates/:type` | Get task creation template for a specific type (e.g. `feature`, `bug`, `chore`) |
-| GET | `/tasks/search` | Keyword search across task `title` + `description` (case-insensitive). Query: `q`, optional `limit` |
+| GET | `/tasks/search` | Keyword search across task `title` + `description` (case-insensitive). Query: `q`, optional `limit`, `include_test=1|true` (include test-harness tasks; default excluded). |
 | GET | `/tasks/analytics` | Task completion analytics and velocity |
 | GET | `/tasks/instrumentation/lifecycle` | Reviewer/done-criteria gates + status-contract violations (`doing` missing ETA, `validating` missing artifact path) |
 | POST | `/tasks/batch-create` | Batch create up to 20 tasks. Body: `{ "tasks": [...], "createdBy": "agent", "deduplicate": true, "dryRun": false }`. Each task follows the same schema as `POST /tasks`. Returns per-task results (created/duplicate/error) with summary counts. Deduplication checks exact title match + fuzzy word overlap (Jaccard >0.6) against active tasks. |
