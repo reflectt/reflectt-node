@@ -147,11 +147,12 @@ export async function tickWorkingContract(): Promise<TickResult> {
           db.prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?')
             .run('todo', now, task.id)
 
-          // Post enforcement comment
-          const commentId = `tcomment-${now}-${Math.random().toString(36).slice(2, 9)}`
-          db.prepare('INSERT INTO task_comments (id, task_id, author, content, timestamp) VALUES (?, ?, ?, ?, ?)')
-            .run(commentId, task.id, 'system', `🔄 [Product Enforcement] Auto-requeued: no status update from @${agent} after warning. Task moved back to todo. (Automated — no leadership action needed.)`, now)
-          db.prepare('UPDATE tasks SET comment_count = comment_count + 1 WHERE id = ?').run(task.id)
+          // Post enforcement comment (goes through TaskManager for comms_policy enforcement + audit)
+          await taskManager.addTaskComment(
+            task.id,
+            'system',
+            `🔄 [Product Enforcement] Auto-requeued: no status update from @${agent} after warning. Task moved back to todo. (Automated — no leadership action needed.)`,
+          )
 
           await routeMessage({
             from: 'system',
@@ -242,7 +243,7 @@ function getLastActivityForAgent(taskId: string, agent: string): number | null {
   try {
     const db = getDb()
     const row = db.prepare(
-      'SELECT MAX(timestamp) as latest FROM task_comments WHERE task_id = ? AND author = ?'
+      'SELECT MAX(timestamp) as latest FROM task_comments WHERE task_id = ? AND author = ? AND (suppressed IS NULL OR suppressed = 0)'
     ).get(taskId, agent) as { latest: number | null } | undefined
     return row?.latest ?? null
   } catch {

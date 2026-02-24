@@ -132,8 +132,9 @@ function importTaskHistory(db: Database.Database, records: unknown[]): number {
 function importTaskComments(db: Database.Database, records: unknown[]): number {
   const insert = db.prepare(`
     INSERT OR REPLACE INTO task_comments (
-      id, task_id, author, content, timestamp
-    ) VALUES (?, ?, ?, ?, ?)
+      id, task_id, author, content, timestamp,
+      category, suppressed, suppressed_reason, suppressed_rule
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const updateCommentCount = db.prepare(`
@@ -152,7 +153,11 @@ function importTaskComments(db: Database.Database, records: unknown[]): number {
         comment.taskId,
         comment.author,
         comment.content,
-        comment.timestamp
+        comment.timestamp,
+        (comment as any).category ?? null,
+        (comment as any).suppressed ? 1 : 0,
+        (comment as any).suppressedReason ?? null,
+        (comment as any).suppressedRule ?? null,
       )
       taskIds.add(comment.taskId)
     }
@@ -492,15 +497,21 @@ class TaskManager {
 
       // Write to SQLite (primary)
       const insert = db.prepare(`
-        INSERT INTO task_comments (id, task_id, author, content, timestamp)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO task_comments (
+          id, task_id, author, content, timestamp,
+          category, suppressed, suppressed_reason, suppressed_rule
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       insert.run(
         comment.id,
         comment.taskId,
         comment.author,
         comment.content,
-        comment.timestamp
+        comment.timestamp,
+        comment.category ?? null,
+        comment.suppressed ? 1 : 0,
+        comment.suppressedReason ?? null,
+        comment.suppressedRule ?? null,
       )
 
       // Update comment count + updated_at for the task.
@@ -981,17 +992,36 @@ class TaskManager {
     }))
   }
 
-  getTaskComments(id: string): TaskComment[] {
+  getTaskComments(id: string, options?: { includeSuppressed?: boolean }): TaskComment[] {
     const db = getDb()
-    const rows = db.prepare(
-      'SELECT * FROM task_comments WHERE task_id = ? ORDER BY timestamp ASC'
-    ).all(id) as Array<{ id: string; task_id: string; author: string; content: string; timestamp: number }>
+    const includeSuppressed = Boolean(options?.includeSuppressed)
+
+    const sql = includeSuppressed
+      ? 'SELECT * FROM task_comments WHERE task_id = ? ORDER BY timestamp ASC'
+      : 'SELECT * FROM task_comments WHERE task_id = ? AND (suppressed IS NULL OR suppressed = 0) ORDER BY timestamp ASC'
+
+    const rows = db.prepare(sql).all(id) as Array<{
+      id: string
+      task_id: string
+      author: string
+      content: string
+      timestamp: number
+      category?: string | null
+      suppressed?: number | null
+      suppressed_reason?: string | null
+      suppressed_rule?: string | null
+    }>
+
     return rows.map(row => ({
       id: row.id,
       taskId: row.task_id,
       author: row.author,
       content: row.content,
       timestamp: row.timestamp,
+      category: row.category ?? null,
+      suppressed: Boolean(row.suppressed),
+      suppressedReason: row.suppressed_reason ?? null,
+      suppressedRule: row.suppressed_rule ?? null,
     }))
   }
 
@@ -1001,25 +1031,78 @@ class TaskManager {
     return row.count
   }
 
-  async addTaskComment(taskId: string, author: string, content: string): Promise<TaskComment> {
+  async addTaskComment(
+    taskId: string,
+    author: string,
+    content: string,
+    options?: { category?: string | null },
+  ): Promise<TaskComment> {
     const task = queryTask(taskId)
     if (!task) {
       throw new Error('Task not found')
     }
 
     const now = Date.now()
+
+    // ── Comms policy enforcement (store always; suppress from default feeds) ──
+    const meta = (task.metadata || {}) as any
+    const rule = meta?.comms_policy?.rule as string | undefined
+
+    const extractCategoryFromContent = (raw: string): string | null => {
+      const s = String(raw || '').trim()
+      // [restart] ...
+      const bracket = s.match(/^\[(restart|rollback_trigger|promote_due_verdict)\]\s*/i)
+      if (bracket?.[1]) return bracket[1].toLowerCase()
+      // restart: ...
+      const colon = s.match(/^(restart|rollback_trigger|promote_due_verdict)\s*:\s+/i)
+      if (colon?.[1]) return colon[1].toLowerCase()
+      // category=restart / category: restart
+      const kv = s.match(/^(?:category|cat)\s*[:=]\s*(restart|rollback_trigger|promote_due_verdict)\b/i)
+      if (kv?.[1]) return kv[1].toLowerCase()
+      return null
+    }
+
+    let category: string | null = (options?.category ? String(options.category).trim() : '') || null
+    if (!category) category = extractCategoryFromContent(content)
+
+    let suppressed = false
+    let suppressedReason: string | null = null
+    let suppressedRule: string | null = null
+
+    if (rule === 'silent_until_restart_or_promote_due') {
+      suppressedRule = rule
+      const allowed = new Set(['restart', 'rollback_trigger', 'promote_due_verdict'])
+      const normalized = category ? category.toLowerCase() : null
+      if (!normalized) {
+        suppressed = true
+        suppressedReason = 'missing_category'
+      } else if (!allowed.has(normalized)) {
+        suppressed = true
+        suppressedReason = `non_whitelisted_category:${normalized}`
+      }
+      category = normalized
+    }
+
     const comment: TaskComment = {
       id: `tcomment-${now}-${Math.random().toString(36).substr(2, 9)}`,
       taskId,
       author,
       content,
       timestamp: now,
+      category,
+      suppressed,
+      suppressedReason,
+      suppressedRule,
     }
 
     await this.appendTaskComment(comment)
     await this.recordTaskHistoryEvent(taskId, 'commented', author, {
       commentId: comment.id,
       content,
+      category,
+      suppressed,
+      suppressedReason,
+      suppressedRule,
     })
 
     return comment

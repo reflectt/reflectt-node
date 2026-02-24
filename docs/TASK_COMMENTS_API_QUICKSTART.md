@@ -40,9 +40,14 @@ curl -s -X POST "http://127.0.0.1:4445/tasks/${TASK_ID}/comments" \
   -H 'Content-Type: application/json' \
   -d '{
     "author":"echo",
-    "content":"QA bundle: proof at process/'"${TASK_ID}"'-proof.md; ready for review"
+    "content":"QA bundle: proof at process/'"${TASK_ID}"'-proof.md; ready for review",
+    "category":"restart"
   }'
 ```
+
+Notes:
+- `category` is optional by default.
+- If a task has `metadata.comms_policy.rule = "silent_until_restart_or_promote_due"`, then only whitelisted categories are visible by default (`restart`, `rollback_trigger`, `promote_due_verdict`). Non-whitelisted/missing category comments are still stored for audit, but suppressed from default feeds.
 
 Expected shape:
 
@@ -54,17 +59,30 @@ Expected shape:
     "taskId": "task-...",
     "author": "echo",
     "content": "...",
-    "timestamp": 1771111111111
+    "timestamp": 1771111111111,
+
+    "category": "restart",
+    "suppressed": false,
+    "suppressedReason": null,
+    "suppressedRule": null
   }
 }
 ```
+
+Notes:
+- For tasks without a `comms_policy`, `suppressed` will be `false` and suppression fields will be `null`.
+- For tasks with `silent_until_restart_or_promote_due`, missing / non-whitelisted categories return `suppressed=true` and set `suppressedReason`/`suppressedRule` (but the comment is still stored).
 
 ---
 
 ## 3) Read comment thread
 
 ```bash
+# Default: suppressed comments omitted
 curl -s "http://127.0.0.1:4445/tasks/${TASK_ID}/comments"
+
+# Include suppressed comments (audit view)
+curl -s "http://127.0.0.1:4445/tasks/${TASK_ID}/comments?includeSuppressed=true"
 ```
 
 Expected shape:
@@ -77,12 +95,19 @@ Expected shape:
       "taskId": "task-...",
       "author": "echo",
       "content": "...",
-      "timestamp": 1771111111111
+      "timestamp": 1771111111111,
+      "category": "restart",
+      "suppressed": false,
+      "suppressedReason": null,
+      "suppressedRule": null
     }
   ],
-  "count": 1
+  "count": 1,
+  "includeSuppressed": false
 }
 ```
+
+Tip: use `?includeSuppressed=true` (or `1`) for audit/debug views when a comms_policy may be suppressing comments.
 
 ---
 

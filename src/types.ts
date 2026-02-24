@@ -45,6 +45,18 @@ export interface TaskComment {
   author: string
   content: string
   timestamp: number
+
+  /** Optional comms categorization (used by comms_policy enforcement) */
+  category?: string | null
+
+  /** If true, comment is stored for audit but suppressed from default feeds */
+  suppressed?: boolean
+
+  /** Human-readable suppression reason (e.g., missing_category, non_whitelisted_category:<x>) */
+  suppressedReason?: string | null
+
+  /** Policy rule that caused suppression (if any) */
+  suppressedRule?: string | null
 }
 
 export interface TaskHistoryEvent {
