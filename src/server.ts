@@ -2958,6 +2958,8 @@ export async function createServer(): Promise<FastifyInstance> {
       ? [query.tag]
       : (query.tags ? query.tags.split(',') : undefined)
 
+    const includeTest = query.include_test === '1' || query.include_test === 'true'
+
     let tasks = taskManager.listTasks({
       status: query.status as Task['status'] | undefined,
       assignee: query.assignee || query.assignedTo, // Support both for backward compatibility
@@ -2965,6 +2967,7 @@ export async function createServer(): Promise<FastifyInstance> {
       teamId: normalizeTeamId(query.teamId),
       priority: query.priority as Task['priority'] | undefined,
       tags: tagFilter,
+      includeTest,
     })
 
     if (updatedSince) {
@@ -3001,8 +3004,21 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     const q = query.q || ''
     const limit = boundedLimit(query.limit, DEFAULT_LIMITS.tasks, MAX_LIMITS.tasks)
+    const includeTest = query.include_test === '1' || query.include_test === 'true'
 
-    const tasks = taskManager.searchTasks(q).slice(0, limit)
+    const isTestHarnessTask = (task: Task): boolean => {
+      const meta = (task.metadata || {}) as Record<string, unknown>
+      if (meta.is_test === true) return true
+      if (typeof meta.source_reflection === 'string' && meta.source_reflection.startsWith('ref-test-')) return true
+      if (typeof meta.source_insight === 'string' && meta.source_insight.startsWith('ins-test-')) return true
+      if (/test run \d{13}/.test(task.title || '')) return true
+      return false
+    }
+
+    const tasks = taskManager.searchTasks(q)
+      .filter(t => includeTest ? true : !isTestHarnessTask(t))
+      .slice(0, limit)
+
     return { tasks: tasks.map(enrichTaskWithComments), count: tasks.length }
   })
 
@@ -4293,19 +4309,31 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       const normalizedTeamId = normalizeTeamId(data.teamId) || normalizeTeamId((rest.metadata as Record<string, unknown> | undefined)?.teamId)
+      const newMetadata: Record<string, unknown> = {
+        ...(rest.metadata || {}),
+        eta,
+        ...(type ? { type } : {}),
+        ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
+        ...(reviewerAutoAssigned ? {
+          reviewer_auto_assigned: true,
+          reviewer_scores: reviewerScores.slice(0, 3), // top 3 candidates for transparency
+        } : {}),
+      }
+
+      // Tag test-harness tasks so they can be excluded from live backlog metrics.
+      // (The harness often uses source_reflection/source_insight markers rather than TEST: titles.)
+      const sr = newMetadata.source_reflection
+      const si = newMetadata.source_insight
+      if (newMetadata.is_test !== true) {
+        if (typeof sr === 'string' && sr.startsWith('ref-test-')) newMetadata.is_test = true
+        if (typeof si === 'string' && si.startsWith('ins-test-')) newMetadata.is_test = true
+        if (/test run \d{13}/i.test(rest.title || '')) newMetadata.is_test = true
+      }
+
       const task = await taskManager.createTask({
         ...rest,
         ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
-        metadata: {
-          ...(rest.metadata || {}),
-          eta,
-          ...(type ? { type } : {}),
-          ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
-          ...(reviewerAutoAssigned ? {
-            reviewer_auto_assigned: true,
-            reviewer_scores: reviewerScores.slice(0, 3), // top 3 candidates for transparency
-          } : {}),
-        },
+        metadata: newMetadata,
       })
       
       // Auto-update presence: creating tasks = working
@@ -4430,18 +4458,30 @@ export async function createServer(): Promise<FastifyInstance> {
           }
 
           const normalizedTeamId = normalizeTeamId(taskData.teamId) || normalizeTeamId((rest.metadata as Record<string, unknown> | undefined)?.teamId)
+
+          const newMetadata: Record<string, unknown> = {
+            ...(rest.metadata || {}),
+            eta,
+            ...(type ? { type } : {}),
+            ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
+            batch_created: true,
+            ...(!taskData.reviewer && rest.reviewer ? { reviewer_auto_assigned: true } : {}),
+          }
+
+          // Tag test-harness tasks so they can be excluded from live backlog metrics.
+          const sr = newMetadata.source_reflection
+          const si = newMetadata.source_insight
+          if (newMetadata.is_test !== true) {
+            if (typeof sr === 'string' && sr.startsWith('ref-test-')) newMetadata.is_test = true
+            if (typeof si === 'string' && si.startsWith('ins-test-')) newMetadata.is_test = true
+            if (/test run \d{13}/i.test(rest.title || '')) newMetadata.is_test = true
+          }
+
           const task = await taskManager.createTask({
             ...rest,
             ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
             createdBy: taskData.createdBy || data.createdBy,
-            metadata: {
-              ...(rest.metadata || {}),
-              eta,
-              ...(type ? { type } : {}),
-              ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
-              batch_created: true,
-              ...(!taskData.reviewer && rest.reviewer ? { reviewer_auto_assigned: true } : {}),
-            },
+            metadata: newMetadata,
           })
 
           // Index for semantic search

@@ -1121,6 +1121,7 @@ class TaskManager {
     priority?: Task['priority']
     tags?: string[]
     includeBlocked?: boolean // If false, filter out blocked tasks (default: true)
+    includeTest?: boolean // If true, include test-harness-generated tasks (default: false)
   }): Task[] {
     // Debounce recurring task materialization: at most once per minute
     // This was previously called on every listTasks() invocation (~50+ callers),
@@ -1185,6 +1186,21 @@ class TaskManager {
     // Filter blocked tasks if requested
     if (options?.includeBlocked === false) {
       tasks = tasks.filter(t => !isBlocked(t))
+    }
+
+    // Filter out test-harness-generated tasks by default.
+    // These are created by pipeline validation runs and must not pollute live backlog metrics.
+    const isTestHarnessTask = (task: Task): boolean => {
+      const meta = (task.metadata || {}) as Record<string, unknown>
+      if (meta.is_test === true) return true
+      if (typeof meta.source_reflection === 'string' && meta.source_reflection.startsWith('ref-test-')) return true
+      if (typeof meta.source_insight === 'string' && meta.source_insight.startsWith('ins-test-')) return true
+      if (/test run \d{13}/.test(task.title || '')) return true
+      return false
+    }
+
+    if (!options?.includeTest) {
+      tasks = tasks.filter(t => !isTestHarnessTask(t))
     }
 
     return tasks
