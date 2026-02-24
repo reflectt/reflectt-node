@@ -40,6 +40,7 @@ List every CTA exactly as it appears.
 - Label matches the *real* next step (avoid vague “Get started”).
 - CTA does not promise behavior that is not implemented.
 - Prefer **nav labels** (“Hosts page”, “Tasks page”) over hard-coded routes unless you can prove routes are canonical.
+- **CTA validity cannot PASS with unknowns:** if any row is not verifiably real (Exists+works ≠ `Y`, destination unknown, or proof missing), this BLOCKER is **FAIL**. Either validate it, or remove/rewrite it as non-CTA guidance.
 
 **BLOCKER PASS/FAIL (explain if FAIL):** ____
 
@@ -75,6 +76,8 @@ Without instrumentation proof, metric debates become opinion. If an event does n
 - open a follow-on instrumentation task and link it here.
 
 Baseline/Target may be `unknown`, but you must specify **how it is measured**.
+
+Rule: your **metric name must match its source** (event/log/dashboard). If you can only measure “join token generated”, don’t claim the metric is “host connect started” until that event exists.
 
 | Section | User action targeted | Primary metric | Event name(s) / source | Where it fires (screen/action OR file/handler) | How to verify (<2 min) | Baseline (ok: unknown) | Target (ok: directional) | Why this copy should move it |
 |---|---|---|---|---|---|---|---|---|
@@ -144,3 +147,6 @@ Metric row example:
 | Section | Action | Metric | Event/source | Where | Verify | Baseline | Target | Why |
 |---|---|---|---|---|---|---|---|---|
 | Hosts empty | click token | host_connect_started | `analytics.host_connect_started` | token modal CTA | click + see event in logs | unknown | + | removes ambiguity |
+
+Fail-case reminder:
+- If you include a CTA like “Invite teammate” but can’t prove the UI label/flow exists yet, CTA validity must be marked **FAIL** (or remove it from the inventory until validated).
