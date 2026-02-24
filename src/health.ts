@@ -312,8 +312,14 @@ class TeamHealthMonitor {
   // Mention rescue fallback: if Ryan pings trio and nobody replies quickly, emit a direct system ack.
   private readonly mentionRescueEnabled = process.env.MENTION_RESCUE_ENABLED !== 'false'
   // Default delay is intentionally non-zero to avoid noisy immediate fallback nudges.
-  // Override with MENTION_RESCUE_DELAY_MIN if you want a different threshold.
-  private readonly mentionRescueDelayMin = Number(process.env.MENTION_RESCUE_DELAY_MIN || 5)
+  // We also clamp to a minimum to prevent misconfig (e.g. env="0") from spamming #general.
+  // Override with MENTION_RESCUE_DELAY_MIN to increase (values <3 are treated as 3).
+  private readonly mentionRescueDelayMin = (() => {
+    const raw = process.env.MENTION_RESCUE_DELAY_MIN
+    const parsed = (raw === undefined || raw.trim() === '') ? 5 : Number(raw)
+    const val = Number.isFinite(parsed) ? parsed : 5
+    return Math.max(3, val)
+  })()
   private readonly mentionRescueCooldownMin = Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10)
   private readonly mentionRescueGlobalCooldownMin = Number(process.env.MENTION_RESCUE_GLOBAL_COOLDOWN_MIN || 5)
   /** Maps mentionId → { lastRescueAt, rescueCount }. Once rescued, won't rescue again (one-shot). */

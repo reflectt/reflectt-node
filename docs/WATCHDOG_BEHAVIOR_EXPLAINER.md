@@ -28,8 +28,18 @@ Purpose: rescue missed @mentions by issuing a fallback check.
 
 Signal inputs typically include:
 - mention timestamps
-- acknowledgement lag
+- acknowledgement lag (delay)
 - rescue cooldown to prevent spam loops
+
+Config:
+- `MENTION_RESCUE_ENABLED` (default: enabled)
+- `MENTION_RESCUE_DELAY_MIN` (default: **5**; values `<3` are clamped to **3**)
+- `MENTION_RESCUE_COOLDOWN_MIN` (default: 10)
+- `MENTION_RESCUE_GLOBAL_COOLDOWN_MIN` (default: 5)
+
+Behavior notes:
+- Rescue only @nudges the agents **actually mentioned** in the triggering message.
+- The rescue message is a fallback: it should only fire after the delay window with no reply.
 
 ---
 
