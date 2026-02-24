@@ -511,6 +511,14 @@ class TaskManager {
       `)
       updateCount.run(comment.taskId, comment.taskId)
 
+      // Touch task updated_at so comment activity counts as task activity (autonomy, SLA, sorting)
+      const touchUpdatedAt = db.prepare(`
+        UPDATE tasks
+        SET updated_at = MAX(updated_at, ?)
+        WHERE id = ?
+      `)
+      touchUpdatedAt.run(comment.timestamp, comment.taskId)
+
       // Append to JSONL (audit log)
       await fs.mkdir(DATA_DIR, { recursive: true })
       await fs.appendFile(TASK_COMMENTS_FILE, `${JSON.stringify(comment)}\n`, 'utf-8')
