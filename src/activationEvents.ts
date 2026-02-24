@@ -393,10 +393,6 @@ export function getFailureDistribution(): FailureDistribution[] {
           reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
         }
 
-        // If no specific reason found, count as "unspecified"
-        if (reasonCounts.size === 0 && droppedCount > 0) {
-          // Don't add unspecified for every user — just once at the end
-        }
       }
     }
 
