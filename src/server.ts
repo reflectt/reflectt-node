@@ -8258,7 +8258,13 @@ export async function createServer(): Promise<FastifyInstance> {
       },
       mentionRescue: {
         enabled: process.env.MENTION_RESCUE_ENABLED !== 'false',
-        delayMin: Number(process.env.MENTION_RESCUE_DELAY_MIN || 0),
+        // Keep default + clamp consistent with runtime (TeamHealthMonitor)
+        delayMin: (() => {
+          const raw = process.env.MENTION_RESCUE_DELAY_MIN
+          const parsed = (raw === undefined || raw.trim() === '') ? 5 : Number(raw)
+          const val = Number.isFinite(parsed) ? parsed : 5
+          return Math.max(3, val)
+        })(),
         cooldownMin: Number(process.env.MENTION_RESCUE_COOLDOWN_MIN || 10),
         globalCooldownMin: Number(process.env.MENTION_RESCUE_GLOBAL_COOLDOWN_MIN || 5),
       },
