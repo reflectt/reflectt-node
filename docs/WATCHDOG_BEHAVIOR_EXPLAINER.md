@@ -33,7 +33,8 @@ Signal inputs typically include:
 
 Config:
 - `MENTION_RESCUE_ENABLED` (default: enabled)
-- `MENTION_RESCUE_DELAY_MIN` (default: **5**; values `<3` are clamped to **3**)
+- `MENTION_RESCUE_DELAY_MIN` (default: **3** via policy; values `<3` are clamped to **3**)
+  - Note: when unset, runtime uses the policy default; env overrides are clamped at runtime.
 - `MENTION_RESCUE_COOLDOWN_MIN` (default: 10)
 - `MENTION_RESCUE_GLOBAL_COOLDOWN_MIN` (default: 5)
 
