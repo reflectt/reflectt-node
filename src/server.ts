@@ -51,6 +51,7 @@ import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
+import { appendStoredLog, readStoredLogs, getStoredLogPath } from './logStore.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
@@ -503,6 +504,7 @@ const HealthHistoryQuerySchema = z.object({
 const LogsQuerySchema = z.object({
   level: z.string().optional(),
   since: z.string().regex(/^\d+$/).optional(),
+  limit: z.string().regex(/^\d+$/).optional(),
 })
 
 const ReleaseNotesQuerySchema = z.object({
@@ -1500,7 +1502,7 @@ export async function createServer(): Promise<FastifyInstance> {
   await app.register(fastifyWebsocket)
 
   // Normalize error responses to a consistent envelope
-  app.addHook('preSerialization', async (_request, reply, payload) => {
+  app.addHook('preSerialization', async (request, reply, payload) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return payload
     }
@@ -1543,6 +1545,26 @@ export async function createServer(): Promise<FastifyInstance> {
     if (body.gate !== undefined) envelope.gate = body.gate
     if (body.problems !== undefined) envelope.problems = body.problems
     if (alreadyEnvelope && body.data !== undefined) envelope.data = body.data
+
+    // Minimal persisted error log: enables /logs to return real entries.
+    // Avoid logging 4xx validation noise by default.
+    if (status >= 500) {
+      const message = String((envelope as any).error ?? body.error ?? 'error')
+      const gate = typeof body.gate === 'string' ? body.gate : undefined
+
+      appendStoredLog({
+        level: 'error',
+        timestamp: Date.now(),
+        message,
+        status,
+        code,
+        hint,
+        gate,
+        method: request.method,
+        url: request.url,
+        details: body.details,
+      }).catch(() => {})
+    }
 
     return envelope
   })
@@ -2338,14 +2360,23 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const level = parsedQuery.data.level || 'error'
     const since = parsedQuery.data.since ? parseInt(parsedQuery.data.since, 10) : Date.now() - (24 * 60 * 60 * 1000)
+    const limit = parsedQuery.data.limit ? Math.min(parseInt(parsedQuery.data.limit, 10), 500) : 200
 
-    // For now, return empty array with note
-    // In production, this would read from actual log files
-    return {
-      logs: [],
-      message: 'Log storage not implemented yet. Use system logs or monitoring service.',
-      level,
-      since,
+    try {
+      const logs = await readStoredLogs({ since, level, limit })
+      return {
+        logs,
+        count: logs.length,
+        level,
+        since,
+        path: getStoredLogPath(),
+      }
+    } catch (err: any) {
+      reply.code(500)
+      return {
+        error: 'Failed to read logs',
+        details: String(err?.message || err),
+      }
     }
   })
 
