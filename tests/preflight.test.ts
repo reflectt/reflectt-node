@@ -266,11 +266,12 @@ describe('Preflight: onboarding drop-off events', () => {
     }
   })
 
-  it('uses host-PID fallback when no userId provided', async () => {
+  it('uses host-hostname fallback when no userId provided', async () => {
+    const { hostname } = await import('node:os')
     const report = await runPreflight({ skipNetwork: true })
     expect(report).toBeDefined()
     await new Promise(r => setTimeout(r, 100))
-    const state = getUserFunnelState(`host-${process.pid}`)
+    const state = getUserFunnelState(`host-${hostname()}`)
     if (report.allPassed) {
       expect(state.events.host_preflight_passed).toBeTypeOf('number')
     }
