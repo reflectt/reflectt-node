@@ -129,17 +129,21 @@ function loadFromFile(path: string): AgentRole[] | null {
 
 /** Load roles from YAML config or fall back to built-in defaults */
 export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
-  // Try user config paths first
-  for (const configPath of CONFIG_PATHS) {
-    const roles = loadFromFile(configPath)
-    if (roles) {
-      loadedRoles = roles
-      loadedFromPath = configPath
-      try {
-        lastMtime = statSync(configPath).mtimeMs
-      } catch { /* ignore */ }
-      console.log(`[Assignment] Loaded ${roles.length} agent roles from ${configPath}`)
-      return { roles, source: configPath }
+  const isTest = Boolean(process.env.VITEST) || process.env.NODE_ENV === 'test'
+
+  // Try user config paths first (but never during tests; tests must be hermetic)
+  if (!isTest) {
+    for (const configPath of CONFIG_PATHS) {
+      const roles = loadFromFile(configPath)
+      if (roles) {
+        loadedRoles = roles
+        loadedFromPath = configPath
+        try {
+          lastMtime = statSync(configPath).mtimeMs
+        } catch { /* ignore */ }
+        console.log(`[Assignment] Loaded ${roles.length} agent roles from ${configPath}`)
+        return { roles, source: configPath }
+      }
     }
   }
 
