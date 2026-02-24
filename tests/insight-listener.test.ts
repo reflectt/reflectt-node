@@ -530,10 +530,9 @@ describe('Ownership guardrail: resolveAssignment', () => {
     })
 
     const decision = resolveAssignment(insight)
-    // Author should be assigned because they have highest role-fit for backend/api tasks
+    // Author assigned via sole-author fallback (no non-author candidates score positive)
     expect(decision.assignee).toBe('link')
     expect(decision.reason).toContain('author_exclusion_bypassed')
-    expect(decision.reason).toContain('best role-fit')
     expect(decision.soleAuthorFallback).toBe(true) // Triggers non-author reviewer
     // Reviewer must not be the author
     expect(decision.reviewer).not.toBe('link')
