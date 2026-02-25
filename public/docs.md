@@ -279,9 +279,12 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/search/semantic` | Semantic search across indexed tasks and chat messages. Query: `q` (required), `limit`, `type` (`task`\|`chat`) |
-| GET | `/search/semantic/status` | Vector index status — availability and counts by source type |
-| POST | `/search/semantic/reindex` | Bulk reindex all existing tasks for semantic search |
+| GET | `/search/semantic` | Semantic search across indexed tasks and chat messages. Query: `q` (required), `limit`, `type` (`task`\|`chat`\|`reflection`\|`insight`\|`shared_file`) |
+| GET | `/search/semantic/status` | Vector index status — availability and counts by source type (tasks, chat, reflections, insights, shared_files) |
+| POST | `/search/semantic/reindex` | Bulk reindex all existing tasks, reflections, and insights for semantic search |
+| GET | `/knowledge/search` | Unified knowledge search across all indexed content (tasks, chat, reflections, insights, shared files). Query: `q` (required), `limit`, `type` (optional filter). Returns results with source_type, snippet, similarity score, and deep link. |
+| GET | `/knowledge/stats` | Knowledge index health — availability and counts per source type |
+| POST | `/knowledge/reindex-shared` | Scan and index shared workspace files (process/, specs/, artifacts/, handoffs/, references/) for knowledge search |
 
 ## Experiments
 

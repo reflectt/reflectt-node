@@ -9,7 +9,7 @@ import fastifyWebsocket from '@fastify/websocket'
 import fastifyCors from '@fastify/cors'
 import { z } from 'zod'
 import { createHash } from 'crypto'
-import { promises as fs, existsSync, readFileSync } from 'fs'
+import { promises as fs, existsSync, readFileSync, readdirSync } from 'fs'
 import { resolve, sep, join } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
@@ -3147,6 +3147,9 @@ export async function createServer(): Promise<FastifyInstance> {
           total: vectorCount(db),
           tasks: vectorCount(db, 'task'),
           chat: vectorCount(db, 'chat'),
+          reflections: vectorCount(db, 'reflection'),
+          insights: vectorCount(db, 'insight'),
+          shared_files: vectorCount(db, 'shared_file'),
         },
       }
     } catch (err: any) {
@@ -3163,9 +3166,9 @@ export async function createServer(): Promise<FastifyInstance> {
         return { error: 'Semantic search not available', code: 'VEC_NOT_AVAILABLE' }
       }
 
-      const { indexTask } = await import('./vector-store.js')
+      const { indexTask, indexReflection, indexInsight } = await import('./vector-store.js')
       const allTasks = taskManager.listTasks({})
-      let indexed = 0
+      let tasksIndexed = 0
 
       for (const task of allTasks) {
         try {
@@ -3175,13 +3178,159 @@ export async function createServer(): Promise<FastifyInstance> {
             (task as any).description,
             task.done_criteria,
           )
-          indexed++
+          tasksIndexed++
         } catch {
           // skip individual failures
         }
       }
 
-      return { indexed, total: allTasks.length }
+      // Backfill reflections
+      let reflectionsIndexed = 0
+      try {
+        const reflections = listReflections({ limit: 5000 })
+        for (const ref of reflections) {
+          try {
+            await indexReflection(ref.id, ref.pain, ref.evidence, ref.proposed_fix, ref.author, ref.tags)
+            reflectionsIndexed++
+          } catch { /* skip */ }
+        }
+      } catch { /* reflections module may not be loaded */ }
+
+      // Backfill insights
+      let insightsIndexed = 0
+      try {
+        const { insights: insightList } = listInsights({ limit: 5000 })
+        for (const ins of insightList) {
+          try {
+            await indexInsight(ins.id, ins.title, ins.evidence_refs, ins.authors, ins.cluster_key)
+            insightsIndexed++
+          } catch { /* skip */ }
+        }
+      } catch { /* insights module may not be loaded */ }
+
+      return {
+        indexed: tasksIndexed + reflectionsIndexed + insightsIndexed,
+        tasks: tasksIndexed,
+        reflections: reflectionsIndexed,
+        insights: insightsIndexed,
+        total: allTasks.length,
+      }
+    } catch (err: any) {
+      reply.code(500)
+      return { error: err?.message || 'Reindex failed', code: 'REINDEX_ERROR' }
+    }
+  })
+
+  // ── Knowledge Search ─────────────────────────────────────────────────
+
+  // Unified knowledge search across all indexed content types
+  app.get('/knowledge/search', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const q = (query.q || '').trim()
+    if (!q) {
+      reply.code(400)
+      return { error: 'Query parameter q is required', code: 'BAD_REQUEST' }
+    }
+
+    const limit = Math.min(Math.max(parseInt(query.limit || '10', 10) || 10, 1), 50)
+    const type = query.type // optional filter: task|chat|reflection|insight|shared_file
+
+    try {
+      const { isVectorSearchAvailable } = await import('./db.js')
+      if (!isVectorSearchAvailable()) {
+        reply.code(503)
+        return { error: 'Knowledge search not available (vector store not loaded)', code: 'VEC_NOT_AVAILABLE' }
+      }
+
+      const { semanticSearch } = await import('./vector-store.js')
+      const results = await semanticSearch(q, { limit, type })
+
+      // Enrich results with deep links
+      const enriched = results.map((r) => ({
+        ...r,
+        link: r.sourceType === 'task' ? `/tasks/${r.sourceId}`
+          : r.sourceType === 'reflection' ? `/reflections/${r.sourceId}`
+          : r.sourceType === 'insight' ? `/insights/${r.sourceId}`
+          : r.sourceType === 'shared_file' ? `/shared/read?path=${encodeURIComponent(r.sourceId)}`
+          : r.sourceType === 'chat' ? `/chat/search?q=${encodeURIComponent(q)}`
+          : null,
+      }))
+
+      return { query: q, results: enriched, count: enriched.length }
+    } catch (err: any) {
+      reply.code(500)
+      return { error: err?.message || 'Knowledge search failed', code: 'SEARCH_ERROR' }
+    }
+  })
+
+  // Knowledge index stats
+  app.get('/knowledge/stats', async () => {
+    try {
+      const { isVectorSearchAvailable } = await import('./db.js')
+      if (!isVectorSearchAvailable()) {
+        return { available: false, reason: 'sqlite-vec extension not loaded' }
+      }
+
+      const { vectorCount } = await import('./vector-store.js')
+      const { getDb } = await import('./db.js')
+      const db = getDb()
+
+      return {
+        available: true,
+        indexed: {
+          total: vectorCount(db),
+          tasks: vectorCount(db, 'task'),
+          chat: vectorCount(db, 'chat'),
+          reflections: vectorCount(db, 'reflection'),
+          insights: vectorCount(db, 'insight'),
+          shared_files: vectorCount(db, 'shared_file'),
+        },
+      }
+    } catch (err: any) {
+      return { available: false, reason: err?.message }
+    }
+  })
+
+  // Index shared workspace files
+  app.post('/knowledge/reindex-shared', async (request, reply) => {
+    try {
+      const { isVectorSearchAvailable } = await import('./db.js')
+      if (!isVectorSearchAvailable()) {
+        reply.code(503)
+        return { error: 'Vector store not available', code: 'VEC_NOT_AVAILABLE' }
+      }
+
+      const { indexSharedFile } = await import('./vector-store.js')
+      const { SHARED_WORKSPACE } = await import('./artifact-mirror.js')
+      const sharedRoot = SHARED_WORKSPACE()
+
+      const allowedDirs = ['process', 'specs', 'artifacts', 'handoffs', 'references']
+      let indexed = 0
+      const errors: string[] = []
+
+      for (const dir of allowedDirs) {
+        const dirPath = join(sharedRoot, dir)
+        try {
+          const entries = readdirSync(dirPath, { withFileTypes: true })
+          for (const entry of entries) {
+            if (!entry.isFile()) continue
+            if (!/\.(md|txt|json)$/i.test(entry.name)) continue
+            try {
+              const filePath = join(dirPath, entry.name)
+              const content = readFileSync(filePath, 'utf-8')
+              const relativePath = `${dir}/${entry.name}`
+              await indexSharedFile(relativePath, content.slice(0, 4000))
+              indexed++
+            } catch (err: any) {
+              errors.push(`${dir}/${entry.name}: ${err?.message}`)
+            }
+          }
+        } catch {
+          // directory may not exist
+        }
+      }
+
+      return { indexed, errors: errors.length ? errors : undefined }
     } catch (err: any) {
       reply.code(500)
       return { error: err?.message || 'Reindex failed', code: 'REINDEX_ERROR' }
@@ -6335,6 +6484,24 @@ export async function createServer(): Promise<FastifyInstance> {
       insight = ingestReflection(reflection)
     } catch (err) {
       console.warn(`[Reflections] Auto-ingest to insight pipeline failed for ${reflection.id}:`, err)
+    }
+
+    // Fire-and-forget: index reflection for semantic search
+    import('./vector-store.js')
+      .then(({ indexReflection }) => indexReflection(
+        reflection.id, reflection.pain, reflection.evidence,
+        reflection.proposed_fix, reflection.author, reflection.tags
+      ))
+      .catch(() => {})
+
+    // Fire-and-forget: index insight if created/updated
+    if (insight) {
+      import('./vector-store.js')
+        .then(({ indexInsight }) => indexInsight(
+          insight!.id, insight!.title, insight!.evidence_refs,
+          insight!.authors, insight!.cluster_key
+        ))
+        .catch(() => {})
     }
 
     reply.code(201)
