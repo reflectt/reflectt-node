@@ -12,6 +12,7 @@ import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 import { CHANNEL_DEFINITIONS, DEFAULT_CHAT_CHANNELS } from './channels.js'
 import { getDb, importJsonlIfNeeded, safeJsonParse, safeJsonStringify } from './db.js'
 import type Database from 'better-sqlite3'
+import { suppressionLedger } from './suppression-ledger.js'
 // OpenClaw integration pending — chat works standalone for now
 
 const MESSAGES_FILE = join(DATA_DIR, 'messages.jsonl')
@@ -145,10 +146,12 @@ class ChatManager {
 
   private writeMessageToDb(message: AgentMessage): void {
     const db = getDb()
+    const meta = (message.metadata || {}) as Record<string, unknown>
+    const dedupKey = typeof meta.dedup_key === 'string' ? meta.dedup_key : null
     const upsert = db.prepare(`
       INSERT OR REPLACE INTO chat_messages (
-        id, "from", "to", content, timestamp, channel, reactions, thread_id, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, "from", "to", content, timestamp, channel, reactions, thread_id, metadata, dedup_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     upsert.run(
@@ -161,6 +164,7 @@ class ChatManager {
       safeJsonStringify(message.reactions),
       message.threadId ?? null,
       safeJsonStringify(message.metadata),
+      dedupKey,
     )
   }
 
@@ -211,6 +215,8 @@ class ChatManager {
   private channelBudgetCounters = new Map<string, { count: number; windowStart: number }>()
   // Duplicate suppression: hash → timestamp of last send
   private recentMessageHashes = new Map<string, number>()
+  // Suppression stats tracking
+  private suppressionStats = { total: 0, byCategory: new Map<string, number>(), since: Date.now() }
   // Digest batching: queued system reminders per channel
   private digestQueue = new Map<string, Array<{ content: string; from: string; queuedAt: number }>>()
   private digestTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -224,14 +230,19 @@ class ChatManager {
     blockers: 15,
     _default: 40,
   }
-  private static readonly DEDUP_WINDOW_MS = 5 * 60 * 1000 // 5 minute dedup window
+  private static readonly DEDUP_WINDOW_MS = 5 * 60 * 1000 // 5 minute dedup window (non-system)
+  private static readonly SYSTEM_DEDUP_WINDOW_MS = 30 * 60 * 1000 // 30 minute dedup window (system messages)
   private static readonly DIGEST_BATCH_DELAY_MS = 30 * 1000 // 30s digest batching window
   private static readonly SYSTEM_REMINDER_PATTERNS = [
     /^⚠️ Working contract warning/,
     /^⚠️ \[Product Enforcement\]/,
     /^🔄.*Auto-requeued/,
     /^⚠️ SLA breach/,
+    /^⚠️ Ready-queue floor/,
     /^🪞 Reflection nudge/,
+    /^\[SHIP\]/,
+    /^🚨 CRITICAL/,
+    /^✅ Auto-closed/,
   ]
 
   /**
@@ -257,25 +268,60 @@ class ChatManager {
   }
 
   /**
-   * Check for duplicate messages within suppression window
+   * Check for duplicate messages within suppression window.
+   * System messages use a 30-minute window; others use 5 minutes.
+   * Callers can pass an explicit dedup_key in metadata to control dedup grouping.
    */
-  private checkDuplicate(from: string, channel: string, content: string): boolean {
+  private checkDuplicate(from: string, channel: string, content: string, dedupKey?: string): boolean {
     const now = Date.now()
-    // Clean expired entries
+    const isSystem = from === 'system'
+    const windowMs = isSystem ? ChatManager.SYSTEM_DEDUP_WINDOW_MS : ChatManager.DEDUP_WINDOW_MS
+
+    // Clean expired entries (use the longer window to avoid premature cleanup)
+    const maxWindow = ChatManager.SYSTEM_DEDUP_WINDOW_MS
     for (const [key, ts] of this.recentMessageHashes) {
-      if (now - ts > ChatManager.DEDUP_WINDOW_MS) this.recentMessageHashes.delete(key)
+      if (now - ts > maxWindow) this.recentMessageHashes.delete(key)
     }
 
-    // Hash: from + channel + normalized content (strip timestamps/IDs)
-    const normalized = content.replace(/\d{10,}/g, '').replace(/task-\S+/g, 'TASK').trim().slice(0, 200)
-    const hash = `${from}:${channel}:${normalized}`
+    // Hash: explicit dedup_key if provided, otherwise from + channel + normalized content
+    let hash: string
+    if (dedupKey) {
+      hash = `dedup:${channel}:${dedupKey}`
+    } else {
+      // Normalize: strip timestamps, task IDs, agent-specific names, counts
+      const normalized = content
+        .replace(/\d{10,}/g, '')           // strip epoch timestamps
+        .replace(/task-\S+/g, 'TASK')      // normalize task IDs
+        .replace(/@\w+/g, '@AGENT')        // normalize @mentions
+        .replace(/\d+\/\d+/g, 'N/M')      // normalize counts like "0/2"
+        .replace(/\(need \d+ more\)/g, '') // normalize "need N more"
+        .trim().slice(0, 200)
+      hash = `${from}:${channel}:${normalized}`
+    }
 
-    if (this.recentMessageHashes.has(hash)) {
+    const lastSent = this.recentMessageHashes.get(hash)
+    if (lastSent && (now - lastSent) < windowMs) {
+      // Track suppression stats
+      this.suppressionStats.total++
+      const category = isSystem ? 'system' : from
+      this.suppressionStats.byCategory.set(category, (this.suppressionStats.byCategory.get(category) || 0) + 1)
       return true // duplicate
     }
 
     this.recentMessageHashes.set(hash, now)
     return false
+  }
+
+  /**
+   * Get suppression statistics
+   */
+  getSuppressionStats(): { total: number; byCategory: Record<string, number>; since: number; activeHashes: number } {
+    return {
+      total: this.suppressionStats.total,
+      byCategory: Object.fromEntries(this.suppressionStats.byCategory),
+      since: this.suppressionStats.since,
+      activeHashes: this.recentMessageHashes.size,
+    }
   }
 
   /**
@@ -341,8 +387,9 @@ class ChatManager {
     // Skip budget checks for direct messages (has `to` field) and metadata.bypass_budget
     const bypassBudget = (message.metadata as any)?.bypass_budget === true || message.to
     if (!bypassBudget) {
-      // 1. Duplicate suppression
-      if (this.checkDuplicate(message.from, channel, message.content)) {
+      // 1. Duplicate suppression (supports explicit dedup_key from metadata)
+      const dedupKey = (message.metadata as any)?.dedup_key as string | undefined
+      if (this.checkDuplicate(message.from, channel, message.content, dedupKey)) {
         console.log(`[Chat/NoiseBudget] Suppressed duplicate from ${message.from} in #${channel}`)
         // Return a synthetic message so callers don't break
         return {
@@ -375,6 +422,37 @@ class ChatManager {
       // if (!budget.allowed) { ... }
     }
 
+    // ── Persistent suppression ledger (dedup_key) ──
+    // For system/automated messages, compute a dedup_key and check the persistent ledger
+    const msgMeta = (message.metadata || {}) as Record<string, unknown>
+    const category = typeof msgMeta.category === 'string' ? msgMeta.category : 'general'
+    const isSystemSource = message.from === 'system'
+      || typeof msgMeta.category === 'string'
+      || msgMeta.digest === true
+    let dedupKey: string | undefined
+
+    if (isSystemSource && !bypassBudget) {
+      const check = suppressionLedger.check({
+        category,
+        channel,
+        from: message.from,
+        content: message.content,
+      })
+      dedupKey = check.dedup_key
+
+      if (check.isDuplicate) {
+        console.log(`[Chat/SuppressionLedger] Suppressed duplicate (key=${dedupKey}) from ${message.from} in #${channel}`)
+        return {
+          ...message,
+          id: `msg-${Date.now()}-ledger-suppressed`,
+          timestamp: Date.now(),
+          channel,
+          reactions: {},
+          metadata: { ...msgMeta, dedup_key: dedupKey, suppressed: true },
+        } as AgentMessage
+      }
+    }
+
     const fullMessage: AgentMessage = {
       ...message,
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -382,6 +460,7 @@ class ChatManager {
       channel,
       reactions: message.reactions || {},
       threadId: message.threadId,
+      metadata: dedupKey ? { ...msgMeta, dedup_key: dedupKey } : message.metadata,
     }
 
     // Persist to SQLite + JSONL audit

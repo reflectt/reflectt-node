@@ -91,6 +91,7 @@ import { policyManager } from './policy.js'
 import { runPrecheck, applyAutoDefaults } from './taskPrecheck.js'
 import { resolveRoute, getRoutingLog, getRoutingStats, type MessageSeverity, type MessageCategory } from './messageRouter.js'
 import { noiseBudgetManager } from './noise-budget.js'
+import { suppressionLedger } from './suppression-ledger.js'
 import {
   submitFeedback,
   listFeedback,
@@ -5246,6 +5247,15 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, ...noiseBudgetManager.getSnapshot() }
   })
 
+  // Chat suppression stats (in-memory dedup + persistent suppression ledger)
+  app.get('/chat/suppression/stats', async () => {
+    return {
+      success: true,
+      inline_dedup: chatManager.getSuppressionStats(),
+      ledger: suppressionLedger.getStats(),
+    }
+  })
+
   // Noise budget canary metrics (rollback evaluation)
   app.get('/chat/noise-budget/canary', async () => {
     return { success: true, ...noiseBudgetManager.getCanaryMetrics() }
@@ -5286,6 +5296,13 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post('/chat/noise-budget/flush-digest', async () => {
     const entries = await noiseBudgetManager.flushDigestQueue()
     return { success: true, flushed: entries.length }
+  })
+
+  // ── Suppression Ledger endpoints ──────────────────────────────────────
+
+  app.post('/chat/suppression/prune', async () => {
+    const pruned = suppressionLedger.prune()
+    return { success: true, pruned }
   })
 
   // ── Alert Integrity endpoints ────────────────────────────────────────
