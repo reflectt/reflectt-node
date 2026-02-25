@@ -7504,17 +7504,33 @@ export async function createServer(): Promise<FastifyInstance> {
         })
       }
     }
+
+    // Enrich each presence with calendar info
+    const enriched = Array.from(presenceMap.values()).map(p => {
+      const availability = calendarManager.getAgentAvailability(p.agent)
+      const currentEvent = calendarEvents.getAgentCurrentEvent(p.agent)
+      return {
+        ...p,
+        calendar: {
+          status: availability.status,
+          current_block: availability.current_block,
+          current_event: currentEvent,
+          until: availability.until || (currentEvent ? currentEvent.dtend : null),
+        },
+      }
+    })
     
-    return { presences: Array.from(presenceMap.values()) }
+    return { presences: enriched }
   })
 
-  // Get specific agent presence
+  // Get specific agent presence (includes calendar block/event info)
   app.get<{ Params: { agent: string } }>('/presence/:agent', async (request) => {
-    let presence = presenceManager.getPresence(request.params.agent)
+    const agent = request.params.agent
+    let presence = presenceManager.getPresence(agent)
     
     // If no explicit presence, infer from activity
     if (!presence) {
-      const activity = presenceManager.getAgentActivity(request.params.agent)
+      const activity = presenceManager.getAgentActivity(agent)
       if (activity && activity.last_active) {
         const now = Date.now()
         const inactiveMs = now - activity.last_active
@@ -7526,7 +7542,7 @@ export async function createServer(): Promise<FastifyInstance> {
         }
         
         presence = {
-          agent: request.params.agent,
+          agent,
           status,
           since: activity.first_seen_today || activity.last_active,
           lastUpdate: activity.last_active,
@@ -7538,7 +7554,22 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!presence) {
       return { presence: null, message: 'No presence data for this agent' }
     }
-    return { presence }
+
+    // Enrich with calendar info
+    const availability = calendarManager.getAgentAvailability(agent)
+    const currentEvent = calendarEvents.getAgentCurrentEvent(agent)
+
+    return {
+      presence: {
+        ...presence,
+        calendar: {
+          status: availability.status,
+          current_block: availability.current_block,
+          current_event: currentEvent,
+          until: availability.until || (currentEvent ? currentEvent.dtend : null),
+        },
+      },
+    }
   })
 
   // Set agent focus mode
@@ -9238,7 +9269,38 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     if (!query.agent) return { error: 'agent query param required' }
     const urgency = (query.urgency || 'normal') as 'low' | 'normal' | 'high'
-    return calendarManager.shouldPing(query.agent, urgency)
+
+    // Check blocks first
+    const blockDecision = calendarManager.shouldPing(query.agent, urgency)
+
+    // If blocks say don't ping, return that
+    if (!blockDecision.should_ping) {
+      return blockDecision
+    }
+
+    // Also check calendar events (unless high urgency)
+    if (urgency !== 'high') {
+      const currentEvent = calendarEvents.getAgentCurrentEvent(query.agent)
+      if (currentEvent) {
+        if (urgency === 'low') {
+          return {
+            should_ping: false,
+            reason: `Agent in event: "${currentEvent.summary}"`,
+            delay_until: currentEvent.dtend,
+            current_block: blockDecision.current_block,
+            current_event: currentEvent,
+          }
+        }
+        // Normal urgency — ping allowed but note the event
+        return {
+          ...blockDecision,
+          current_event: currentEvent,
+          note: `Agent is in event "${currentEvent.summary}" but urgency is normal — ping allowed`,
+        }
+      }
+    }
+
+    return blockDecision
   })
 
   // ── Calendar Events API ────────────────────────────────────────────────

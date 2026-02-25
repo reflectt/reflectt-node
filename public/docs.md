@@ -261,8 +261,8 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/presence` | All agents' presence |
-| GET | `/presence/:agent` | Single agent presence |
+| GET | `/presence` | All agents' presence. Each entry includes a `calendar` object with: `status` (free/busy/focus/ooo), `current_block`, `current_event`, `until` (epoch ms when current status ends). |
+| GET | `/presence/:agent` | Single agent presence + calendar info. Returns `calendar.current_block` and `calendar.current_event` if agent has active calendar entries. |
 | POST | `/presence/:agent` | Update presence. Body: `{ "status": "working|idle|blocked|reviewing|offline" }` |
 | GET | `/presence/:agent/focus` | Get agent focus state (active, level, expiry) |
 | POST | `/presence/:agent/focus` | Toggle focus mode. Body: `{ "active": true, "level": "soft|deep", "durationMin": 60, "reason": "shipping PR" }`. Soft: suppresses system nudges, allows direct mentions. Deep: suppresses everything except blocker/review pings. |
@@ -757,7 +757,7 @@ Artifact paths are normalized on PATCH to `validating` to prevent workspace-depe
 
 ## Calendar
 
-Shared time-awareness system for agents and humans. Supports availability blocks and (coming soon) full calendar events with iCal compatibility.
+Shared time-awareness system for agents and humans. Supports availability blocks, full calendar events with iCal compatibility, and agent ping gating.
 
 ### Block Types
 - `busy` — occupied but interruptible for normal+ urgency
@@ -782,9 +782,9 @@ Recurring blocks use day-of-week scheduling with minutes-from-midnight for start
 | GET | `/calendar/blocks/:id` | Get a single block by ID. |
 | PATCH | `/calendar/blocks/:id` | Update a block. Body: partial block fields. |
 | DELETE | `/calendar/blocks/:id` | Delete a block. |
-| GET | `/calendar/busy` | Check if agent is busy. Query: `agent` (required). Returns busy/free status + current block details. |
+| GET | `/calendar/busy` | Check if agent is busy. Query: `agent` (required). Returns busy/free status + current block + current event details. Checks both blocks AND events. |
 | GET | `/calendar/availability` | Team-wide availability snapshot. Returns all agents with calendar blocks and their current status. |
-| GET | `/calendar/should-ping` | Ping gating check. Query: `agent` (required), `urgency` (low/normal/high, default: normal). Returns should_ping boolean + reason + delay_until. |
+| GET | `/calendar/should-ping` | Ping gating check. Query: `agent` (required), `urgency` (low/normal/high, default: normal). Checks both blocks AND events. Returns `should_ping` boolean + `reason` + `delay_until` + `current_event` (if in one). High urgency always passes through. Low urgency delays if in any event. Normal urgency pings but notes the event. |
 
 ## Calendar Events
 
@@ -817,5 +817,11 @@ Full calendar event system with iCal-compatible fields, attendees, RSVP, recurre
 | POST | `/calendar/events/:id/rsvp` | RSVP to event. Body: `{ name, status }`. Adds attendee if not present. |
 | GET | `/calendar/events/:id/occurrences` | Get occurrence timestamps for recurring events. Query: `from`, `to` (epoch ms, default: next 30 days). |
 | GET | `/calendar/reminders/pending` | List reminders that should fire now (for reminder engine polling). |
+| GET | `/calendar/reminders/status` | Reminder engine health: running, totalFired, lastPollAt, lastError, pollIntervalMs. |
+| POST | `/calendar/reminders/trigger` | Force a reminder poll cycle (for testing/manual). Returns fired count + engine status. |
 | GET | `/calendar/events/current` | Check if agent is in an event right now. Query: `agent` (required). |
 | GET | `/calendar/events/next` | Get agent's next upcoming event. Query: `agent` (required). |
+| GET | `/calendar/export.ics` | Export events as iCalendar (.ics). Query: `organizer`, `attendee`, `from`, `to` (epoch ms). Returns `text/calendar`. |
+| GET | `/calendar/events/:id/export.ics` | Export single event as .ics file. |
+| POST | `/calendar/import` | Import events from .ics content. Body: raw ICS text or `{ ics: "...", organizer?: "..." }`. Deduplicates by UID. |
+| POST | `/calendar/import/url` | Import events from a URL. Body: `{ url: "https://...", organizer?: "..." }`. Fetches and parses the .ics. |
