@@ -28,6 +28,7 @@ import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, gene
 import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog } from './prAutoMerge.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
 import { listSharedFiles, readSharedFile, resolveTaskArtifact, validatePath, ALLOWED_EXTENSIONS } from './shared-workspace-api.js'
+import { normalizeArtifactPath, normalizeTaskArtifactPaths, buildGitHubBlobUrl, buildGitHubRawUrl } from './artifact-resolver.js'
 import {
   emitActivationEvent,
   getUserFunnelState,
@@ -640,6 +641,25 @@ function applyReviewStateMetadata(
       metadata.review_state = 'queued'
     }
     metadata.review_last_activity_at = now
+
+    // ── Artifact path normalization on validating transition ──
+    // Normalize workspace-prefixed paths to repo-relative.
+    // This prevents reviewers from hitting "file not found" due to workspace-dependent paths.
+    const normResult = normalizeTaskArtifactPaths(metadata)
+    if (normResult.rejected.length > 0) {
+      // Log but don't block — auto-normalize what we can
+      console.warn(`[ArtifactNormalize] task ${existing.id}: rejected paths:`, normResult.rejected)
+    }
+    if (Object.keys(normResult.patches).length > 0) {
+      Object.assign(metadata, normResult.patches)
+      metadata.artifact_normalization = {
+        normalized: true,
+        warnings: normResult.warnings,
+        rejected: normResult.rejected,
+        normalizedAt: new Date().toISOString(),
+      }
+      console.log(`[ArtifactNormalize] task ${existing.id}: normalized`, normResult.warnings)
+    }
   }
 
   if (previousStatus === 'validating' && nextStatus === 'doing' && !incomingReviewState) {
@@ -3326,7 +3346,25 @@ export async function createServer(): Promise<FastifyInstance> {
           }
           return result
         }
-        return { ...ref, type: 'file' as const, accessible: false, error: 'File not found (checked workspace + shared-workspace)' }
+        // GitHub blob fallback: if local file missing but PR is known, build a GitHub URL
+        const prUrl = meta.pr_url || meta.qa_bundle?.review_packet?.pr_url || meta.review_handoff?.pr_url
+        const commitSha = meta.commit_sha || meta.commit || meta.qa_bundle?.review_packet?.commit || meta.review_handoff?.commit_sha
+        if (typeof prUrl === 'string' && typeof commitSha === 'string' && ref.path.startsWith('process/')) {
+          const blobUrl = buildGitHubBlobUrl(prUrl, commitSha, ref.path)
+          const rawUrl = buildGitHubRawUrl(prUrl, commitSha, ref.path)
+          if (blobUrl) {
+            return {
+              ...ref,
+              type: 'file' as const,
+              accessible: true,
+              source: 'github-fallback',
+              resolvedPath: blobUrl,
+              rawUrl,
+              note: 'Local file not found; resolved via GitHub blob URL from PR metadata.',
+            }
+          }
+        }
+        return { ...ref, type: 'file' as const, accessible: false, error: 'File not found (checked workspace + shared-workspace + GitHub fallback)' }
       })
     )
 

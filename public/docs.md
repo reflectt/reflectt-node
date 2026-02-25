@@ -708,3 +708,25 @@ Explicit routing approval queue. Tasks enter ONLY when marked with `metadata.rou
 | GET | `/routing/approvals` | List all tasks with `routing_approval=true`. Returns suggestion details + confidence. |
 | POST | `/routing/approvals/:taskId/decide` | Approve or reject a routing suggestion. Body: `{ decision: 'approve'\|'reject', actor, assignee?, note? }`. Approve sets assignee + clears queue. Reject suppresses reappearance. |
 | POST | `/routing/approvals/suggest` | Submit a routing suggestion for a task. Body: `{ taskId, suggestedAssignee, confidence, reason, alternatives? }`. Sets `routing_approval=true`. |
+
+## Artifact Resolver (path normalization + GitHub fallback)
+
+Artifact paths are normalized on PATCH to `validating` to prevent workspace-dependent paths from blocking reviewer access.
+
+### Path Normalization
+- Absolute paths with known workspace prefixes (e.g., `/Users/.../workspace-link/process/...`) are stripped to repo-relative (`process/...`)
+- Relative workspace prefixes (`workspace-shared/`, `shared/`) are stripped
+- Unknown absolute paths (e.g., `/etc/passwd`) are rejected
+- Paths with `..` or null bytes are rejected
+- Normalization metadata stamped: `metadata.artifact_normalization.{ normalized, warnings, rejected, normalizedAt }`
+
+### GitHub Blob Fallback
+- When `/tasks/:id/artifacts` can't find a local file but PR URL + commit SHA are available
+- Builds `https://github.com/{owner/repo}/blob/{sha}/{path}` as fallback
+- Returns `source: 'github-fallback'` + `rawUrl` for direct download
+- Only applies to `process/` prefixed paths
+
+### Artifact Path Guidance (for submitters)
+- Always use repo-relative paths: `process/task-{id}-qa-bundle.md`
+- Never use absolute paths or workspace-prefixed paths
+- The normalizer will auto-fix common workspace prefixes but rejection is possible for unknown patterns
