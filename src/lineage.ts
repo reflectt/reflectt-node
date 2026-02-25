@@ -6,6 +6,7 @@
 // for debugging and audit.
 
 import { getDb, safeJsonParse } from './db.js'
+import type { InsightRow } from './insights.js'
 
 // ── Types ──
 
@@ -110,7 +111,7 @@ export function listLineage(opts: LineageListOpts = {}): { entries: LineageEntry
   // Get insight rows
   const insightRows = db.prepare(
     `SELECT * FROM insights i ${insightWhereClause} ORDER BY i.updated_at DESC LIMIT ? OFFSET ?`
-  ).all(...insightParams, limit, offset) as any[]
+  ).all(...insightParams, limit, offset) as InsightRow[]
 
   const entries: LineageEntry[] = []
 
@@ -135,7 +136,7 @@ export function getLineage(id: string): LineageEntry | null {
 
   // Try as insight ID
   if (id.startsWith('ins-')) {
-    const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(id) as any
+    const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(id) as InsightRow | undefined
     if (row) return buildLineageFromInsight(row, {})
   }
 
@@ -143,7 +144,7 @@ export function getLineage(id: string): LineageEntry | null {
   if (id.startsWith('ref-')) {
     const insightRow = db.prepare(
       `SELECT * FROM insights WHERE reflection_ids LIKE ?`
-    ).get(`%${id}%`) as any
+    ).get(`%${id}%`) as InsightRow | undefined
     if (insightRow) return buildLineageFromInsight(insightRow, {})
 
     // Orphaned reflection (no insight)
@@ -156,22 +157,22 @@ export function getLineage(id: string): LineageEntry | null {
   if (id.startsWith('task-')) {
     const insightRow = db.prepare(
       `SELECT * FROM insights WHERE task_id = ?`
-    ).get(id) as any
+    ).get(id) as InsightRow | undefined
     if (insightRow) return buildLineageFromInsight(insightRow, {})
 
     // Check promotion audits
     const auditRow = db.prepare(
       `SELECT insight_id FROM promotion_audits WHERE task_id = ?`
-    ).get(id) as any
+    ).get(id) as { insight_id: string } | undefined
     if (auditRow) {
-      const insRow = db.prepare('SELECT * FROM insights WHERE id = ?').get(auditRow.insight_id) as any
+      const insRow = db.prepare('SELECT * FROM insights WHERE id = ?').get(auditRow.insight_id) as InsightRow | undefined
       if (insRow) return buildLineageFromInsight(insRow, {})
     }
     return null
   }
 
   // Generic search
-  const insightRow = db.prepare('SELECT * FROM insights WHERE id = ?').get(id) as any
+  const insightRow = db.prepare('SELECT * FROM insights WHERE id = ?').get(id) as InsightRow | undefined
   if (insightRow) return buildLineageFromInsight(insightRow, {})
 
   return null
@@ -179,7 +180,7 @@ export function getLineage(id: string): LineageEntry | null {
 
 // ── Builders ──
 
-function buildLineageFromInsight(insightRow: any, opts: LineageListOpts): LineageEntry | null {
+function buildLineageFromInsight(insightRow: InsightRow, opts: LineageListOpts): LineageEntry | null {
   const db = getDb()
   const anomalies: LineageAnomaly[] = []
   const timeline: TimelineEvent[] = []
@@ -399,7 +400,7 @@ export function lineageStats(): {
   let withAnomalies = 0
   const anomalyBreakdown: Record<string, number> = {}
 
-  const rows = db.prepare('SELECT * FROM insights ORDER BY updated_at DESC LIMIT 500').all() as any[]
+  const rows = db.prepare('SELECT * FROM insights ORDER BY updated_at DESC LIMIT 500').all() as InsightRow[]
   for (const row of rows) {
     const entry = buildLineageFromInsight(row, {})
     if (entry && entry.anomalies.length > 0) {
