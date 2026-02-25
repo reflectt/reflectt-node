@@ -449,6 +449,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | GET | `/reflections/stats` | Aggregate stats: total count, by role_type, by severity, average confidence. |
 | GET | `/reflections/sla` | Reflection SLA status per agent: last reflection time, overdue hours, tasks done since last reflection. |
 | POST | `/reflections/nudge/tick` | Manually trigger reflection nudge cycle (post-task + idle checks). |
+| GET | `/reflections/tracking/:agent` | Debug endpoint: reflection tracking state for an agent. Returns tracking row, latest actual reflection, staleness flag, gate status (`gate_would_block`), and whether reconciliation is available. |
 | GET | `/reflections/schema` | Machine-readable field reference (required/optional fields, enums, ranges). |
 
 ## Insights (Clustering Engine)

@@ -153,3 +153,73 @@ describe('Working contract API endpoints', () => {
     expect(body.gate).toBe('reflection_overdue')
   })
 })
+
+describe('Reflection tracking debug endpoint', () => {
+  it('GET /reflections/tracking/:agent returns tracking state for unknown agent', async () => {
+    const agent = `unknown-agent-${Date.now()}`
+    const res = await app.inject({ method: 'GET', url: `/reflections/tracking/${agent}` })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(body.agent).toBe(agent)
+    expect(body.tracking).toBeNull()
+    expect(body.latest_reflection).toBeNull()
+    expect(body.stale).toBe(false)
+    expect(body.gate_would_block).toBe(false)
+  })
+
+  it('GET /reflections/tracking/:agent detects stale tracking', async () => {
+    const agent = `stale-debug-${Date.now()}`
+    const db = getDb()
+
+    // Stale tracking row: overdue
+    const tenHoursAgo = Date.now() - 10 * 60 * 60 * 1000
+    db.prepare(`
+      INSERT OR REPLACE INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+      VALUES (?, ?, 3, ?)
+    `).run(agent, tenHoursAgo, Date.now())
+
+    // Insert a recent reflection
+    const { createReflection } = await import('../src/reflections.js')
+    createReflection({
+      pain: 'debug endpoint stale test',
+      impact: 'verifies stale detection',
+      evidence: ['test'],
+      went_well: 'n/a',
+      suspected_why: 'n/a',
+      proposed_fix: 'check endpoint',
+      confidence: 7,
+      role_type: 'agent',
+      author: agent,
+    })
+
+    const res = await app.inject({ method: 'GET', url: `/reflections/tracking/${agent}` })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(body.agent).toBe(agent)
+    expect(body.stale).toBe(true)
+    expect(body.gate_would_block).toBe(true)
+    expect(body.reconciliation_available).toBe(true)
+    expect(body.latest_reflection).toBeDefined()
+    expect(body.latest_reflection.author).toBe(agent)
+  })
+
+  it('GET /reflections/tracking/:agent shows healthy state', async () => {
+    const agent = `healthy-debug-${Date.now()}`
+    const db = getDb()
+
+    // Recent tracking: no overdue
+    const thirtyMinAgo = Date.now() - 30 * 60 * 1000
+    db.prepare(`
+      INSERT OR REPLACE INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+      VALUES (?, ?, 1, ?)
+    `).run(agent, thirtyMinAgo, Date.now())
+
+    const res = await app.inject({ method: 'GET', url: `/reflections/tracking/${agent}` })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(body.agent).toBe(agent)
+    expect(body.stale).toBe(false)
+    expect(body.gate_would_block).toBe(false)
+    expect(body.reconciliation_available).toBe(false)
+  })
+})
