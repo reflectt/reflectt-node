@@ -754,3 +754,34 @@ Artifact paths are normalized on PATCH to `validating` to prevent workspace-depe
 - Always use repo-relative paths: `process/task-{id}-qa-bundle.md`
 - Never use absolute paths or workspace-prefixed paths
 - The normalizer will auto-fix common workspace prefixes but rejection is possible for unknown patterns
+
+## Calendar
+
+Shared time-awareness system for agents and humans. Supports availability blocks and (coming soon) full calendar events with iCal compatibility.
+
+### Block Types
+- `busy` — occupied but interruptible for normal+ urgency
+- `focus` — deep work, only interruptible for high urgency
+- `available` — explicitly free
+- `ooo` — out of office, only interruptible for high urgency
+
+### Recurring Blocks
+Recurring blocks use day-of-week scheduling with minutes-from-midnight for start/end times. Days: `sun,mon,tue,wed,thu,fri,sat`. Timezone-aware evaluation.
+
+### Ping Gating Rules
+| Urgency | Free | Busy | Focus | OOO |
+|---------|------|------|-------|-----|
+| high    | ✅   | ✅   | ✅    | ✅  |
+| normal  | ✅   | ✅   | ❌    | ❌  |
+| low     | ✅   | ❌   | ❌    | ❌  |
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/calendar/blocks` | Create a calendar block. Body: `{ agent, type, title, start, end, recurring?, timezone? }`. For one-off: start/end are epoch ms. For recurring: start/end are minutes from midnight (0-1439), recurring is comma-separated days. |
+| GET | `/calendar/blocks` | List blocks. Query: `agent`, `type`, `from` (epoch ms), `to` (epoch ms). |
+| GET | `/calendar/blocks/:id` | Get a single block by ID. |
+| PATCH | `/calendar/blocks/:id` | Update a block. Body: partial block fields. |
+| DELETE | `/calendar/blocks/:id` | Delete a block. |
+| GET | `/calendar/busy` | Check if agent is busy. Query: `agent` (required). Returns busy/free status + current block details. |
+| GET | `/calendar/availability` | Team-wide availability snapshot. Returns all agents with calendar blocks and their current status. |
+| GET | `/calendar/should-ping` | Ping gating check. Query: `agent` (required), `urgency` (low/normal/high, default: normal). Returns should_ping boolean + reason + delay_until. |
