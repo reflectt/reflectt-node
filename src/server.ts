@@ -3143,6 +3143,8 @@ export async function createServer(): Promise<FastifyInstance> {
           total: vectorCount(db),
           tasks: vectorCount(db, 'task'),
           chat: vectorCount(db, 'chat'),
+          reflections: vectorCount(db, 'reflection'),
+          insights: vectorCount(db, 'insight'),
         },
       }
     } catch (err: any) {
@@ -3159,9 +3161,9 @@ export async function createServer(): Promise<FastifyInstance> {
         return { error: 'Semantic search not available', code: 'VEC_NOT_AVAILABLE' }
       }
 
-      const { indexTask } = await import('./vector-store.js')
+      const { indexTask, reindexKnowledgeBase } = await import('./vector-store.js')
       const allTasks = taskManager.listTasks({})
-      let indexed = 0
+      let tasksIndexed = 0
 
       for (const task of allTasks) {
         try {
@@ -3171,13 +3173,23 @@ export async function createServer(): Promise<FastifyInstance> {
             (task as any).description,
             task.done_criteria,
           )
-          indexed++
+          tasksIndexed++
         } catch {
           // skip individual failures
         }
       }
 
-      return { indexed, total: allTasks.length }
+      // Also backfill reflections and insights
+      const kb = await reindexKnowledgeBase()
+
+      return {
+        indexed: tasksIndexed + kb.reflections + kb.insights,
+        tasks: tasksIndexed,
+        reflections: kb.reflections,
+        insights: kb.insights,
+        errors: kb.errors,
+        total: allTasks.length,
+      }
     } catch (err: any) {
       reply.code(500)
       return { error: err?.message || 'Reindex failed', code: 'REINDEX_ERROR' }
@@ -6325,10 +6337,26 @@ export async function createServer(): Promise<FastifyInstance> {
       onReflectionSubmitted(reflection.author)
     } catch { /* reflection automation may not be loaded */ }
 
+    // Auto-index reflection for semantic search
+    import('./vector-store.js')
+      .then(({ indexReflection }) =>
+        indexReflection(reflection.id, reflection.pain, reflection.impact, reflection.proposed_fix, reflection.evidence, reflection.author)
+      )
+      .catch(() => { /* vector search may not be available */ })
+
     // Auto-ingest into insight pipeline (reflection → insight clustering)
     let insight = null
     try {
       insight = ingestReflection(reflection)
+
+      // Auto-index insight for semantic search
+      if (insight) {
+        import('./vector-store.js')
+          .then(({ indexInsight }) =>
+            indexInsight(insight!.id, insight!.title, insight!.cluster_key, insight!.evidence_refs, insight!.authors)
+          )
+          .catch(() => { /* vector search may not be available */ })
+      }
     } catch (err) {
       console.warn(`[Reflections] Auto-ingest to insight pipeline failed for ${reflection.id}:`, err)
     }
@@ -6409,6 +6437,16 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const insight = ingestReflection(reflection)
+
+    // Auto-index insight for semantic search
+    if (insight) {
+      import('./vector-store.js')
+        .then(({ indexInsight }) =>
+          indexInsight(insight.id, insight.title, insight.cluster_key, insight.evidence_refs, insight.authors)
+        )
+        .catch(() => { /* vector search may not be available */ })
+    }
+
     reply.code(201)
     return { success: true, insight, cluster_key: extractClusterKey(reflection) }
   })

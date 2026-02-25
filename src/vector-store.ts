@@ -235,6 +235,112 @@ export async function indexChatMessage(
 }
 
 /**
+ * Index a reflection for semantic search.
+ * Combines pain, impact, proposed_fix, and evidence into searchable text.
+ */
+export async function indexReflection(
+  reflectionId: string,
+  pain: string,
+  impact: string,
+  proposedFix: string,
+  evidence?: string[] | null,
+  author?: string,
+): Promise<void> {
+  const parts = [`Pain: ${pain}`, `Impact: ${impact}`, `Fix: ${proposedFix}`]
+  if (evidence?.length) parts.push(`Evidence: ${evidence.join(', ')}`)
+  if (author) parts.push(`Author: ${author}`)
+  const text = parts.join(' — ')
+
+  const { embed } = await import('./embeddings.js')
+  const embedding = await embed(text)
+
+  const db = getDb()
+  upsertVector(db, 'reflection', reflectionId, text, embedding)
+}
+
+/**
+ * Index an insight for semantic search.
+ * Combines title, cluster key, evidence, and authors.
+ */
+export async function indexInsight(
+  insightId: string,
+  title: string,
+  clusterKey: string,
+  evidenceRefs?: string[] | null,
+  authors?: string[] | null,
+): Promise<void> {
+  const parts = [title, `Cluster: ${clusterKey}`]
+  if (evidenceRefs?.length) parts.push(`Evidence: ${evidenceRefs.join(', ')}`)
+  if (authors?.length) parts.push(`Authors: ${authors.join(', ')}`)
+  const text = parts.join(' — ')
+
+  const { embed } = await import('./embeddings.js')
+  const embedding = await embed(text)
+
+  const db = getDb()
+  upsertVector(db, 'insight', insightId, text, embedding)
+}
+
+/**
+ * Reindex all reflections and insights (backfill).
+ * Returns counts of indexed items.
+ */
+export async function reindexKnowledgeBase(): Promise<{
+  reflections: number
+  insights: number
+  errors: number
+}> {
+  const db = getDb()
+  let reflections = 0
+  let insights = 0
+  let errors = 0
+
+  // Reindex reflections
+  try {
+    const rows = db.prepare('SELECT id, pain, impact, proposed_fix, evidence, author FROM reflections').all() as Array<{
+      id: string; pain: string; impact: string; proposed_fix: string; evidence: string | null; author: string
+    }>
+
+    for (const row of rows) {
+      try {
+        const evidence = row.evidence ? JSON.parse(row.evidence) : null
+        await indexReflection(row.id, row.pain, row.impact, row.proposed_fix, evidence, row.author)
+        reflections++
+      } catch (err: any) {
+        console.error(`[vector-store] Failed to index reflection ${row.id}:`, err?.message)
+        errors++
+      }
+    }
+  } catch (err: any) {
+    console.error('[vector-store] Failed to query reflections for reindex:', err?.message)
+  }
+
+  // Reindex insights
+  try {
+    const rows = db.prepare('SELECT id, title, cluster_key, evidence_refs, authors FROM insights').all() as Array<{
+      id: string; title: string; cluster_key: string; evidence_refs: string | null; authors: string | null
+    }>
+
+    for (const row of rows) {
+      try {
+        const evidenceRefs = row.evidence_refs ? JSON.parse(row.evidence_refs) : null
+        const authors = row.authors ? JSON.parse(row.authors) : null
+        await indexInsight(row.id, row.title, row.cluster_key, evidenceRefs, authors)
+        insights++
+      } catch (err: any) {
+        console.error(`[vector-store] Failed to index insight ${row.id}:`, err?.message)
+        errors++
+      }
+    }
+  } catch (err: any) {
+    console.error('[vector-store] Failed to query insights for reindex:', err?.message)
+  }
+
+  console.log(`[vector-store] Reindex complete: ${reflections} reflections, ${insights} insights, ${errors} errors`)
+  return { reflections, insights, errors }
+}
+
+/**
  * Semantic search across all indexed content.
  */
 export async function semanticSearch(
