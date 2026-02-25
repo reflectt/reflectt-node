@@ -2786,6 +2786,89 @@ export async function createServer(): Promise<FastifyInstance> {
     return payload
   })
 
+  // ── Agent context endpoint ──────────────────────────────────────────
+  // Returns a compact, deduplicated view of recent chat optimized for
+  // agent context injection. Includes: mentions of the agent, recent
+  // system alerts (deduplicated), and team messages — all in slim format.
+  app.get<{ Params: { agent: string } }>('/chat/context/:agent', async (request) => {
+    const agent = String(request.params.agent || '').trim().toLowerCase()
+    const query = request.query as Record<string, string>
+    const limit = Math.min(Number(query.limit) || 30, 100)
+    const channelFilter = query.channel || undefined
+    const sinceMs = query.since ? Number(query.since) : Date.now() - (4 * 60 * 60 * 1000) // default 4h
+
+    const allMessages = chatManager.getMessages({
+      channel: channelFilter,
+      limit: Math.min(limit * 5, 500), // fetch more, then filter
+      since: sinceMs,
+    })
+
+    // Partition: mentions, system alerts, team messages
+    const mentions: typeof allMessages = []
+    const systemAlerts: typeof allMessages = []
+    const teamMessages: typeof allMessages = []
+
+    const agentPattern = new RegExp(`@${agent}\\b`, 'i')
+
+    for (const m of allMessages) {
+      const content = m.content || ''
+      if (m.from === 'system') {
+        systemAlerts.push(m)
+      } else if (agentPattern.test(content)) {
+        mentions.push(m)
+      } else {
+        teamMessages.push(m)
+      }
+    }
+
+    // Deduplicate system alerts by normalized content (aggressive normalization)
+    const seenHashes = new Set<string>()
+    const dedupedAlerts = systemAlerts.filter(m => {
+      const normalized = (m.content || '')
+        .replace(/\d{10,}/g, '')           // strip epoch timestamps
+        .replace(/task-\S+/g, 'TASK')      // normalize task IDs
+        .replace(/@[\w-]+/g, '@AGENT')     // normalize @mentions (incl. hyphens)
+        .replace(/\d+\/\d+/g, 'N/M')      // normalize counts like "0/2"
+        .replace(/\d+h\b/g, 'Nh')         // normalize durations like "10h", "28h"
+        .replace(/\d+m\b/g, 'Nm')         // normalize minutes
+        .replace(/\d+\s*hour/g, 'N hour')
+        .replace(/\d+\s*min/g, 'N min')
+        .replace(/\(need \d+ more\)/g, '') // normalize "need N more"
+        .replace(/\s+/g, ' ')             // collapse whitespace
+        .trim().slice(0, 200)
+      const hash = `${m.channel}:${normalized}`
+      if (seenHashes.has(hash)) return false
+      seenHashes.add(hash)
+      return true
+    })
+
+    // Slim format: strip id, reactions, replyCount
+    const slim = (m: typeof allMessages[0]) => ({
+      from: m.from,
+      content: m.content,
+      ts: m.timestamp,
+      ch: m.channel,
+    })
+
+    // Assemble: prioritize mentions, then deduped alerts, then team msgs
+    const result = [
+      ...mentions.slice(-limit).map(slim),
+      ...dedupedAlerts.slice(-Math.ceil(limit / 3)).map(slim),
+      ...teamMessages.slice(-Math.ceil(limit / 3)).map(slim),
+    ].sort((a, b) => a.ts - b.ts).slice(-limit)
+
+    return {
+      agent,
+      since: sinceMs,
+      count: result.length,
+      messages: result,
+      suppressed: {
+        system_deduped: systemAlerts.length - dedupedAlerts.length,
+        total_scanned: allMessages.length,
+      },
+    }
+  })
+
   // Edit message (author only)
   app.patch<{ Params: { id: string } }>('/chat/messages/:id', async (request, reply) => {
     const parsedBody = EditMessageBodySchema.safeParse(request.body ?? {})
