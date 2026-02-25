@@ -19,6 +19,7 @@ import { validateTaskTimestamp, verifyTaskExists } from './health.js'
 import { policyManager } from './policy.js'
 import { getEffectiveActivity } from './activity-signal.js'
 import type { Task } from './types.js'
+import { isTestHarnessTask } from './test-task-filter.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -172,8 +173,8 @@ export class BoardHealthWorker {
     for (const task of staleDoing) {
       if (actionCount >= this.config.maxActionsPerTick) break
 
-      // Don't re-block already blocked tasks or TEST: tasks
-      if (task.title?.startsWith('TEST:')) continue
+      // Don't re-block already blocked tasks or test-harness tasks
+      if (isTestHarnessTask(task)) continue
 
       const action = await this.applyAutoBlockStale(task, now, dryRun)
       if (action) {
@@ -186,7 +187,7 @@ export class BoardHealthWorker {
     const abandonedTasks = this.findAbandonedTasks(now)
     for (const task of abandonedTasks) {
       if (actionCount >= this.config.maxActionsPerTick) break
-      if (task.title?.startsWith('TEST:')) continue
+      if (isTestHarnessTask(task)) continue
 
       const action = await this.applySuggestClose(task, now, dryRun)
       if (action) {

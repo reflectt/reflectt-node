@@ -1831,7 +1831,9 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Health check
-  app.get('/health', async () => {
+  app.get('/health', async (request) => {
+    const query = request.query as Record<string, string>
+    const includeTest = query.include_test === '1' || query.include_test === 'true'
     return {
       status: 'ok',
       version: BUILD_VERSION,
@@ -1839,7 +1841,7 @@ export async function createServer(): Promise<FastifyInstance> {
       uptime_seconds: Math.round((Date.now() - BUILD_STARTED_AT) / 1000),
       openclaw: 'not configured',
       chat: chatManager.getStats(),
-      tasks: taskManager.getStats(),
+      tasks: taskManager.getStats({ includeTest }),
       inbox: inboxManager.getStats(),
       timestamp: Date.now(),
     }
@@ -1922,8 +1924,10 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Unified per-agent workflow state (task + PR + artifact + blocker)
   app.get('/health/workflow', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const includeTest = query.include_test === '1' || query.include_test === 'true'
     const now = Date.now()
-    const tasks = taskManager.listTasks({})
+    const tasks = taskManager.listTasks({ includeTest })
     const messages = chatManager.getMessages({ limit: 500 })
     const presences = presenceManager.getAllPresence()
 
@@ -2006,8 +2010,10 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ─── Backlog health: ready counts per lane, breach status, floor compliance ───
   app.get('/health/backlog', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const includeTest = query.include_test === '1' || query.include_test === 'true'
     const now = Date.now()
-    const allTasks = taskManager.listTasks({})
+    const allTasks = taskManager.listTasks({ includeTest })
 
     // Define lanes and their agents
     const lanes: Record<string, { agents: string[]; readyFloor: number }> = {
@@ -4964,8 +4970,10 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Board health: low-watermark detection
-  app.get('/tasks/board-health', async () => {
-    const allTasks = taskManager.listTasks({})
+  app.get('/tasks/board-health', async (request) => {
+    const query = request.query as Record<string, string>
+    const includeTest = query.include_test === '1' || query.include_test === 'true'
+    const allTasks = taskManager.listTasks({ includeTest })
     const agents = [...new Set(allTasks.map(t => t.assignee).filter(Boolean))] as string[]
 
     const outOfLaneFlags = allTasks

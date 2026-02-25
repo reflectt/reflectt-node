@@ -11,6 +11,7 @@ import { eventBus } from './events.js'
 import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 import { createTaskStateAdapterFromEnv, type TaskStateAdapter } from './taskStateSync.js'
 import { getDb, importJsonlIfNeeded, safeJsonStringify, safeJsonParse } from './db.js'
+import { isTestHarnessTask, TEST_TASK_EXCLUDE_SQL } from './test-task-filter.js'
 import type Database from 'better-sqlite3'
 
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
@@ -1210,17 +1211,7 @@ class TaskManager {
       tasks = tasks.filter(t => !isBlocked(t))
     }
 
-    // Filter out test-harness-generated tasks by default.
-    // These are created by pipeline validation runs and must not pollute live backlog metrics.
-    const isTestHarnessTask = (task: Task): boolean => {
-      const meta = (task.metadata || {}) as Record<string, unknown>
-      if (meta.is_test === true) return true
-      if (typeof meta.source_reflection === 'string' && meta.source_reflection.startsWith('ref-test-')) return true
-      if (typeof meta.source_insight === 'string' && meta.source_insight.startsWith('ins-test-')) return true
-      if (/test run \d{13}/i.test(task.title || '')) return true
-      return false
-    }
-
+    // Filter out test-harness-generated tasks by default (shared classifier in test-task-filter.ts)
     if (!options?.includeTest) {
       tasks = tasks.filter(t => !isTestHarnessTask(t))
     }
@@ -1535,16 +1526,9 @@ class TaskManager {
   getNextTask(agent?: string, opts?: { includeTest?: boolean }): Task | undefined {
     void this.materializeDueRecurringTasks().catch(() => {})
 
-    // Filter out test-harness-generated tasks (ref-test-* / ins-test-* / "test run <timestamp>")
-    const isTestHarnessTask = (task: Task): boolean => {
-      if (opts?.includeTest) return false
-      const meta = (task.metadata || {}) as Record<string, unknown>
-      if (meta.is_test === true) return true
-      if (typeof meta.source_reflection === 'string' && meta.source_reflection.startsWith('ref-test-')) return true
-      if (typeof meta.source_insight === 'string' && meta.source_insight.startsWith('ins-test-')) return true
-      if (/test run \d{13}/i.test(task.title || '')) return true
-      return false
-    }
+    // Filter out test-harness-generated tasks (shared classifier in test-task-filter.ts)
+    const shouldExcludeTest = !opts?.includeTest
+    const filterTestTask = (task: Task): boolean => shouldExcludeTest ? !isTestHarnessTask(task) : true
 
     // Priority order: P0 > P1 > P2 > P3
     const priorityOrder: Record<string, number> = {
@@ -1578,7 +1562,7 @@ class TaskManager {
       const doingRows = db.prepare(
         'SELECT * FROM tasks WHERE status = ? AND assignee = ?'
       ).all('doing', agent) as TaskRow[]
-      const doingTasks = doingRows.map(rowToTask).filter(t => !isBlocked(t) && !isTestHarnessTask(t)).sort(sortByPriority)
+      const doingTasks = doingRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t)).sort(sortByPriority)
 
       if (doingTasks.length > 0) {
         return doingTasks[0]
@@ -1589,13 +1573,13 @@ class TaskManager {
     const todoUnassignedRows = db.prepare(
       'SELECT * FROM tasks WHERE status = ? AND assignee IS NULL'
     ).all('todo') as TaskRow[]
-    let tasks = todoUnassignedRows.map(rowToTask).filter(t => !isBlocked(t) && !isTestHarnessTask(t))
+    let tasks = todoUnassignedRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t))
 
     if (agent) {
       const agentTodoRows = db.prepare(
         'SELECT * FROM tasks WHERE status = ? AND assignee = ?'
       ).all('todo', agent) as TaskRow[]
-      tasks = [...tasks, ...agentTodoRows.map(rowToTask).filter(t => !isBlocked(t) && !isTestHarnessTask(t))]
+      tasks = [...tasks, ...agentTodoRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t))]
     }
 
     if (tasks.length === 0) return undefined
@@ -1643,11 +1627,13 @@ class TaskManager {
     }
   }
 
-  getStats() {
+  getStats(options?: { includeTest?: boolean }) {
     const db = getDb()
-    const total = (db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number }).count
+    const excludeTest = !options?.includeTest
+    const whereClause = excludeTest ? `WHERE ${TEST_TASK_EXCLUDE_SQL}` : ''
+    const total = (db.prepare(`SELECT COUNT(*) as count FROM tasks ${whereClause}`).get() as { count: number }).count
     const byStatusRows = db.prepare(
-      'SELECT status, COUNT(*) as count FROM tasks GROUP BY status'
+      `SELECT status, COUNT(*) as count FROM tasks ${whereClause} GROUP BY status`
     ).all() as Array<{ status: string; count: number }>
     const byStatus: Record<string, number> = {
       todo: 0, doing: 0, blocked: 0, validating: 0, done: 0, 'in-progress': 0,
