@@ -137,6 +137,7 @@ import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buil
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
+import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -9318,6 +9319,69 @@ export async function createServer(): Promise<FastifyInstance> {
   // Reminder engine stats
   app.get('/calendar/reminders/stats', async () => {
     return getReminderEngineStats()
+  })
+
+  // ── iCal Import/Export ───────────────────────────────────────────────────
+
+  // Export all events as .ics
+  app.get('/calendar/export.ics', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const filters: Parameters<typeof calendarEvents.listEvents>[0] = {}
+    if (query.organizer) filters.organizer = query.organizer
+    if (query.attendee) filters.attendee = query.attendee
+    if (query.from) filters.from = parseInt(query.from, 10)
+    if (query.to) filters.to = parseInt(query.to, 10)
+
+    const events = calendarEvents.listEvents(filters)
+    const ics = exportICS(events)
+
+    return reply
+      .header('Content-Type', 'text/calendar; charset=utf-8')
+      .header('Content-Disposition', 'attachment; filename="reflectt-calendar.ics"')
+      .send(ics)
+  })
+
+  // Export single event as .ics
+  app.get<{ Params: { id: string } }>('/calendar/events/:id/export.ics', async (request, reply) => {
+    const event = calendarEvents.getEvent(request.params.id)
+    if (!event) return reply.code(404).send({ error: 'Event not found' })
+
+    const ics = exportEventICS(event)
+    return reply
+      .header('Content-Type', 'text/calendar; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="event-${event.id}.ics"`)
+      .send(ics)
+  })
+
+  // Import events from .ics content
+  app.post('/calendar/import', async (request, reply) => {
+    const body = request.body as { ics?: string; organizer?: string } | string
+    let icsContent: string
+    let organizer = 'imported'
+
+    if (typeof body === 'string') {
+      icsContent = body
+    } else if (body && typeof body === 'object' && 'ics' in body) {
+      icsContent = body.ics || ''
+      organizer = body.organizer || 'imported'
+    } else {
+      return reply.code(400).send({ error: 'Request body must be .ics content (string) or { ics: string, organizer?: string }' })
+    }
+
+    if (!icsContent.includes('BEGIN:VCALENDAR') && !icsContent.includes('BEGIN:VEVENT')) {
+      return reply.code(400).send({ error: 'Invalid .ics content — must contain BEGIN:VCALENDAR or BEGIN:VEVENT' })
+    }
+
+    try {
+      const imported = importICS(icsContent, organizer)
+      return reply.code(201).send({
+        success: true,
+        imported: imported.length,
+        events: imported,
+      })
+    } catch (err: any) {
+      return reply.code(400).send({ error: err.message })
+    }
   })
 
   // ── Calendar Events API ────────────────────────────────────────────────

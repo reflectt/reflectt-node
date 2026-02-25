@@ -830,3 +830,22 @@ Reminder delivery: fires to `#calendar-reminders` channel AND `#general` with @m
 |--------|------|-------------|
 | GET | `/calendar/reminders/stats` | Reminder engine stats: running, poll_interval_ms, last_poll_at, total_polls, total_delivered. |
 | GET | `/calendar/next-free` | When is agent next free? Query: `agent` (required). Returns free_now boolean + free_at timestamp. Checks both blocks and events. |
+
+## Calendar iCal Import/Export (RFC 5545)
+
+Standard iCalendar format support. Events can be imported from email invites, Google Calendar, Outlook, etc.
+
+### Export
+Exports produce RFC 5545 compliant `.ics` files with VEVENT, ATTENDEE (with PARTSTAT), VALARM (reminders), RRULE, CATEGORIES, and proper text escaping/line folding.
+
+### Import
+Import parses VEVENT components and creates/updates events. If a VEVENT has a UID matching an existing event, it's updated instead of duplicated. VALARM maps to reminders, ATTENDEE maps to attendees with PARTSTAT.
+
+### Round-trip
+Export → import preserves: summary, description, organizer, attendees, location, categories, reminders, RRULE, status.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/calendar/export.ics` | Export events as .ics file. Query: `organizer`, `attendee`, `from`, `to`. Returns `text/calendar` with Content-Disposition. |
+| GET | `/calendar/events/:id/export.ics` | Export single event as .ics file. |
+| POST | `/calendar/import` | Import events from .ics content. Body: `{ ics: string, organizer?: string }` or raw .ics string. Returns created/updated events. UID-based dedup on re-import. |
