@@ -12,7 +12,7 @@ import { getDb } from './db.js'
 import { taskManager } from './tasks.js'
 import { policyManager } from './policy.js'
 import { routeMessage } from './messageRouter.js'
-import { countReflections } from './reflections.js'
+import { listReflections } from './reflections.js'
 import { getEffectiveActivity, formatActivityWarning, type ActivitySignal } from './activity-signal.js'
 
 // ── Types ──
@@ -210,6 +210,29 @@ export function checkClaimGate(agent: string): ClaimGateResult {
       : Infinity
 
     if (tasksDone >= 2 && hoursSinceReflection > 4) {
+      // Reconciliation: if reflections exist in the reflections table but the tracking row is stale
+      // (e.g., reflections ingested via a path that didn't call onReflectionSubmitted), do not
+      // permanently lock the agent out of claiming work.
+      try {
+        const latest = listReflections({ author: agent, limit: 1 })[0]
+        const latestAt = latest?.created_at
+        if (typeof latestAt === 'number' && latestAt > lastReflection) {
+          // Treat this as a missed tracking reset; sync the tracking row and allow.
+          const now = Date.now()
+          db.prepare(`
+            INSERT INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+            VALUES (?, ?, 0, ?)
+            ON CONFLICT(agent) DO UPDATE SET
+              last_reflection_at = ?,
+              tasks_done_since_reflection = 0,
+              updated_at = ?
+          `).run(agent, latestAt, now, latestAt, now)
+          return { allowed: true }
+        }
+      } catch {
+        // ignore reconciliation errors; fall through to block
+      }
+
       return {
         allowed: false,
         reason: `Reflection gate: ${tasksDone} tasks completed since last reflection (${lastReflection > 0 ? Math.floor(hoursSinceReflection) + 'h ago' : 'never'}). Submit a reflection via POST /reflections before claiming new work.`,
