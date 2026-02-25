@@ -137,6 +137,7 @@ import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buil
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { startReminderEngine, stopReminderEngine, triggerPoll as triggerReminderPoll, getReminderEngineStatus } from './calendar-reminder-engine.js'
+import { exportToIcs, exportEventToIcs, importFromIcs } from './calendar-ical.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -9353,6 +9354,96 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!query.agent) return { error: 'agent query param required' }
     const result = calendarEvents.getAgentNextEvent(query.agent)
     return { agent: query.agent, next_event: result?.event || null, starts_at: result?.starts_at || null }
+  })
+
+  // ── iCal Import/Export ──────────────────────────────────────────────────
+
+  // Export all events (or filtered) as .ics
+  app.get('/calendar/export.ics', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const filters: Parameters<typeof calendarEvents.listEvents>[0] = {}
+    if (query.organizer) filters.organizer = query.organizer
+    if (query.attendee) filters.attendee = query.attendee
+    if (query.from) filters.from = parseInt(query.from, 10)
+    if (query.to) filters.to = parseInt(query.to, 10)
+
+    const events = calendarEvents.listEvents(filters)
+    const ics = exportToIcs(events)
+
+    return reply
+      .header('Content-Type', 'text/calendar; charset=utf-8')
+      .header('Content-Disposition', 'attachment; filename="reflectt-calendar.ics"')
+      .send(ics)
+  })
+
+  // Export single event as .ics
+  app.get<{ Params: { id: string } }>('/calendar/events/:id/export.ics', async (request, reply) => {
+    const event = calendarEvents.getEvent(request.params.id)
+    if (!event) return reply.code(404).send({ error: 'Event not found' })
+
+    const ics = exportEventToIcs(event)
+    return reply
+      .header('Content-Type', 'text/calendar; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="event-${event.id}.ics"`)
+      .send(ics)
+  })
+
+  // Import events from .ics body
+  app.post('/calendar/import', async (request, reply) => {
+    const body = request.body
+    let icsContent: string
+
+    if (typeof body === 'string') {
+      icsContent = body
+    } else if (body && typeof (body as any).ics === 'string') {
+      icsContent = (body as any).ics
+    } else {
+      return reply.code(400).send({ error: 'Request body must be .ics text or JSON { ics: "..." }' })
+    }
+
+    const defaultOrganizer = (body as any)?.organizer || 'system'
+    const result = importFromIcs(icsContent, defaultOrganizer)
+
+    return {
+      success: true,
+      imported: result.created.length,
+      skipped: result.skipped,
+      errors: result.errors,
+      events: result.created,
+    }
+  })
+
+  // Import events from URL
+  app.post('/calendar/import/url', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const url = body?.url as string
+    if (!url || typeof url !== 'string') {
+      return reply.code(400).send({ error: 'url is required' })
+    }
+
+    try {
+      const response = await fetch(url, {
+        headers: { 'Accept': 'text/calendar, */*' },
+        signal: AbortSignal.timeout(15_000),
+      })
+      if (!response.ok) {
+        return reply.code(502).send({ error: `Failed to fetch .ics: ${response.status} ${response.statusText}` })
+      }
+      const icsContent = await response.text()
+      const defaultOrganizer = (body?.organizer as string) || 'system'
+      const result = importFromIcs(icsContent, defaultOrganizer)
+
+      return {
+        success: true,
+        source: url,
+        imported: result.created.length,
+        skipped: result.skipped,
+        errors: result.errors,
+        events: result.created,
+      }
+    } catch (err: any) {
+      return reply.code(502).send({ error: `Failed to fetch .ics: ${err.message}` })
+    }
   })
 
   return app
