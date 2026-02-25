@@ -9,11 +9,28 @@ import fastifyWebsocket from '@fastify/websocket'
 import fastifyCors from '@fastify/cors'
 import { z } from 'zod'
 import { createHash } from 'crypto'
-import { promises as fs, existsSync } from 'fs'
+import { promises as fs, existsSync, readFileSync } from 'fs'
 import { resolve, sep, join } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
+import { execSync } from 'child_process'
 import { serverConfig, isDev, REFLECTT_HOME } from './config.js'
+
+// ── Build info (read once at startup) ──────────────────────────────────────
+const BUILD_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
+    return pkg.version || '0.0.0'
+  } catch { return '0.0.0' }
+})()
+
+const BUILD_COMMIT = (() => {
+  try {
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000 }).trim()
+  } catch { return 'unknown' }
+})()
+
+const BUILD_STARTED_AT = Date.now()
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { detectApproval, applyApproval } from './chat-approval-detector.js'
@@ -1799,6 +1816,9 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/health', async () => {
     return {
       status: 'ok',
+      version: BUILD_VERSION,
+      commit: BUILD_COMMIT,
+      uptime_seconds: Math.round((Date.now() - BUILD_STARTED_AT) / 1000),
       openclaw: 'not configured',
       chat: chatManager.getStats(),
       tasks: taskManager.getStats(),
