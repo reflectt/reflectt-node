@@ -3036,6 +3036,16 @@ export async function createServer(): Promise<FastifyInstance> {
     commentCount: taskManager.getTaskCommentCount(task.id),
   })
 
+  /** Strip metadata (and other heavy fields) from a task for compact responses. */
+  const compactTask = (task: ReturnType<typeof enrichTaskWithComments>) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { metadata, description, done_criteria, ...slim } = task
+    return slim
+  }
+
+  const isCompact = (query: Record<string, string>) =>
+    query.compact === '1' || query.compact === 'true'
+
   // List tasks
   app.get('/tasks', async (request, reply) => {
     const query = request.query as Record<string, string>
@@ -3078,7 +3088,9 @@ export async function createServer(): Promise<FastifyInstance> {
     tasks = tasks.slice(offset, offset + limit)
     const hasMore = offset + tasks.length < total
 
-    const payload = { tasks: tasks.map(enrichTaskWithComments), total, offset, limit, hasMore }
+    const enriched = tasks.map(enrichTaskWithComments)
+    const compact = isCompact(query)
+    const payload = { tasks: compact ? enriched.map(compactTask) : enriched, total, offset, limit, hasMore }
     const lastModified = tasks.length > 0 ? Math.max(...tasks.map(t => t.updatedAt || 0)) : undefined
     if (applyConditionalCaching(request, reply, payload, lastModified)) {
       return
@@ -3107,7 +3119,8 @@ export async function createServer(): Promise<FastifyInstance> {
       .filter(t => includeTest ? true : !isTestHarnessTask(t))
       .slice(0, limit)
 
-    return { tasks: tasks.map(enrichTaskWithComments), count: tasks.length }
+    const enriched = tasks.map(enrichTaskWithComments)
+    return { tasks: isCompact(query) ? enriched.map(compactTask) : enriched, count: tasks.length }
   })
 
   // Semantic search across tasks and chat messages
@@ -3646,8 +3659,10 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    const query = request.query as Record<string, string>
+    const enriched = enrichTaskWithComments(resolved.task)
     return {
-      task: enrichTaskWithComments(resolved.task),
+      task: isCompact(query) ? compactTask(enriched) : enriched,
       resolvedId: resolved.resolvedId,
       matchType: resolved.matchType,
     }
@@ -7566,7 +7581,8 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!task) {
       return { task: null, message: 'No available tasks' }
     }
-    return { task: enrichTaskWithComments(task) }
+    const enriched = enrichTaskWithComments(task)
+    return { task: isCompact(query) ? compactTask(enriched) : enriched }
   })
 
   // Per-agent cockpit summary (single-pane "My Now" payload)
