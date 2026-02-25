@@ -127,6 +127,7 @@ import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from '.
 import { listLineage, getLineage, lineageStats } from './lineage.js'
 import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
 import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats } from './shipped-heartbeat.js'
+import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
@@ -1670,6 +1671,13 @@ export async function createServer(): Promise<FastifyInstance> {
     vault,
   })
   console.log(`[GitHubIdentity] mode=${githubIdentityProvider.getMode()}`)
+
+  // Initialize contacts table
+  try {
+    initContactsTable()
+  } catch (err) {
+    console.error('[Contacts] Table init failed:', (err as Error).message)
+  }
 
   // Initialize telemetry (opt-in via REFLECTT_TELEMETRY=true)
   initTelemetry({
@@ -3413,6 +3421,116 @@ export async function createServer(): Promise<FastifyInstance> {
     const deleted = deleteDoc(request.params.id)
     if (!deleted) return reply.code(404).send({ error: 'Document not found' })
     return { success: true }
+  })
+
+  // ── Contacts Directory ───────────────────────────────────────────────
+
+  app.post('/contacts', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const name = (body.name as string || '').trim()
+
+    if (!name) {
+      reply.code(400)
+      return { error: 'Required: name', code: 'BAD_REQUEST' }
+    }
+
+    const contact = createContact({
+      name,
+      org: typeof body.org === 'string' ? body.org.trim() : undefined,
+      emails: Array.isArray(body.emails) ? body.emails.filter((e: unknown) => typeof e === 'string') : [],
+      handles: (body.handles && typeof body.handles === 'object' && !Array.isArray(body.handles))
+        ? body.handles as Record<string, string> : {},
+      tags: Array.isArray(body.tags) ? body.tags.filter((t: unknown) => typeof t === 'string') : [],
+      notes: typeof body.notes === 'string' ? body.notes : '',
+      source: typeof body.source === 'string' ? body.source : undefined,
+      owner: typeof body.owner === 'string' ? body.owner : undefined,
+      last_contact: typeof body.last_contact === 'number' ? body.last_contact : undefined,
+      related_task_ids: Array.isArray(body.related_task_ids) ? body.related_task_ids : [],
+    })
+
+    // Fire-and-forget: index for knowledge search
+    import('./vector-store.js')
+      .then(({ indexSharedFile }) => {
+        const text = `[contact] ${contact.name}${contact.org ? ` (${contact.org})` : ''} — ${contact.notes} tags:${contact.tags.join(',')}`
+        indexSharedFile(`contact/${contact.id}`, text)
+      })
+      .catch(() => {})
+
+    reply.code(201)
+    return { success: true, contact }
+  })
+
+  app.get('/contacts', async (request) => {
+    const query = request.query as Record<string, string>
+    const { contacts, total } = listContacts({
+      name: query.name,
+      org: query.org,
+      tag: query.tag,
+      owner: query.owner,
+      q: query.q,
+      limit: Math.min(parseInt(query.limit || '50', 10) || 50, 200),
+      offset: parseInt(query.offset || '0', 10) || 0,
+    })
+    return { contacts, total, count: contacts.length }
+  })
+
+  app.get<{ Params: { id: string } }>('/contacts/:id', async (request, reply) => {
+    const contact = getContact(request.params.id)
+    if (!contact) {
+      reply.code(404)
+      return { error: 'Contact not found', code: 'NOT_FOUND' }
+    }
+    return { contact }
+  })
+
+  app.patch<{ Params: { id: string } }>('/contacts/:id', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const input: Record<string, unknown> = {}
+
+    if (typeof body.name === 'string') input.name = body.name.trim()
+    if (typeof body.org === 'string') input.org = body.org.trim()
+    if (Array.isArray(body.emails)) input.emails = body.emails.filter((e: unknown) => typeof e === 'string')
+    if (body.handles && typeof body.handles === 'object' && !Array.isArray(body.handles)) input.handles = body.handles
+    if (Array.isArray(body.tags)) input.tags = body.tags.filter((t: unknown) => typeof t === 'string')
+    if (typeof body.notes === 'string') input.notes = body.notes
+    if (typeof body.source === 'string') input.source = body.source
+    if (typeof body.owner === 'string') input.owner = body.owner
+    if (typeof body.last_contact === 'number') input.last_contact = body.last_contact
+    if (Array.isArray(body.related_task_ids)) input.related_task_ids = body.related_task_ids
+
+    const contact = updateContact(request.params.id, input as any)
+    if (!contact) {
+      reply.code(404)
+      return { error: 'Contact not found', code: 'NOT_FOUND' }
+    }
+
+    // Re-index
+    import('./vector-store.js')
+      .then(({ indexSharedFile }) => {
+        const text = `[contact] ${contact.name}${contact.org ? ` (${contact.org})` : ''} — ${contact.notes} tags:${contact.tags.join(',')}`
+        indexSharedFile(`contact/${contact.id}`, text)
+      })
+      .catch(() => {})
+
+    return { success: true, contact }
+  })
+
+  app.delete<{ Params: { id: string } }>('/contacts/:id', async (request, reply) => {
+    const deleted = deleteContact(request.params.id)
+    if (!deleted) {
+      reply.code(404)
+      return { error: 'Contact not found', code: 'NOT_FOUND' }
+    }
+
+    // Remove from vector index
+    import('./vector-store.js')
+      .then(async (vs) => {
+        const { getDb: gdb } = await import('./db.js')
+        vs.deleteVector(gdb(), 'shared_file', `contact/${request.params.id}`)
+      })
+      .catch(() => {})
+
+    return { success: true, deleted: true }
   })
 
   // List recurring task definitions
