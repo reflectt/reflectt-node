@@ -689,3 +689,22 @@ Preflight reconciliation for system alerts — verifies live state before publis
 | PATCH | `/chat/alert-integrity/config` | Update guard config. Body: partial config object. |
 | POST | `/chat/alert-integrity/activate` | Exit canary mode — start rejecting stale alerts (instead of log-only). |
 | GET | `/chat/alert-integrity/rollback` | Rollback evaluation metrics: false-positive rate, critical misses, whether rollback trigger is tripped. |
+
+## Routing Approvals
+
+Explicit routing approval queue. Tasks enter ONLY when marked with `metadata.routing_approval=true` by the routing system. This is NOT derived from "all todo tasks."
+
+**Routing approvals** (assignment suggestions) are distinct from **reviewer approvals** (code review sign-off).
+
+### Metadata Contract
+
+- `metadata.routing_approval: boolean` — marks task as needing routing review
+- `metadata.routing_suggestion: { suggestedAssignee, confidence, reason, alternatives? }` — the routing system's suggestion
+- `metadata.routing_decision: { approvedBy/rejectedBy, decision, assignee?, note? }` — auditable decision record
+- `metadata.routing_rejected: boolean` — suppression flag (prevents reappearance after rejection)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/routing/approvals` | List all tasks with `routing_approval=true`. Returns suggestion details + confidence. |
+| POST | `/routing/approvals/:taskId/decide` | Approve or reject a routing suggestion. Body: `{ decision: 'approve'\|'reject', actor, assignee?, note? }`. Approve sets assignee + clears queue. Reject suppresses reappearance. |
+| POST | `/routing/approvals/suggest` | Submit a routing suggestion for a task. Body: `{ taskId, suggestedAssignee, confidence, reason, alternatives? }`. Sets `routing_approval=true`. |

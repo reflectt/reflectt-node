@@ -114,6 +114,7 @@ import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
+import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -6725,6 +6726,130 @@ export async function createServer(): Promise<FastifyInstance> {
 
   app.post('/intake/maintenance', async () => {
     return { success: true, ...pipelineMaintenance() }
+  })
+
+  // ── Routing Approvals (explicit queue, not all todos) ────────────────
+
+  /**
+   * GET /routing/approvals — List tasks with routing_approval=true.
+   * This is router-fed ONLY. Tasks without routing_approval never appear.
+   */
+  app.get('/routing/approvals', async () => {
+    const allTasks = taskManager.listTasks({})
+    const queue = getRoutingApprovalQueue(allTasks)
+    const items = queue.map(task => {
+      const suggestion = getRoutingSuggestion(task)
+      return {
+        taskId: task.id,
+        title: task.title,
+        description: task.description,
+        priority: task.priority,
+        status: task.status,
+        assignee: task.assignee,
+        suggestedAssignee: suggestion?.suggestedAssignee || task.assignee || 'unassigned',
+        confidence: suggestion?.confidence ?? 0,
+        reasoning: suggestion ? {
+          matches: [{ factor: suggestion.reason, score: suggestion.confidence }],
+          alternatives: suggestion.alternatives || [],
+          summary: suggestion.reason,
+        } : { matches: [], alternatives: [], summary: 'No routing suggestion' },
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+      }
+    })
+    return { success: true, approvals: items, count: items.length }
+  })
+
+  /**
+   * POST /routing/approvals/:taskId/decide — Approve or reject a routing suggestion.
+   * Body: { decision: 'approve' | 'reject', actor: string, assignee?: string, note?: string }
+   */
+  app.post<{ Params: { taskId: string } }>('/routing/approvals/:taskId/decide', async (request, reply) => {
+    const { taskId } = request.params
+    const body = request.body as Record<string, unknown>
+
+    const decision = body.decision as string
+    if (decision !== 'approve' && decision !== 'reject') {
+      reply.code(400)
+      return { success: false, error: 'decision must be "approve" or "reject"', code: 'BAD_REQUEST', status: 400 }
+    }
+
+    const actor = (body.actor as string)?.trim()
+    if (!actor) {
+      reply.code(400)
+      return { success: false, error: 'actor is required', code: 'BAD_REQUEST', status: 400 }
+    }
+
+    const task = taskManager.getTask(taskId)
+    if (!task) {
+      reply.code(404)
+      return { success: false, error: 'Task not found', code: 'NOT_FOUND', status: 404 }
+    }
+
+    if (!isRoutingApproval(task)) {
+      reply.code(400)
+      return { success: false, error: 'Task is not a routing approval', code: 'BAD_REQUEST', status: 400,
+        hint: 'Only tasks with metadata.routing_approval=true can be decided via this endpoint.' }
+    }
+
+    const note = (body.note as string)?.trim() || undefined
+
+    if (decision === 'approve') {
+      const assignee = (body.assignee as string)?.trim() || getRoutingSuggestion(task)?.suggestedAssignee || task.assignee
+      if (!assignee) {
+        reply.code(400)
+        return { success: false, error: 'assignee is required for approval (or must exist in routing suggestion)', code: 'BAD_REQUEST', status: 400 }
+      }
+      const patch = buildApprovalPatch(actor, assignee, note)
+      taskManager.updateTask(taskId, { assignee, metadata: { ...((task.metadata || {}) as Record<string, unknown>), ...patch } })
+      return { success: true, taskId, decision: 'approved', assignee, message: 'Routing approval recorded.' }
+    } else {
+      const patch = buildRejectionPatch(actor, note)
+      taskManager.updateTask(taskId, { metadata: { ...((task.metadata || {}) as Record<string, unknown>), ...patch } })
+      return { success: true, taskId, decision: 'rejected', message: 'Routing rejection recorded. Task will not reappear in approvals.' }
+    }
+  })
+
+  /**
+   * POST /routing/approvals/suggest — Submit a routing suggestion for a task.
+   * Creates routing_approval=true + routing_suggestion on the task.
+   * Body: { taskId: string, suggestedAssignee: string, confidence: number, reason: string, alternatives?: [...] }
+   */
+  app.post('/routing/approvals/suggest', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const taskId = (body.taskId as string)?.trim()
+    if (!taskId) {
+      reply.code(400)
+      return { success: false, error: 'taskId is required', code: 'BAD_REQUEST', status: 400 }
+    }
+
+    const task = taskManager.getTask(taskId)
+    if (!task) {
+      reply.code(404)
+      return { success: false, error: 'Task not found', code: 'NOT_FOUND', status: 404 }
+    }
+
+    // Don't re-suggest rejected tasks
+    const meta = (task.metadata || {}) as Record<string, unknown>
+    if (meta.routing_rejected === true) {
+      reply.code(409)
+      return { success: false, error: 'Task was previously rejected and is suppressed', code: 'CONFLICT', status: 409 }
+    }
+
+    const suggestedAssignee = (body.suggestedAssignee as string)?.trim()
+    if (!suggestedAssignee) {
+      reply.code(400)
+      return { success: false, error: 'suggestedAssignee is required', code: 'BAD_REQUEST', status: 400 }
+    }
+
+    const confidence = typeof body.confidence === 'number' ? Math.max(0, Math.min(100, body.confidence)) : 50
+    const reason = (body.reason as string)?.trim() || 'Router suggestion'
+    const alternatives = Array.isArray(body.alternatives) ? body.alternatives : undefined
+
+    const patch = buildRoutingSuggestionPatch({ suggestedAssignee, confidence, reason, alternatives })
+    taskManager.updateTask(taskId, { metadata: { ...meta, ...patch } })
+
+    return { success: true, taskId, routing_approval: true, suggestedAssignee, confidence }
   })
 
   // ── Routing Overrides (role-aware routing hardening) ─────────────────
