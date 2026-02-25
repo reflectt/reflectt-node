@@ -459,6 +459,30 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | GET | `/insights/:id/audit` | Promotion audit trail for an insight. |
 | GET | `/insights/promotions` | List all promotion audit entries. Query: `limit`. |
 | GET | `/insights/recurring/candidates` | List recurring task candidates from insights with persistent patterns. Auto-suggests owner/lane per failure family. Template-first (no auto task spam). |
+| GET | `/insights/top` | Top pain clusters by frequency within a time window. Query: `window` (e.g. `7d`, `24h`, `2w`; default `7d`), `limit` (1-50, default 10). Returns `{ clusters: [{ cluster_key, count, avg_score, last_seen_at, linked_task_ids }], window, since, limit }`. |
+
+### Example: `/insights/top`
+
+```bash
+curl "http://localhost:4445/insights/top?window=7d&limit=10"
+```
+
+```json
+{
+  "clusters": [
+    {
+      "cluster_key": "runtime::crash::api-server",
+      "count": 5,
+      "avg_score": 7.6,
+      "last_seen_at": 1771987260456,
+      "linked_task_ids": ["task-abc123", "task-def456"]
+    }
+  ],
+  "window": "7d",
+  "since": 1771382460456,
+  "limit": 10
+}
+```
 
 ## Scoring Engine Configuration
 

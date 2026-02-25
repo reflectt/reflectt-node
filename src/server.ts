@@ -6549,6 +6549,60 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, config: getBridgeConfig() }
   })
 
+  // ── Insights Top Clusters ─────────────────────────────────────────────
+
+  app.get('/insights/top', async (request) => {
+    const query = request.query as Record<string, string>
+    const limit = Math.min(Math.max(Number(query.limit) || 10, 1), 50)
+
+    // Parse window: e.g. "7d", "30d", "24h", "2w"
+    let windowMs = 7 * 24 * 60 * 60 * 1000 // default 7d
+    const windowStr = (query.window || '7d').trim().toLowerCase()
+    const windowMatch = windowStr.match(/^(\d+)(h|d|w)$/)
+    if (windowMatch) {
+      const n = Number(windowMatch[1])
+      const unit = windowMatch[2]
+      if (unit === 'h') windowMs = n * 60 * 60 * 1000
+      else if (unit === 'd') windowMs = n * 24 * 60 * 60 * 1000
+      else if (unit === 'w') windowMs = n * 7 * 24 * 60 * 60 * 1000
+    }
+
+    const since = Date.now() - windowMs
+    const db = getDb()
+
+    const rows = db.prepare(`
+      SELECT
+        cluster_key,
+        COUNT(*) as count,
+        AVG(score) as avg_score,
+        MAX(created_at) as last_seen_at,
+        GROUP_CONCAT(CASE WHEN task_id IS NOT NULL AND task_id != '' THEN task_id ELSE NULL END) as task_ids_csv
+      FROM insights
+      WHERE created_at >= ?
+      GROUP BY cluster_key
+      ORDER BY count DESC, avg_score DESC
+      LIMIT ?
+    `).all(since, limit) as Array<{
+      cluster_key: string
+      count: number
+      avg_score: number
+      last_seen_at: number
+      task_ids_csv: string | null
+    }>
+
+    const clusters = rows.map(r => ({
+      cluster_key: r.cluster_key,
+      count: r.count,
+      avg_score: Math.round(r.avg_score * 100) / 100,
+      last_seen_at: r.last_seen_at,
+      linked_task_ids: r.task_ids_csv
+        ? [...new Set(r.task_ids_csv.split(',').filter(Boolean))]
+        : [],
+    }))
+
+    return { clusters, window: windowStr, since, limit }
+  })
+
   // ── Continuity Loop ──────────────────────────────────────────────────
 
   app.get('/continuity/stats', async () => {
