@@ -121,7 +121,7 @@ import {
 } from './escalation.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
-import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks } from './insights.js'
+import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary } from './insights.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
 import { listLineage, getLineage, lineageStats } from './lineage.js'
@@ -6889,6 +6889,17 @@ export async function createServer(): Promise<FastifyInstance> {
 
   app.get('/insights/stats', async () => {
     return insightStats()
+  })
+
+  // ── Loop summary: top signals from the reflection loop ──
+  app.get('/loop/summary', async (request) => {
+    const query = request.query as Record<string, string>
+    const limit = query.limit ? Math.min(Math.max(1, Number(query.limit)), 100) : undefined
+    const min_score = query.min_score ? Number(query.min_score) : undefined
+    const exclude_addressed = query.exclude_addressed === '1' || query.exclude_addressed === 'true'
+
+    const result = await getLoopSummary({ limit, min_score, exclude_addressed })
+    return { success: true, ...result }
   })
 
   app.post('/insights/tick-cooldowns', async () => {

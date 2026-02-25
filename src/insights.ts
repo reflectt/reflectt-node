@@ -6,6 +6,7 @@ import { getDb, safeJsonStringify, safeJsonParse } from './db.js'
 import { eventBus } from './events.js'
 import type { Reflection } from './reflections.js'
 
+
 // ── Constants ──
 
 const COOLDOWN_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -924,6 +925,128 @@ export function updateInsightStatus(
 }
 
 export { COOLDOWN_MS, PROMOTION_THRESHOLD, SCORING_ENGINE_VERSION as _SCORING_ENGINE_VERSION }
+
+// ── Loop summary: top signals from the reflection loop ──
+
+export interface LoopSummaryEntry {
+  insight_id: string
+  title: string
+  score: number
+  priority: string
+  status: InsightStatus
+  workflow_stage: string
+  failure_family: string
+  impacted_unit: string
+  independent_count: number
+  authors: string[]
+  evidence_count: number
+  evidence_refs: string[]
+  linked_task: {
+    id: string
+    title: string
+    status: string
+    assignee: string | null
+  } | null
+  addressed: boolean
+  created_at: number
+  updated_at: number
+}
+
+export interface LoopSummaryOpts {
+  limit?: number
+  min_score?: number
+  exclude_addressed?: boolean
+}
+
+/**
+ * Returns top insight signals from the reflection loop, ranked by score.
+ * Each entry includes linked task details and evidence status.
+ *
+ * "Addressed" means the insight has a linked task in done/validating status,
+ * or the insight itself is in cooldown/closed status.
+ */
+export function getLoopSummary(opts: LoopSummaryOpts = {}): {
+  entries: LoopSummaryEntry[]
+  total: number
+  filters: { limit: number; min_score: number; exclude_addressed: boolean }
+} {
+  const db = getDb()
+  const limit = Math.min(opts.limit ?? 20, 100)
+  const minScore = opts.min_score ?? 0
+  const excludeAddressed = opts.exclude_addressed ?? false
+
+  const where: string[] = []
+  const params: unknown[] = []
+
+  if (minScore > 0) {
+    where.push('score >= ?')
+    params.push(minScore)
+  }
+
+  if (excludeAddressed) {
+    where.push("status NOT IN ('cooldown', 'closed')")
+  }
+
+  const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM insights ${whereClause}`).get(...params) as { c: number }).c
+  const rows = db.prepare(
+    `SELECT * FROM insights ${whereClause} ORDER BY score DESC, updated_at DESC LIMIT ?`
+  ).all(...params, limit) as InsightRow[]
+
+  // Resolve linked tasks directly from DB (avoids circular import with tasks.ts)
+  const taskStmt = db.prepare('SELECT id, title, status, assignee FROM tasks WHERE id = ?')
+
+  const entries: LoopSummaryEntry[] = rows.map(row => {
+    const insight = rowToInsight(row)
+
+    // Resolve linked task
+    let linkedTask: LoopSummaryEntry['linked_task'] = null
+    if (insight.task_id) {
+      const taskRow = taskStmt.get(insight.task_id) as { id: string; title: string; status: string; assignee: string | null } | undefined
+      if (taskRow) {
+        linkedTask = {
+          id: taskRow.id,
+          title: taskRow.title,
+          status: taskRow.status,
+          assignee: taskRow.assignee || null,
+        }
+      }
+    }
+
+    // Addressed: insight closed/cooldown, or linked task is done/validating
+    const addressed = insight.status === 'cooldown' || insight.status === 'closed'
+      || (linkedTask !== null && (linkedTask.status === 'done' || linkedTask.status === 'validating'))
+
+    return {
+      insight_id: insight.id,
+      title: insight.title,
+      score: insight.score,
+      priority: insight.priority,
+      status: insight.status,
+      workflow_stage: insight.workflow_stage,
+      failure_family: insight.failure_family,
+      impacted_unit: insight.impacted_unit,
+      independent_count: insight.independent_count,
+      authors: insight.authors,
+      evidence_count: insight.evidence_refs.length,
+      evidence_refs: insight.evidence_refs,
+      linked_task: linkedTask,
+      addressed,
+      created_at: insight.created_at,
+      updated_at: insight.updated_at,
+    }
+  })
+
+  // Post-filter addressed entries if requested (can't fully do in SQL because
+  // "addressed" depends on linked task status which is in a different table)
+  const filtered = excludeAddressed ? entries.filter(e => !e.addressed) : entries
+
+  return {
+    entries: filtered,
+    total: excludeAddressed ? filtered.length : total,
+    filters: { limit, min_score: minScore, exclude_addressed: excludeAddressed },
+  }
+}
 
 // ── Reconciler: find promoted insights without task links ──
 

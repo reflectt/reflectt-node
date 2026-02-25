@@ -474,6 +474,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | GET | `/insights/promotions` | List all promotion audit entries. Query: `limit`. |
 | GET | `/insights/recurring/candidates` | List recurring task candidates from insights with persistent patterns. Auto-suggests owner/lane per failure family. Template-first (no auto task spam). |
 | GET | `/insights/top` | Top pain clusters by frequency within a time window. Query: `window` (e.g. `7d`, `24h`, `2w`; default `7d`), `limit` (1-50, default 10). Returns `{ clusters: [{ cluster_key, count, avg_score, last_seen_at, linked_task_ids }], window, since, limit }`. |
+| GET | `/loop/summary` | Top signals from the reflection→insight→task loop. Returns insights ranked by score, each with linked task details and evidence status. Query: `limit` (1-100, default 20), `min_score` (minimum score threshold, default 0), `exclude_addressed=1` (skip insights in cooldown/closed status or whose linked task is done/validating). Response: `{ success, entries[], total, filters }`. Each entry: `insight_id`, `title`, `score`, `priority`, `status`, `workflow_stage`, `failure_family`, `impacted_unit`, `independent_count`, `authors[]`, `evidence_count`, `evidence_refs[]`, `linked_task { id, title, status, assignee }`, `addressed`, `created_at`, `updated_at`. |
 
 ### Example: `/insights/top`
 
