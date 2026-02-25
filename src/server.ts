@@ -16,6 +16,7 @@ import type { WebSocket } from 'ws'
 import { serverConfig, isDev, REFLECTT_HOME } from './config.js'
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
+import { detectApproval, applyApproval } from './chat-approval-detector.js'
 import { inboxManager } from './inbox.js'
 import { getDb } from './db.js'
 import type { AgentMessage, Task } from './types.js'
@@ -2662,12 +2663,33 @@ export async function createServer(): Promise<FastifyInstance> {
         .catch(() => {})
     }
 
+    // ── Chat approval detector: bridge chat approvals → formal review decisions ──
+    let approvalApplied: { taskId: string; reviewer: string } | undefined
+    if (data.from && data.content) {
+      const detection = detectApproval(data.from, data.content)
+      if (detection.detected && detection.signal) {
+        try {
+          const updated = await applyApproval(detection.signal)
+          if (updated) {
+            approvalApplied = { taskId: detection.signal.taskId, reviewer: detection.signal.reviewer }
+            app.log.info(
+              { taskId: detection.signal.taskId, reviewer: detection.signal.reviewer, source: detection.signal.source },
+              '[ChatApproval] Auto-applied reviewer approval from chat message',
+            )
+          }
+        } catch (err) {
+          app.log.warn({ err, signal: detection.signal }, '[ChatApproval] Failed to apply approval')
+        }
+      }
+    }
+
     return {
       success: true,
       message,
       ...(mentionWarnings.length > 0 ? { warnings: mentionWarnings } : {}),
       ...(actionValidation.warnings.length > 0 ? { action_warnings: actionValidation.warnings } : {}),
       ...(autonomyWarnings.length > 0 ? { autonomy_warnings: autonomyWarnings } : {}),
+      ...(approvalApplied ? { approval_applied: approvalApplied } : {}),
     }
   })
 
