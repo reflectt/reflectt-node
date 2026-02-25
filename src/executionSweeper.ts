@@ -18,6 +18,7 @@ import { chatManager } from './chat.js'
 import type { Task } from './types.js'
 import { execSync } from 'child_process'
 import { processAutoMerge, generateRemediation } from './prAutoMerge.js'
+import { msToMinutes } from './format-duration.js'
 
 // ── Live PR State Check ────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ export function sweepValidatingQueue(): SweepResult {
     const enteredAt = (meta.entered_validating_at as number) || task.updatedAt
     const lastActivity = (meta.review_last_activity_at as number) || enteredAt
     const ageSinceActivity = now - lastActivity
-    const ageMinutes = Math.round(ageSinceActivity / 60_000)
+    const ageMinutes = msToMinutes(ageSinceActivity)
 
     // ── Persistent escalation state (survives restarts) ──────────────
     // Read escalation history from task metadata, not just in-memory map
@@ -382,12 +383,12 @@ export function sweepValidatingQueue(): SweepResult {
         assignee: task.assignee,
         reviewer: task.reviewer,
         type: 'orphan_pr',
-        age_minutes: Math.round(completedAge / 60_000),
+        age_minutes: msToMinutes(completedAge),
         message: `🔍 Orphan PR detected: ${prUrl} linked to done task "${task.title}" (${task.id}). PR may still be open — ${assigneeMention} close or merge it. ${reviewerMention} — confirm status.`,
         remediation: generateRemediation({ taskId: task.id, issue: 'orphan_pr', prUrl }),
       })
       flaggedOrphanPRs.add(prUrl)
-      logDryRun('orphan_pr', `${prUrl} on ${task.id} — task done ${Math.round(completedAge / 60_000)}m ago`)
+      logDryRun('orphan_pr', `${prUrl} on ${task.id} — task done ${msToMinutes(completedAge)}m ago`)
     }
   }
 
@@ -404,12 +405,12 @@ export function sweepValidatingQueue(): SweepResult {
           assignee: task.assignee,
           reviewer: task.reviewer,
           type: 'pr_drift',
-          age_minutes: Math.round(driftAge / 60_000),
-          message: `📦 PR merged ${Math.round(driftAge / 60_000)}m ago but "${task.title}" (${task.id}) still in validating. @${task.reviewer || 'unassigned'} — approve or close. @${task.assignee || 'unassigned'} — ping if needed.`,
+          age_minutes: msToMinutes(driftAge),
+          message: `📦 PR merged ${msToMinutes(driftAge)}m ago but "${task.title}" (${task.id}) still in validating. @${task.reviewer || 'unassigned'} — approve or close. @${task.assignee || 'unassigned'} — ping if needed.`,
           remediation: generateRemediation({ taskId: task.id, issue: 'pr_merged_not_closed', prUrl: extractPrUrl(meta) || undefined, meta }),
         })
         escalated.set(`drift:${task.id}`, { level: 'warning', at: now })
-        logDryRun('pr_drift', `${task.id} — PR merged ${Math.round(driftAge / 60_000)}m ago, still validating`)
+        logDryRun('pr_drift', `${task.id} — PR merged ${msToMinutes(driftAge)}m ago, still validating`)
       }
     }
   }
@@ -593,7 +594,7 @@ export function generateDriftReport(): DriftReport {
     const enteredAt = (meta.entered_validating_at as number) || task.updatedAt
     const lastActivity = (meta.review_last_activity_at as number) || enteredAt
     const ageSinceActivity = now - lastActivity
-    const ageMinutes = Math.round(ageSinceActivity / 60_000)
+    const ageMinutes = msToMinutes(ageSinceActivity)
     const prUrl = extractPrUrl(meta)
     const prMerged = !!(meta.pr_merged)
 
@@ -679,7 +680,7 @@ export function generateDriftReport(): DriftReport {
       status: 'done',
       assignee: oldestDone?.assignee,
       reviewer: oldestDone?.reviewer,
-      age_minutes: oldestDone ? Math.round((now - oldestDone.updatedAt) / 60_000) : 0,
+      age_minutes: oldestDone ? msToMinutes(now - oldestDone.updatedAt) : 0,
       prUrl,
       issue: 'orphan_pr',
       detail: `PR linked to ${doneTasks.length} done task(s) but not marked as merged. May still be open.`,
