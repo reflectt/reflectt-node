@@ -523,14 +523,14 @@ function createInsight(key: InsightClusterKey, clusterKeyStr: string, reflection
   if (shouldPromote) {
     eventBus.emit({
       id: `evt-insight-promoted-${id}`,
-      type: 'task_created' as const,
+      type: 'insight_created' as const,
       timestamp: Date.now(),
       data: { kind: 'insight:promoted', insightId: id, priority, score },
     })
   } else {
     eventBus.emit({
       id: `evt-insight-created-${id}`,
-      type: 'task_created' as const,
+      type: 'insight_created' as const,
       timestamp: Date.now(),
       data: { kind: 'insight:created', insightId: id },
     })
@@ -604,7 +604,7 @@ function addReflectionToInsight(existing: Insight, reflection: Reflection): Insi
   if (shouldPromote && wasCandidate) {
     eventBus.emit({
       id: `evt-insight-promoted-${existing.id}`,
-      type: 'task_created' as const,
+      type: 'insight_created' as const,
       timestamp: Date.now(),
       data: { kind: 'insight:promoted', insightId: existing.id, priority, score },
     })

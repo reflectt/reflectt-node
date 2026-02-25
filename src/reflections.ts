@@ -226,7 +226,7 @@ export function createReflection(input: ReflectionInput): Reflection {
 
   eventBus.emit({
     id: `evt-reflection-${id}`,
-    type: 'task_created' as const,
+    type: 'reflection_created' as const,
     timestamp: Date.now(),
     data: { kind: 'reflection:created', reflectionId: id, author: reflection.author },
   })

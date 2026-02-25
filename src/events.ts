@@ -21,6 +21,8 @@ export type EventType =
   | 'task_updated'
   | 'memory_written'
   | 'presence_updated'
+  | 'reflection_created'
+  | 'insight_created'
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -29,6 +31,8 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'task_updated',
   'memory_written',
   'presence_updated',
+  'reflection_created',
+  'insight_created',
 ])
 
 export interface Event {
