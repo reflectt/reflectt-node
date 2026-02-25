@@ -1,8 +1,11 @@
 // Regression test: pipeline health should count insight merges (updated_at) not just creates
-import { describe, it, expect, beforeAll } from 'vitest'
+// NOTE: This test creates reflections against the LIVE server.
+// Reflections don't have a DELETE endpoint, but auto-promoted tasks are cleaned up.
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 
 const BASE = 'http://127.0.0.1:4445'
 let serverUp = false
+const createdTaskIds: string[] = []
 
 beforeAll(async () => {
   try {
@@ -10,6 +13,14 @@ beforeAll(async () => {
     serverUp = res.ok
   } catch {
     serverUp = false
+  }
+})
+
+afterAll(async () => {
+  for (const id of createdTaskIds) {
+    try {
+      await fetch(`${BASE}/tasks/${id}`, { method: 'DELETE' })
+    } catch { /* best-effort */ }
   }
 })
 
@@ -60,6 +71,10 @@ describe('GET /health/reflection-pipeline', () => {
     })
     const reflData = await reflectionRes.json() as any
     expect(reflData.success).toBe(true)
+
+    // Track any auto-promoted task for cleanup
+    const promotedTaskId = reflData.insight?.promoted_task_id || reflData.task?.id
+    if (promotedTaskId) createdTaskIds.push(promotedTaskId)
 
     // Now check pipeline health — should show activity (either created or updated)
     const healthRes = await fetch(`${BASE}/health/reflection-pipeline`)
