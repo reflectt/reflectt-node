@@ -9198,17 +9198,27 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true }
   })
 
-  // Check if an agent is busy
+  // Check if an agent is busy (checks both calendar blocks AND events)
   app.get('/calendar/busy', async (request) => {
     const query = request.query as Record<string, string>
     if (!query.agent) return { error: 'agent query param required' }
     const availability = calendarManager.getAgentAvailability(query.agent)
+
+    // Also check calendar events for current activity
+    const currentEvent = calendarEvents.getAgentCurrentEvent(query.agent)
+
+    // If block says free but there's an active event, agent is busy
+    const busy = availability.status !== 'free' || !!currentEvent
+    const status = availability.status !== 'free' ? availability.status : (currentEvent ? 'busy' : 'free')
+    const until = availability.until || (currentEvent ? currentEvent.dtend : null)
+
     return {
       agent: availability.agent,
-      busy: availability.status !== 'free',
-      status: availability.status,
+      busy,
+      status,
       current_block: availability.current_block,
-      until: availability.until,
+      current_event: currentEvent || null,
+      until,
     }
   })
 
