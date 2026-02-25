@@ -13,6 +13,7 @@ import { startCloudIntegration, stopCloudIntegration, isCloudConfigured, watchCo
 import { stopConfigWatch } from './assignment.js'
 import { getDb, closeDb } from './db.js'
 import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
+import { stopReminderEngine } from './calendar-reminder-engine.js'
 // OpenClaw connection is optional — server works for chat/tasks without it
 
 /**
@@ -122,6 +123,7 @@ async function main() {
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       console.log(`\n${signal} received, shutting down...`)
+      stopReminderEngine()
       stopConfigWatch()
       stopConfigWatcher()
       stopCloudIntegration()

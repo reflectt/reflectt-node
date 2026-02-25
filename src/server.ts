@@ -136,6 +136,7 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
+import { startReminderEngine, stopReminderEngine, triggerPoll as triggerReminderPoll, getReminderEngineStatus } from './calendar-reminder-engine.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -9005,6 +9006,9 @@ export async function createServer(): Promise<FastifyInstance> {
     return body
   })
 
+  // ── Calendar Reminder Engine ───────────────────────────────────────────
+  startReminderEngine()
+
   // ── Execution Sweeper: zero-leak enforcement ──────────────────────────
   startSweeper()
 
@@ -9322,6 +9326,17 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/calendar/reminders/pending', async () => {
     const pending = calendarEvents.getPendingReminders()
     return { reminders: pending, count: pending.length }
+  })
+
+  // Reminder engine status
+  app.get('/calendar/reminders/status', async () => {
+    return getReminderEngineStatus()
+  })
+
+  // Force a reminder poll (for testing/manual trigger)
+  app.post('/calendar/reminders/trigger', async () => {
+    const fired = await triggerReminderPoll()
+    return { fired, status: getReminderEngineStatus() }
   })
 
   // Get agent's current event
