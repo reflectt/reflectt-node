@@ -985,6 +985,20 @@ class TaskManager {
     }
   }
 
+  /**
+   * Lightweight metadata-only patch that bypasses lifecycle gates.
+   * Used by internal subsystems (sweeper, auto-close) to persist bookkeeping
+   * fields without triggering full validation or history events.
+   */
+  patchTaskMetadata(id: string, metadataUpdates: Record<string, unknown>): boolean {
+    const task = queryTask(id)
+    if (!task) return false
+    const merged = { ...(task.metadata || {}), ...metadataUpdates }
+    const updated: Task = { ...task, metadata: merged, updatedAt: Date.now() }
+    this.writeTaskToDb(updated)
+    return true
+  }
+
   getTaskHistory(id: string): TaskHistoryEvent[] {
     const db = getDb()
     const rows = db.prepare(
