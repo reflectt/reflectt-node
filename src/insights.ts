@@ -69,7 +69,7 @@ export interface Insight {
 
 // ── DB row mapping ──
 
-interface InsightRow {
+export interface InsightRow {
   id: string
   cluster_key: string
   workflow_stage: string

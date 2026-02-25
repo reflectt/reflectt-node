@@ -6,6 +6,7 @@
 // for debugging and audit.
 
 import { getDb, safeJsonParse } from './db.js'
+import type { InsightRow } from './insights.js'
 
 // ── Types ──
 
@@ -110,7 +111,7 @@ export function listLineage(opts: LineageListOpts = {}): { entries: LineageEntry
   // Get insight rows
   const insightRows = db.prepare(
     `SELECT * FROM insights i ${insightWhereClause} ORDER BY i.updated_at DESC LIMIT ? OFFSET ?`
-  ).all(...insightParams, limit, offset) as any[]
+  ).all(...insightParams, limit, offset) as InsightRow[]
 
   const entries: LineageEntry[] = []
 
@@ -179,7 +180,7 @@ export function getLineage(id: string): LineageEntry | null {
 
 // ── Builders ──
 
-function buildLineageFromInsight(insightRow: any, opts: LineageListOpts): LineageEntry | null {
+function buildLineageFromInsight(insightRow: InsightRow, opts: LineageListOpts): LineageEntry | null {
   const db = getDb()
   const anomalies: LineageAnomaly[] = []
   const timeline: TimelineEvent[] = []
