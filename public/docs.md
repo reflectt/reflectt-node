@@ -819,3 +819,14 @@ Full calendar event system with iCal-compatible fields, attendees, RSVP, recurre
 | GET | `/calendar/reminders/pending` | List reminders that should fire now (for reminder engine polling). |
 | GET | `/calendar/events/current` | Check if agent is in an event right now. Query: `agent` (required). |
 | GET | `/calendar/events/next` | Get agent's next upcoming event. Query: `agent` (required). |
+
+## Calendar Reminder Engine
+
+Polls for pending reminders every 30 seconds and delivers them via chat messages. Reminders are deduplicated across restarts via SQLite.
+
+Reminder delivery: fires to `#calendar-reminders` channel AND `#general` with @mentions for recipients.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/calendar/reminders/stats` | Reminder engine stats: running, poll_interval_ms, last_poll_at, total_polls, total_delivered. |
+| GET | `/calendar/next-free` | When is agent next free? Query: `agent` (required). Returns free_now boolean + free_at timestamp. Checks both blocks and events. |
