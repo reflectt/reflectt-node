@@ -2778,7 +2778,12 @@ export async function createServer(): Promise<FastifyInstance> {
       before: parseEpochMs(query.before),
       after: parseEpochMs(query.after),
     })
-    const payload = { messages }
+    const rawQuery = request.query as Record<string, string>
+    const compact = rawQuery?.compact === '1' || rawQuery?.compact === 'true'
+    const slimMessages = compact
+      ? messages.map(m => ({ from: m.from, content: m.content, ts: m.timestamp, ch: m.channel }))
+      : messages
+    const payload = { messages: slimMessages }
     const lastModified = messages.length > 0 ? Math.max(...messages.map(m => m.timestamp || 0)) : undefined
     if (applyConditionalCaching(request, reply, payload, lastModified)) {
       return
@@ -6994,7 +6999,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   app.get('/insights', async (request) => {
     const query = request.query as Record<string, string>
-    return listInsights({
+    const result = listInsights({
       status: query.status,
       priority: query.priority,
       workflow_stage: query.workflow_stage,
@@ -7003,6 +7008,21 @@ export async function createServer(): Promise<FastifyInstance> {
       limit: query.limit ? Math.min(Number(query.limit) || 50, 200) : 50,
       offset: query.offset ? Number(query.offset) || 0 : 0,
     })
+
+    if (isCompact(query)) {
+      const slimInsights = (result.insights || []).map((i: any) => ({
+        id: i.id,
+        title: i.title,
+        score: i.score,
+        priority: i.priority,
+        status: i.status,
+        task_id: i.task_id,
+        independent_count: i.independent_count,
+      }))
+      return { ...result, insights: slimInsights }
+    }
+
+    return result
   })
 
   app.get<{ Params: { id: string } }>('/insights/:id', async (request, reply) => {
@@ -7026,6 +7046,22 @@ export async function createServer(): Promise<FastifyInstance> {
     const exclude_addressed = query.exclude_addressed === '1' || query.exclude_addressed === 'true'
 
     const result = await getLoopSummary({ limit, min_score, exclude_addressed })
+
+    if (isCompact(query)) {
+      // Strip heavy fields: evidence_refs, linked_task details
+      const slimEntries = result.entries.map(e => ({
+        insight_id: e.insight_id,
+        title: e.title,
+        score: e.score,
+        priority: e.priority,
+        status: e.status,
+        independent_count: e.independent_count,
+        addressed: e.addressed,
+        linked_task: e.linked_task ? { id: e.linked_task.id, status: e.linked_task.status } : null,
+      }))
+      return { success: true, entries: slimEntries, total: result.total, filters: result.filters }
+    }
+
     return { success: true, ...result }
   })
 

@@ -202,7 +202,7 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/chat/ws` | WebSocket — real-time chat |
 | GET | `/ws/stats` | WebSocket heartbeat stats (connections, ping/pong health, cleanup stats) |
 | POST | `/chat/messages` | Post message. Body: `from` (required), `content` (required), `channel`, `replyTo` |
-| GET | `/chat/messages` | Message history. Query: `channel`, `limit`, `before`, `after` |
+| GET | `/chat/messages` | Message history. Query: `channel`, `limit`, `before`, `after`, `compact` (slim: from/content/ts/ch only) |
 | GET | `/chat/context/:agent` | Compact, deduplicated chat context for agent injection. Prioritizes mentions, deduplicates system alerts, slim format. Query: `limit` (default 30), `channel`, `since` (epoch ms, default 4h). |
 | PATCH | `/chat/messages/:id` | Edit message (author-only). Body: `from`, `content` |
 | DELETE | `/chat/messages/:id` | Delete message (author-only). Body: `from` |
@@ -461,7 +461,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/insights/ingest` | Ingest a reflection into clustering. Body: `{ reflection_id }`. Cluster key auto-derived from reflection tags/content. Promotion gate: 2 independent reflections (distinct authors) OR severity high/critical. 24h cooldown after promotion. |
-| GET | `/insights` | List insights. Query: `status` (candidate\|promoted\|pending_triage\|task_created\|cooldown\|closed), `priority` (P0-P3), `workflow_stage`, `failure_family`, `impacted_unit`, `limit`, `offset`. Sorted by score desc. |
+| GET | `/insights` | List insights. Supports `compact=true` (slim: id/title/score/priority/status/task_id/independent_count). Query: `status` (candidate\|promoted\|pending_triage\|task_created\|cooldown\|closed), `priority` (P0-P3), `workflow_stage`, `failure_family`, `impacted_unit`, `limit`, `offset`. Sorted by score desc. |
 | GET | `/insights/bridge/stats` | Insight→Task bridge stats: auto-created count, triaged count, duplicates skipped, errors. |
 | GET | `/insights/bridge/config` | Current bridge config including ownership guardrail settings. |
 | PATCH | `/insights/bridge/config` | Update bridge config. Body: partial config object (e.g. `{ ownershipGuardrail: { enabled: false } }`). |
@@ -478,7 +478,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | GET | `/insights/promotions` | List all promotion audit entries. Query: `limit`. |
 | GET | `/insights/recurring/candidates` | List recurring task candidates from insights with persistent patterns. Auto-suggests owner/lane per failure family. Template-first (no auto task spam). |
 | GET | `/insights/top` | Top pain clusters by frequency within a time window. Query: `window` (e.g. `7d`, `24h`, `2w`; default `7d`), `limit` (1-50, default 10). Returns `{ clusters: [{ cluster_key, count, avg_score, last_seen_at, linked_task_ids }], window, since, limit }`. |
-| GET | `/loop/summary` | Top signals from the reflection→insight→task loop. Returns insights ranked by score, each with linked task details and evidence status. Query: `limit` (1-100, default 20), `min_score` (minimum score threshold, default 0), `exclude_addressed=1` (skip insights in cooldown/closed status or whose linked task is done/validating). Response: `{ success, entries[], total, filters }`. Each entry: `insight_id`, `title`, `score`, `priority`, `status`, `workflow_stage`, `failure_family`, `impacted_unit`, `independent_count`, `authors[]`, `evidence_count`, `evidence_refs[]`, `linked_task { id, title, status, assignee }`, `addressed`, `created_at`, `updated_at`. |
+| GET | `/loop/summary` | Supports `compact=true` (strips evidence_refs, slim linked_task). Top signals from the reflection→insight→task loop. Returns insights ranked by score, each with linked task details and evidence status. Query: `limit` (1-100, default 20), `min_score` (minimum score threshold, default 0), `exclude_addressed=1` (skip insights in cooldown/closed status or whose linked task is done/validating). Response: `{ success, entries[], total, filters }`. Each entry: `insight_id`, `title`, `score`, `priority`, `status`, `workflow_stage`, `failure_family`, `impacted_unit`, `independent_count`, `authors[]`, `evidence_count`, `evidence_refs[]`, `linked_task { id, title, status, assignee }`, `addressed`, `created_at`, `updated_at`. |
 
 ### Example: `/insights/top`
 
