@@ -3013,6 +3013,18 @@ export async function createServer(): Promise<FastifyInstance> {
     
     // Auto-update presence when agent checks inbox
     presenceManager.updatePresence(request.params.agent, 'working')
+
+    const rawQuery = request.query as Record<string, string>
+    if (isCompact(rawQuery)) {
+      const slim = inbox.map(m => ({
+        from: m.from,
+        content: m.content,
+        ts: m.timestamp,
+        ch: m.channel,
+        ...(m.priority ? { priority: m.priority } : {}),
+      }))
+      return { messages: slim, count: slim.length }
+    }
     
     return { messages: inbox, count: inbox.length }
   })
@@ -7663,6 +7675,22 @@ export async function createServer(): Promise<FastifyInstance> {
     const task = taskManager.getNextTask(agent, { includeTest })
     if (!task) {
       return { task: null, message: 'No available tasks' }
+    }
+    const enriched = enrichTaskWithComments(task)
+    return { task: isCompact(query) ? compactTask(enriched) : enriched }
+  })
+
+  // Get active (doing) task for an agent
+  app.get('/tasks/active', async (request) => {
+    const query = request.query as Record<string, string>
+    const agent = query.agent
+    if (!agent) {
+      return { task: null, message: 'agent query param required' }
+    }
+    const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
+    const task = doingTasks[0] || null
+    if (!task) {
+      return { task: null, message: 'No active tasks' }
     }
     const enriched = enrichTaskWithComments(task)
     return { task: isCompact(query) ? compactTask(enriched) : enriched }

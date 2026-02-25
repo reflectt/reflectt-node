@@ -125,7 +125,8 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | POST | `/tasks` | Create task. Required: `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria` (string[]), `eta`. Optional: `description`, `priority` (P0-P3), `status`, `tags`, `metadata`. **Reflection-origin invariant:** `metadata.source_reflection` or `metadata.source_insight` required (or `metadata.reflection_exempt=true` with `reflection_exempt_reason`). Status contract: `validating` also requires `metadata.artifact_path` under `process/`. |
 | PATCH | `/tasks/:id` | Update task (partial). Any task field, plus optional `actor` for history attribution. Status contract: `doing` requires reviewer + `metadata.eta`; `validating` requires `metadata.artifact_path` under `process/` (workspace-agnostic). |
 | DELETE | `/tasks/:id` | Delete task |
-| GET | `/tasks/next` | Pull-based assignment. Query: `agent` |
+| GET | `/tasks/next` | Pull-based assignment. Query: `agent`, `compact` |
+| GET | `/tasks/active` | Get active (doing) task for agent. Query: `agent`, `compact`. Returns null if no doing tasks. |
 | GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action |
 | GET | `/tasks/intake-schema` | Task intake schema discovery — returns required/optional fields and per-type templates |
 | GET | `/tasks/templates/:type` | Get task creation template for a specific type (e.g. `feature`, `bug`, `chore`) |
@@ -253,7 +254,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/inbox/:agent` | Get inbox. Query: `limit`, `since` (epoch ms), `channel` |
+| GET | `/inbox/:agent` | Get inbox. Query: `limit`, `since` (epoch ms), `channel`, `compact` (strips id/reactions/replyCount) |
 | POST | `/inbox/:agent/ack` | Acknowledge messages. Body: `{ "upTo": epochMs }` |
 | POST | `/inbox/:agent/subscribe` | Replace channel subscriptions. Body: `{ "channels": ["reviews", "blockers"] }` |
 | GET | `/inbox/:agent/subscriptions` | List subscriptions |
