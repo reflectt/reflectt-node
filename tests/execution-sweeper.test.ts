@@ -260,6 +260,8 @@ describe('Sweeper escalation persistence and cooldown', () => {
 
   it('persists escalation state in task metadata', async () => {
     // Create a task stuck in validating > 2h
+    // Use unique agent to avoid WIP cap / reflection gate interference from real agent state
+    const testAgent = `sweeper-persist-${Date.now()}`
     const pastTime = Date.now() - (3 * 60 * 60 * 1000) // 3 hours ago
     const createRes = await app.inject({
       method: 'POST',
@@ -268,7 +270,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
         title: 'Escalation persist test',
         description: 'Testing metadata persistence',
         status: 'todo',
-        assignee: 'link',
+        assignee: testAgent,
         reviewer: 'sage',
         priority: 'P2',
         createdBy: 'test',
@@ -283,7 +285,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
     const doingRes = await app.inject({
       method: 'PATCH',
       url: `/tasks/${task.id}`,
-      payload: { status: 'doing', metadata: { eta: '1h' } },
+      payload: { status: 'doing', metadata: { eta: '1h', wip_override: 'test isolation' } },
     })
     expect(doingRes.statusCode).toBe(200)
 
@@ -330,6 +332,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
 
   it('does not re-escalate within cooldown window', async () => {
     // Create a task with sweeper metadata already set (simulating restart scenario)
+    const testAgent = `sweeper-cooldown-${Date.now()}`
     const recentEscalation = Date.now() - (30 * 60 * 1000) // 30m ago (within 4h cooldown)
     const oldActivity = Date.now() - (3 * 60 * 60 * 1000) // 3h ago
     const createRes = await app.inject({
@@ -339,7 +342,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
         title: 'Cooldown test task',
         description: 'Should not re-escalate',
         status: 'todo',
-        assignee: 'link',
+        assignee: testAgent,
         reviewer: 'sage',
         priority: 'P2',
         createdBy: 'test',
@@ -352,7 +355,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
     const doingRes = await app.inject({
       method: 'PATCH',
       url: `/tasks/${task.id}`,
-      payload: { status: 'doing', metadata: { eta: '1h' } },
+      payload: { status: 'doing', metadata: { eta: '1h', wip_override: 'test isolation' } },
     })
     expect(doingRes.statusCode).toBe(200)
 
@@ -395,23 +398,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
   })
 
   it('silences after max escalation count reached', async () => {
-    // Clear reflection gate (previous tests moved tasks to done)
-    await app.inject({
-      method: 'POST',
-      url: '/reflections',
-      payload: {
-        author: 'link',
-        role_type: 'agent',
-        pain: 'Sweeper test: completing tasks in prior tests triggers reflection gate',
-        impact: 'Test cannot transition task to doing',
-        evidence: ['tests/execution-sweeper.test.ts'],
-        went_well: 'Prior sweeper tests pass',
-        suspected_why: 'Reflection gate counts completions without per-test isolation',
-        proposed_fix: 'Submit reflection between tests',
-        confidence: 5,
-      },
-    })
-
+    const testAgent = `sweeper-silence-${Date.now()}`
     const oldActivity = Date.now() - (9 * 60 * 60 * 1000) // 9h ago (well past critical)
     const oldEscalation = Date.now() - (5 * 60 * 60 * 1000) // 5h ago (past cooldown)
     const createRes = await app.inject({
@@ -421,7 +408,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
         title: 'Silenced task test',
         description: 'Already escalated max times',
         status: 'todo',
-        assignee: 'link',
+        assignee: testAgent,
         reviewer: 'sage',
         priority: 'P2',
         createdBy: 'test',
@@ -434,7 +421,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
     const doingRes = await app.inject({
       method: 'PATCH',
       url: `/tasks/${task.id}`,
-      payload: { status: 'doing', metadata: { eta: '1h' } },
+      payload: { status: 'doing', metadata: { eta: '1h', wip_override: 'test isolation' } },
     })
     if (doingRes.statusCode !== 200) console.error('SILENCED DOING FAILED:', doingRes.body)
     expect(doingRes.statusCode).toBe(200)
