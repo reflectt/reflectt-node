@@ -785,3 +785,37 @@ Recurring blocks use day-of-week scheduling with minutes-from-midnight for start
 | GET | `/calendar/busy` | Check if agent is busy. Query: `agent` (required). Returns busy/free status + current block details. |
 | GET | `/calendar/availability` | Team-wide availability snapshot. Returns all agents with calendar blocks and their current status. |
 | GET | `/calendar/should-ping` | Ping gating check. Query: `agent` (required), `urgency` (low/normal/high, default: normal). Returns should_ping boolean + reason + delay_until. |
+
+## Calendar Events
+
+Full calendar event system with iCal-compatible fields, attendees, RSVP, recurrence (RRULE), and reminders.
+
+### Event Fields (iCal-aligned)
+- `summary` — event title (SUMMARY)
+- `description` — event description (DESCRIPTION)
+- `dtstart`, `dtend` — epoch ms start/end (DTSTART, DTEND)
+- `timezone` — IANA timezone (VTIMEZONE)
+- `rrule` — RFC 5545 recurrence rule (e.g., `FREQ=WEEKLY;BYDAY=MO,WE,FR`)
+- `organizer` — creator (agent or human name)
+- `attendees[]` — participants with RSVP status (`accepted`, `declined`, `tentative`, `needs-action`)
+- `location` — text or URL
+- `categories[]` — tags
+- `reminders[]` — `{ minutes_before, method: 'chat'|'inbox' }`
+- `status` — `confirmed`, `tentative`, `cancelled`
+- `uid` — RFC 5545 UID for iCal interop
+
+### Supported RRULE frequencies
+`DAILY`, `WEEKLY`, `MONTHLY`, `YEARLY` with `INTERVAL`, `BYDAY`, `BYMONTHDAY`, `BYMONTH`, `COUNT`, `UNTIL`.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/calendar/events` | Create event. Body: `{ summary, dtstart, dtend, organizer, description?, timezone?, rrule?, attendees?, location?, categories?, reminders?, status? }` |
+| GET | `/calendar/events` | List events. Query: `organizer`, `attendee`, `status`, `from`, `to` (epoch ms), `categories` (comma-separated), `limit`. |
+| GET | `/calendar/events/:id` | Get single event. |
+| PATCH | `/calendar/events/:id` | Update event fields. |
+| DELETE | `/calendar/events/:id` | Delete event + associated fired reminders. |
+| POST | `/calendar/events/:id/rsvp` | RSVP to event. Body: `{ name, status }`. Adds attendee if not present. |
+| GET | `/calendar/events/:id/occurrences` | Get occurrence timestamps for recurring events. Query: `from`, `to` (epoch ms, default: next 30 days). |
+| GET | `/calendar/reminders/pending` | List reminders that should fire now (for reminder engine polling). |
+| GET | `/calendar/events/current` | Check if agent is in an event right now. Query: `agent` (required). |
+| GET | `/calendar/events/next` | Get agent's next upcoming event. Query: `agent` (required). |

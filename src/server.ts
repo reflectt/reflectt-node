@@ -135,6 +135,7 @@ import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
+import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -9223,6 +9224,110 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!query.agent) return { error: 'agent query param required' }
     const urgency = (query.urgency || 'normal') as 'low' | 'normal' | 'high'
     return calendarManager.shouldPing(query.agent, urgency)
+  })
+
+  // ── Calendar Events API ────────────────────────────────────────────────
+
+  // Create an event
+  app.post('/calendar/events', async (request, reply) => {
+    try {
+      const body = request.body as CreateEventInput
+      if (!body || !body.summary || !body.organizer) {
+        return reply.code(400).send({ error: 'summary and organizer are required' })
+      }
+      const event = calendarEvents.createEvent(body)
+      return reply.code(201).send({ success: true, event })
+    } catch (err: any) {
+      return reply.code(400).send({ error: err.message })
+    }
+  })
+
+  // List events
+  app.get('/calendar/events', async (request) => {
+    const query = request.query as Record<string, string>
+    const filters: Parameters<typeof calendarEvents.listEvents>[0] = {}
+    if (query.organizer) filters.organizer = query.organizer
+    if (query.attendee) filters.attendee = query.attendee
+    if (query.status) filters.status = query.status as any
+    if (query.from) filters.from = parseInt(query.from, 10)
+    if (query.to) filters.to = parseInt(query.to, 10)
+    if (query.categories) filters.categories = query.categories.split(',')
+    if (query.limit) filters.limit = parseInt(query.limit, 10)
+    const events = calendarEvents.listEvents(filters)
+    return { events, total: events.length }
+  })
+
+  // Get single event
+  app.get<{ Params: { id: string } }>('/calendar/events/:id', async (request, reply) => {
+    const event = calendarEvents.getEvent(request.params.id)
+    if (!event) return reply.code(404).send({ error: 'Event not found' })
+    return { event }
+  })
+
+  // Update event
+  app.patch<{ Params: { id: string } }>('/calendar/events/:id', async (request, reply) => {
+    try {
+      const event = calendarEvents.updateEvent(request.params.id, request.body as UpdateEventInput)
+      if (!event) return reply.code(404).send({ error: 'Event not found' })
+      return { success: true, event }
+    } catch (err: any) {
+      return reply.code(400).send({ error: err.message })
+    }
+  })
+
+  // Delete event
+  app.delete<{ Params: { id: string } }>('/calendar/events/:id', async (request, reply) => {
+    const deleted = calendarEvents.deleteEvent(request.params.id)
+    if (!deleted) return reply.code(404).send({ error: 'Event not found' })
+    return { success: true }
+  })
+
+  // RSVP to event
+  app.post<{ Params: { id: string } }>('/calendar/events/:id/rsvp', async (request, reply) => {
+    try {
+      const body = request.body as { name: string; status: AttendeeStatus }
+      if (!body?.name || !body?.status) {
+        return reply.code(400).send({ error: 'name and status are required' })
+      }
+      const event = calendarEvents.rsvpEvent(request.params.id, body.name, body.status)
+      if (!event) return reply.code(404).send({ error: 'Event not found' })
+      return { success: true, event }
+    } catch (err: any) {
+      return reply.code(400).send({ error: err.message })
+    }
+  })
+
+  // Get occurrences of a recurring event
+  app.get<{ Params: { id: string } }>('/calendar/events/:id/occurrences', async (request, reply) => {
+    const event = calendarEvents.getEvent(request.params.id)
+    if (!event) return reply.code(404).send({ error: 'Event not found' })
+    const query = request.query as Record<string, string>
+    const from = query.from ? parseInt(query.from, 10) : Date.now()
+    const to = query.to ? parseInt(query.to, 10) : from + 30 * 24 * 60 * 60 * 1000 // 30 days default
+    const occurrences = calendarEvents.getOccurrences(event, from, to)
+    return { event_id: event.id, occurrences, count: occurrences.length }
+  })
+
+  // Get pending reminders (for reminder engine polling)
+  app.get('/calendar/reminders/pending', async () => {
+    const pending = calendarEvents.getPendingReminders()
+    return { reminders: pending, count: pending.length }
+  })
+
+  // Get agent's current event
+  app.get('/calendar/events/current', async (request) => {
+    const query = request.query as Record<string, string>
+    if (!query.agent) return { error: 'agent query param required' }
+    const event = calendarEvents.getAgentCurrentEvent(query.agent)
+    return { agent: query.agent, in_event: !!event, event }
+  })
+
+  // Get agent's next event
+  app.get('/calendar/events/next', async (request) => {
+    const query = request.query as Record<string, string>
+    if (!query.agent) return { error: 'agent query param required' }
+    const result = calendarEvents.getAgentNextEvent(query.agent)
+    return { agent: query.agent, next_event: result?.event || null, starts_at: result?.starts_at || null }
   })
 
   return app
