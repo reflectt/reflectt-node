@@ -1,5 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Content lane compliance reporter — launchd template.
+
+  Before loading, replace these placeholders with your actual paths:
+    __REPO_ROOT__   → absolute path to your reflectt-node checkout
+                      e.g. /Users/you/.openclaw/workspace/projects/reflectt-node
+    __NODE_BIN__    → path to node binary (run `which node` to find yours)
+                      e.g. /opt/homebrew/bin/node  or  /usr/local/bin/node
+
+  Install:
+    cp scripts/launchd/ai.reflectt.echo.content-lane-compliance.plist ~/Library/LaunchAgents/
+    # edit the copy to fill in __REPO_ROOT__ and __NODE_BIN__
+    launchctl load ~/Library/LaunchAgents/ai.reflectt.echo.content-lane-compliance.plist
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key>
@@ -8,11 +22,11 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>/Users/ryan/.openclaw/workspace-echo/scripts/content-lane-compliance-report.sh</string>
+    <string>__REPO_ROOT__/scripts/content-lane-compliance-report.sh</string>
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/ryan/.openclaw/workspace-echo</string>
+  <string>__REPO_ROOT__</string>
 
   <key>EnvironmentVariables</key>
   <dict>
@@ -24,90 +38,22 @@
     <string>echo</string>
     <key>CONTROL_TASK_ID</key>
     <string>task-1771427184904-mu356v5md</string>
+    <key>PATH</key>
+    <string>__NODE_BIN__:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 
   <key>StartCalendarInterval</key>
   <array>
-    <dict>
-      <key>Weekday</key>
-      <integer>2</integer>
-      <key>Hour</key>
-      <integer>9</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <dict>
-      <key>Weekday</key>
-      <integer>2</integer>
-      <key>Hour</key>
-      <integer>14</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <dict>
-      <key>Weekday</key>
-      <integer>3</integer>
-      <key>Hour</key>
-      <integer>9</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <dict>
-      <key>Weekday</key>
-      <integer>3</integer>
-      <key>Hour</key>
-      <integer>14</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <dict>
-      <key>Weekday</key>
-      <integer>4</integer>
-      <key>Hour</key>
-      <integer>9</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <dict>
-      <key>Weekday</key>
-      <integer>4</integer>
-      <key>Hour</key>
-      <integer>14</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <dict>
-      <key>Weekday</key>
-      <integer>5</integer>
-      <key>Hour</key>
-      <integer>9</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <dict>
-      <key>Weekday</key>
-      <integer>5</integer>
-      <key>Hour</key>
-      <integer>14</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <dict>
-      <key>Weekday</key>
-      <integer>6</integer>
-      <key>Hour</key>
-      <integer>9</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <dict>
-      <key>Weekday</key>
-      <integer>6</integer>
-      <key>Hour</key>
-      <integer>14</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>9</integer><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Weekday</key><integer>6</integer><key>Hour</key><integer>14</integer><key>Minute</key><integer>0</integer></dict>
   </array>
 
   <key>StandardOutPath</key>

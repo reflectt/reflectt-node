@@ -82,6 +82,7 @@ async function main() {
 
   if (breach) {
     lines.push(`- Recovery: ${recoveryPlan({ wip, readyCount })}`)
+    lines.push(`- Owner: ${ASSIGNEE} | ETA: 30m`)
     lines.push(`- Escalation: @kai ${CONTROL_TASK_ID} breach during active hours; needs recovery within 30m`)
   }
 
