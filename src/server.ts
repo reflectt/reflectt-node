@@ -7681,14 +7681,24 @@ export async function createServer(): Promise<FastifyInstance> {
       presence?.lastUpdate,
     )
 
+    const query = request.query as Record<string, string>
+    const compact = isCompact(query)
+
+    // Slim task helper: strip metadata/description/done_criteria for compact mode
+    const slimTask = (task: Task) => {
+      if (!compact) return task
+      const { metadata, description, done_criteria, ...slim } = task
+      return slim
+    }
+
     return {
       agent,
       timestamp: now,
       active_lane: activeLane,
-      activeTask,
-      assignedTasks: assignedTasks.slice(0, 20),
-      pendingReviews: pendingReviews.slice(0, 20),
-      blockers: blockerTasks.slice(0, 20),
+      activeTask: activeTask ? slimTask(activeTask) : null,
+      assignedTasks: assignedTasks.slice(0, 20).map(slimTask),
+      pendingReviews: pendingReviews.slice(0, 20).map(slimTask),
+      blockers: blockerTasks.slice(0, 20).map(slimTask),
       taskPrLinks: Array.from(new Set(taskPrLinks)).slice(0, 20),
       failingChecks,
       sinceLastSeen: {
