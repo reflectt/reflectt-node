@@ -304,6 +304,31 @@ export async function indexSharedFile(
 }
 
 /**
+ * Index a knowledge document for semantic search.
+ * Combines title, content snippet, category, and tags.
+ */
+export async function indexKnowledgeDoc(
+  docId: string,
+  title: string,
+  content: string,
+  category?: string,
+  tags?: string[] | null,
+): Promise<void> {
+  const parts = [title]
+  // Use first ~2000 chars of content for embedding
+  if (content) parts.push(content.slice(0, 2000))
+  if (category) parts.push(`Category: ${category}`)
+  if (tags?.length) parts.push(`Tags: ${tags.join(', ')}`)
+  const text = parts.join(' — ')
+
+  const { embed } = await import('./embeddings.js')
+  const embedding = await embed(text)
+
+  const db = getDb()
+  upsertVector(db, 'knowledge_doc', docId, text.slice(0, 500), embedding)
+}
+
+/**
  * Semantic search across all indexed content.
  */
 export async function semanticSearch(
