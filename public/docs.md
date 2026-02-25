@@ -65,20 +65,20 @@ Operationally:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | System health — task counts, chat stats, inbox stats |
+| GET | `/health` | System health — task counts, chat stats, inbox stats. Query: `include_test=1` to include test-harness tasks in stats (excluded by default). |
 | GET | `/team/health` | Team config linter status for `~/.reflectt/TEAM.md`, `TEAM-ROLES.yaml`, `TEAM-STANDARDS.md` (issues, role coverage, last check timestamp) |
 | GET | `/health/team` | Team health metrics with compliance + `staleDoing` snapshot. Per-agent rows include `activeTaskTitle` and `activeTaskPrLink` when an agent has a doing task with PR evidence. Flagged agents also include `actionable_reason` (last comment age, last transition, last mention age, suggested action). |
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
-| GET | `/health/backlog` | Backlog readiness health by lane (ready counts, floor compliance, breach status, blocked/todo/doing/validating rollups). |
+| GET | `/health/backlog` | Backlog readiness health by lane (ready counts, floor compliance, breach status, blocked/todo/doing/validating rollups). Query: `include_test=1` to include test-harness tasks. |
 | GET | `/health/system` | System info (uptime, memory, versions) |
 | GET | `/health/build` | Build/runtime identity (version, git SHA, branch, build timestamp, PID, uptime) |
 | GET | `/health/deploy` | Deploy attestation payload for dashboards (`version`, `gitSha`, `branch`, `buildTimestamp`, `startedAt`, `pid`) |
 | GET | `/health/team/summary` | Compact team health summary |
 | GET | `/health/team/history` | Historical team health data |
-| GET | `/health/workflow` | Unified per-agent workflow state: doing-task age, last shipped timestamp, blocker flag, artifact path, and linked PR state |
+| GET | `/health/workflow` | Unified per-agent workflow state: doing-task age, last shipped timestamp, blocker flag, artifact path, and linked PR state. Query: `include_test=1` to include test-harness tasks. |
 | GET | `/health/reflection-pipeline` | Reflection→Insight→Promotion health signal. Returns recent reflection/insight/promotion counts, status (`healthy`\|`at_risk`\|`broken`), and alert timestamps. Triggers alert when reflections flow but insights remain zero past threshold. |
-| GET | `/health/backlog` | Backlog readiness snapshot by lane/agent with ready-floor breach detection and stale-validating summary. |
+| GET | `/health/backlog` | Backlog readiness snapshot by lane/agent with ready-floor breach detection and stale-validating summary. Query: `include_test=1` to include test-harness tasks. |
 | GET | `/health/mention-ack` | Mention-ack lifecycle metrics (pending, timeout, latency counters) |
 | GET | `/health/mention-ack/recent` | Recent mention-ack entries for debugging. Query: `limit` (max 100) |
 | GET | `/health/mention-ack/:agent` | Pending mention-ack entries for one agent |
@@ -134,7 +134,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/instrumentation/lifecycle` | Reviewer/done-criteria gates + status-contract violations (`doing` missing ETA, `validating` missing artifact path) |
 | POST | `/tasks/batch-create` | Batch create up to 20 tasks. Body: `{ "tasks": [...], "createdBy": "agent", "deduplicate": true, "dryRun": false }`. Each task follows the same schema as `POST /tasks`. Returns per-task results (created/duplicate/error) with summary counts. Deduplication checks exact title match + fuzzy word overlap (Jaccard >0.6) against active tasks. |
 | GET | `/tasks/heartbeat-status` | All doing tasks with stale comment activity (>30m). Returns `{ threshold, doingTaskCount, staleCount, staleTasks[] }`. Use for monitoring status heartbeat discipline compliance. |
-| GET | `/tasks/board-health` | Board-level health metrics for backlog replenishment. Returns per-agent breakdown (doing, validating, todo, active counts), `needsWork`/`lowWatermark` flags, and `replenishNeeded` trigger (fires when 2+ agents idle or <3 backlog tasks). |
+| GET | `/tasks/board-health` | Board-level health metrics for backlog replenishment. Returns per-agent breakdown (doing, validating, todo, active counts), `needsWork`/`lowWatermark` flags, and `replenishNeeded` trigger (fires when 2+ agents idle or <3 backlog tasks). Query: `include_test=1` to include test-harness tasks. |
 | GET | `/agents/roles` | Agent role registry with live WIP status. Returns all agents with `name`, `role`, `affinityTags`, `protectedDomains`, `wipCap`, `wipCount`, `overCap`. |
 | POST | `/tasks/suggest-assignee` | Suggest best assignee for a task. Body: `{ "title": "...", "tags": [...], "done_criteria": [...] }`. Returns `suggested` agent name, `scores` array with affinity/WIP/throughput breakdown, and `protectedMatch` if a protected domain applies. |
 | GET | `/team/manifest` | Serve TEAM.md from `~/.reflectt/` (falls back to defaults). Returns `manifest` object with `raw_markdown`, parsed `sections` array, `version` (SHA-256 hash), `updated_at`, `path`, and `source`. |
