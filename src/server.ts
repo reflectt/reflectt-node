@@ -139,6 +139,7 @@ import { calendarEvents, type CreateEventInput, type UpdateEventInput, type Atte
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
 import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CATEGORIES, type CreateDocInput, type UpdateDocInput, type DocCategory } from './knowledge-docs.js'
+import { onTaskShipped, onProcessFileWritten, onDecisionComment, isDecisionComment } from './knowledge-auto-index.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -4136,6 +4137,18 @@ export async function createServer(): Promise<FastifyInstance> {
         { category: (data as any).category ?? null },
       )
 
+      // ── Knowledge auto-index: decision comments ──
+      if (isDecisionComment(data.content, (data as any).category)) {
+        const taskForDecision = taskManager.getTask(resolved.resolvedId)
+        onDecisionComment({
+          taskId: resolved.resolvedId,
+          commentId: comment.id,
+          author: data.author,
+          content: data.content,
+          taskTitle: taskForDecision?.title,
+        }).catch(() => { /* knowledge indexing is best-effort */ })
+      }
+
       // Task-comments are now primary execution comms:
       // fan out inbox-visible notifications to assignee/reviewer + explicit @mentions.
       // Notification routing respects per-agent preferences (quiet hours, mute, filters).
@@ -5724,6 +5737,18 @@ export async function createServer(): Promise<FastifyInstance> {
             emitActivationEvent('day2_return_action', funnelUserId, { action: 'task_update', taskId: task.id }).catch(() => {})
           }
         }
+      }
+
+      // ── Knowledge auto-index: on task ship, index artifacts + QA bundle ──
+      if (parsed.status === 'done' && existing.status !== 'done') {
+        onTaskShipped({
+          taskId: task.id,
+          title: task.title,
+          description: (task as any).description,
+          doneCriteria: task.done_criteria,
+          assignee: task.assignee,
+          metadata: task.metadata as Record<string, unknown>,
+        }).catch(() => { /* knowledge indexing is best-effort */ })
       }
 
       // ── Auto-queue: on task completion, recommend next tasks to assignee ──
