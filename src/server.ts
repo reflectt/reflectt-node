@@ -6773,6 +6773,59 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Debug endpoint: show reflection tracking state + actual latest reflection for an agent
+  app.get<{ Params: { agent: string } }>('/reflections/tracking/:agent', async (request) => {
+    const { agent } = request.params
+    const db = getDb()
+
+    // Ensure tracking table exists
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS reflection_tracking (
+        agent TEXT PRIMARY KEY,
+        last_reflection_at INTEGER,
+        last_nudge_at INTEGER,
+        tasks_done_since_reflection INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      );
+    `)
+
+    const tracking = db.prepare('SELECT * FROM reflection_tracking WHERE agent = ?').get(agent) as Record<string, unknown> | undefined
+
+    // Get latest actual reflection from reflections table
+    const latestReflections = listReflections({ author: agent, limit: 1 })
+    const latestReflection = latestReflections[0] ?? null
+
+    const trackingLastAt = (tracking?.last_reflection_at as number) || 0
+    const actualLastAt = latestReflection?.created_at ?? 0
+    const isStale = actualLastAt > trackingLastAt
+
+    // Compute current gate status
+    let gateBlocked = false
+    let gateReason: string | null = null
+    if (tracking) {
+      const tasksDone = (tracking.tasks_done_since_reflection as number) || 0
+      const hoursSince = trackingLastAt > 0 ? (Date.now() - trackingLastAt) / (1000 * 60 * 60) : Infinity
+      gateBlocked = tasksDone >= 2 && hoursSince > 4
+      if (gateBlocked) {
+        gateReason = `${tasksDone} tasks since reflection, ${trackingLastAt > 0 ? Math.floor(hoursSince) + 'h ago' : 'never'}`
+      }
+    }
+
+    return {
+      agent,
+      tracking: tracking ?? null,
+      latest_reflection: latestReflection ? {
+        id: latestReflection.id,
+        created_at: latestReflection.created_at,
+        author: latestReflection.author,
+      } : null,
+      stale: isStale,
+      gate_would_block: gateBlocked,
+      gate_reason: gateReason,
+      reconciliation_available: isStale && gateBlocked,
+    }
+  })
+
   app.get<{ Params: { id: string } }>('/reflections/:id', async (request, reply) => {
     const reflection = getReflection(request.params.id)
     if (!reflection) {
