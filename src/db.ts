@@ -419,6 +419,31 @@ export function runMigrations(db: Database.Database): void {
         db.exec('CREATE INDEX IF NOT EXISTS idx_task_comments_task_id_suppressed ON task_comments(task_id, suppressed)')
       },
     },
+    {
+      version: 14,
+      sql: `
+        -- Persistent suppression ledger for system message deduplication
+        CREATE TABLE IF NOT EXISTS suppression_ledger (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          dedup_key TEXT NOT NULL,
+          category TEXT NOT NULL,
+          channel TEXT NOT NULL,
+          "from" TEXT NOT NULL,
+          content_preview TEXT,
+          first_seen_at INTEGER NOT NULL,
+          last_seen_at INTEGER NOT NULL,
+          hit_count INTEGER NOT NULL DEFAULT 1,
+          suppressed INTEGER NOT NULL DEFAULT 0,
+          window_ms INTEGER NOT NULL DEFAULT 1800000
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_suppression_ledger_dedup_key ON suppression_ledger(dedup_key);
+        CREATE INDEX IF NOT EXISTS idx_suppression_ledger_last_seen ON suppression_ledger(last_seen_at);
+        CREATE INDEX IF NOT EXISTS idx_suppression_ledger_channel ON suppression_ledger(channel);
+
+        -- Add dedup_key column to chat_messages for traceability
+        ALTER TABLE chat_messages ADD COLUMN dedup_key TEXT;
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')

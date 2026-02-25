@@ -217,6 +217,8 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/chat/noise-budget` | Current budget snapshot: per-channel ratios, window stats, enforcement state |
+| GET | `/chat/suppression/stats` | Chat dedup suppression stats: total suppressed, by category (system/agent), active hash count, since timestamp. |
+| POST | `/chat/suppression/prune` | Prune expired entries from the suppression ledger. Returns `{ pruned }`. |
 | GET | `/chat/noise-budget/canary` | Canary rollback evaluation: ratio vs target, SLA miss delta, P95 response delta |
 | GET | `/chat/noise-budget/suppression-log` | Audit trail of suppressed/digested messages |
 | GET | `/chat/noise-budget/config` | Read current noise budget configuration |
