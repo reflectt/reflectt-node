@@ -77,15 +77,21 @@ export function _clearPrStateCache(): void {
 const SWEEP_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
 /** Validating SLA: escalate after this many ms without reviewer activity */
-const VALIDATING_SLA_MS = 30 * 60 * 1000 // 30 minutes
+const VALIDATING_SLA_MS = 2 * 60 * 60 * 1000 // 2 hours (was 30m — too aggressive for async AI review)
 
 /** Critical SLA: second escalation tier */
-const VALIDATING_CRITICAL_MS = 60 * 60 * 1000 // 60 minutes
+const VALIDATING_CRITICAL_MS = 8 * 60 * 60 * 1000 // 8 hours (was 60m — reviewers aren't real-time)
 
 /** PR age threshold: flag PRs linked to non-active tasks older than this */
 const ORPHAN_PR_THRESHOLD_MS = 2 * 60 * 60 * 1000 // 2 hours
 
-/** Track which tasks we've already escalated (avoid spam) */
+/** Re-escalation cooldown: don't re-alert the same task within this window */
+const ESCALATION_COOLDOWN_MS = 4 * 60 * 60 * 1000 // 4 hours
+
+/** Max escalation count per task before silencing */
+const MAX_ESCALATION_COUNT = 3
+
+/** Track which tasks we've already escalated (avoid spam) — in-memory cache */
 const escalated = new Map<string, { level: 'warning' | 'critical'; at: number }>()
 
 /** Track which orphan PRs we've already flagged */
@@ -240,10 +246,37 @@ export function sweepValidatingQueue(): SweepResult {
     const ageSinceActivity = now - lastActivity
     const ageMinutes = Math.round(ageSinceActivity / 60_000)
 
-    const prev = escalated.get(task.id)
+    // ── Persistent escalation state (survives restarts) ──────────────
+    // Read escalation history from task metadata, not just in-memory map
+    const persistedLevel = meta.sweeper_escalation_level as string | undefined
+    const persistedAt = meta.sweeper_escalated_at as number | undefined
+    const persistedCount = (meta.sweeper_escalation_count as number) || 0
 
-    if (ageSinceActivity >= VALIDATING_CRITICAL_MS && prev?.level !== 'critical') {
+    // Rehydrate in-memory map from metadata on first encounter
+    const prev = escalated.get(task.id)
+    if (!prev && persistedLevel && persistedAt) {
+      escalated.set(task.id, {
+        level: persistedLevel as 'warning' | 'critical',
+        at: persistedAt,
+      })
+    }
+    const effective = escalated.get(task.id)
+
+    // Skip if max escalations reached (silenced)
+    if (persistedCount >= MAX_ESCALATION_COUNT) {
+      logDryRun('escalation_silenced', `${task.id} — ${persistedCount} escalations, max reached`)
+      continue
+    }
+
+    // Skip if within cooldown window
+    const lastEscalatedAt = effective?.at || persistedAt || 0
+    if (lastEscalatedAt && (now - lastEscalatedAt) < ESCALATION_COOLDOWN_MS) {
+      continue // Still in cooldown
+    }
+
+    if (ageSinceActivity >= VALIDATING_CRITICAL_MS && effective?.level !== 'critical') {
       const prUrl = extractPrUrl(meta)
+      const newCount = persistedCount + 1
       violations.push({
         taskId: task.id,
         title: task.title,
@@ -255,9 +288,16 @@ export function sweepValidatingQueue(): SweepResult {
         remediation: generateRemediation({ taskId: task.id, issue: 'stale_validating', prUrl: prUrl || undefined, meta }),
       })
       escalated.set(task.id, { level: 'critical', at: now })
-      logDryRun('validating_critical', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee}`)
-    } else if (ageSinceActivity >= VALIDATING_SLA_MS && !prev) {
+      // Persist to task metadata so it survives restarts (lightweight, bypasses lifecycle gates)
+      taskManager.patchTaskMetadata(task.id, {
+        sweeper_escalation_level: 'critical',
+        sweeper_escalated_at: now,
+        sweeper_escalation_count: newCount,
+      })
+      logDryRun('validating_critical', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee} count:${newCount}`)
+    } else if (ageSinceActivity >= VALIDATING_SLA_MS && !effective) {
       const prUrl = extractPrUrl(meta)
+      const newCount = persistedCount + 1
       violations.push({
         taskId: task.id,
         title: task.title,
@@ -269,18 +309,35 @@ export function sweepValidatingQueue(): SweepResult {
         remediation: generateRemediation({ taskId: task.id, issue: 'stale_validating', prUrl: prUrl || undefined, meta }),
       })
       escalated.set(task.id, { level: 'warning', at: now })
-      logDryRun('validating_sla', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee}`)
+      // Persist to task metadata so it survives restarts (lightweight, bypasses lifecycle gates)
+      taskManager.patchTaskMetadata(task.id, {
+        sweeper_escalation_level: 'warning',
+        sweeper_escalated_at: now,
+        sweeper_escalation_count: newCount,
+      })
+      logDryRun('validating_sla', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee} count:${newCount}`)
     }
   }
 
   // Clean up escalation tracking for tasks no longer validating
   for (const [key] of escalated) {
     // drift: prefix holds the real task ID — strip before resolving
-    const realTaskId = key.startsWith("drift:") ? key.slice(6) : key
+    const realTaskId = key.startsWith('drift:') ? key.slice(6) : key
     const lookup = taskManager.resolveTaskId(realTaskId)
-    if (!lookup.task || lookup.task.status !== "validating") {
+    if (!lookup.task || lookup.task.status !== 'validating') {
       escalated.delete(key)
-      logDryRun("escalation_cleared", `${key} — no longer validating`)
+      // Also clear persisted sweeper metadata when task leaves validating
+      if (lookup.task) {
+        const meta = (lookup.task.metadata || {}) as Record<string, unknown>
+        if (meta.sweeper_escalation_level) {
+          taskManager.patchTaskMetadata(realTaskId, {
+            sweeper_escalation_level: undefined,
+            sweeper_escalated_at: undefined,
+            sweeper_escalation_count: undefined,
+          })
+        }
+      }
+      logDryRun('escalation_cleared', `${key} — no longer validating`)
     }
   }
 
@@ -424,21 +481,50 @@ function extractPrUrl(meta: Record<string, unknown>): string | null {
 async function escalateViolations(violations: SweepViolation[]): Promise<void> {
   if (violations.length === 0) return
 
-  for (const v of violations) {
-    // Post to general channel for visibility — includes @mentions for owner + reviewer
-    try {
-      await chatManager.sendMessage({
-        channel: 'general',
-        from: 'sweeper',
-        content: v.message,
-      })
-    } catch {
-      // Chat might not be ready — log only
-      console.warn(`[Sweeper] Could not post escalation for ${v.taskId}`)
+  // ── Batch violations into a single summary message ─────────────────
+  // Instead of spamming one message per violation, group them by type
+  // and post a single digest. Reduces noise from N messages to 1.
+  const critical = violations.filter(v => v.type === 'validating_critical')
+  const warnings = violations.filter(v => v.type === 'validating_sla')
+  const prIssues = violations.filter(v => v.type === 'orphan_pr' || v.type === 'pr_drift')
+
+  const lines: string[] = [`🔍 **Sweeper Digest** — ${violations.length} issue(s) found`]
+
+  if (critical.length > 0) {
+    lines.push('')
+    lines.push(`🚨 **Critical** (${critical.length}):`)
+    for (const v of critical) {
+      lines.push(`  • ${v.title} (${v.taskId}) — ${v.age_minutes}m, reviewer: @${v.reviewer || 'unassigned'}`)
     }
   }
 
-  console.log(`[Sweeper] Escalated ${violations.length} violation(s):`,
+  if (warnings.length > 0) {
+    lines.push('')
+    lines.push(`⚠️ **SLA Warning** (${warnings.length}):`)
+    for (const v of warnings) {
+      lines.push(`  • ${v.title} (${v.taskId}) — ${v.age_minutes}m, reviewer: @${v.reviewer || 'unassigned'}`)
+    }
+  }
+
+  if (prIssues.length > 0) {
+    lines.push('')
+    lines.push(`📦 **PR Issues** (${prIssues.length}):`)
+    for (const v of prIssues) {
+      lines.push(`  • ${v.title} (${v.taskId}) — ${v.age_minutes}m`)
+    }
+  }
+
+  try {
+    await chatManager.sendMessage({
+      channel: 'general',
+      from: 'sweeper',
+      content: lines.join('\n'),
+    })
+  } catch {
+    console.warn(`[Sweeper] Could not post escalation digest`)
+  }
+
+  console.log(`[Sweeper] Escalated ${violations.length} violation(s) (batched):`,
     violations.map(v => `${v.type}:${v.taskId}`).join(', '))
 }
 

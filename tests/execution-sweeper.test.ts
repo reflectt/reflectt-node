@@ -216,3 +216,265 @@ describe('Orphan PR detection accuracy', () => {
     expect(['open', 'merged', 'closed', 'unknown']).toContain(result.state)
   })
 })
+
+// ── Escalation persistence + cooldown tests ────────────────────────────────
+
+describe('Sweeper escalation persistence and cooldown', () => {
+  let app: ReturnType<typeof Fastify>
+
+  beforeAll(async () => {
+    const { createServer } = await import('../src/server.js')
+    app = await createServer()
+  })
+
+  /** Helper: build a valid qa_bundle + review_handoff for validating transition */
+  function validatingMetadata(taskId: string, artifactPath: string, extra: Record<string, unknown> = {}) {
+    return {
+      artifact_path: artifactPath,
+      review_handoff: {
+        task_id: taskId,
+        artifact_path: artifactPath,
+        test_proof: 'pass',
+        known_caveats: 'test only',
+        doc_only: true,
+      },
+      qa_bundle: {
+        lane: 'test',
+        summary: 'Test task for sweeper',
+        changed_files: [artifactPath],
+        artifact_links: [artifactPath],
+        checks: ['lint:pass'],
+        screenshot_proof: ['n/a'],
+        review_packet: {
+          task_id: taskId,
+          artifact_path: artifactPath,
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+          commit: 'abc1234',
+          changed_files: [artifactPath],
+          caveats: 'Test only',
+        },
+      },
+      ...extra,
+    }
+  }
+
+  it('persists escalation state in task metadata', async () => {
+    // Create a task stuck in validating > 2h
+    const pastTime = Date.now() - (3 * 60 * 60 * 1000) // 3 hours ago
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      payload: {
+        title: 'Escalation persist test',
+        description: 'Testing metadata persistence',
+        status: 'todo',
+        assignee: 'link',
+        reviewer: 'sage',
+        priority: 'P2',
+        createdBy: 'test',
+        eta: '1h',
+        done_criteria: ['Done'],
+      },
+    })
+    expect(createRes.statusCode).toBe(200)
+    const task = JSON.parse(createRes.body).task
+
+    // Move to doing then validating
+    const doingRes = await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: { status: 'doing', metadata: { eta: '1h' } },
+    })
+    expect(doingRes.statusCode).toBe(200)
+
+    const valRes = await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: {
+        status: 'validating',
+        metadata: validatingMetadata(task.id, 'process/test-persist.md'),
+      },
+    })
+    expect(valRes.statusCode).toBe(200)
+
+    // Backdate timestamps using patchTaskMetadata (server auto-sets them to now on transition)
+    const { taskManager } = await import('../src/tasks.js')
+    taskManager.patchTaskMetadata(task.id, {
+      entered_validating_at: pastTime,
+      review_last_activity_at: pastTime,
+    })
+
+    // Run sweep — task has been in validating 3h > 2h SLA
+    const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
+    sweepValidatingQueue()
+
+    // Check that escalation metadata was persisted to the task
+    const taskRes = await app.inject({ method: 'GET', url: `/tasks/${task.id}` })
+    const updatedTask = JSON.parse(taskRes.body).task
+    const meta = updatedTask.metadata || {}
+    expect(meta.sweeper_escalation_level).toBeDefined()
+    expect(meta.sweeper_escalated_at).toBeGreaterThan(0)
+    expect(meta.sweeper_escalation_count).toBeGreaterThanOrEqual(1)
+
+    // Clean up: move to done
+    await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: {
+        status: 'done',
+        actor: 'sage',
+        metadata: { reviewer_approved: true, artifacts: ['process/test-persist.md'] },
+      },
+    })
+  })
+
+  it('does not re-escalate within cooldown window', async () => {
+    // Create a task with sweeper metadata already set (simulating restart scenario)
+    const recentEscalation = Date.now() - (30 * 60 * 1000) // 30m ago (within 4h cooldown)
+    const oldActivity = Date.now() - (3 * 60 * 60 * 1000) // 3h ago
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      payload: {
+        title: 'Cooldown test task',
+        description: 'Should not re-escalate',
+        status: 'todo',
+        assignee: 'link',
+        reviewer: 'sage',
+        priority: 'P2',
+        createdBy: 'test',
+        eta: '1h',
+        done_criteria: ['Done'],
+      },
+    })
+    const task = JSON.parse(createRes.body).task
+
+    const doingRes = await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: { status: 'doing', metadata: { eta: '1h' } },
+    })
+    expect(doingRes.statusCode).toBe(200)
+
+    const valRes = await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: {
+        status: 'validating',
+        metadata: validatingMetadata(task.id, 'process/test-cooldown.md'),
+      },
+    })
+    expect(valRes.statusCode).toBe(200)
+
+    // Backdate timestamps + inject prior escalation state (simulating restart recovery)
+    const { taskManager } = await import('../src/tasks.js')
+    taskManager.patchTaskMetadata(task.id, {
+      entered_validating_at: oldActivity,
+      review_last_activity_at: oldActivity,
+      sweeper_escalation_level: 'warning',
+      sweeper_escalated_at: recentEscalation,
+      sweeper_escalation_count: 1,
+    })
+
+    // Run sweep — should NOT generate a violation for this task (within cooldown)
+    const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
+    const result = sweepValidatingQueue()
+    const violations = result.violations.filter(v => v.taskId === task.id)
+    expect(violations).toHaveLength(0)
+
+    // Clean up
+    await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: {
+        status: 'done',
+        actor: 'sage',
+        metadata: { reviewer_approved: true, artifacts: ['process/test-cooldown.md'] },
+      },
+    })
+  })
+
+  it('silences after max escalation count reached', async () => {
+    // Clear reflection gate (previous tests moved tasks to done)
+    await app.inject({
+      method: 'POST',
+      url: '/reflections',
+      payload: {
+        author: 'link',
+        role_type: 'agent',
+        pain: 'Sweeper test: completing tasks in prior tests triggers reflection gate',
+        impact: 'Test cannot transition task to doing',
+        evidence: ['tests/execution-sweeper.test.ts'],
+        went_well: 'Prior sweeper tests pass',
+        suspected_why: 'Reflection gate counts completions without per-test isolation',
+        proposed_fix: 'Submit reflection between tests',
+        confidence: 5,
+      },
+    })
+
+    const oldActivity = Date.now() - (9 * 60 * 60 * 1000) // 9h ago (well past critical)
+    const oldEscalation = Date.now() - (5 * 60 * 60 * 1000) // 5h ago (past cooldown)
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      payload: {
+        title: 'Silenced task test',
+        description: 'Already escalated max times',
+        status: 'todo',
+        assignee: 'link',
+        reviewer: 'sage',
+        priority: 'P2',
+        createdBy: 'test',
+        eta: '1h',
+        done_criteria: ['Done'],
+      },
+    })
+    const task = JSON.parse(createRes.body).task
+
+    const doingRes = await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: { status: 'doing', metadata: { eta: '1h' } },
+    })
+    if (doingRes.statusCode !== 200) console.error('SILENCED DOING FAILED:', doingRes.body)
+    expect(doingRes.statusCode).toBe(200)
+
+    const valRes = await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: {
+        status: 'validating',
+        metadata: validatingMetadata(task.id, 'process/test-silenced.md'),
+      },
+    })
+    if (valRes.statusCode !== 200) console.error('SILENCED VAL FAILED:', valRes.body)
+    expect(valRes.statusCode).toBe(200)
+
+    // Backdate timestamps + inject max escalation count (simulating task already silenced)
+    const { taskManager } = await import('../src/tasks.js')
+    taskManager.patchTaskMetadata(task.id, {
+      entered_validating_at: oldActivity,
+      review_last_activity_at: oldActivity,
+      sweeper_escalation_level: 'critical',
+      sweeper_escalated_at: oldEscalation,
+      sweeper_escalation_count: 3, // Already at max
+    })
+
+    // Run sweep — should NOT generate violations (count >= 3)
+    const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
+    const result = sweepValidatingQueue()
+    const violations = result.violations.filter(v => v.taskId === task.id)
+    expect(violations).toHaveLength(0)
+
+    // Clean up
+    await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: {
+        status: 'done',
+        actor: 'sage',
+        metadata: { reviewer_approved: true, artifacts: ['process/test-silenced.md'] },
+      },
+    })
+  })
+})
