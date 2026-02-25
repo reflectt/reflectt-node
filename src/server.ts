@@ -4924,6 +4924,41 @@ export async function createServer(): Promise<FastifyInstance> {
       // Normalize review-state metadata for state-aware SLA tracking.
       const mergedMeta = applyReviewStateMetadata(existing, parsed, mergedRawMeta, Date.now())
 
+      // ── State machine transition validation ──
+      // Must run before all other gates to give a clear rejection message.
+      if (parsed.status && parsed.status !== existing.status) {
+        const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+          'todo':       ['doing'],
+          'doing':      ['blocked', 'validating'],
+          'blocked':    ['doing', 'todo'],
+          'validating': ['done', 'doing'],   // doing = reviewer rejection / rework
+          'done':       [],                   // all exits require reopen
+          'in-progress': ['blocked', 'validating', 'done', 'doing', 'todo'], // legacy, permissive
+        }
+        const allowed = ALLOWED_TRANSITIONS[existing.status] ?? []
+        if (!allowed.includes(parsed.status)) {
+          const meta = (incomingMeta ?? {}) as Record<string, unknown>
+          const isReopen = meta.reopen === true
+          const reopenReason = typeof meta.reopen_reason === 'string' ? String(meta.reopen_reason).trim() : ''
+          if (!isReopen || reopenReason.length === 0) {
+            reply.code(422)
+            return {
+              success: false,
+              error: `State transition rejected: ${existing.status}→${parsed.status} is not allowed. ` +
+                `Valid transitions from "${existing.status}": [${allowed.join(', ')}]. ` +
+                `To force this transition, set metadata.reopen=true and metadata.reopen_reason.`,
+              code: 'STATE_TRANSITION_REJECTED',
+              gate: 'state_machine',
+            }
+          }
+          // Reopen is valid — stamp it in merged metadata
+          mergedMeta.reopen = true
+          mergedMeta.reopen_reason = reopenReason
+          mergedMeta.reopened_at = Date.now()
+          mergedMeta.reopened_from = existing.status
+        }
+      }
+
       // Reviewer-identity gate: only assigned reviewer can set reviewer_approved=true.
       const incomingReviewerApproved = (incomingMeta as Record<string, unknown>).reviewer_approved
       if (incomingReviewerApproved === true) {

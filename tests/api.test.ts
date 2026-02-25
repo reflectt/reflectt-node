@@ -51,6 +51,47 @@ async function req(method: string, url: string, body?: unknown) {
   }
 }
 
+/**
+ * Walk a task from todo through valid transitions.
+ * 'doing' = todo→doing
+ * 'validating' = todo→doing→validating (with minimal valid QA bundle)
+ */
+async function advanceTo(taskId: string, targetStatus: 'doing' | 'validating'): Promise<void> {
+  await req('PATCH', `/tasks/${taskId}`, {
+    status: 'doing',
+    metadata: { transition: { type: 'claim', reason: 'test advance' }, eta: '~1h' },
+  })
+  if (targetStatus === 'validating') {
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-test-advance.md',
+        qa_bundle: validQaBundle({
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+            commit: 'abc1234',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-test-advance.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+          commit_sha: 'abc1234',
+          changed_files: ['src/server.ts'],
+          artifact_path: 'process/TASK-test-advance.md',
+          test_proof: 'test',
+          known_caveats: 'none',
+          caveats: 'none',
+        },
+      },
+    })
+  }
+}
+
 /** Build a valid QA bundle that passes QaBundleSchema */
 function validQaBundle(overrides: Record<string, unknown> = {}) {
   return {
@@ -788,6 +829,7 @@ describe('Artifact Path Canonicalization', () => {
       eta: '1h',
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'doing')
   })
 
   afterAll(async () => {
@@ -876,6 +918,7 @@ describe('Review packet gate', () => {
       eta: '1h',
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'doing')
   })
 
   afterAll(async () => {
@@ -969,6 +1012,7 @@ describe('Validating review handoff gate', () => {
       eta: '1h',
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'doing')
   })
 
   afterAll(async () => {
@@ -1139,6 +1183,7 @@ describe('Non-code validating contract (design/docs)', () => {
       },
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'doing')
   })
 
   afterAll(async () => {
@@ -1194,6 +1239,7 @@ describe('Non-code validating without qa_bundle', () => {
       },
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'doing')
   })
 
   afterAll(async () => {
@@ -1427,6 +1473,7 @@ describe('Task Close Gate', () => {
       eta: '1h',
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'validating')
   })
 
   afterAll(async () => {
@@ -1482,6 +1529,7 @@ describe('Task close follow-on linkage gate', () => {
     })
 
     const specTaskId = created.body.task.id
+    await advanceTo(specTaskId, 'validating')
 
     const result = await req('PATCH', `/tasks/${specTaskId}`, {
       status: 'done',
@@ -1524,6 +1572,7 @@ describe('Task close follow-on linkage gate', () => {
 
     const followOnId = followOn.body.task.id
     const specTaskId = spec.body.task.id
+    await advanceTo(specTaskId, 'validating')
 
     const result = await req('PATCH', `/tasks/${specTaskId}`, {
       status: 'done',
@@ -1558,6 +1607,7 @@ describe('Task close follow-on linkage gate', () => {
     })
 
     const taskId = research.body.task.id
+    await advanceTo(taskId, 'validating')
 
     const result = await req('PATCH', `/tasks/${taskId}`, {
       status: 'done',
@@ -1596,6 +1646,7 @@ describe('Design handoff auto-notification', () => {
       },
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'doing')
   })
 
   afterAll(async () => {
@@ -1603,19 +1654,38 @@ describe('Design handoff auto-notification', () => {
   })
 
   it('posts a @link review-channel handoff message when design task becomes ready', async () => {
-    const done = await req('PATCH', `/tasks/${taskId}`, {
-      status: 'done',
-      actor: 'test-reviewer',
+    // Design handoff fires on validating (first ready transition), not done
+    const validating = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
       metadata: {
         lane: 'design',
         artifact_path: 'process/TASK-design-ready-proof.md',
-        artifacts: ['process/TASK-design-ready-proof.md'],
-        reviewer_approved: true,
+        qa_bundle: validQaBundle({
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+            commit: 'abc1234',
+            changed_files: ['src/design.ts'],
+            artifact_path: 'process/TASK-design-ready-proof.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+          commit_sha: 'abc1234',
+          changed_files: ['src/design.ts'],
+          artifact_path: 'process/TASK-design-ready-proof.md',
+          test_proof: 'test',
+          known_caveats: 'none',
+          caveats: 'none',
+        },
       },
     })
 
-    expect(done.status).toBe(200)
-    expect(done.body.success).toBe(true)
+    expect(validating.status).toBe(200)
+    expect(validating.body.success).toBe(true)
 
     const { status, body } = await req('GET', '/chat/messages?channel=reviews&limit=200')
     expect(status).toBe(200)
@@ -1704,6 +1774,174 @@ describe('Task review endpoint', () => {
   })
 })
 
+describe('State machine transition validation', () => {
+  // Helper to create a task in a given status
+  async function createInStatus(status: string): Promise<string> {
+    const ts = Date.now()
+    const { body } = await req('POST', '/tasks', {
+      title: `TEST: state-machine-${status}-${ts}`,
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      done_criteria: ['test'],
+      priority: 'P2',
+      eta: '~1h',
+      metadata: {
+        source_reflection: 'ref-test-statemachine',
+        is_test: true,
+        eta: '~1h',
+      },
+    })
+    const id = body.task?.id || body.id
+    if (!id) throw new Error(`Failed to create task: ${JSON.stringify(body)}`)
+
+    // Walk forward to the desired status
+    if (status === 'todo') return id
+    await req('PATCH', `/tasks/${id}`, {
+      status: 'doing',
+      metadata: { transition: { type: 'claim', reason: 'test' }, eta: '~1h' },
+    })
+    if (status === 'doing') return id
+    if (status === 'blocked') {
+      await req('PATCH', `/tasks/${id}`, {
+        status: 'blocked',
+        metadata: { transition: { type: 'pause', reason: 'test block' } },
+      })
+      return id
+    }
+    if (status === 'validating') {
+      await req('PATCH', `/tasks/${id}`, {
+        status: 'validating',
+        metadata: {
+          artifact_path: 'process/test-statemachine.md',
+          qa_bundle: {
+            lane: 'engineering',
+            summary: 'test',
+            changed_files: ['test.ts'],
+            artifact_links: ['process/test-statemachine.md'],
+            checks: ['test: pass'],
+            screenshot_proof: ['n/a'],
+            review_packet: {
+              task_id: id,
+              repo: 'test',
+              pr_url: 'https://github.com/test/test/pull/1',
+              commit: 'abc123',
+              changed_files: ['test.ts'],
+              artifact_path: 'process/test-statemachine.md',
+              test_proof: 'pass',
+              caveats: 'none',
+            },
+          },
+        },
+      })
+      return id
+    }
+    return id
+  }
+
+  // ── Forward transitions should work ──
+
+  it('allows todo→doing', async () => {
+    const id = await createInStatus('todo')
+    const { status, body } = await req('PATCH', `/tasks/${id}`, {
+      status: 'doing',
+      metadata: { transition: { type: 'claim', reason: 'test' }, eta: '~1h' },
+    })
+    expect(status).toBe(200)
+    expect(body.task.status).toBe('doing')
+  })
+
+  it('allows doing→blocked', async () => {
+    const id = await createInStatus('doing')
+    const { status, body } = await req('PATCH', `/tasks/${id}`, {
+      status: 'blocked',
+      metadata: { transition: { type: 'pause', reason: 'waiting on dep' } },
+    })
+    expect(status).toBe(200)
+    expect(body.task.status).toBe('blocked')
+  })
+
+  it('allows blocked→doing', async () => {
+    const id = await createInStatus('blocked')
+    const { status, body } = await req('PATCH', `/tasks/${id}`, {
+      status: 'doing',
+      metadata: { transition: { type: 'resume', reason: 'unblocked' }, eta: '~1h' },
+    })
+    expect(status).toBe(200)
+    expect(body.task.status).toBe('doing')
+  })
+
+  it('allows validating→doing (reviewer rejection)', async () => {
+    const id = await createInStatus('validating')
+    const { status, body } = await req('PATCH', `/tasks/${id}`, {
+      status: 'doing',
+      metadata: { transition: { type: 'claim', reason: 'reviewer rejected' }, eta: '~1h' },
+    })
+    expect(status).toBe(200)
+    expect(body.task.status).toBe('doing')
+  })
+
+  // ── Backward transitions should be rejected ──
+
+  it('rejects doing→todo without reopen', async () => {
+    const id = await createInStatus('doing')
+    const { status, body } = await req('PATCH', `/tasks/${id}`, {
+      status: 'todo',
+    })
+    expect(status).toBe(422)
+    expect(body.error).toContain('State transition rejected')
+    expect(body.error).toContain('doing→todo')
+    expect(body.code).toBe('STATE_TRANSITION_REJECTED')
+  })
+
+  it('rejects todo→validating (skip doing)', async () => {
+    const id = await createInStatus('todo')
+    const { status, body } = await req('PATCH', `/tasks/${id}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/test.md',
+      },
+    })
+    expect(status).toBe(422)
+    expect(body.error).toContain('State transition rejected')
+    expect(body.error).toContain('todo→validating')
+  })
+
+  it('rejects todo→done (skip everything)', async () => {
+    const id = await createInStatus('todo')
+    const { status, body } = await req('PATCH', `/tasks/${id}`, { status: 'done' })
+    expect(status).toBe(422)
+    expect(body.error).toContain('State transition rejected')
+  })
+
+  // ── Reopen override should work ──
+
+  it('allows doing→todo with explicit reopen', async () => {
+    const id = await createInStatus('doing')
+    const { status, body } = await req('PATCH', `/tasks/${id}`, {
+      status: 'todo',
+      metadata: {
+        reopen: true,
+        reopen_reason: 'Descoped — returning to backlog',
+      },
+    })
+    expect(status).toBe(200)
+    expect(body.task.status).toBe('todo')
+    expect(body.task.metadata.reopened_at).toBeTruthy()
+    expect(body.task.metadata.reopened_from).toBe('doing')
+  })
+
+  it('rejects reopen without reason', async () => {
+    const id = await createInStatus('doing')
+    const { status, body } = await req('PATCH', `/tasks/${id}`, {
+      status: 'todo',
+      metadata: { reopen: true },
+    })
+    expect(status).toBe(422)
+    expect(body.error).toContain('State transition rejected')
+  })
+})
+
 describe('Lane-state transition lock', () => {
   let taskId: string
 
@@ -1775,6 +2013,7 @@ describe('Review State Tracking Metadata', () => {
       eta: '1h',
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'doing')
   })
 
   afterAll(async () => {
@@ -2494,6 +2733,7 @@ describe('Task outcome checkpoint', () => {
       eta: '1h',
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'validating')
 
     await req('PATCH', `/tasks/${taskId}`, {
       status: 'done',
@@ -2545,6 +2785,7 @@ describe('Task review bundle', () => {
     })
 
     taskId = body.task.id
+    await advanceTo(taskId, 'doing')
 
     await req('PATCH', `/tasks/${taskId}`, {
       status: 'validating',
@@ -3157,6 +3398,35 @@ describe('Model performance analytics', () => {
       metadata: { model: 'anthropic/claude-sonnet-4-5' },
     })
     expect(doing.task.metadata.model).toBe('anthropic/claude-sonnet-4-5')
+
+    // Advance to validating before done
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/TASK-model-test.md',
+        qa_bundle: validQaBundle({
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+            commit: 'abc1234',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-model-test.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+          commit_sha: 'abc1234',
+          changed_files: ['src/server.ts'],
+          artifact_path: 'process/TASK-model-test.md',
+          test_proof: 'test',
+          known_caveats: 'none',
+          caveats: 'none',
+        },
+      },
+    })
 
     // Model should persist through to done
     const { body: done } = await req('PATCH', `/tasks/${taskId}`, {
@@ -3971,6 +4241,7 @@ describe('Reviewer approval identity gate', () => {
       eta: '1h',
     })
     const freshId = created.task.id
+    await advanceTo(freshId, 'validating')
 
     // Try to approve and move to done in one call — wrong actor
     const { status, body } = await req('PATCH', `/tasks/${freshId}`, {
@@ -4082,6 +4353,7 @@ describe('Task close gate: PR merge state', () => {
       eta: '1h',
     })
     taskId = body.task.id
+    await advanceTo(taskId, 'validating')
   })
 
   afterAll(async () => {
