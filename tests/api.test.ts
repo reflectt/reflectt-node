@@ -4414,6 +4414,67 @@ describe('Test harness task filtering on /tasks/next', () => {
     expect(agentRow).toBeDefined()
     expect(agentRow.todo).toBe(1) // only the real task
   })
+
+  it('filters title-only "Test Run <timestamp>" case-insensitively in /tasks and /tasks/search (even if metadata.is_test missing)', async () => {
+    const db = getDb()
+    const ts = Date.now()
+    const agent = `filter-case-agent-${ts}`
+    const id = `task-caseinsens-${ts}`
+    const title = `CASEINSENS-${ts} for Test Run ${ts}`
+
+    // Insert directly into DB to simulate legacy/unmarked harness tasks
+    db.prepare(
+      `INSERT INTO tasks (
+        id, title, description, status, assignee, reviewer, done_criteria,
+        created_by, created_at, updated_at, priority, blocked_by, epic_id,
+        tags, metadata, comment_count
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?
+      )`
+    ).run(
+      id,
+      title,
+      'Inserted directly for filter regression test',
+      'todo',
+      agent,
+      'test-reviewer',
+      JSON.stringify(['n/a']),
+      'test-runner',
+      ts,
+      ts,
+      'P2',
+      JSON.stringify([]),
+      null,
+      JSON.stringify([]),
+      JSON.stringify({}),
+      0
+    )
+
+    // /tasks should exclude it by default
+    const { status: s1, body: b1 } = await req('GET', `/tasks?assignee=${agent}&status=todo`)
+    expect(s1).toBe(200)
+    expect((b1.tasks || []).some((t: any) => t.id === id)).toBe(false)
+
+    // include_test=1 should include it (escape hatch)
+    const { status: s2, body: b2 } = await req('GET', `/tasks?assignee=${agent}&status=todo&include_test=1`)
+    expect(s2).toBe(200)
+    expect((b2.tasks || []).some((t: any) => t.id === id)).toBe(true)
+
+    // /tasks/search should also exclude by default
+    const { status: s3, body: b3 } = await req('GET', `/tasks/search?q=${encodeURIComponent(`CASEINSENS-${ts}`)}`)
+    expect(s3).toBe(200)
+    expect((b3.tasks || []).some((t: any) => t.id === id)).toBe(false)
+
+    // include_test=1 should include in search
+    const { status: s4, body: b4 } = await req('GET', `/tasks/search?q=${encodeURIComponent(`CASEINSENS-${ts}`)}&include_test=1`)
+    expect(s4).toBe(200)
+    expect((b4.tasks || []).some((t: any) => t.id === id)).toBe(true)
+
+    // Cleanup
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
+  })
 })
 
 // ── Shared Workspace Read API (HTTP) ─────────────────────
