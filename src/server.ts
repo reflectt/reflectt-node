@@ -134,6 +134,7 @@ import { createStarterTeam } from './starter-team.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
+import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -9141,6 +9142,87 @@ export async function createServer(): Promise<FastifyInstance> {
         closeGateFail: log.filter(l => l.action === 'close_gate_fail').length,
       },
     }
+  })
+
+  // ── Calendar API ──────────────────────────────────────────────────────────
+
+  // Create a calendar block
+  app.post('/calendar/blocks', async (request, reply) => {
+    try {
+      const body = request.body as CreateBlockInput
+      if (!body || !body.agent || !body.type) {
+        return reply.code(400).send({ error: 'agent and type are required' })
+      }
+      const block = calendarManager.createBlock(body)
+      return reply.code(201).send({ success: true, block })
+    } catch (err: any) {
+      return reply.code(400).send({ error: err.message })
+    }
+  })
+
+  // List calendar blocks (with optional filters)
+  app.get('/calendar/blocks', async (request) => {
+    const query = request.query as Record<string, string>
+    const filters: { agent?: string; type?: BlockType; from?: number; to?: number } = {}
+    if (query.agent) filters.agent = query.agent
+    if (query.type) filters.type = query.type as BlockType
+    if (query.from) filters.from = parseInt(query.from, 10)
+    if (query.to) filters.to = parseInt(query.to, 10)
+    const blocks = calendarManager.listBlocks(filters)
+    return { blocks, total: blocks.length }
+  })
+
+  // Get a single block
+  app.get<{ Params: { id: string } }>('/calendar/blocks/:id', async (request, reply) => {
+    const block = calendarManager.getBlock(request.params.id)
+    if (!block) return reply.code(404).send({ error: 'Block not found' })
+    return { block }
+  })
+
+  // Update a block
+  app.patch<{ Params: { id: string } }>('/calendar/blocks/:id', async (request, reply) => {
+    try {
+      const block = calendarManager.updateBlock(request.params.id, request.body as UpdateBlockInput)
+      if (!block) return reply.code(404).send({ error: 'Block not found' })
+      return { success: true, block }
+    } catch (err: any) {
+      return reply.code(400).send({ error: err.message })
+    }
+  })
+
+  // Delete a block
+  app.delete<{ Params: { id: string } }>('/calendar/blocks/:id', async (request, reply) => {
+    const deleted = calendarManager.deleteBlock(request.params.id)
+    if (!deleted) return reply.code(404).send({ error: 'Block not found' })
+    return { success: true }
+  })
+
+  // Check if an agent is busy
+  app.get('/calendar/busy', async (request) => {
+    const query = request.query as Record<string, string>
+    if (!query.agent) return { error: 'agent query param required' }
+    const availability = calendarManager.getAgentAvailability(query.agent)
+    return {
+      agent: availability.agent,
+      busy: availability.status !== 'free',
+      status: availability.status,
+      current_block: availability.current_block,
+      until: availability.until,
+    }
+  })
+
+  // Team-wide availability snapshot
+  app.get('/calendar/availability', async () => {
+    const team = calendarManager.getTeamAvailability()
+    return { agents: team, timestamp: Date.now() }
+  })
+
+  // Should I ping this agent?
+  app.get('/calendar/should-ping', async (request) => {
+    const query = request.query as Record<string, string>
+    if (!query.agent) return { error: 'agent query param required' }
+    const urgency = (query.urgency || 'normal') as 'low' | 'normal' | 'high'
+    return calendarManager.shouldPing(query.agent, urgency)
   })
 
   return app
