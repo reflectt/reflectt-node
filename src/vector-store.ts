@@ -235,6 +235,75 @@ export async function indexChatMessage(
 }
 
 /**
+ * Index a reflection for semantic search.
+ * Combines pain + evidence + proposed_fix into searchable text.
+ */
+export async function indexReflection(
+  reflectionId: string,
+  pain: string,
+  evidence: string[],
+  proposedFix: string,
+  author?: string,
+  tags?: string[],
+): Promise<void> {
+  const parts = [pain]
+  if (evidence?.length) parts.push(evidence.join('. '))
+  if (proposedFix) parts.push(proposedFix)
+  if (author) parts.push(`author:${author}`)
+  if (tags?.length) parts.push(`tags:${tags.join(',')}`)
+  const text = parts.join(' — ')
+
+  const { embed } = await import('./embeddings.js')
+  const embedding = await embed(text)
+
+  const db = getDb()
+  upsertVector(db, 'reflection', reflectionId, text, embedding)
+}
+
+/**
+ * Index an insight for semantic search.
+ * Combines title + evidence_refs into searchable text.
+ */
+export async function indexInsight(
+  insightId: string,
+  title: string,
+  evidenceRefs: string[],
+  authors?: string[],
+  clusterKey?: string,
+): Promise<void> {
+  const parts = [title]
+  if (evidenceRefs?.length) parts.push(evidenceRefs.join('. '))
+  if (authors?.length) parts.push(`authors:${authors.join(',')}`)
+  if (clusterKey) parts.push(`cluster:${clusterKey}`)
+  const text = parts.join(' — ')
+
+  const { embed } = await import('./embeddings.js')
+  const embedding = await embed(text)
+
+  const db = getDb()
+  upsertVector(db, 'insight', insightId, text, embedding)
+}
+
+/**
+ * Index a shared workspace file for semantic search.
+ * Stores the file path and content snippet.
+ */
+export async function indexSharedFile(
+  filePath: string,
+  content: string,
+): Promise<void> {
+  if (content.trim().length < 10) return
+
+  const text = `[${filePath}] ${content}`
+
+  const { embed } = await import('./embeddings.js')
+  const embedding = await embed(text)
+
+  const db = getDb()
+  upsertVector(db, 'shared_file', filePath, text, embedding)
+}
+
+/**
  * Semantic search across all indexed content.
  */
 export async function semanticSearch(
