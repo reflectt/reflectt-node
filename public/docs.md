@@ -202,6 +202,7 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 | GET | `/ws/stats` | WebSocket heartbeat stats (connections, ping/pong health, cleanup stats) |
 | POST | `/chat/messages` | Post message. Body: `from` (required), `content` (required), `channel`, `replyTo` |
 | GET | `/chat/messages` | Message history. Query: `channel`, `limit`, `before`, `after` |
+| GET | `/chat/context/:agent` | Compact, deduplicated chat context for agent injection. Prioritizes mentions, deduplicates system alerts, slim format. Query: `limit` (default 30), `channel`, `since` (epoch ms, default 4h). |
 | PATCH | `/chat/messages/:id` | Edit message (author-only). Body: `from`, `content` |
 | DELETE | `/chat/messages/:id` | Delete message (author-only). Body: `from` |
 | POST | `/chat/messages/:id/react` | React to message. Body: `emoji`, `agent`, `remove` |
