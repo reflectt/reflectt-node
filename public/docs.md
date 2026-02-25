@@ -290,6 +290,11 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | GET | `/knowledge/docs/:id` | Get single document. |
 | PATCH | `/knowledge/docs/:id` | Update document (re-indexes in vector store). |
 | DELETE | `/knowledge/docs/:id` | Delete document + vector entry. |
+| POST | `/contacts` | Create a contact. Body: `name` (required); optional: `org`, `emails[]`, `handles{}` (discord/github/twitter), `tags[]`, `notes`, `source`, `owner`, `last_contact` (epoch ms), `related_task_ids[]`. Auto-indexed for knowledge search. |
+| GET | `/contacts` | List contacts. Query: `name`, `org`, `tag`, `owner`, `q` (text search across name/org/notes/emails), `limit`, `offset`. |
+| GET | `/contacts/:id` | Get a single contact by ID. |
+| PATCH | `/contacts/:id` | Update a contact. Body: any field from create. Re-indexes on update. |
+| DELETE | `/contacts/:id` | Delete a contact. Removes from vector index. |
 
 ## Experiments
 
