@@ -138,6 +138,7 @@ import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBloc
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
+import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CATEGORIES, type CreateDocInput, type UpdateDocInput, type DocCategory } from './knowledge-docs.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -3150,6 +3151,7 @@ export async function createServer(): Promise<FastifyInstance> {
           reflections: vectorCount(db, 'reflection'),
           insights: vectorCount(db, 'insight'),
           shared_files: vectorCount(db, 'shared_file'),
+          knowledge_docs: vectorCount(db, 'knowledge_doc'),
         },
       }
     } catch (err: any) {
@@ -3252,6 +3254,7 @@ export async function createServer(): Promise<FastifyInstance> {
           : r.sourceType === 'reflection' ? `/reflections/${r.sourceId}`
           : r.sourceType === 'insight' ? `/insights/${r.sourceId}`
           : r.sourceType === 'shared_file' ? `/shared/read?path=${encodeURIComponent(r.sourceId)}`
+          : r.sourceType === 'knowledge_doc' ? `/knowledge/docs/${r.sourceId}`
           : r.sourceType === 'chat' ? `/chat/search?q=${encodeURIComponent(q)}`
           : null,
       }))
@@ -3284,6 +3287,7 @@ export async function createServer(): Promise<FastifyInstance> {
           reflections: vectorCount(db, 'reflection'),
           insights: vectorCount(db, 'insight'),
           shared_files: vectorCount(db, 'shared_file'),
+          knowledge_docs: vectorCount(db, 'knowledge_doc'),
         },
       }
     } catch (err: any) {
@@ -3335,6 +3339,79 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.code(500)
       return { error: err?.message || 'Reindex failed', code: 'REINDEX_ERROR' }
     }
+  })
+
+  // ── Knowledge Docs CRUD ──────────────────────────────────────────────────
+
+  app.post('/knowledge/docs', async (request, reply) => {
+    try {
+      const body = request.body as CreateDocInput
+      const doc = createDoc(body)
+
+      // Auto-index in vector store
+      import('./vector-store.js')
+        .then(({ indexKnowledgeDoc }) =>
+          indexKnowledgeDoc(doc.id, doc.title, doc.content, doc.category, doc.tags)
+        )
+        .catch(() => { /* vector search may not be available */ })
+
+      reply.code(201)
+      return { success: true, doc }
+    } catch (err: any) {
+      reply.code(400)
+      return { error: err.message }
+    }
+  })
+
+  app.get('/knowledge/docs', async (request) => {
+    const query = request.query as Record<string, string>
+    const filters: Parameters<typeof listDocs>[0] = {}
+    if (query.tag) filters.tag = query.tag
+    if (query.category) filters.category = query.category as DocCategory
+    if (query.author) filters.author = query.author
+    if (query.search) filters.search = query.search
+    if (query.limit) filters.limit = parseInt(query.limit, 10)
+
+    const docs = listDocs(filters)
+    return { docs, count: docs.length }
+  })
+
+  app.get<{ Params: { id: string } }>('/knowledge/docs/:id', async (request, reply) => {
+    const doc = getDoc(request.params.id)
+    if (!doc) return reply.code(404).send({ error: 'Document not found' })
+    return { doc }
+  })
+
+  app.patch<{ Params: { id: string } }>('/knowledge/docs/:id', async (request, reply) => {
+    try {
+      const doc = updateDoc(request.params.id, request.body as UpdateDocInput)
+      if (!doc) return reply.code(404).send({ error: 'Document not found' })
+
+      // Re-index in vector store
+      import('./vector-store.js')
+        .then(({ indexKnowledgeDoc }) =>
+          indexKnowledgeDoc(doc.id, doc.title, doc.content, doc.category, doc.tags)
+        )
+        .catch(() => { /* vector search may not be available */ })
+
+      return { success: true, doc }
+    } catch (err: any) {
+      reply.code(400)
+      return { error: err.message }
+    }
+  })
+
+  app.delete<{ Params: { id: string } }>('/knowledge/docs/:id', async (request, reply) => {
+    // Remove from vector store
+    Promise.all([import('./vector-store.js'), import('./db.js')])
+      .then(([{ deleteVector }, { getDb: getDatabase }]) => {
+        deleteVector(getDatabase(), 'knowledge_doc', request.params.id)
+      })
+      .catch(() => { /* vector search may not be available */ })
+
+    const deleted = deleteDoc(request.params.id)
+    if (!deleted) return reply.code(404).send({ error: 'Document not found' })
+    return { success: true }
   })
 
   // List recurring task definitions
