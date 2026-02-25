@@ -61,6 +61,7 @@ export interface CreateEventInput {
   categories?: string[]
   reminders?: Reminder[]
   status?: EventStatus
+  uid?: string  // Optional: use specific UID (for iCal imports)
 }
 
 export interface UpdateEventInput {
@@ -413,7 +414,7 @@ export function createEvent(input: CreateEventInput): CalendarEvent {
   const db = getDb()
   const now = Date.now()
   const id = generateId()
-  const uid = generateUid()
+  const uid = input.uid || generateUid()
 
   const attendees = (input.attendees || []).map(a => ({
     ...a,

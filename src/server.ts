@@ -136,6 +136,8 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
+import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
+import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -1803,6 +1805,9 @@ export async function createServer(): Promise<FastifyInstance> {
   // Shipped-artifact auto-heartbeat → #general on validating/done with artifact_path
   startShippedHeartbeat()
 
+  // Calendar reminder engine — polls for pending reminders every 30s
+  startReminderEngine()
+
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
     clearInterval(cadenceWatchdogTimer)
@@ -1811,6 +1816,7 @@ export async function createServer(): Promise<FastifyInstance> {
     stopInsightTaskBridge()
     stopShippedHeartbeat()
     stopTeamPulse()
+    stopReminderEngine()
     wsHeartbeat.stop()
   })
 
@@ -7503,7 +7509,33 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
     
-    return { presences: Array.from(presenceMap.values()) }
+    // Enrich with calendar context
+    const enriched = Array.from(presenceMap.values()).map(p => {
+      const calAvailability = calendarManager.getAgentAvailability(p.agent)
+      const currentEvent = calendarEvents.getAgentCurrentEvent(p.agent)
+      const nextEvent = calendarEvents.getAgentNextEvent(p.agent)
+      return {
+        ...p,
+        calendar: {
+          status: calAvailability.status,
+          current_block: calAvailability.current_block ? {
+            type: calAvailability.current_block.type,
+            title: calAvailability.current_block.title,
+            until: calAvailability.until,
+          } : null,
+          current_event: currentEvent ? {
+            summary: currentEvent.summary,
+            until: currentEvent.dtend,
+          } : null,
+          next_event: nextEvent ? {
+            summary: nextEvent.event.summary,
+            starts_at: nextEvent.starts_at,
+          } : null,
+        },
+      }
+    })
+
+    return { presences: enriched }
   })
 
   // Get specific agent presence
@@ -9228,12 +9260,128 @@ export async function createServer(): Promise<FastifyInstance> {
     return { agents: team, timestamp: Date.now() }
   })
 
-  // Should I ping this agent?
+  // Should I ping this agent? (checks both blocks AND events)
   app.get('/calendar/should-ping', async (request) => {
     const query = request.query as Record<string, string>
     if (!query.agent) return { error: 'agent query param required' }
     const urgency = (query.urgency || 'normal') as 'low' | 'normal' | 'high'
-    return calendarManager.shouldPing(query.agent, urgency)
+
+    // Check blocks first
+    const blockDecision = calendarManager.shouldPing(query.agent, urgency)
+    if (!blockDecision.should_ping) return blockDecision
+
+    // If blocks say OK, also check events (meetings = busy)
+    const currentEvent = calendarEvents.getAgentCurrentEvent(query.agent)
+    if (currentEvent && urgency !== 'high') {
+      const isFocus = currentEvent.categories?.includes('focus')
+      if (isFocus || urgency === 'low') {
+        return {
+          should_ping: false,
+          reason: `Agent in event: "${currentEvent.summary}"`,
+          delay_until: currentEvent.dtend,
+          current_block: null,
+          current_event: currentEvent,
+        }
+      }
+    }
+
+    return { ...blockDecision, current_event: currentEvent }
+  })
+
+  // When is agent next free? (checks blocks + events)
+  app.get('/calendar/next-free', async (request) => {
+    const query = request.query as Record<string, string>
+    if (!query.agent) return { error: 'agent query param required' }
+
+    const blockAvailability = calendarManager.getAgentAvailability(query.agent)
+    const currentEvent = calendarEvents.getAgentCurrentEvent(query.agent)
+
+    // If free now, return immediately
+    if (blockAvailability.status === 'free' && !currentEvent) {
+      return { agent: query.agent, free_now: true, free_at: Date.now() }
+    }
+
+    // Find when the current block/event ends
+    const blockEnds = blockAvailability.until || 0
+    const eventEnds = currentEvent ? currentEvent.dtend : 0
+    const freeAt = Math.max(blockEnds, eventEnds)
+
+    return {
+      agent: query.agent,
+      free_now: false,
+      free_at: freeAt || null,
+      reason: currentEvent
+        ? `In event: "${currentEvent.summary}"`
+        : `Calendar block: "${blockAvailability.current_block?.title || blockAvailability.status}"`,
+    }
+  })
+
+  // Reminder engine stats
+  app.get('/calendar/reminders/stats', async () => {
+    return getReminderEngineStats()
+  })
+
+  // ── iCal Import/Export ───────────────────────────────────────────────────
+
+  // Export all events as .ics
+  app.get('/calendar/export.ics', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const filters: Parameters<typeof calendarEvents.listEvents>[0] = {}
+    if (query.organizer) filters.organizer = query.organizer
+    if (query.attendee) filters.attendee = query.attendee
+    if (query.from) filters.from = parseInt(query.from, 10)
+    if (query.to) filters.to = parseInt(query.to, 10)
+
+    const events = calendarEvents.listEvents(filters)
+    const ics = exportICS(events)
+
+    return reply
+      .header('Content-Type', 'text/calendar; charset=utf-8')
+      .header('Content-Disposition', 'attachment; filename="reflectt-calendar.ics"')
+      .send(ics)
+  })
+
+  // Export single event as .ics
+  app.get<{ Params: { id: string } }>('/calendar/events/:id/export.ics', async (request, reply) => {
+    const event = calendarEvents.getEvent(request.params.id)
+    if (!event) return reply.code(404).send({ error: 'Event not found' })
+
+    const ics = exportEventICS(event)
+    return reply
+      .header('Content-Type', 'text/calendar; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="event-${event.id}.ics"`)
+      .send(ics)
+  })
+
+  // Import events from .ics content
+  app.post('/calendar/import', async (request, reply) => {
+    const body = request.body as { ics?: string; organizer?: string } | string
+    let icsContent: string
+    let organizer = 'imported'
+
+    if (typeof body === 'string') {
+      icsContent = body
+    } else if (body && typeof body === 'object' && 'ics' in body) {
+      icsContent = body.ics || ''
+      organizer = body.organizer || 'imported'
+    } else {
+      return reply.code(400).send({ error: 'Request body must be .ics content (string) or { ics: string, organizer?: string }' })
+    }
+
+    if (!icsContent.includes('BEGIN:VCALENDAR') && !icsContent.includes('BEGIN:VEVENT')) {
+      return reply.code(400).send({ error: 'Invalid .ics content — must contain BEGIN:VCALENDAR or BEGIN:VEVENT' })
+    }
+
+    try {
+      const imported = importICS(icsContent, organizer)
+      return reply.code(201).send({
+        success: true,
+        imported: imported.length,
+        events: imported,
+      })
+    } catch (err: any) {
+      return reply.code(400).send({ error: err.message })
+    }
   })
 
   // ── Calendar Events API ────────────────────────────────────────────────
