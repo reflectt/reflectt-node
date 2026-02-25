@@ -42,6 +42,13 @@ export interface AssignmentDecision {
   insightAuthors: string[]
 }
 
+/** Failure families that represent feature requests rather than bugs.
+ *  These skip P0 auto-create and route to triage instead. */
+export const FEATURE_FAMILIES: ReadonlySet<string> = new Set([
+  'autonomy', 'revenue-focus', 'monetization', 'product-is-process',
+  'focus-correction', 'autonomy-contract', 'burn-rate',
+])
+
 export interface BridgeConfig {
   enabled: boolean
   autoCreateSeverities: string[]
@@ -49,12 +56,16 @@ export interface BridgeConfig {
   defaultEtaDays: number
   assignableAgents: string[]
   ownershipGuardrail: OwnershipGuardrailConfig
+  /** Families treated as features (route to triage, never auto-P0). Defaults to FEATURE_FAMILIES. */
+  featureFamilies?: ReadonlySet<string>
 }
 
 export interface BridgeStats {
   tasksAutoCreated: number
   insightsTriaged: number
   duplicatesSkipped: number
+  alreadyAddressedSkipped: number
+  featureRoutedToTriage: number
   errors: number
   lastEventAt: number | null
 }
@@ -67,6 +78,8 @@ let stats: BridgeStats = {
   tasksAutoCreated: 0,
   insightsTriaged: 0,
   duplicatesSkipped: 0,
+  alreadyAddressedSkipped: 0,
+  featureRoutedToTriage: 0,
   errors: 0,
   lastEventAt: null,
 }
@@ -141,7 +154,7 @@ function findExistingTaskForInsight(insight: Insight): { id: string; title: stri
   const targetTitle = `[Insight] ${insight.title}`.toLowerCase()
 
   for (const task of allTasks) {
-    // Skip done tasks — they shouldn't block new work
+    // Skip done tasks — they shouldn't block new work on active dedup
     if (task.status === 'done') continue
 
     const meta = (task.metadata || {}) as Record<string, unknown>
@@ -170,8 +183,83 @@ function findExistingTaskForInsight(insight: Insight): { id: string; title: stri
   return null
 }
 
+/**
+ * Check if a done or validating task already addresses this insight's problem.
+ * Prevents re-creating P0 tasks for already-fixed issues.
+ *
+ * Looks at recent done/validating tasks (last 30 days) that share:
+ * 1. Direct insight_id / source_insight match
+ * 2. Same cluster_key via linked insight
+ * 3. Overlapping evidence_refs (at least one shared reference)
+ *
+ * Returns the matching task if found, null otherwise.
+ */
+function findAlreadyAddressedTask(insight: Insight): { id: string; title: string; status: string } | null {
+  const allTasks = taskManager.listTasks({})
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
+
+  for (const task of allTasks) {
+    // Only check done/validating tasks
+    if (task.status !== 'done' && task.status !== 'validating') continue
+
+    // Only consider recent tasks (within 30 days)
+    const updatedAt = (task as any).updatedAt || (task as any).updated_at || 0
+    if (updatedAt < thirtyDaysAgo) continue
+
+    const meta = (task.metadata || {}) as Record<string, unknown>
+
+    // 1. Direct insight_id match — this exact insight already had a task that completed
+    if (meta.insight_id === insight.id || meta.source_insight === insight.id) {
+      return { id: task.id, title: task.title, status: task.status }
+    }
+
+    // 2. Same cluster_key via linked insight (another insight in same cluster was fixed)
+    if (meta.source === 'insight-task-bridge' && typeof meta.insight_id === 'string') {
+      try {
+        const sourceInsight = getInsight(meta.insight_id as string)
+        if (sourceInsight && sourceInsight.cluster_key === insight.cluster_key) {
+          return { id: task.id, title: task.title, status: task.status }
+        }
+      } catch { /* ignore lookup failures */ }
+    }
+
+    // 3. Same cluster_key stored directly in task metadata
+    if (typeof meta.cluster_key === 'string' && meta.cluster_key === insight.cluster_key) {
+      return { id: task.id, title: task.title, status: task.status }
+    }
+  }
+
+  return null
+}
+
+/**
+ * Classify whether an insight's failure_family represents a feature request
+ * rather than a bug/defect. Feature requests should not be auto-promoted to P0.
+ */
+function isFeatureRequest(insight: Insight): boolean {
+  const families = config.featureFamilies ?? FEATURE_FAMILIES
+  return families.has(insight.failure_family)
+}
+
 async function autoCreateTask(insight: Insight): Promise<void> {
   const title = `[Insight] ${insight.title}`
+
+  // Already-addressed check: skip if a done/validating task already covers this problem
+  const addressed = findAlreadyAddressedTask(insight)
+  if (addressed) {
+    stats.alreadyAddressedSkipped++
+    updateInsightStatus(insight.id, 'task_created', addressed.id)
+    console.log(`[InsightTaskBridge] Already addressed: insight ${insight.id} covered by ${addressed.status} task ${addressed.id} ("${addressed.title}")`)
+    return
+  }
+
+  // Feature classification: route feature requests to triage instead of auto-creating P0
+  if (isFeatureRequest(insight)) {
+    stats.featureRoutedToTriage++
+    updateInsightStatus(insight.id, 'pending_triage')
+    console.log(`[InsightTaskBridge] Feature request: insight ${insight.id} (family: ${insight.failure_family}) → pending_triage instead of auto-P0`)
+    return
+  }
 
   // Dedup check: prevent creating duplicate tasks for the same topic
   const existing = findExistingTaskForInsight(insight)
@@ -207,6 +295,8 @@ async function autoCreateTask(insight: Insight): Promise<void> {
         promotion_reason: insight.promotion_readiness,
         severity: insight.severity_max,
         source: 'insight-task-bridge',
+        cluster_key: insight.cluster_key,
+        failure_family: insight.failure_family,
         reflection_count: insight.reflection_ids.length,
         authors: insight.authors,
         assignment_decision: {
@@ -541,11 +631,11 @@ export function getInsightTaskBridgeStats(): BridgeStats {
 }
 
 export function _resetBridgeStats(): void {
-  stats = { tasksAutoCreated: 0, insightsTriaged: 0, duplicatesSkipped: 0, errors: 0, lastEventAt: null }
+  stats = { tasksAutoCreated: 0, insightsTriaged: 0, duplicatesSkipped: 0, alreadyAddressedSkipped: 0, featureRoutedToTriage: 0, errors: 0, lastEventAt: null }
 }
 
 export function getBridgeConfig(): BridgeConfig {
   return { ...config, ownershipGuardrail: { ...config.ownershipGuardrail } }
 }
 
-export { handlePromotedInsight as _handlePromotedInsight }
+export { handlePromotedInsight as _handlePromotedInsight, findAlreadyAddressedTask as _findAlreadyAddressedTask, isFeatureRequest as _isFeatureRequest }
