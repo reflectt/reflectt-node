@@ -285,6 +285,11 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | GET | `/knowledge/search` | Unified knowledge search across all indexed content (tasks, chat, reflections, insights, shared files). Query: `q` (required), `limit`, `type` (optional filter). Returns results with source_type, snippet, similarity score, and deep link. |
 | GET | `/knowledge/stats` | Knowledge index health — availability and counts per source type |
 | POST | `/knowledge/reindex-shared` | Scan and index shared workspace files (process/, specs/, artifacts/, handoffs/, references/) for knowledge search |
+| POST | `/knowledge/docs` | Create a knowledge document. Body: `title`, `content`, `category` (decision\|runbook\|architecture\|lesson\|how-to), `author`; optional: `tags[]`, `related_task_ids[]`, `related_insight_ids[]`. Auto-indexed for search. |
+| GET | `/knowledge/docs` | List knowledge documents. Query: `tag`, `category`, `author`, `q` (text search), `limit`, `offset`. |
+| GET | `/knowledge/docs/:id` | Get a single knowledge document by ID. |
+| PATCH | `/knowledge/docs/:id` | Update a knowledge document. Body: any of `title`, `content`, `category`, `tags[]`, `related_task_ids[]`, `related_insight_ids[]`. Re-indexes on update. |
+| DELETE | `/knowledge/docs/:id` | Delete a knowledge document. Removes from vector index. |
 
 ## Experiments
 

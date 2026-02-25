@@ -127,6 +127,7 @@ import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from '.
 import { listLineage, getLineage, lineageStats } from './lineage.js'
 import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
 import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats } from './shipped-heartbeat.js'
+import { initKnowledgeDocsTable, createKnowledgeDoc, getKnowledgeDoc, updateKnowledgeDoc, deleteKnowledgeDoc, listKnowledgeDocs, countKnowledgeDocs, KNOWLEDGE_CATEGORIES, type CreateKnowledgeDocInput, type UpdateKnowledgeDocInput } from './knowledge-docs.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
@@ -1668,6 +1669,13 @@ export async function createServer(): Promise<FastifyInstance> {
     vault,
   })
   console.log(`[GitHubIdentity] mode=${githubIdentityProvider.getMode()}`)
+
+  // Initialize knowledge docs table
+  try {
+    initKnowledgeDocsTable()
+  } catch (err) {
+    console.error('[KnowledgeDocs] Table init failed:', (err as Error).message)
+  }
 
   // Initialize telemetry (opt-in via REFLECTT_TELEMETRY=true)
   initTelemetry({
@@ -3335,6 +3343,120 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.code(500)
       return { error: err?.message || 'Reindex failed', code: 'REINDEX_ERROR' }
     }
+  })
+
+  // ── Knowledge Docs CRUD ──────────────────────────────────────────────
+
+  app.post('/knowledge/docs', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const title = (body.title as string || '').trim()
+    const content = (body.content as string || '').trim()
+    const category = (body.category as string || '').trim()
+    const author = (body.author as string || '').trim()
+
+    if (!title || !content || !category || !author) {
+      reply.code(400)
+      return { error: 'Required: title, content, category, author', code: 'BAD_REQUEST' }
+    }
+    if (!KNOWLEDGE_CATEGORIES.includes(category as any)) {
+      reply.code(400)
+      return { error: `Invalid category. Must be one of: ${KNOWLEDGE_CATEGORIES.join(', ')}`, code: 'BAD_REQUEST' }
+    }
+
+    const doc = createKnowledgeDoc({
+      title,
+      content,
+      category: category as any,
+      author,
+      tags: Array.isArray(body.tags) ? body.tags.filter((t: unknown) => typeof t === 'string') : [],
+      related_task_ids: Array.isArray(body.related_task_ids) ? body.related_task_ids : [],
+      related_insight_ids: Array.isArray(body.related_insight_ids) ? body.related_insight_ids : [],
+    })
+
+    // Fire-and-forget: index for knowledge search
+    import('./vector-store.js')
+      .then(({ indexSharedFile }) => indexSharedFile(
+        `knowledge/${doc.id}`,
+        `[${doc.category}] ${doc.title} — ${doc.content.slice(0, 3000)}`
+      ))
+      .catch(() => {})
+
+    reply.code(201)
+    return { success: true, doc }
+  })
+
+  app.get('/knowledge/docs', async (request) => {
+    const query = request.query as Record<string, string>
+    const { docs, total } = listKnowledgeDocs({
+      tag: query.tag,
+      category: query.category as any,
+      author: query.author,
+      q: query.q,
+      limit: Math.min(parseInt(query.limit || '50', 10) || 50, 200),
+      offset: parseInt(query.offset || '0', 10) || 0,
+    })
+    return { docs, total, count: docs.length }
+  })
+
+  app.get<{ Params: { id: string } }>('/knowledge/docs/:id', async (request, reply) => {
+    const doc = getKnowledgeDoc(request.params.id)
+    if (!doc) {
+      reply.code(404)
+      return { error: 'Knowledge doc not found', code: 'NOT_FOUND' }
+    }
+    return { doc }
+  })
+
+  app.patch<{ Params: { id: string } }>('/knowledge/docs/:id', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const input: UpdateKnowledgeDocInput = {}
+
+    if (typeof body.title === 'string') input.title = body.title.trim()
+    if (typeof body.content === 'string') input.content = body.content.trim()
+    if (Array.isArray(body.tags)) input.tags = body.tags.filter((t: unknown) => typeof t === 'string')
+    if (typeof body.category === 'string') {
+      if (!KNOWLEDGE_CATEGORIES.includes(body.category as any)) {
+        reply.code(400)
+        return { error: `Invalid category. Must be one of: ${KNOWLEDGE_CATEGORIES.join(', ')}`, code: 'BAD_REQUEST' }
+      }
+      input.category = body.category as any
+    }
+    if (Array.isArray(body.related_task_ids)) input.related_task_ids = body.related_task_ids
+    if (Array.isArray(body.related_insight_ids)) input.related_insight_ids = body.related_insight_ids
+
+    const doc = updateKnowledgeDoc(request.params.id, input)
+    if (!doc) {
+      reply.code(404)
+      return { error: 'Knowledge doc not found', code: 'NOT_FOUND' }
+    }
+
+    // Re-index
+    import('./vector-store.js')
+      .then(({ indexSharedFile }) => indexSharedFile(
+        `knowledge/${doc.id}`,
+        `[${doc.category}] ${doc.title} — ${doc.content.slice(0, 3000)}`
+      ))
+      .catch(() => {})
+
+    return { success: true, doc }
+  })
+
+  app.delete<{ Params: { id: string } }>('/knowledge/docs/:id', async (request, reply) => {
+    const deleted = deleteKnowledgeDoc(request.params.id)
+    if (!deleted) {
+      reply.code(404)
+      return { error: 'Knowledge doc not found', code: 'NOT_FOUND' }
+    }
+
+    // Remove from vector index
+    import('./vector-store.js')
+      .then(async (vs) => {
+        const { getDb } = await import('./db.js')
+        vs.deleteVector(getDb(), 'shared_file', `knowledge/${request.params.id}`)
+      })
+      .catch(() => {})
+
+    return { success: true, deleted: true }
   })
 
   // List recurring task definitions
@@ -5707,6 +5829,19 @@ export async function createServer(): Promise<FastifyInstance> {
           const { onTaskDone } = await import('./reflection-automation.js')
           onTaskDone(task)
         } catch { /* reflection automation may not be loaded */ }
+      }
+
+      // Auto-index task artifacts into knowledge base on completion
+      if (parsed.status === 'done' && existing.status !== 'done') {
+        import('./vector-store.js')
+          .then(({ indexTask: idxTask }) => {
+            // Re-index with full context (title + description + done criteria + QA summary)
+            const meta = (task.metadata || {}) as Record<string, unknown>
+            const qaSummary = ((meta.qa_bundle as Record<string, unknown>)?.summary as string) || ''
+            const desc = (task as any).description || ''
+            idxTask(task.id, task.title, `${desc} ${qaSummary}`.trim(), task.done_criteria)
+          })
+          .catch(() => {})
       }
 
       // Route status-change notifications through agent preferences
