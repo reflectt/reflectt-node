@@ -1,9 +1,10 @@
 // Integration tests for GET /tasks/:id/artifacts and GET /tasks/heartbeat-status endpoints
-// Auto-skipped when server is unavailable (e.g., CI environment)
-import { describe, it, expect, beforeAll } from 'vitest'
+// These tests hit the LIVE server — created tasks are cleaned up in afterAll
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 
 const BASE = 'http://127.0.0.1:4445'
 let serverUp = false
+const createdTaskIds: string[] = []
 
 beforeAll(async () => {
   try {
@@ -14,12 +15,21 @@ beforeAll(async () => {
   }
 })
 
+afterAll(async () => {
+  for (const id of createdTaskIds) {
+    try {
+      await fetch(`${BASE}/tasks/${id}`, { method: 'DELETE' })
+    } catch { /* best-effort */ }
+  }
+})
+
 // Helper: create a task with artifacts metadata, return ID
 async function createTestTask(overrides: Record<string, any> = {}) {
   const ts = Date.now()
   const meta = {
     source_reflection: 'ref-test-artifact-vis',
     source_insight: 'ins-test-artifact-vis',
+    is_test: true,
     ...(overrides.metadata || {}),
   }
   const body = {
@@ -43,7 +53,9 @@ async function createTestTask(overrides: Record<string, any> = {}) {
   if (!data.success) {
     throw new Error(`Task creation failed: ${data.error} — ${data.hint || ''}`)
   }
-  return data.task?.id || data.id
+  const id = data.task?.id || data.id
+  if (id) createdTaskIds.push(id)
+  return id
 }
 
 // Helper: add comment to task
@@ -74,6 +86,7 @@ describe('GET /tasks/:id/artifacts', () => {
       metadata: {
         source_reflection: 'ref-test',
         source_insight: 'ins-test',
+        is_test: true,
         artifact_path: 'process/test-artifact.md',
       },
     })
@@ -92,6 +105,7 @@ describe('GET /tasks/:id/artifacts', () => {
       metadata: {
         source_reflection: 'ref-test',
         source_insight: 'ins-test',
+        is_test: true,
         artifacts: ['https://github.com/reflectt/reflectt-node/pull/246'],
       },
     })
