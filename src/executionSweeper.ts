@@ -274,11 +274,13 @@ export function sweepValidatingQueue(): SweepResult {
   }
 
   // Clean up escalation tracking for tasks no longer validating
-  for (const [taskId] of escalated) {
-    const lookup = taskManager.resolveTaskId(taskId)
-    if (!lookup.task || lookup.task.status !== 'validating') {
-      escalated.delete(taskId)
-      logDryRun('escalation_cleared', `${taskId} — no longer validating`)
+  for (const [key] of escalated) {
+    // drift: prefix holds the real task ID — strip before resolving
+    const realTaskId = key.startsWith("drift:") ? key.slice(6) : key
+    const lookup = taskManager.resolveTaskId(realTaskId)
+    if (!lookup.task || lookup.task.status !== "validating") {
+      escalated.delete(key)
+      logDryRun("escalation_cleared", `${key} — no longer validating`)
     }
   }
 
