@@ -128,32 +128,50 @@ async function handlePromotedInsight(event: Event): Promise<void> {
 }
 
 /**
- * Check if a non-done task already exists for this insight's cluster/topic.
- * Prevents duplicate tasks when multiple insights about the same topic get promoted.
+ * Check if a task already covers this insight's cluster/topic.
+ * Checks ALL tasks including done/validating — already-addressed problems
+ * should not spawn new P0 tasks.
  *
  * Match criteria (ordered by specificity):
  * 1. Direct insight_id match (exact)
  * 2. Exact title match (case-insensitive)
  * 3. Same cluster_key via insight-bridge source (same stage::family::unit)
+ *
+ * Returns match with status so callers can decide (done = already addressed,
+ * active = in progress, null = no coverage).
  */
-function findExistingTaskForInsight(insight: Insight): { id: string; title: string } | null {
+interface ExistingTaskMatch {
+  id: string
+  title: string
+  status: string
+  alreadyAddressed: boolean  // true if done or validating
+}
+
+function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch | null {
   const allTasks = taskManager.listTasks({})
   const targetTitle = `[Insight] ${insight.title}`.toLowerCase()
 
   for (const task of allTasks) {
-    // Skip done tasks — they shouldn't block new work
-    if (task.status === 'done') continue
-
     const meta = (task.metadata || {}) as Record<string, unknown>
 
     // 1. Direct insight_id match
     if (meta.insight_id === insight.id || meta.source_insight === insight.id) {
-      return { id: task.id, title: task.title }
+      return {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        alreadyAddressed: task.status === 'done' || task.status === 'validating',
+      }
     }
 
     // 2. Exact title match (case-insensitive) for insight-bridge tasks
     if (meta.source === 'insight-task-bridge' && task.title.toLowerCase() === targetTitle) {
-      return { id: task.id, title: task.title }
+      return {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        alreadyAddressed: task.status === 'done' || task.status === 'validating',
+      }
     }
 
     // 3. Same full cluster_key (stage::family::unit) via insight-bridge source
@@ -161,7 +179,12 @@ function findExistingTaskForInsight(insight: Insight): { id: string; title: stri
       try {
         const sourceInsight = getInsight(meta.insight_id as string)
         if (sourceInsight && sourceInsight.cluster_key === insight.cluster_key) {
-          return { id: task.id, title: task.title }
+          return {
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            alreadyAddressed: task.status === 'done' || task.status === 'validating',
+          }
         }
       } catch { /* ignore lookup failures */ }
     }
@@ -170,16 +193,65 @@ function findExistingTaskForInsight(insight: Insight): { id: string; title: stri
   return null
 }
 
+// ── Feature Detection ──
+
+/**
+ * Heuristic: classify whether an insight is a feature request vs a bug/problem.
+ * Feature requests should NOT be auto-promoted to P0.
+ *
+ * Signals:
+ * - cluster_key workflow_stage contains "feature", "enhancement", "request"
+ * - title contains feature-request language
+ * - No severity or low severity (features aren't "critical")
+ */
+const FEATURE_PATTERNS = [
+  /\bfeature\b/i,
+  /\benhancement\b/i,
+  /\brequest\b/i,
+  /\badd support\b/i,
+  /\bwould be nice\b/i,
+  /\bwish list\b/i,
+  /\bnew capability\b/i,
+  /\bplease add\b/i,
+]
+
+export function isFeatureRequest(insight: Insight): boolean {
+  const title = insight.title || ''
+  const cluster = insight.cluster_key || ''
+
+  // Check title and cluster key against feature patterns
+  for (const pattern of FEATURE_PATTERNS) {
+    if (pattern.test(title) || pattern.test(cluster)) return true
+  }
+
+  // No severity or low severity + no "bug/error/crash/broken" in title = likely feature
+  const bugPatterns = /\bbug\b|\berror\b|\bcrash\b|\bbroken\b|\bfail\b|\bfix\b|\bregress/i
+  if (!insight.severity_max || insight.severity_max === 'low') {
+    if (!bugPatterns.test(title)) return true
+  }
+
+  return false
+}
+
 async function autoCreateTask(insight: Insight): Promise<void> {
   const title = `[Insight] ${insight.title}`
 
-  // Dedup check: prevent creating duplicate tasks for the same topic
+  // Feature request gate: don't auto-create P0 tasks for feature requests
+  if (isFeatureRequest(insight)) {
+    updateInsightStatus(insight.id, 'pending_triage')
+    stats.insightsTriaged++
+    console.log(`[InsightTaskBridge] Feature request detected: insight ${insight.id} ("${insight.title}") → pending_triage (not auto-promoted to P0)`)
+    return
+  }
+
+  // Dedup check: prevent creating tasks for already-addressed problems
   const existing = findExistingTaskForInsight(insight)
   if (existing) {
     stats.duplicatesSkipped++
-    // Link this insight to the existing task
+    // Link this insight to the existing task regardless of status
     updateInsightStatus(insight.id, 'task_created', existing.id)
-    console.log(`[InsightTaskBridge] Dedup: insight ${insight.id} linked to existing task ${existing.id} ("${existing.title}")`)
+    const addressedNote = existing.alreadyAddressed ? ` (already ${existing.status})` : ''
+    console.log(`[InsightTaskBridge] Dedup: insight ${insight.id} linked to existing task ${existing.id} ("${existing.title}")${addressedNote}`)
     return
   }
 
