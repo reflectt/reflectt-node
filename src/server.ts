@@ -5467,15 +5467,32 @@ export async function createServer(): Promise<FastifyInstance> {
       const agentTasks = allTasks.filter(t => (t.assignee || '').toLowerCase() === agent.toLowerCase())
       const doing = agentTasks.filter(t => t.status === 'doing').length
       const validating = agentTasks.filter(t => t.status === 'validating').length
-      const todo = agentTasks.filter(t => t.status === 'todo').length
+      const todoTasks = agentTasks.filter(t => t.status === 'todo')
+      const todo = todoTasks.length
       const active = doing + validating
       const outOfLaneCount = flaggedByAgent.get(agent.toLowerCase()) || 0
+
+      // Ready-floor breakdown: unblocked vs blocked
+      const unblockedTodo = todoTasks.filter(t => {
+        const blocked = (t.metadata as Record<string, unknown> | undefined)?.blocked_by
+        if (!blocked) return true
+        const blocker = taskManager.getTask(blocked as string)
+        return !blocker || blocker.status === 'done'
+      })
+      const blockedTodo = todoTasks.filter(t => !unblockedTodo.includes(t))
 
       return {
         agent,
         doing,
         validating,
         todo,
+        todoUnblocked: unblockedTodo.length,
+        todoBlocked: blockedTodo.length,
+        blockedTasks: blockedTodo.slice(0, 5).map(t => ({
+          id: t.id,
+          title: (t.title || '').slice(0, 60),
+          blockedBy: (t.metadata as Record<string, unknown> | undefined)?.blocked_by || null,
+        })),
         active,
         outOfLaneCount,
         needsWork: active === 0 && todo === 0,

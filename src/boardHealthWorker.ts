@@ -472,7 +472,23 @@ export class BoardHealthWorker {
       // Ready-queue floor warning
       if (readyCount < rqf.minReady && now - lastAlert > cooldownMs) {
         const deficit = rqf.minReady - readyCount
-        const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.`
+
+        // Build breakdown: show blocked tasks and why
+        const blockedTasks = todoTasks.filter(t => !unblockedTodo.includes(t))
+        let breakdown = ''
+        if (todoTasks.length > readyCount) {
+          breakdown += `\n  📊 todo=${todoTasks.length}, unblocked=${readyCount}, blocked=${blockedTasks.length}`
+          const capped = blockedTasks.slice(0, 5)
+          for (const bt of capped) {
+            const blockedBy = bt.metadata?.blocked_by || 'unknown'
+            breakdown += `\n  • ${bt.id} (${(bt.title || '').slice(0, 50)}) — blocked_by: ${blockedBy}`
+          }
+          if (blockedTasks.length > 5) breakdown += `\n  … and ${blockedTasks.length - 5} more`
+        } else {
+          breakdown += `\n  📊 todo=${todoTasks.length} (all unblocked), doing=${doingTasks.length}`
+        }
+
+        const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}`
 
         if (!dryRun) {
           try {
