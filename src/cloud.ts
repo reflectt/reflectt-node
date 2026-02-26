@@ -77,6 +77,23 @@ const DEFAULT_CHAT_SYNC_MS = 5_000
 const DEFAULT_CHAT_SYNC_MIN_INTERVAL_MS = 1_500
 const DEFAULT_CHAT_SYNC_MAX_BACKOFF_MS = 30_000
 
+// Adaptive sync: idle detection + interval scaling
+const IDLE_THRESHOLD_MS = 2 * 60_000 // 2 min without activity → idle mode
+const IDLE_SYNC_MS = 60_000           // Slow sync when idle (60s)
+const ACTIVE_CANVAS_SYNC_MS = 5_000   // Fast canvas sync when active
+const ACTIVE_USAGE_SYNC_MS = 15_000   // Fast usage sync when active
+let lastActivityAt = Date.now()
+
+/** Mark recent activity (call from event handlers) */
+export function markCloudActivity(): void {
+  lastActivityAt = Date.now()
+}
+
+/** Check if the system is idle */
+function isIdle(): boolean {
+  return Date.now() - lastActivityAt > IDLE_THRESHOLD_MS
+}
+
 let config: CloudConfig | null = null
 let state: CloudState = {
   hostId: null,
@@ -240,38 +257,55 @@ export async function startCloudIntegration(): Promise<void> {
     syncTasks().catch(() => {})
   }, config.taskSyncIntervalMs)
 
-  // Chat sync for remote chat relay — event-driven with polling fallback
-  const chatSyncMs = Number(process.env.REFLECTT_CHAT_SYNC_MS) || DEFAULT_CHAT_SYNC_MS
+  // Chat sync — event-driven with adaptive polling fallback
+  // When active: 5s poll. When idle: 60s poll. Events always trigger immediate sync.
+  const chatSyncActiveMs = Number(process.env.REFLECTT_CHAT_SYNC_MS) || DEFAULT_CHAT_SYNC_MS
+  let lastChatPollAt = 0
   requestChatSync('startup').catch(() => {})
   state.chatSyncTimer = setInterval(() => {
+    const now = Date.now()
+    const interval = isIdle() ? IDLE_SYNC_MS : chatSyncActiveMs
+    if (now - lastChatPollAt < interval) return
+    lastChatPollAt = now
     requestChatSync('interval').catch(() => {})
-  }, chatSyncMs)
+  }, chatSyncActiveMs)
 
   // Event-driven: sync immediately when new messages arrive (debounced 500ms)
   let chatSyncDebounce: ReturnType<typeof setTimeout> | null = null
   chatManager.subscribe(() => {
     if (!state.running) return
+    markCloudActivity() // Mark as active on new chat
     if (chatSyncDebounce) clearTimeout(chatSyncDebounce)
     chatSyncDebounce = setTimeout(() => {
       requestChatSync('event').catch(() => {})
     }, 500)
   })
 
-  // Canvas sync for remote canvas relay
-  const canvasSyncMs = Number(process.env.REFLECTT_CANVAS_SYNC_MS) || 5_000
+  // Canvas sync — adaptive: 5s when active, 60s when idle
+  // Uses a single 5s tick that skips when idle (unless enough time has passed)
+  let lastCanvasSyncAt = 0
   syncCanvas().catch(() => {})
   state.canvasSyncTimer = setInterval(() => {
+    const now = Date.now()
+    const interval = isIdle() ? IDLE_SYNC_MS : ACTIVE_CANVAS_SYNC_MS
+    if (now - lastCanvasSyncAt < interval) return
+    lastCanvasSyncAt = now
     syncCanvas().catch(() => {})
-  }, canvasSyncMs)
+  }, ACTIVE_CANVAS_SYNC_MS)
 
-  // Usage sync for remote cost dashboard
-  const usageSyncMs = Number(process.env.REFLECTT_USAGE_SYNC_MS) || 15_000
+  // Usage sync — adaptive: 15s when active, 60s when idle
+  let lastUsageSyncAt = 0
   syncUsage().catch(() => {})
   state.usageSyncTimer = setInterval(() => {
+    const now = Date.now()
+    const interval = isIdle() ? IDLE_SYNC_MS : ACTIVE_USAGE_SYNC_MS
+    if (now - lastUsageSyncAt < interval) return
+    lastUsageSyncAt = now
     syncUsage().catch(() => {})
-  }, usageSyncMs)
+  }, ACTIVE_USAGE_SYNC_MS)
 
-  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s, chat sync every ${chatSyncMs / 1000}s, canvas sync every ${canvasSyncMs / 1000}s, usage sync every ${usageSyncMs / 1000}s`)
+  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s`)
+  console.log(`   📊 Adaptive sync: chat/canvas/usage ${chatSyncActiveMs / 1000}s active → ${IDLE_SYNC_MS / 1000}s idle (idle after ${IDLE_THRESHOLD_MS / 1000}s)`)
 }
 
 /**
