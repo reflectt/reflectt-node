@@ -93,6 +93,9 @@ const ORPHAN_PR_THRESHOLD_MS = 2 * 60 * 60 * 1000 // 2 hours
 /** Re-escalation cooldown: don't re-alert the same task within this window */
 const ESCALATION_COOLDOWN_MS = 4 * 60 * 60 * 1000 // 4 hours
 
+/** Artifact grace period: validating tasks without artifacts after this are auto-rejected */
+const ARTIFACT_GRACE_MS = 24 * 60 * 60 * 1000 // 24 hours
+
 /**
  * @deprecated Use formatDuration(ms) from format-duration.ts instead.
  * Kept temporarily for reference; all call sites now use formatDuration().
@@ -139,6 +142,7 @@ export interface SweepResult {
   tasksScanned: number
   validatingCount: number
   autoClosedCount?: number
+  artifactRejectedCount?: number
 }
 
 export interface DriftReportEntry {
@@ -258,10 +262,48 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
     }
   }
 
-  // Filter out auto-closed tasks from SLA checks
+  // Filter out auto-closed tasks from further checks
   const remainingValidating = validating.filter(t => !autoClosedIds.has(t.id))
 
+  // ── Artifact grace period: auto-reject tasks missing artifacts after 24h ──
+  const artifactRejectedIds = new Set<string>()
   for (const task of remainingValidating) {
+    const meta = (task.metadata || {}) as Record<string, unknown>
+    const enteredAt = (meta.entered_validating_at as number) || task.updatedAt
+    const ageInValidating = now - enteredAt
+
+    if (ageInValidating >= ARTIFACT_GRACE_MS && !hasRequiredArtifacts(meta)) {
+      try {
+        taskManager.updateTask(task.id, {
+          status: 'todo',
+          metadata: {
+            ...meta,
+            artifact_rejected: true,
+            artifact_rejected_at: now,
+            artifact_reject_reason: 'Missing required artifacts (PR or qa_bundle) after 24h grace period',
+            review_state: undefined,
+            reviewer_approved: undefined,
+          },
+        } as any)
+        artifactRejectedIds.add(task.id)
+        escalated.delete(task.id)
+        logDryRun('artifact_rejected', `${task.id} — no artifacts after ${msToMinutes(ageInValidating)}m in validating`)
+
+        chatManager.sendMessage({
+          from: 'system',
+          channel: 'task-notifications',
+          content: `⚠️ Auto-rejected "${task.title}" (${task.id}) back to todo — missing required artifacts (PR or qa_bundle) after 24h in validating. @${task.assignee || 'unassigned'} please add artifacts and resubmit.`,
+        }).catch(() => {})
+      } catch (err) {
+        logDryRun('artifact_reject_failed', `${task.id} — ${String(err)}`)
+      }
+    }
+  }
+
+  // Filter out artifact-rejected tasks from SLA checks
+  const slaValidating = remainingValidating.filter(t => !artifactRejectedIds.has(t.id))
+
+  for (const task of slaValidating) {
     const meta = (task.metadata || {}) as Record<string, unknown>
 
     // Skip tasks with approved review — they should auto-transition to done
@@ -512,6 +554,7 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
     tasksScanned: totalScanned,
     validatingCount: validating.length,
     autoClosedCount: autoClosedIds.size,
+    artifactRejectedCount: artifactRejectedIds.size,
   }
 
   lastSweepAt = now
@@ -554,6 +597,39 @@ function extractPrUrl(meta: Record<string, unknown>): string | null {
     if (isValidPrUrl(url)) return url
   }
   return null
+}
+
+// ── Artifact Check ─────────────────────────────────────────────────────────
+
+/**
+ * Check if a validating task has required artifacts (PR URL or qa_bundle).
+ * Doc-only and config-only tasks are exempt (they use review_handoff).
+ */
+export function hasRequiredArtifacts(meta: Record<string, unknown>): boolean {
+  // Doc-only / config-only tasks don't need code artifacts
+  const reviewHandoff = meta.review_handoff as Record<string, unknown> | undefined
+  if (reviewHandoff?.doc_only || reviewHandoff?.config_only) return true
+
+  // Reconciled tasks (no code delta) are exempt
+  if (meta.reconciled === true) return true
+
+  // Check for PR URL in any known location
+  if (extractPrUrl(meta)) return true
+
+  // Check for qa_bundle with meaningful evidence (not just review_packet structure)
+  const qaBundle = meta.qa_bundle as Record<string, unknown> | undefined
+  if (qaBundle) {
+    // pr_link in qa_bundle counts as evidence
+    if (qaBundle.pr_link && typeof qaBundle.pr_link === 'string' && isValidPrUrl(qaBundle.pr_link)) return true
+    // test results or deployment evidence count
+    if (qaBundle.test_results || qaBundle.deployment_url) return true
+  }
+
+  // Check artifacts array for any meaningful entry
+  const artifacts = meta.artifacts as string[] | undefined
+  if (artifacts?.some(a => typeof a === 'string' && a.length > 0 && !a.startsWith('duplicate:'))) return true
+
+  return false
 }
 
 // ── Escalation ─────────────────────────────────────────────────────────────
