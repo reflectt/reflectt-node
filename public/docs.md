@@ -127,8 +127,10 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | DELETE | `/tasks/:id` | Delete task |
 | GET | `/tasks/next` | Pull-based assignment. Query: `agent`, `compact` |
 | GET | `/tasks/active` | Get active (doing) task for agent. Query: `agent`, `compact`. Returns null if no doing tasks. |
-| GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md content for agent. Adapts to agent role/lane. Includes version stamp and content hash for change detection. |
-| GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action |
+| GET | `/heartbeat/:agent` | Single compact heartbeat payload (~200 tokens). Returns active task, next task, slim inbox, queue counts, and suggested action. Replaces 3 separate API calls. |
+| GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md content for agent. References best endpoints. Includes version stamp and content hash for change detection. |
+| GET | `/capabilities` | Agent-facing endpoint discovery. Lists all endpoints grouped by purpose, compact support flags, and usage recommendations. |
+| GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action. Supports `compact`. |
 | GET | `/tasks/intake-schema` | Task intake schema discovery — returns required/optional fields and per-type templates |
 | GET | `/tasks/templates/:type` | Get task creation template for a specific type (e.g. `feature`, `bug`, `chore`) |
 | GET | `/tasks/search` | Keyword search across task `title` + `description` (case-insensitive). Query: `q`, optional `limit`, `include_test=1|true` (include test-harness tasks; default excluded). |
