@@ -200,7 +200,13 @@ export async function applyApproval(
   // Double-check guard: don't approve twice
   if (isAlreadyApproved(task)) return task
 
+  // Auto-transition: approved validating → done
+  // This prevents tasks from getting stuck in validating when approval is detected via chat
+  // (as opposed to an explicit POST /tasks/:id/review call).
+  const autoTransition = task.status === 'validating'
+
   const updated = await taskManager.updateTask(signal.taskId, {
+    ...(autoTransition ? { status: 'done' as const } : {}),
     metadata: {
       ...(task.metadata || {}),
       reviewer_approved: true,
@@ -216,6 +222,14 @@ export async function applyApproval(
       actor: signal.reviewer,
       review_state: 'approved',
       review_last_activity_at: now,
+      ...(autoTransition
+        ? {
+            auto_closed: true,
+            auto_closed_at: now,
+            auto_close_reason: 'chat_auto_approval',
+            completed_at: now,
+          }
+        : {}),
     },
   })
 

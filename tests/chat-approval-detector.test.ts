@@ -238,7 +238,7 @@ describe('Chat Approval Detector', () => {
       })
 
       getTaskSpy.mockReturnValue(task)
-      updateTaskSpy.mockResolvedValue({ ...task, metadata: { reviewer_approved: true } })
+      updateTaskSpy.mockResolvedValue({ ...task, status: 'done', metadata: { reviewer_approved: true } })
       addCommentSpy.mockResolvedValue(undefined)
 
       const signal: ApprovalSignal = {
@@ -255,6 +255,7 @@ describe('Chat Approval Detector', () => {
       expect(updateTaskSpy).toHaveBeenCalledWith(
         task.id,
         expect.objectContaining({
+          status: 'done',
           metadata: expect.objectContaining({
             reviewer_approved: true,
             review_state: 'approved',
@@ -273,7 +274,7 @@ describe('Chat Approval Detector', () => {
       })
 
       getTaskSpy.mockReturnValue(task)
-      updateTaskSpy.mockResolvedValue({ ...task, metadata: { reviewer_approved: true } })
+      updateTaskSpy.mockResolvedValue({ ...task, status: 'done', metadata: { reviewer_approved: true } })
       addCommentSpy.mockResolvedValue(undefined)
 
       const signal: ApprovalSignal = {
@@ -340,7 +341,7 @@ describe('Chat Approval Detector', () => {
       })
 
       getTaskSpy.mockReturnValue(task)
-      updateTaskSpy.mockResolvedValue({ ...task, metadata: { reviewer_approved: true } })
+      updateTaskSpy.mockResolvedValue({ ...task, status: 'done', metadata: { reviewer_approved: true } })
       addCommentSpy.mockResolvedValue(undefined)
 
       const signal: ApprovalSignal = {
