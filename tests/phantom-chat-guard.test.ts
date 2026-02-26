@@ -95,4 +95,55 @@ describe('Phantom task-comment chat guard', () => {
     // tcomment- doesn't match task- pattern, so guard doesn't trigger
     expect(res.statusCode).toBe(200)
   })
+
+  it('rejects when ANY tag references a nonexistent task (multi-tag)', async () => {
+    // Create one real task
+    const taskRes = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      payload: {
+        title: 'TEST: phantom guard multi-tag real task',
+        assignee: `phantom-multi-${Date.now()}`,
+        reviewer: 'ryan',
+        priority: 'P2',
+        done_criteria: ['test'],
+        createdBy: 'test',
+        eta: '1h',
+        metadata: { is_test: true, wip_override: true, skip_dedup: true },
+      },
+    })
+    const realTaskId = JSON.parse(taskRes.body).task.id
+    createdIds.push(realTaskId)
+
+    // Message has one valid tag and one phantom tag
+    const res = await app.inject({
+      method: 'POST',
+      url: '/chat/messages',
+      payload: {
+        from: 'link',
+        channel: 'task-comments',
+        content: `[task-comment:${realTaskId}] update and also [task-comment:task-nonexistent-phantom] cross-ref`,
+      },
+    })
+    const body = JSON.parse(res.body)
+    expect(res.statusCode).toBe(422)
+    expect(body.code).toBe('PHANTOM_TASK_COMMENT')
+    // Phantom task ID should be named in the error message
+    expect(body.error).toContain('task-nonexistent-phantom')
+    expect(body.error).not.toContain(realTaskId)
+  })
+
+  it('allows [task-comment:task-...] in non-task-comments channels', async () => {
+    // Quoting a tag in #general should not be blocked (discussion context)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/chat/messages',
+      payload: {
+        from: 'link',
+        channel: 'general',
+        content: 'Saw this phantom: [task-comment:task-nonexistent-999] — we should fix it',
+      },
+    })
+    expect(res.statusCode).toBe(200)
+  })
 })
