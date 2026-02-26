@@ -178,9 +178,13 @@ export async function routeMessage(msg: RoutedMessage): Promise<RoutingResult> {
         msg.content,
       )
       commentId = comment?.id || null
-    } catch {
-      // Task doesn't exist or comment failed — don't emit phantom chat line
-      taskCommentFailed = true
+    } catch (err: any) {
+      // Only suppress chat for missing-task errors (404 / not found)
+      const errMsg = (err?.message || '').toLowerCase()
+      if (errMsg.includes('not found') || errMsg.includes('404') || errMsg.includes('does not exist')) {
+        taskCommentFailed = true
+      }
+      // Other errors (validation, etc.) — still emit chat, just skip comment
     }
   }
 
