@@ -5467,15 +5467,32 @@ export async function createServer(): Promise<FastifyInstance> {
       const agentTasks = allTasks.filter(t => (t.assignee || '').toLowerCase() === agent.toLowerCase())
       const doing = agentTasks.filter(t => t.status === 'doing').length
       const validating = agentTasks.filter(t => t.status === 'validating').length
-      const todo = agentTasks.filter(t => t.status === 'todo').length
+      const todoTasks = agentTasks.filter(t => t.status === 'todo')
+      const todo = todoTasks.length
       const active = doing + validating
       const outOfLaneCount = flaggedByAgent.get(agent.toLowerCase()) || 0
+
+      // Ready-floor predicate: unblocked todo (matching boardHealthWorker logic)
+      const excludedTodos: Array<{ id: string; blockedBy: string; blockerStatus: string }> = []
+      const unblockedTodo = todoTasks.filter(t => {
+        const blocked = (t.metadata as Record<string, unknown>)?.blocked_by
+        if (!blocked) return true
+        const blocker = taskManager.getTask(blocked as string)
+        const blockerOpen = blocker && blocker.status !== 'done'
+        if (blockerOpen) {
+          excludedTodos.push({ id: t.id, blockedBy: String(blocked), blockerStatus: blocker!.status })
+        }
+        return !blockerOpen
+      })
 
       return {
         agent,
         doing,
         validating,
         todo,
+        unblockedTodo: unblockedTodo.length,
+        excludedTodoCount: excludedTodos.length,
+        excludedTodos: excludedTodos.slice(0, 5),
         active,
         outOfLaneCount,
         needsWork: active === 0 && todo === 0,

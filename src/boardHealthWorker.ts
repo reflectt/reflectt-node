@@ -49,6 +49,16 @@ export interface PolicyAction {
   rollbackBy: string | null
 }
 
+export interface AgentReadyFloorBreakdown {
+  agent: string
+  todoCount: number
+  unblockedTodoCount: number
+  doingCount: number
+  excludedCount: number
+  excludedTasks: Array<{ id: string; blockedBy: string }>
+  belowFloor: boolean
+}
+
 export interface BoardHealthDigest {
   timestamp: number
   staleDoingCount: number
@@ -57,6 +67,7 @@ export interface BoardHealthDigest {
   blockedTasks: string[]
   suggestedCloseTasks: string[]
   summary: string
+  readyFloorBreakdown?: AgentReadyFloorBreakdown[]
 }
 
 export interface BoardHealthWorkerConfig {
@@ -454,12 +465,21 @@ export class BoardHealthWorker {
     for (const agent of rqf.agents) {
       // Count unblocked todo tasks for this agent
       const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
+      const excludedTasks: Array<{ id: string; title: string; reason: string }> = []
       const unblockedTodo = todoTasks.filter(t => {
         const blocked = t.metadata?.blocked_by
         if (!blocked) return true
         // Check if blocker is still open
         const blocker = taskManager.getTask(blocked as string)
-        return !blocker || blocker.status === 'done'
+        const blockerOpen = blocker && blocker.status !== 'done'
+        if (blockerOpen) {
+          excludedTasks.push({
+            id: t.id,
+            title: (t.title || '').slice(0, 60),
+            reason: `blocked_by: ${blocked} (${blocker!.status})`,
+          })
+        }
+        return !blockerOpen
       })
 
       const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
@@ -472,7 +492,22 @@ export class BoardHealthWorker {
       // Ready-queue floor warning
       if (readyCount < rqf.minReady && now - lastAlert > cooldownMs) {
         const deficit = rqf.minReady - readyCount
-        const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.`
+        const breakdownLines = [
+          `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more).`,
+          `  todoTotal=${todoTasks.length} unblockedTodo=${readyCount} doing=${doingTasks.length}`,
+        ]
+        if (excludedTasks.length > 0) {
+          const capped = excludedTasks.slice(0, 5)
+          breakdownLines.push(`  Excluded (${excludedTasks.length}):`)
+          for (const ex of capped) {
+            breakdownLines.push(`    - ${ex.id} "${ex.title}" — ${ex.reason}`)
+          }
+          if (excludedTasks.length > 5) {
+            breakdownLines.push(`    ... and ${excludedTasks.length - 5} more`)
+          }
+        }
+        breakdownLines.push(`@sage @pixel — please spec/assign tasks to keep engineering lane fed.`)
+        const msg = breakdownLines.join('\n')
 
         if (!dryRun) {
           try {
@@ -493,7 +528,13 @@ export class BoardHealthWorker {
           taskId: null,
           agent,
           description: `Ready queue below floor: ${readyCount}/${rqf.minReady} for @${agent}`,
-          previousState: { readyCount, doingCount: doingTasks.length },
+          previousState: {
+            todoCount: todoTasks.length,
+            unblockedTodoCount: readyCount,
+            doingCount: doingTasks.length,
+            excludedCount: excludedTasks.length,
+            excludedTasks: excludedTasks.slice(0, 5),
+          },
           appliedAt: now,
           rolledBack: false,
           rolledBackAt: null,
@@ -693,6 +734,55 @@ export class BoardHealthWorker {
       .filter(a => a.kind === 'suggest-close' && a.taskId)
       .map(a => a.taskId!)
 
+    // Per-agent ready-floor breakdown
+    const policy = policyManager.get()
+    const rqf = policy.readyQueueFloor
+    const agentBreakdownLines: string[] = []
+    const readyFloorBreakdown: AgentReadyFloorBreakdown[] = []
+    if (rqf?.enabled) {
+      for (const agent of rqf.agents) {
+        const agentTodo = todoTasks.filter(t => t.assignee === agent)
+        const blockedItems: Array<{ id: string; blockedBy: string }> = []
+        const agentUnblocked = agentTodo.filter(t => {
+          const blocked = t.metadata?.blocked_by
+          if (!blocked) return true
+          const blocker = taskManager.getTask(blocked as string)
+          const blockerOpen = blocker && blocker.status !== 'done'
+          if (blockerOpen) {
+            blockedItems.push({ id: t.id, blockedBy: String(blocked) })
+          }
+          return !blockerOpen
+        })
+        const agentDoing = doingTasks.filter(t => t.assignee === agent)
+        const excluded = agentTodo.length - agentUnblocked.length
+        const belowFloor = agentUnblocked.length < rqf.minReady
+
+        readyFloorBreakdown.push({
+          agent,
+          todoCount: agentTodo.length,
+          unblockedTodoCount: agentUnblocked.length,
+          doingCount: agentDoing.length,
+          excludedCount: excluded,
+          excludedTasks: blockedItems.slice(0, 5),
+          belowFloor,
+        })
+
+        const status = belowFloor ? '⚠️' : '✅'
+        agentBreakdownLines.push(
+          `  ${status} @${agent}: ${agentUnblocked.length}/${rqf.minReady} ready (todo=${agentTodo.length} unblocked=${agentUnblocked.length} doing=${agentDoing.length}${excluded > 0 ? ` excluded=${excluded}` : ''})`,
+        )
+        // Show excluded tasks (capped at 5) when below floor
+        if (excluded > 0 && belowFloor) {
+          for (const bt of blockedItems.slice(0, 5)) {
+            agentBreakdownLines.push(`      - ${bt.id} blocked_by=${bt.blockedBy}`)
+          }
+          if (blockedItems.length > 5) {
+            agentBreakdownLines.push(`      ... +${blockedItems.length - 5} more`)
+          }
+        }
+      }
+    }
+
     const lines = [
       `📊 **Board Health Digest**`,
       ``,
@@ -700,6 +790,11 @@ export class BoardHealthWorker {
       `**Stale doing:** ${staleDoingCount} tasks (>${this.config.staleDoingThresholdMin}m threshold)`,
       `**Abandoned candidates:** ${suggestedCloseCount} tasks (>${Math.floor(this.config.suggestCloseThresholdMin / 60)}h threshold)`,
     ]
+
+    if (agentBreakdownLines.length > 0) {
+      lines.push(``, `**Ready-floor (per agent):**`)
+      lines.push(...agentBreakdownLines)
+    }
 
     if (recentActions.length > 0) {
       lines.push(``, `**Actions this cycle:** ${recentActions.length}`)
@@ -723,6 +818,7 @@ export class BoardHealthWorker {
       blockedTasks: blockedTaskIds,
       suggestedCloseTasks: suggestedCloseTaskIds,
       summary,
+      readyFloorBreakdown: readyFloorBreakdown.length > 0 ? readyFloorBreakdown : undefined,
     }
 
     if (!dryRun) {
