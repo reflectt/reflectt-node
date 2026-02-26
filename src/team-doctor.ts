@@ -3,8 +3,9 @@
 
 import { getDb } from './db.js'
 import { DATA_DIR } from './config.js'
-import { readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 
 export type CheckStatus = 'pass' | 'fail' | 'warn'
 
@@ -51,7 +52,10 @@ export function runTeamDoctor(opts?: {
   // 5. Check: model/LLM auth
   checks.push(checkModelAuth(opts?.modelProvider))
 
-  // 6. Check: at least one chat channel has messages (agents are communicating)
+  // 6. Check: OpenClaw workspace bootstrap bloat (duplicate MEMORY.md/memory.md, oversized injected files)
+  checks.push(checkOpenClawBootstrap())
+
+  // 7. Check: at least one chat channel has messages (agents are communicating)
   checks.push(checkChatActivity())
 
   // Compute overall status
@@ -193,6 +197,95 @@ function checkModelAuth(provider?: string): DoctorCheck {
     name: 'model_auth',
     status: 'pass',
     message: `LLM providers configured: ${configured.join(', ')}`,
+  }
+}
+
+function checkOpenClawBootstrap(): DoctorCheck {
+  try {
+    const stateDir = process.env.OPENCLAW_STATE_DIR || join(homedir(), '.openclaw')
+
+    const candidates: string[] = []
+
+    const mainWorkspace = join(stateDir, 'workspace')
+    if (existsSync(mainWorkspace)) candidates.push(mainWorkspace)
+
+    // workspace-<agent>
+    try {
+      for (const name of readdirSync(stateDir)) {
+        if (!name.startsWith('workspace-')) continue
+        const full = join(stateDir, name)
+        try {
+          if (statSync(full).isDirectory()) candidates.push(full)
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (candidates.length === 0) {
+      return {
+        name: 'openclaw_bootstrap',
+        status: 'warn',
+        message: `No OpenClaw workspaces found under ${stateDir}`,
+        fix: 'If OpenClaw is installed, ensure OPENCLAW_STATE_DIR is set correctly (or create ~/.openclaw/workspace)',
+      }
+    }
+
+    const bootstrapFiles = ['AGENTS.md', 'SOUL.md', 'TOOLS.md', 'IDENTITY.md', 'USER.md', 'HEARTBEAT.md', 'BOOTSTRAP.md', 'MEMORY.md', 'memory.md']
+
+    const dupes: Array<{ ws: string; a: string; b: string }> = []
+    const large: Array<{ ws: string; file: string; bytes: number }> = []
+
+    for (const ws of candidates) {
+      const memA = join(ws, 'MEMORY.md')
+      const memB = join(ws, 'memory.md')
+      if (existsSync(memA) && existsSync(memB)) {
+        dupes.push({ ws, a: memA, b: memB })
+      }
+
+      for (const f of bootstrapFiles) {
+        const p = join(ws, f)
+        if (!existsSync(p)) continue
+        try {
+          const bytes = statSync(p).size
+          // Heuristic: once any injected bootstrap file grows past ~8KB, it starts to materially bloat prompt tokens.
+          if (bytes > 8000) large.push({ ws, file: f, bytes })
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (dupes.length === 0 && large.length === 0) {
+      return {
+        name: 'openclaw_bootstrap',
+        status: 'pass',
+        message: `OpenClaw bootstrap looks sane across ${candidates.length} workspace(s)`,
+      }
+    }
+
+    const parts: string[] = []
+    if (dupes.length) parts.push(`${dupes.length} workspace(s) have both MEMORY.md + memory.md (injected twice)`)
+    if (large.length) {
+      const worst = large.sort((a, b) => b.bytes - a.bytes)[0]
+      parts.push(`largest injected bootstrap file: ${worst.file} (${worst.bytes} bytes) in ${worst.ws}`)
+    }
+
+    return {
+      name: 'openclaw_bootstrap',
+      status: 'warn',
+      message: `OpenClaw bootstrap bloat risk: ${parts.join('; ')}`,
+      fix: 'Delete one of MEMORY.md/memory.md (keep only one), and keep injected bootstrap files concise (esp. TOOLS.md, AGENTS.md, MEMORY.md). Use daily notes in memory/YYYY-MM-DD.md instead of growing a root memory file.',
+    }
+  } catch (err) {
+    return {
+      name: 'openclaw_bootstrap',
+      status: 'warn',
+      message: `Could not check OpenClaw bootstrap files: ${String(err)}`,
+      fix: 'Set OPENCLAW_STATE_DIR correctly and ensure the process can read workspace bootstrap files',
+    }
   }
 }
 

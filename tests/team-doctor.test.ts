@@ -5,6 +5,23 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
+const withEnv = async (env: Record<string, string | undefined>, fn: () => Promise<void> | void) => {
+  const prev: Record<string, string | undefined> = {}
+  for (const [k, v] of Object.entries(env)) {
+    prev[k] = process.env[k]
+    if (v === undefined) delete process.env[k]
+    else process.env[k] = v
+  }
+  try {
+    await fn()
+  } finally {
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+  }
+}
+
 describe('team-doctor', () => {
   it('returns a valid report structure', () => {
     const report = runTeamDoctor()
@@ -75,5 +92,23 @@ describe('team-doctor', () => {
 
     // Cleanup
     await fs.rm(tempDir, { recursive: true, force: true })
+  })
+
+  it('warns when a workspace has both MEMORY.md and memory.md (double-injection risk)', async () => {
+    const stateDir = join(tmpdir(), `doctor-openclaw-${Date.now()}`)
+    const ws = join(stateDir, 'workspace')
+    await fs.mkdir(ws, { recursive: true })
+
+    await fs.writeFile(join(ws, 'MEMORY.md'), 'hello', 'utf-8')
+    await fs.writeFile(join(ws, 'memory.md'), 'hello', 'utf-8')
+
+    await withEnv({ OPENCLAW_STATE_DIR: stateDir }, async () => {
+      const report = runTeamDoctor()
+      const check = report.checks.find(c => c.name === 'openclaw_bootstrap')
+      expect(check).toBeDefined()
+      expect(['warn', 'fail']).toContain(check?.status)
+    })
+
+    await fs.rm(stateDir, { recursive: true, force: true })
   })
 })
