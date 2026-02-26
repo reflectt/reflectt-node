@@ -10,6 +10,10 @@ In addition, at least one task reached `done` while lacking an explicit `/tasks/
 ## Root cause (most likely)
 1. **Duration unit conversion bug** in the SLA alert formatter:
    - Observed numbers are consistent with dividing milliseconds by `60` (or otherwise off by a factor of `1000`) instead of converting correctly to minutes (`ms / 60000`).
+   - Example (makes the factor-of-1000 undeniable):
+     - If a task has been waiting ~9h, that's `9 * 60 * 60 * 1000 = 32,400,000 ms`.
+     - Correct minutes: `32,400,000 / 60000 = 540 minutes`.
+     - Buggy minutes (divide by 60): `32,400,000 / 60 = 540,000` → exactly the kind of “hundreds of thousands of minutes” we’re seeing.
 2. **Artifact/reviewer drift adds to confusion**:
    - Doc-only tasks without a PR URL may have artifacts living only in another agent’s workspace.
    - The artifacts resolver checks current workspace + shared workspace + GitHub fallback; without PR URL, fallback can’t fetch.
