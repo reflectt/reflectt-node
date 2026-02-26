@@ -7920,6 +7920,66 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Version: current + latest available from GitHub ────────────────
+  const versionCache: { latest: string | null; checkedAt: number; error?: string } = {
+    latest: null,
+    checkedAt: 0,
+  }
+  const VERSION_CACHE_TTL_MS = 15 * 60 * 1000 // 15 minutes
+
+  app.get('/version', async () => {
+    const now = Date.now()
+
+    // Refresh cache if stale
+    if (now - versionCache.checkedAt > VERSION_CACHE_TTL_MS) {
+      try {
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 5000)
+        const res = await fetch(
+          'https://api.github.com/repos/reflectt/reflectt-node/releases/latest',
+          {
+            headers: {
+              'Accept': 'application/vnd.github+json',
+              'User-Agent': `reflectt-node/${BUILD_VERSION}`,
+            },
+            signal: controller.signal,
+          },
+        )
+        clearTimeout(timeout)
+
+        if (res.ok) {
+          const data = await res.json() as { tag_name?: string }
+          const tagName = data.tag_name || ''
+          versionCache.latest = tagName.replace(/^v/, '')
+          versionCache.error = undefined
+        } else if (res.status === 404) {
+          // No releases published yet
+          versionCache.latest = null
+          versionCache.error = undefined
+        } else {
+          versionCache.error = `GitHub API returned ${res.status}`
+        }
+      } catch (err) {
+        versionCache.error = err instanceof Error ? err.message : 'fetch failed'
+      }
+      versionCache.checkedAt = now
+    }
+
+    const current = BUILD_VERSION
+    const latest = versionCache.latest
+    const updateAvailable = latest != null && latest !== current && latest > current
+
+    return {
+      current,
+      commit: BUILD_COMMIT,
+      latest: latest ?? 'unknown',
+      update_available: updateAvailable,
+      checked_at: versionCache.checkedAt,
+      uptime_seconds: Math.round((now - BUILD_STARTED_AT) / 1000),
+      ...(versionCache.error ? { check_error: versionCache.error } : {}),
+    }
+  })
+
   // Per-agent cockpit summary (single-pane "My Now" payload)
   app.get<{ Params: { agent: string } }>('/me/:agent', async (request) => {
     const agent = String(request.params.agent || '').trim()
