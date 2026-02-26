@@ -2768,6 +2768,26 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const data = parsedBody.data
+
+    // ── Phantom task-comment guard ──────────────────────────────────────
+    // Reject messages with [task-comment:task-...] tag if the task doesn't exist.
+    // Prevents agents from emitting phantom task references to chat.
+    const taskCommentMatch = data.content.match(/\[task-comment:(task-[^\]]+)\]/)
+    if (taskCommentMatch) {
+      const referencedTaskId = taskCommentMatch[1]
+      const referencedTask = taskManager.getTask(referencedTaskId)
+      if (!referencedTask) {
+        reply.code(422)
+        return {
+          success: false,
+          error: `Phantom task-comment rejected: task ${referencedTaskId} does not exist`,
+          code: 'PHANTOM_TASK_COMMENT',
+          hint: `Verify the task exists (GET /tasks/${referencedTaskId}) before posting [task-comment:...] messages.`,
+          gate: 'phantom_task_comment',
+        }
+      }
+    }
+
     const actionValidation = validateActionRequiredMessage(data.content, data.channel)
     if (actionValidation.blockingError) {
       reply.code(400)
