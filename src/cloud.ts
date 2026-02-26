@@ -257,21 +257,72 @@ export async function startCloudIntegration(): Promise<void> {
     }, 500)
   })
 
-  // Canvas sync for remote canvas relay
-  const canvasSyncMs = Number(process.env.REFLECTT_CANVAS_SYNC_MS) || 5_000
+  // Canvas sync for remote canvas relay — adaptive backoff
+  const canvasSyncBaseMs = Number(process.env.REFLECTT_CANVAS_SYNC_MS) || 5_000
+  const canvasSyncIdleMs = Number(process.env.REFLECTT_CANVAS_SYNC_IDLE_MS) || 60_000
+  let canvasLastChange = Date.now()
+  let canvasCurrentInterval = canvasSyncBaseMs
+
   syncCanvas().catch(() => {})
-  state.canvasSyncTimer = setInterval(() => {
-    syncCanvas().catch(() => {})
-  }, canvasSyncMs)
 
-  // Usage sync for remote cost dashboard
-  const usageSyncMs = Number(process.env.REFLECTT_USAGE_SYNC_MS) || 15_000
+  function scheduleCanvasSync() {
+    if (!state.running) return
+    state.canvasSyncTimer = setTimeout(() => {
+      syncCanvas().catch(() => {})
+      // Adaptive: if no changes for 60s, back off to idle interval
+      const idleFor = Date.now() - canvasLastChange
+      canvasCurrentInterval = idleFor > 60_000 ? canvasSyncIdleMs : canvasSyncBaseMs
+      scheduleCanvasSync()
+    }, canvasCurrentInterval) as unknown as ReturnType<typeof setInterval>
+  }
+  scheduleCanvasSync()
+
+  // Hook: call bumpCanvasActivity() when canvas changes are detected
+  ;(globalThis as Record<string, unknown>).__bumpCanvasActivity = () => {
+    canvasLastChange = Date.now()
+    // If currently in idle mode, immediately reschedule at fast rate
+    if (canvasCurrentInterval > canvasSyncBaseMs && state.canvasSyncTimer) {
+      clearTimeout(state.canvasSyncTimer as unknown as ReturnType<typeof setTimeout>)
+      canvasCurrentInterval = canvasSyncBaseMs
+      syncCanvas().catch(() => {})
+      scheduleCanvasSync()
+    }
+  }
+
+  // Usage sync — adaptive backoff (idle: 5 min, active: 15s)
+  const usageSyncBaseMs = Number(process.env.REFLECTT_USAGE_SYNC_MS) || 15_000
+  const usageSyncIdleMs = Number(process.env.REFLECTT_USAGE_SYNC_IDLE_MS) || 300_000 // 5 min idle
+  let usageLastChange = Date.now()
+  let usageCurrentInterval = usageSyncBaseMs
+
   syncUsage().catch(() => {})
-  state.usageSyncTimer = setInterval(() => {
-    syncUsage().catch(() => {})
-  }, usageSyncMs)
 
-  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s, chat sync every ${chatSyncMs / 1000}s, canvas sync every ${canvasSyncMs / 1000}s, usage sync every ${usageSyncMs / 1000}s`)
+  function scheduleUsageSync() {
+    if (!state.running) return
+    state.usageSyncTimer = setTimeout(() => {
+      syncUsage().catch(() => {})
+      // Back off to idle after 2 min of no usage events
+      const idleFor = Date.now() - usageLastChange
+      usageCurrentInterval = idleFor > 120_000 ? usageSyncIdleMs : usageSyncBaseMs
+      scheduleUsageSync()
+    }, usageCurrentInterval) as unknown as ReturnType<typeof setInterval>
+  }
+  scheduleUsageSync()
+
+  // Hook: call bumpUsageActivity() when new usage events occur
+  ;(globalThis as Record<string, unknown>).__bumpUsageActivity = () => {
+    usageLastChange = Date.now()
+    if (usageCurrentInterval > usageSyncBaseMs && state.usageSyncTimer) {
+      clearTimeout(state.usageSyncTimer as unknown as ReturnType<typeof setTimeout>)
+      usageCurrentInterval = usageSyncBaseMs
+      syncUsage().catch(() => {})
+      scheduleUsageSync()
+    }
+  }
+
+  console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s, chat sync every ${chatSyncMs / 1000}s`)
+  console.log(`   ✅ Canvas sync: ${canvasSyncBaseMs / 1000}s active / ${canvasSyncIdleMs / 1000}s idle`)
+  console.log(`   ✅ Usage sync: ${usageSyncBaseMs / 1000}s active / ${usageSyncIdleMs / 1000}s idle`)
 }
 
 /**
@@ -336,11 +387,11 @@ export function stopCloudIntegration(): void {
     state.chatSyncTimer = null
   }
   if (state.canvasSyncTimer) {
-    clearInterval(state.canvasSyncTimer)
+    clearTimeout(state.canvasSyncTimer as unknown as ReturnType<typeof setTimeout>)
     state.canvasSyncTimer = null
   }
   if (state.usageSyncTimer) {
-    clearInterval(state.usageSyncTimer)
+    clearTimeout(state.usageSyncTimer as unknown as ReturnType<typeof setTimeout>)
     state.usageSyncTimer = null
   }
   console.log('☁️  Cloud integration: stopped')
