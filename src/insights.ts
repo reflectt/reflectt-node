@@ -224,16 +224,29 @@ export function extractClusterKey(reflection: Reflection): InsightClusterKey {
   const familyRaw = tags.find(t => t.startsWith('family:'))?.slice(7) ?? _inferFailureFamily(reflection.pain)
 
   const explicitUnit = tags.find(t => t.startsWith('unit:'))?.slice(5)
+  const inferredUnitFromTags = _inferImpactedUnitFromTags(tags)
+
   let unitRaw = explicitUnit
-    ?? _inferImpactedUnitFromTags(tags)
+    ?? inferredUnitFromTags
     ?? reflection.team_id
     ?? 'unknown'
 
   // If we still have no unit, derive a small topic signature so unrelated
   // reflections don't cluster into the same `unknown::*::unknown` bucket.
-  if (!explicitUnit && (!unitRaw || unitRaw === 'unknown')) {
+  //
+  // Additionally: if the only signal we have is a *very broad umbrella* tag
+  // (e.g. "openclaw"), append a topic signature so distinct problems inside
+  // that umbrella don't get accidentally clustered together.
+  if (!explicitUnit) {
     const topic = _inferTopicFromPain(reflection.pain)
-    if (topic) unitRaw = topic
+
+    if (topic && unitRaw && _isUmbrellaUnit(unitRaw) && _hasOnlyUmbrellaOrGenericUnitTags(tags)) {
+      unitRaw = `${unitRaw}-${topic}`
+    }
+
+    if ((!unitRaw || unitRaw === 'unknown') && topic) {
+      unitRaw = topic
+    }
   }
 
   return {
@@ -270,11 +283,43 @@ function _inferImpactedUnitFromTags(tags: string[]): string | null {
 
   // Prefer a non-generic tag if possible, but keep deterministic ordering.
   const generic = new Set([
+    // broad families
     'performance', 'data-loss', 'runtime-error', 'access', 'ui', 'config', 'deployment', 'testing', 'uncategorized',
+
+    // broad/ambiguous unit tags (avoid clustering everything on these)
+    'openclaw', 'reflectt', 'reflectt-node', 'reflectt-cloud',
+
+    // too-generic symptoms
     'memory', 'latency', 'timeout',
   ])
 
   return candidates.find(t => !generic.has(t.toLowerCase())) ?? candidates[0]
+}
+
+function _isUmbrellaUnit(unit: string): boolean {
+  const u = (unit || '').trim().toLowerCase()
+  return u === 'openclaw' || u === 'reflectt' || u === 'reflectt-node' || u === 'reflectt-cloud'
+}
+
+function _hasOnlyUmbrellaOrGenericUnitTags(tags: string[]): boolean {
+  const reservedPrefixes = ['stage:', 'family:', 'unit:', 'team:']
+  const candidates = (tags || [])
+    .map(t => t.trim())
+    .filter(Boolean)
+    .filter(t => !reservedPrefixes.some(p => t.startsWith(p)))
+
+  if (candidates.length === 0) return true
+
+  const generic = new Set([
+    // umbrellas
+    'openclaw', 'reflectt', 'reflectt-node', 'reflectt-cloud',
+
+    // broad families + symptoms that are often not "the unit"
+    'performance', 'data-loss', 'runtime-error', 'access', 'ui', 'config', 'deployment', 'testing', 'uncategorized',
+    'memory', 'latency', 'timeout',
+  ])
+
+  return candidates.every(t => generic.has(t.toLowerCase()))
 }
 
 function _inferTopicFromPain(pain: string): string | null {

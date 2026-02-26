@@ -72,6 +72,15 @@ describe('extractClusterKey', () => {
     expect(key.impacted_unit).toBe('chat')
   })
 
+  it('appends a topic signature when the only unit hint is an umbrella tag (prevents over-clustering)', () => {
+    const ref = makeReflection({
+      tags: ['openclaw'],
+      pain: 'OpenClaw channel-scoped sessions diverge between reflectt rooms',
+    })
+    const key = extractClusterKey(ref)
+    expect(key.impacted_unit).toBe('openclaw-topic-openclaw-channel-scoped-sessions')
+  })
+
   it('derives a topic signature from pain when unit is missing', () => {
     const ref = makeReflection({ tags: [], team_id: undefined })
     const key = extractClusterKey(ref)
