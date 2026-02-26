@@ -34,7 +34,8 @@ export function deriveScopeId(input: ScopeRoutingInput): string {
   if (ch === 'general' || ch === 'ops') return 'team:default'
 
   // 2) Task scope
-  if (ch === 'task-comments' || ch === 'task-notifications' || ch.startsWith('task-') || ch.includes('task')) {
+  // Keep this intentionally tight to avoid surprising channels like "taskforce".
+  if (ch === 'task-comments' || ch === 'task-notifications' || ch.startsWith('task-')) {
     return taskId ? `task:${taskId}` : 'team:default'
   }
 

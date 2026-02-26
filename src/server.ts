@@ -3083,19 +3083,23 @@ export async function createServer(): Promise<FastifyInstance> {
       .map(m => (m.metadata as any)?.taskId)
       .find(v => typeof v === 'string') as string | undefined)
 
-    const channelForScope = channelFilter || selected[selected.length - 1]?.channel || 'general'
-    const derivedScopeId = deriveScopeId({
+    // Deterministic: if caller doesn't provide channel, default to team scope.
+    const channelForScope = channelFilter || 'general'
+    const derivedSessionScopeId = deriveScopeId({
       scope_id: scopeOverride,
       channel: channelForScope,
       task_id: discoveredTaskId,
       peer,
     })
 
+    // team_shared should remain team-scoped unless explicitly overridden.
+    const teamScopeId = (query.team_scope_id || 'team:default').trim()
+
     const injection = await buildContextInjection({
       agent,
       sessionMessages: selected,
-      sessionScopeId: derivedScopeId,
-      teamScopeId: derivedScopeId,
+      sessionScopeId: derivedSessionScopeId,
+      teamScopeId,
     })
 
     return {
