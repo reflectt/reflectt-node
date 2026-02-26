@@ -191,11 +191,15 @@ export async function routeMessage(msg: RoutedMessage): Promise<RoutingResult> {
   // Send to resolved channel (skip if this was purely a task-comment route and comment failed)
   const skipChat = taskCommentFailed && decision.reason === 'status-update-to-task-comment'
   if (!skipChat) {
+    // Append tcomment id for traceability when comment was successfully created
+    const chatContent = commentId
+      ? `${msg.content} [tcomment:${commentId}]`
+      : msg.content
     try {
       const sent = await chatManager.sendMessage({
         from: msg.from,
         channel: decision.channel,
-        content: msg.content,
+        content: chatContent,
       })
       messageId = sent?.id || null
     } catch {
