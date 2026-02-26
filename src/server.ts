@@ -1559,6 +1559,8 @@ export async function createServer(): Promise<FastifyInstance> {
     const hasError = typeof body.error === 'string'
     const alreadyEnvelope = typeof body.success === 'boolean' && hasError
     if (!hasError) return payload
+    // If already a well-formed envelope, pass through (avoid stripping extra fields)
+    if (alreadyEnvelope && typeof body.code === 'string' && typeof body.status === 'number') return payload
 
     let status = Number(body.status)
     if (!Number.isFinite(status) || status <= 0) {
@@ -1647,37 +1649,103 @@ export async function createServer(): Promise<FastifyInstance> {
   app.setNotFoundHandler(async (request, reply) => {
     const method = request.method
     const url = request.url.split('?')[0]
+    const wantsJson = (request.headers.accept || '').includes('application/json')
+
+    if (wantsJson) {
+      reply.code(404).header('content-type', 'application/json; charset=utf-8')
+      return {
+        success: false,
+        error: 'Not Found',
+        code: 'NOT_FOUND',
+        status: 404,
+        hint: 'Try GET /capabilities for endpoint discovery, or GET /docs for full reference.',
+        requested: `${method} ${url}`,
+      }
+    }
 
     const md = [
       `# 404 — \`${method} ${url}\` not found`,
       '',
       `reflectt-node v${BUILD_VERSION} does not have this endpoint.`,
       '',
-      '## Quick Reference',
+      '## Quick discovery',
       '',
       '| Method | Endpoint | Description |',
       '|--------|----------|-------------|',
+      '| GET | `/capabilities` | **Start here.** All endpoints grouped by purpose |',
+      '| GET | `/heartbeat/:agent` | Single compact heartbeat (~200 tokens) |',
+      '| GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md for your agent |',
       '| GET | `/health` | System health + version + stats |',
       '| GET | `/version` | Current version + update availability |',
-      '| GET | `/capabilities` | Full endpoint discovery with compact flags |',
-      '| GET | `/tasks?compact=true` | List tasks (slim) |',
-      '| GET | `/tasks/active?agent=NAME&compact=true` | Current doing task |',
-      '| GET | `/tasks/next?agent=NAME&compact=true` | Pull next task |',
-      '| GET | `/tasks/:id` | Task details |',
-      '| PATCH | `/tasks/:id` | Update task |',
-      '| POST | `/tasks/:id/comments` | Add comment |',
-      '| GET | `/inbox/:agent` | Agent inbox |',
-      '| GET | `/chat/messages` | Chat messages |',
-      '| GET | `/chat/context/:agent` | Compact chat context |',
-      '| GET | `/insights?compact=true` | Insights list |',
-      '| GET | `/loop/summary` | Top reflection signals |',
-      '| GET | `/bootstrap/heartbeat/:agent` | Generate HEARTBEAT.md |',
-      '| GET | `/me/:agent` | Agent dashboard |',
       '',
-      '> Use `GET /capabilities` for the complete list with descriptions.',
+      '## Common endpoints',
+      '',
+      '**Tasks:** `GET /tasks`, `GET /tasks/next?agent=NAME`, `GET /tasks/active?agent=NAME`',
+      '**Chat:** `GET /chat/messages`, `POST /chat/messages`, `GET /chat/context/:agent`',
+      '**Inbox:** `GET /inbox/:agent`',
+      '**Insights:** `GET /insights`, `GET /loop/summary`',
+      '**Agent:** `GET /me/:agent`, `GET /heartbeat/:agent`',
+      '',
+      '> **Tip:** Add `?compact=true` to most GET endpoints to reduce response size by 50-75%.',
+      '',
+      '> **New here?** Start with `GET /capabilities` — it lists every endpoint with hints.',
     ].join('\n')
 
     reply.code(404).header('content-type', 'text/markdown; charset=utf-8')
+    return md
+  })
+
+  // ── Global error handler: markdown diagnostics for 500s ──────────────
+  app.setErrorHandler(async (error: Error & { statusCode?: number }, request, reply) => {
+    const status = error.statusCode || 500
+    const wantsJson = (request.headers.accept || '').includes('application/json')
+
+    if (status < 500) {
+      // 4xx errors: pass through to preSerialization envelope
+      reply.code(status)
+      return { error: error.message, status }
+    }
+
+    // Log 500s
+    appendStoredLog({
+      level: 'error',
+      timestamp: Date.now(),
+      message: error.message,
+      status,
+      code: 'INTERNAL_ERROR',
+      method: request.method,
+      url: request.url,
+    }).catch(() => {})
+
+    if (wantsJson) {
+      reply.code(status).header('content-type', 'application/json; charset=utf-8')
+      return {
+        success: false,
+        error: 'Internal Server Error',
+        code: 'INTERNAL_ERROR',
+        status,
+        hint: 'Check GET /health for system status. If persistent, check server logs.',
+      }
+    }
+
+    const md = [
+      `# 500 — Internal Server Error`,
+      '',
+      `**Request:** \`${request.method} ${request.url}\``,
+      '',
+      '## What to check',
+      '',
+      '1. **System health:** `GET /health` — verify status is "ok"',
+      '2. **Error logs:** `GET /logs?level=error&limit=5` — recent errors',
+      '3. **Retry** — transient errors often resolve on retry',
+      '',
+      '## Need help?',
+      '',
+      '- `GET /capabilities` — verify endpoint exists and check required params',
+      '- `GET /docs` — full API reference with request/response schemas',
+    ].join('\n')
+
+    reply.code(status).header('content-type', 'text/markdown; charset=utf-8')
     return md
   })
 
