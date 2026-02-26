@@ -132,7 +132,17 @@ function hashItems(items: Array<{ id: string; content: string }>): string {
 function clampTextToTokens(text: string, budgetTokens: number): string {
   const maxChars = Math.max(0, budgetTokens * 4)
   if (text.length <= maxChars) return text
-  return text.slice(0, maxChars).replace(/\s+\S*$/, '') + '\n\n…(truncated)'
+
+  // IMPORTANT: ensure the final string stays within the char budget.
+  // (We add a suffix, so we must reserve space for it.)
+  const suffix = '\n\n…(truncated)'
+  const budgetForBody = Math.max(0, maxChars - suffix.length)
+
+  const body = text
+    .slice(0, budgetForBody)
+    .replace(/\s+\S*$/, '')
+
+  return body + suffix
 }
 
 function heuristicSummarize(items: ContextItem[], opts: { layer: ContextLayer; scope_id: string; budgetTokens: number }): string {
@@ -382,8 +392,10 @@ async function enforceLayerBudget(opts: {
   // Autosummary enabled.
   // Strategy (v1): summarize the items we are dropping (oldest) into a memo,
   // and keep a recent tail. Memo must always be included.
-  const tailBudget = Math.max(300, Math.floor(opts.budgetTokens * 0.45))
-  const memoBudget = Math.max(300, opts.budgetTokens - tailBudget)
+  // Split the layer budget into memo + tail. Must always sum <= layer budget.
+  // (Earlier versions used hard minimums that broke tiny budgets in tests.)
+  const tailBudget = Math.max(0, Math.floor(opts.budgetTokens * 0.45))
+  const memoBudget = Math.max(0, opts.budgetTokens - tailBudget)
 
   const { kept: tail } = keepMostRecentWithinBudget(opts.items, tailBudget)
   const tailIds = new Set(tail.map(i => i.id))
