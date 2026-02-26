@@ -142,6 +142,7 @@ export interface SweepResult {
   tasksScanned: number
   validatingCount: number
   autoClosedCount?: number
+  driftRepairedCount?: number
   artifactRejectedCount?: number
 }
 
@@ -263,6 +264,7 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   }
 
   // Filter out auto-closed tasks from further checks
+  const reconciledAutoClosedCount = autoClosedIds.size
   const remainingValidating = validating.filter(t => !autoClosedIds.has(t.id))
 
   // ── Artifact grace period: auto-reject tasks missing artifacts after 24h ──
@@ -306,12 +308,35 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   for (const task of slaValidating) {
     const meta = (task.metadata || {}) as Record<string, unknown>
 
-    // Skip tasks with approved review — they should auto-transition to done
-    // (prevents false CRITICAL alerts for approved-but-not-yet-transitioned tasks)
+    // ── Auto-close drift repair: approved tasks stuck in validating ──
+    // If review is approved but task is still validating (race condition or
+    // error during original auto-transition), repair by moving to done.
     const reviewState = meta.review_state as string | undefined
     const reviewerApproved = meta.reviewer_approved === true
     if (reviewState === 'approved' || reviewerApproved) {
-      logDryRun('skipped_approved', `${task.id} — review_state=${reviewState}, reviewer_approved=${reviewerApproved}`)
+      try {
+        await taskManager.updateTask(task.id, {
+          status: 'done',
+          metadata: {
+            ...meta,
+            auto_closed: true,
+            auto_closed_at: now,
+            auto_close_reason: 'drift_repair_approved_still_validating',
+            completed_at: now,
+          },
+        } as any)
+        autoClosedIds.add(task.id)
+        escalated.delete(task.id)
+        logDryRun('drift_repair_closed', `${task.id} — review_state=${reviewState}, reviewer_approved=${reviewerApproved}, repaired to done`)
+
+        chatManager.sendMessage({
+          from: 'system',
+          channel: 'task-notifications',
+          content: `🔧 Drift repair: auto-closed "${task.title}" (${task.id}) — reviewer approved but task was stuck in validating.`,
+        }).catch(() => {})
+      } catch (err) {
+        logDryRun('drift_repair_failed', `${task.id} — ${String(err)}`)
+      }
       continue
     }
 
@@ -554,6 +579,7 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
     tasksScanned: totalScanned,
     validatingCount: validating.length,
     autoClosedCount: autoClosedIds.size,
+    driftRepairedCount: autoClosedIds.size - reconciledAutoClosedCount,
     artifactRejectedCount: artifactRejectedIds.size,
   }
 
