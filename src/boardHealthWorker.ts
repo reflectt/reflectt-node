@@ -18,6 +18,7 @@ import { routeMessage } from './messageRouter.js'
 import { validateTaskTimestamp, verifyTaskExists } from './health.js'
 import { policyManager } from './policy.js'
 import { getEffectiveActivity } from './activity-signal.js'
+import { presenceManager } from './presence.js'
 import type { Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
 
@@ -31,6 +32,7 @@ export type PolicyActionKind =
   | 'ready-queue-warning'
   | 'idle-queue-escalation'
   | 'continuity-replenish'
+  | 'review-reassign'
   | 'auto-requeue'
   | 'working-contract-warning'
 
@@ -79,6 +81,10 @@ export interface BoardHealthWorkerConfig {
   dryRun: boolean
   /** Max actions per tick to prevent runaway automation (default: 5) */
   maxActionsPerTick: number
+  /** Minutes without reviewer activity before auto-reassigning reviewer (default: 480 = 8h) */
+  reviewSlaThresholdMin: number
+  /** Fallback reviewer when no active agent is available (default: 'ryan') */
+  reviewEscalationTarget: string
 }
 
 const DEFAULT_CONFIG: BoardHealthWorkerConfig = {
@@ -93,6 +99,8 @@ const DEFAULT_CONFIG: BoardHealthWorkerConfig = {
   quietHoursEnd: 6,
   dryRun: false,
   maxActionsPerTick: 5,
+  reviewSlaThresholdMin: 480,        // 8 hours
+  reviewEscalationTarget: 'ryan',
 }
 
 // ── Worker ─────────────────────────────────────────────────────────────────
@@ -199,6 +207,10 @@ export class BoardHealthWorker {
     // 3. Ready-queue floor check
     const rqfActions = await this.checkReadyQueueFloor(now, dryRun)
     actions.push(...rqfActions)
+
+    // 3a. Review SLA auto-reassignment
+    const reviewActions = await this.checkReviewSla(now, dryRun)
+    actions.push(...reviewActions)
 
     // 3b. Reflection automation nudges
     if (!dryRun) {
@@ -531,6 +543,131 @@ export class BoardHealthWorker {
     }
 
     return actions
+  }
+
+  // ── Policy: Review SLA auto-reassignment ──────────────────────────────
+
+  /** Track last reassignment per task to avoid churning */
+  private reviewReassignLastAt: Record<string, number> = {}
+
+  private async checkReviewSla(now: number, dryRun: boolean): Promise<PolicyAction[]> {
+    const thresholdMs = this.config.reviewSlaThresholdMin * 60_000
+    const cooldownMs = thresholdMs // Don't re-reassign within one SLA window
+    const actions: PolicyAction[] = []
+
+    const validatingTasks = taskManager.listTasks({ status: 'validating' })
+      .filter(t => !isTestHarnessTask(t) && t.reviewer)
+
+    for (const task of validatingTasks) {
+      // Skip if we already reassigned this task recently
+      const lastReassignAt = this.reviewReassignLastAt[task.id] ?? 0
+      if (now - lastReassignAt < cooldownMs) continue
+
+      // Check reviewer activity on this task using the review_last_activity_at metadata field
+      const meta = (task.metadata || {}) as Record<string, unknown>
+      const reviewEnteredAt = (meta.entered_validating_at as number | undefined) ?? task.updatedAt ?? task.createdAt
+      const reviewLastActivityAt = (meta.review_last_activity_at as number | undefined) ?? reviewEnteredAt
+
+      // Use the more recent of entered_validating and review_last_activity
+      const lastReviewActivity = Math.max(
+        typeof reviewEnteredAt === 'number' ? reviewEnteredAt : 0,
+        typeof reviewLastActivityAt === 'number' ? reviewLastActivityAt : 0,
+      )
+
+      if (!lastReviewActivity || now - lastReviewActivity < thresholdMs) continue
+
+      const staleMinutes = Math.floor((now - lastReviewActivity) / 60_000)
+      const currentReviewer = task.reviewer!
+      const newReviewer = this.pickAlternateReviewer(task, currentReviewer)
+
+      const action: PolicyAction = {
+        id: `bh-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        kind: 'review-reassign',
+        taskId: task.id,
+        agent: currentReviewer,
+        description: `Review SLA breach: reassigned reviewer ${currentReviewer} → ${newReviewer} (${staleMinutes}m without review activity, threshold: ${this.config.reviewSlaThresholdMin}m)`,
+        previousState: {
+          reviewer: currentReviewer,
+          review_state: meta.review_state ?? null,
+        },
+        appliedAt: now,
+        rolledBack: false,
+        rolledBackAt: null,
+        rollbackBy: null,
+      }
+
+      this.auditLog.push(action)
+      actions.push(action)
+
+      if (!dryRun) {
+        try {
+          await taskManager.updateTask(task.id, {
+            reviewer: newReviewer,
+            metadata: {
+              ...(meta as Record<string, unknown>),
+              review_reassigned_from: currentReviewer,
+              review_reassigned_at: now,
+              review_reassign_reason: `SLA breach: ${staleMinutes}m without reviewer activity (threshold: ${this.config.reviewSlaThresholdMin}m)`,
+              board_health_action: 'review-reassign',
+              board_health_action_id: action.id,
+            },
+          })
+        } catch (err) {
+          console.warn(`[board-health] review-reassign updateTask failed for ${task.id}:`, (err as Error).message)
+        }
+
+        try {
+          await routeMessage({
+            from: 'system',
+            content: `🔄 Review SLA: reassigned reviewer on **${task.id}** (${(task.title || '').slice(0, 60)}) from @${currentReviewer} → @${newReviewer} (${staleMinutes}m without activity). ${newReviewer === this.config.reviewEscalationTarget ? '⚡ Escalated — no active reviewer available.' : ''}`,
+            category: 'watchdog-alert',
+            severity: 'warning',
+            taskId: task.id,
+            mentions: [newReviewer, currentReviewer],
+          })
+        } catch {
+          // Message routing failure is non-critical
+        }
+
+        this.reviewReassignLastAt[task.id] = now
+      }
+    }
+
+    return actions
+  }
+
+  /**
+   * Pick an alternate reviewer for a task.
+   * Prefers active agents who aren't the assignee or current reviewer.
+   * Falls back to escalation target (ryan).
+   */
+  private pickAlternateReviewer(task: Task, currentReviewer: string): string {
+    const assignee = (task.assignee || '').toLowerCase()
+    const current = currentReviewer.toLowerCase()
+
+    // Get all agents with recent presence
+    const allPresence = presenceManager.getAllPresence()
+    const now = Date.now()
+    const activeThresholdMs = 60 * 60 * 1000 // Consider active if seen in last hour
+
+    const candidates = allPresence
+      .filter(p => {
+        const agent = p.agent.toLowerCase()
+        // Exclude current reviewer and assignee
+        if (agent === current || agent === assignee) return false
+        // Exclude the escalation target initially (use as fallback)
+        if (agent === this.config.reviewEscalationTarget.toLowerCase()) return false
+        // Must have recent activity
+        return p.status !== 'offline' && now - p.lastUpdate < activeThresholdMs
+      })
+      .sort((a, b) => b.lastUpdate - a.lastUpdate) // Most recently active first
+
+    if (candidates.length > 0) {
+      return candidates[0].agent
+    }
+
+    // No active reviewer available — escalate
+    return this.config.reviewEscalationTarget
   }
 
   // ── Digest ────────────────────────────────────────────────────────────
