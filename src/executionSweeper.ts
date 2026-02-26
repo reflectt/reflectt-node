@@ -18,7 +18,7 @@ import { chatManager } from './chat.js'
 import type { Task } from './types.js'
 import { execSync } from 'child_process'
 import { processAutoMerge, generateRemediation } from './prAutoMerge.js'
-import { msToMinutes } from './format-duration.js'
+import { msToMinutes, formatDuration } from './format-duration.js'
 import { suggestReviewer } from './assignment.js'
 
 // ── Live PR State Check ────────────────────────────────────────────────────
@@ -94,28 +94,9 @@ const ORPHAN_PR_THRESHOLD_MS = 2 * 60 * 60 * 1000 // 2 hours
 const ESCALATION_COOLDOWN_MS = 4 * 60 * 60 * 1000 // 4 hours
 
 /**
- * Format a duration in minutes to human-readable text.
- * Guards against ms→minutes conversion errors by sanity-capping the value.
- * If ageMinutes > 10080 (1 week), it was likely a conversion bug.
+ * @deprecated Use formatDuration(ms) from format-duration.ts instead.
+ * Kept temporarily for reference; all call sites now use formatDuration().
  */
-export function formatReviewDuration(ageMinutes: number): string {
-  // Sanity check: if someone passed ms instead of minutes, correct it
-  if (ageMinutes > 10_080) {
-    // Likely ms passed as minutes — divide by 60000 to get real minutes
-    const corrected = Math.round(ageMinutes / 1000)
-    if (corrected < 10_080) {
-      ageMinutes = corrected
-    }
-  }
-
-  if (ageMinutes < 60) return `${ageMinutes}m`
-  const hours = Math.floor(ageMinutes / 60)
-  const mins = ageMinutes % 60
-  if (hours < 24) return mins > 0 ? `${hours}h${mins}m` : `${hours}h`
-  const days = Math.floor(hours / 24)
-  const remHours = hours % 24
-  return remHours > 0 ? `${days}d${remHours}h` : `${days}d`
-}
 
 /** Max escalation count per task before silencing */
 const MAX_ESCALATION_COUNT = 3
@@ -383,7 +364,7 @@ export function sweepValidatingQueue(): SweepResult {
         reviewer: task.reviewer,
         type: 'validating_critical',
         age_minutes: ageMinutes,
-        message: `🚨 CRITICAL: "${task.title}" (${task.id}) stuck in validating for ${formatReviewDuration(ageMinutes)}. @${task.reviewer || 'unassigned'} please review. @${task.assignee || 'unassigned'} — your PR is blocked.`,
+        message: `🚨 CRITICAL: "${task.title}" (${task.id}) stuck in validating for ${formatDuration(ageSinceActivity)}. @${task.reviewer || 'unassigned'} please review. @${task.assignee || 'unassigned'} — your PR is blocked.`,
         remediation: generateRemediation({ taskId: task.id, issue: 'stale_validating', prUrl: prUrl || undefined, meta }),
       })
       escalated.set(task.id, { level: 'critical', at: now })
@@ -404,7 +385,7 @@ export function sweepValidatingQueue(): SweepResult {
         reviewer: task.reviewer,
         type: 'validating_sla',
         age_minutes: ageMinutes,
-        message: `⚠️ SLA breach: "${task.title}" (${task.id}) in validating ${formatReviewDuration(ageMinutes)}. @${task.reviewer || 'unassigned'} — review needed. @${task.assignee || 'unassigned'} — ping if blocked.`,
+        message: `⚠️ SLA breach: "${task.title}" (${task.id}) in validating ${formatDuration(ageSinceActivity)}. @${task.reviewer || 'unassigned'} — review needed. @${task.assignee || 'unassigned'} — ping if blocked.`,
         remediation: generateRemediation({ taskId: task.id, issue: 'stale_validating', prUrl: prUrl || undefined, meta }),
       })
       escalated.set(task.id, { level: 'warning', at: now })
