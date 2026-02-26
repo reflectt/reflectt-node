@@ -125,6 +125,7 @@ import {
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary } from './insights.js'
+import { patchInsightById } from './insight-mutation.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
 import { listLineage, getLineage, lineageStats } from './lineage.js'
@@ -7432,6 +7433,63 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, error: 'Insight not found' }
     }
     return { insight }
+  })
+
+  // Admin-only mutation endpoint: allow re-key + status changes for hygiene.
+  // Safety rails: allowlisted fields only, requires actor + reason, and writes an audit record.
+  app.patch<{ Params: { id: string } }>('/insights/:id', async (request, reply) => {
+    const body = (request.body ?? {}) as Record<string, unknown>
+
+    // Reject unexpected top-level keys (immutable fields protected)
+    const allowedKeys = new Set(['actor', 'reason', 'status', 'cluster_key', 'metadata'])
+    for (const key of Object.keys(body)) {
+      if (!allowedKeys.has(key)) {
+        reply.code(400)
+        return { success: false, error: `Immutable/unknown field: ${key}`, hint: 'Allowed: actor, reason, status, cluster_key, metadata' }
+      }
+    }
+
+    // Validate metadata allowlist
+    if (body.metadata !== undefined) {
+      if (!body.metadata || typeof body.metadata !== 'object') {
+        reply.code(400)
+        return { success: false, error: 'metadata must be an object' }
+      }
+      const allowedMeta = new Set(['notes', 'cluster_key_override'])
+      for (const k of Object.keys(body.metadata as Record<string, unknown>)) {
+        if (!allowedMeta.has(k)) {
+          reply.code(400)
+          return { success: false, error: `Immutable/unknown metadata field: ${k}`, hint: 'Allowed metadata keys: notes, cluster_key_override' }
+        }
+      }
+    }
+
+    const actor = typeof body.actor === 'string' ? body.actor : ''
+    const reason = typeof body.reason === 'string' ? body.reason : ''
+    const status = typeof body.status === 'string' ? body.status : undefined
+    const cluster_key = typeof body.cluster_key === 'string' ? body.cluster_key : undefined
+
+    const metadata = body.metadata as Record<string, unknown> | undefined
+    const result = patchInsightById(request.params.id, {
+      actor,
+      reason,
+      ...(status ? { status: status as any } : {}),
+      ...(cluster_key ? { cluster_key } : {}),
+      ...(metadata ? {
+        metadata: {
+          ...(typeof metadata.notes === 'string' ? { notes: metadata.notes } : {}),
+          ...(typeof metadata.cluster_key_override === 'string' ? { cluster_key_override: metadata.cluster_key_override } : {}),
+        },
+      } : {}),
+    })
+
+    if (!result.success) {
+      const notFound = result.error === 'Insight not found'
+      reply.code(notFound ? 404 : 400)
+      return { success: false, error: result.error }
+    }
+
+    return { success: true, insight: result.insight }
   })
 
   app.get('/insights/stats', async () => {
