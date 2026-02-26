@@ -66,6 +66,7 @@ import { analyticsManager } from './analytics.js'
 import { getDashboardHTML } from './dashboard.js'
 import { healthMonitor, computeActiveLane } from './health.js'
 import { contentManager } from './content.js'
+import { getBootstrapContextReport } from './bootstrapContext.js'
 import { experimentsManager } from './experiments.js'
 import { releaseManager } from './release.js'
 import { researchManager } from './research.js'
@@ -1990,6 +1991,16 @@ export async function createServer(): Promise<FastifyInstance> {
       roleNamesFromConfig: health.roleNamesFromConfig,
       assignmentRoleNames: health.assignmentRoleNames,
     }
+  })
+
+  // Bootstrap-context budget (OpenClaw-injected workspace files)
+  // NOTE: this is intentionally cheap; it's just filesystem reads.
+  app.get('/health/bootstrap-context', async (request, reply) => {
+    const report = await getBootstrapContextReport()
+    if (applyConditionalCaching(request, reply, report, Date.now())) {
+      return
+    }
+    return report
   })
 
   // Team health monitoring
