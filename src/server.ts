@@ -10241,7 +10241,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // GET /execution-health — sweeper status + current violations
   app.get('/execution-health', async (_request, reply) => {
     const status = getSweeperStatus()
-    const freshSweep = sweepValidatingQueue()
+    const freshSweep = await sweepValidatingQueue()
     reply.send({
       sweeper: {
         running: status.running,

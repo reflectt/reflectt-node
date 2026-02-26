@@ -177,7 +177,7 @@ describe('Orphan PR detection accuracy', () => {
 
     // Run sweep and check
     const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
-    const result = sweepValidatingQueue()
+    const result = await sweepValidatingQueue()
     const orphanForThisTask = result.violations.filter(
       v => v.taskId === task.id && v.type === 'orphan_pr',
     )
@@ -186,7 +186,7 @@ describe('Orphan PR detection accuracy', () => {
 
   it('orphan alert includes @assignee and @reviewer mentions', async () => {
     const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
-    const result = sweepValidatingQueue()
+    const result = await sweepValidatingQueue()
 
     // Check all orphan_pr violations have mentions
     for (const v of result.violations.filter(v => v.type === 'orphan_pr')) {
@@ -308,7 +308,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
 
     // Run sweep — task has been in validating 3h > 2h SLA
     const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
-    sweepValidatingQueue()
+    await sweepValidatingQueue()
 
     // Check that escalation metadata was persisted to the task
     const taskRes = await app.inject({ method: 'GET', url: `/tasks/${task.id}` })
@@ -381,7 +381,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
 
     // Run sweep — should NOT generate a violation for this task (within cooldown)
     const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
-    const result = sweepValidatingQueue()
+    const result = await sweepValidatingQueue()
     const violations = result.violations.filter(v => v.taskId === task.id)
     expect(violations).toHaveLength(0)
 
@@ -449,7 +449,7 @@ describe('Sweeper escalation persistence and cooldown', () => {
 
     // Run sweep — should NOT generate violations (count >= 3)
     const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
-    const result = sweepValidatingQueue()
+    const result = await sweepValidatingQueue()
     const violations = result.violations.filter(v => v.taskId === task.id)
     expect(violations).toHaveLength(0)
 
