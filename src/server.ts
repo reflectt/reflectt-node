@@ -4155,7 +4155,45 @@ export async function createServer(): Promise<FastifyInstance> {
 </body></html>`)
   })
 
-  // Task heartbeat status — all doing tasks with stale comment activity
+  // GET /reviews/pending/:agent — tasks awaiting this agent's review
+  app.get('/reviews/pending/:agent', async (request) => {
+    const { agent } = request.params as { agent: string }
+    const query = request.query as Record<string, string>
+    const compact = query.compact === 'true' || query.compact === '1'
+    const now = Date.now()
+
+    // Get all validating tasks where this agent is the reviewer
+    const validating = taskManager.listTasks({ status: 'validating' })
+    const pending = validating.filter(t => {
+      if (t.reviewer !== agent) return false
+      const meta = (t.metadata || {}) as Record<string, unknown>
+      if (meta.review_state === 'approved' || meta.reviewer_approved === true) return false
+      return true
+    })
+
+    const items = pending.map(t => {
+      const meta = (t.metadata || {}) as Record<string, unknown>
+      const enteredAt = (meta.entered_validating_at as number) || t.updatedAt
+      const waitMinutes = Math.round((now - enteredAt) / 60_000)
+      const prUrl = meta.pr_url as string | undefined
+      const artifactPath = meta.artifact_path as string | undefined
+
+      if (compact) {
+        return { id: t.id, title: t.title, assignee: t.assignee, wait_min: waitMinutes, pr: prUrl || null, artifact: artifactPath || null, priority: t.priority }
+      }
+      return {
+        id: t.id, title: t.title, assignee: t.assignee, priority: t.priority,
+        wait_minutes: waitMinutes, pr_url: prUrl || null, artifact_path: artifactPath || null,
+        done_criteria: t.done_criteria, qa_bundle_summary: (meta.qa_bundle as any)?.summary || null,
+      }
+    })
+
+    items.sort((a, b) => (b.wait_min || b.wait_minutes || 0) - (a.wait_min || a.wait_minutes || 0))
+
+    return { reviewer: agent, pending_count: items.length, items, ts: now }
+  })
+
+    // Task heartbeat status — all doing tasks with stale comment activity
   app.get('/tasks/heartbeat-status', async () => {
     const HEARTBEAT_THRESHOLD_MS = 30 * 60 * 1000
     const now = Date.now()
@@ -8083,6 +8121,7 @@ export async function createServer(): Promise<FastifyInstance> {
           { method: 'GET', path: '/health', hint: 'System health + version + stats' },
           { method: 'GET', path: '/capabilities', hint: 'This endpoint. Query: category to filter' },
           { method: 'GET', path: '/me/:agent', compact: true, hint: 'Full dashboard. Use /heartbeat/:agent for polls.' },
+          { method: 'GET', path: '/reviews/pending/:agent', compact: true, hint: 'Tasks awaiting review. Use compact=true for slim payloads.' },
           { method: 'GET', path: '/docs', hint: 'Full API reference (68K chars). Use /capabilities instead when possible.' },
         ],
       },

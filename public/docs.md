@@ -626,6 +626,7 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/activation/funnel/conversions` | Step-by-step conversion rates with per-step reach count, conversion rate, and median step timing. |
 | GET | `/activation/funnel/failures` | Failure-reason distribution per step. Shows where users drop off and why (from event metadata). |
 | GET | `/activation/funnel/weekly` | Weekly trend snapshots for planning. Query: `?weeks=12`. Exportable JSON with per-week step counts, new users, completion rate. |
+| GET | `/reviews/pending/:agent` | Tasks awaiting this agent's review (status=validating, reviewer=agent, not yet approved). Supports `compact` query. |
 | GET | `/audit/reviews` | Audit ledger for review-field mutations: actor trace, before/after diffs, timestamps. |
 | GET | `/audit/mutation-alerts` | Suspicious mutation alert status and history. |
 | GET | `/escalations` | List active escalations. |
