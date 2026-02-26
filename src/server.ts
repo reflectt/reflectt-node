@@ -6871,6 +6871,8 @@ export async function createServer(): Promise<FastifyInstance> {
       metadata: {
         ...triage.metadata,
         ...(triage.lane ? { lane: triage.lane } : {}),
+        reflection_exempt: true,
+        reflection_exempt_reason: 'System-created from user feedback triage',
       },
     })
 
@@ -7554,6 +7556,8 @@ export async function createServer(): Promise<FastifyInstance> {
         done_criteria: ['Root cause addressed', 'Evidence validated', 'Follow-up reflection submitted'],
         metadata: {
           insight_id: insight.id,
+          source_insight: insight.id,
+          source_reflection: insight.reflection_ids?.[0],
           promotion_reason: 'triage_approved',
           severity: insight.severity_max,
           source: 'triage',
@@ -8526,6 +8530,8 @@ export async function createServer(): Promise<FastifyInstance> {
         metadata: {
           ...(data.metadata || {}),
           eta: data.eta,
+          reflection_exempt: true,
+          reflection_exempt_reason: 'System-created from research handoff pipeline',
           source: {
             kind: 'research-handoff',
             requestId: data.requestId,
