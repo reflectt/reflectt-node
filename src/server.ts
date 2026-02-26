@@ -7921,6 +7921,62 @@ export async function createServer(): Promise<FastifyInstance> {
     return { task: isCompact(query) ? compactTask(enriched) : enriched }
   })
 
+  // ── Reviews: pending reviews for a reviewer ─────────────────────────
+  app.get<{ Querystring: { reviewer?: string; compact?: string } }>('/reviews/pending', async (request) => {
+    const query = request.query
+    const reviewer = (query.reviewer || '').trim().toLowerCase()
+    if (!reviewer) {
+      return { success: false, error: 'reviewer query param required', hint: 'GET /reviews/pending?reviewer=ryan' }
+    }
+
+    const now = Date.now()
+    const validating = taskManager.listTasks({ status: 'validating', includeTest: true })
+    const pending = validating.filter(t => {
+      if ((t.reviewer || '').trim().toLowerCase() !== reviewer) return false
+      const meta = (t.metadata || {}) as Record<string, unknown>
+      // Skip already-approved tasks
+      if (meta.review_state === 'approved' || meta.reviewer_approved === true) return false
+      return true
+    })
+
+    const compact = isCompact(query)
+    const items = pending.map(t => {
+      const meta = (t.metadata || {}) as Record<string, unknown>
+      const enteredAt = (meta.entered_validating_at as number) || t.updatedAt
+      const ageMinutes = Math.round((now - enteredAt) / 60000)
+      const prUrl = meta.review_handoff && typeof (meta.review_handoff as Record<string, unknown>).pr_url === 'string'
+        ? (meta.review_handoff as Record<string, unknown>).pr_url as string
+        : (meta.qa_bundle && typeof (meta.qa_bundle as Record<string, unknown>).artifact_links === 'object'
+          ? ((meta.qa_bundle as Record<string, unknown>).artifact_links as string[])?.[0]
+          : undefined)
+
+      const base: Record<string, unknown> = {
+        id: t.id,
+        title: t.title,
+        assignee: t.assignee,
+        priority: t.priority,
+        age_minutes: ageMinutes,
+        review_state: meta.review_state || 'queued',
+      }
+      if (prUrl) base.pr_url = prUrl
+      if (meta.artifact_path) base.artifact_path = meta.artifact_path
+      if (!compact) {
+        base.done_criteria = t.done_criteria
+        base.description = t.description
+      }
+      return base
+    })
+
+    // Sort by age descending (oldest first)
+    items.sort((a, b) => (b.age_minutes as number) - (a.age_minutes as number))
+
+    return {
+      reviewer,
+      pending_count: items.length,
+      reviews: items,
+    }
+  })
+
   // ── Heartbeat: single compact payload for agent heartbeat polls ─────
   app.get<{ Params: { agent: string } }>('/heartbeat/:agent', async (request) => {
     const agent = String(request.params.agent || '').trim().toLowerCase()
@@ -8045,7 +8101,8 @@ export async function createServer(): Promise<FastifyInstance> {
           { method: 'POST', path: '/tasks', hint: 'Create. Requires: title, assignee, reviewer, done_criteria' },
           { method: 'PATCH', path: '/tasks/:id', hint: 'Update status/metadata' },
           { method: 'POST', path: '/tasks/:id/comments' },
-          { method: 'POST', path: '/tasks/:id/review', hint: 'Submit review decision (approve/reject)' },
+          { method: 'POST', path: '/tasks/:id/review', hint: 'Submit review decision (approve/reject). Approve auto-transitions validating→done.' },
+          { method: 'GET', path: '/reviews/pending', compact: true, hint: 'Pending reviews for a reviewer. Query: reviewer (required)' },
         ],
       },
       chat: {
