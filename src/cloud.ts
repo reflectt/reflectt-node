@@ -934,7 +934,17 @@ async function handleCommand(cmd: PendingCommand): Promise<void> {
 async function handleContextSync(cmd: PendingCommand): Promise<void> {
   if (!state.hostId) return
 
-  const agent = (cmd.payload?.agent as string) || 'link'
+  // Require explicit agent — no hardcoded fallback
+  const agent = (cmd.payload?.agent as string)?.trim()
+  if (!agent) {
+    console.warn(`☁️  [Commands] context_sync missing payload.agent (${cmd.id}) — failing`)
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'fail',
+      error: 'payload.agent is required',
+    })
+    return
+  }
+
   console.log(`☁️  [Commands] Processing context_sync for agent=${agent} (${cmd.id})`)
 
   // Ack immediately (in-progress)
@@ -943,14 +953,13 @@ async function handleContextSync(cmd: PendingCommand): Promise<void> {
   })
 
   // Fetch context snapshot from local node
+  const port = process.env.REFLECTT_NODE_PORT || '4445'
   let contextData: Record<string, unknown>
   try {
-    const port = process.env.PORT || '4445'
     const localRes = await fetch(`http://127.0.0.1:${port}/context/inject/${encodeURIComponent(agent)}`)
     if (!localRes.ok) throw new Error(`Local context fetch failed: ${localRes.status}`)
     contextData = await localRes.json() as Record<string, unknown>
   } catch (err: any) {
-    // Complete as failed
     await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
       action: 'fail',
       error: `Failed to fetch local context: ${err?.message}`,
@@ -958,10 +967,14 @@ async function handleContextSync(cmd: PendingCommand): Promise<void> {
     throw err
   }
 
-  // Push to cloud
+  // Push to cloud — use computed_at from injection payload when available
+  const computedAt = (typeof contextData.computed_at === 'number' && contextData.computed_at > 0)
+    ? contextData.computed_at
+    : Date.now()
+
   const syncResult = await cloudPost(`/api/hosts/${state.hostId}/context/sync`, {
     agent,
-    computed_at: Date.now(),
+    computed_at: computedAt,
     budgets: contextData.budgets || { totalTokens: 0, layers: {} },
     autosummary_enabled: Boolean(contextData.autosummary_enabled),
     layers: contextData.layers || {},
