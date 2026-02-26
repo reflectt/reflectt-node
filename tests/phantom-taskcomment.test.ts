@@ -1,108 +1,89 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Test the messageRouter logic for phantom task-comment suppression.
-// We mock taskManager and chatManager to verify the reorder behavior.
+// Mock chatManager and taskManager before importing routeMessage
+vi.mock('../src/chat.js', () => ({
+  chatManager: {
+    sendMessage: vi.fn().mockResolvedValue({ id: 'mock-msg-1' }),
+  },
+}))
+
+vi.mock('../src/tasks.js', () => ({
+  taskManager: {
+    addTaskComment: vi.fn().mockResolvedValue({ id: 'mock-comment-1' }),
+  },
+}))
+
+// Import after mocks are set up
+const { chatManager } = await import('../src/chat.js')
+const { taskManager } = await import('../src/tasks.js')
+const { routeMessage } = await import('../src/messageRouter.js')
 
 describe('messageRouter phantom task-comment suppression', () => {
-  // We test the core logic: when task comment fails with "not found",
-  // chat message should NOT be emitted for status-update-to-task-comment routes.
-
-  it('skips chat emission when task comment fails with not-found error', async () => {
-    // Simulate the router logic inline (messageRouter is tightly coupled)
-    const taskCommentThrows = true
-    const errorMessage = 'Task not found'
-    const decisionReason = 'status-update-to-task-comment'
-
-    let taskCommentFailed = false
-    let chatSent = false
-
-    // Step 1: Try comment first
-    try {
-      if (taskCommentThrows) {
-        throw new Error(errorMessage)
-      }
-    } catch (err: any) {
-      const errMsg = (err?.message || '').toLowerCase()
-      if (errMsg.includes('not found') || errMsg.includes('404') || errMsg.includes('does not exist')) {
-        taskCommentFailed = true
-      }
-    }
-
-    // Step 2: Conditionally send chat
-    const skipChat = taskCommentFailed && decisionReason === 'status-update-to-task-comment'
-    if (!skipChat) {
-      chatSent = true
-    }
-
-    expect(taskCommentFailed).toBe(true)
-    expect(chatSent).toBe(false) // Chat should NOT be sent
+  beforeEach(() => {
+    vi.clearAllMocks()
   })
 
-  it('still emits chat when task comment fails with non-404 error', async () => {
-    const errorMessage = 'Validation error: content too long'
-    const decisionReason = 'status-update-to-task-comment'
+  it('skips chat when status-update-to-task-comment and addTaskComment throws not-found', async () => {
+    ;(taskManager.addTaskComment as any).mockRejectedValueOnce(new Error('Task not found'))
 
-    let taskCommentFailed = false
-    let chatSent = false
+    const result = await routeMessage({
+      from: 'system',
+      content: 'status update for task',
+      severity: 'info',
+      category: 'status-update',
+      taskId: 'task-nonexistent-999',
+    })
 
-    try {
-      throw new Error(errorMessage)
-    } catch (err: any) {
-      const errMsg = (err?.message || '').toLowerCase()
-      if (errMsg.includes('not found') || errMsg.includes('404') || errMsg.includes('does not exist')) {
-        taskCommentFailed = true
-      }
-    }
-
-    const skipChat = taskCommentFailed && decisionReason === 'status-update-to-task-comment'
-    if (!skipChat) {
-      chatSent = true
-    }
-
-    expect(taskCommentFailed).toBe(false)
-    expect(chatSent).toBe(true) // Chat SHOULD still be sent
+    // addTaskComment was called
+    expect(taskManager.addTaskComment).toHaveBeenCalledOnce()
+    // sendMessage should NOT be called — task doesn't exist, no phantom chat line
+    expect(chatManager.sendMessage).not.toHaveBeenCalled()
   })
 
-  it('still emits chat for non-task-comment routes even on 404', async () => {
-    const errorMessage = 'Task not found'
-    const decisionReason = 'escalation-to-general' // Not a task-comment route
+  it('still emits chat when addTaskComment throws non-404 error', async () => {
+    ;(taskManager.addTaskComment as any).mockRejectedValueOnce(new Error('Validation error: content too long'))
 
-    let taskCommentFailed = false
-    let chatSent = false
+    const result = await routeMessage({
+      from: 'system',
+      content: 'status update for task',
+      severity: 'info',
+      category: 'status-update',
+      taskId: 'task-existing-456',
+    })
 
-    try {
-      throw new Error(errorMessage)
-    } catch (err: any) {
-      const errMsg = (err?.message || '').toLowerCase()
-      if (errMsg.includes('not found') || errMsg.includes('404') || errMsg.includes('does not exist')) {
-        taskCommentFailed = true
-      }
-    }
-
-    const skipChat = taskCommentFailed && decisionReason === 'status-update-to-task-comment'
-    if (!skipChat) {
-      chatSent = true
-    }
-
-    expect(taskCommentFailed).toBe(true)
-    expect(chatSent).toBe(true) // Chat SHOULD still be sent for non-task-comment routes
+    expect(taskManager.addTaskComment).toHaveBeenCalledOnce()
+    // sendMessage SHOULD be called — non-404 errors don't suppress chat
+    expect(chatManager.sendMessage).toHaveBeenCalledOnce()
   })
 
-  it('emits chat normally when comment succeeds', async () => {
-    const decisionReason = 'status-update-to-task-comment'
+  it('emits chat normally when task comment succeeds', async () => {
+    ;(taskManager.addTaskComment as any).mockResolvedValueOnce({ id: 'comment-ok' })
 
-    let taskCommentFailed = false
-    let chatSent = false
+    const result = await routeMessage({
+      from: 'system',
+      content: 'status update for task',
+      severity: 'info',
+      category: 'status-update',
+      taskId: 'task-existing-789',
+    })
 
-    // Comment succeeds — no throw
-    taskCommentFailed = false
+    expect(taskManager.addTaskComment).toHaveBeenCalledOnce()
+    expect(chatManager.sendMessage).toHaveBeenCalledOnce()
+  })
 
-    const skipChat = taskCommentFailed && decisionReason === 'status-update-to-task-comment'
-    if (!skipChat) {
-      chatSent = true
-    }
+  it('emits chat for non-task-comment routes even when task is missing', async () => {
+    ;(taskManager.addTaskComment as any).mockRejectedValueOnce(new Error('Task not found'))
 
-    expect(taskCommentFailed).toBe(false)
-    expect(chatSent).toBe(true)
+    // Critical messages route to #general, not task-comments
+    const result = await routeMessage({
+      from: 'system',
+      content: 'CRITICAL: something is on fire',
+      severity: 'critical',
+      category: 'escalation',
+      taskId: 'task-nonexistent-999',
+    })
+
+    // Chat should be sent regardless for non-task-comment routes
+    expect(chatManager.sendMessage).toHaveBeenCalledOnce()
   })
 })
