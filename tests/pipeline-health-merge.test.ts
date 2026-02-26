@@ -51,6 +51,8 @@ describe('GET /health/reflection-pipeline', () => {
 
   it('reports healthy when reflections merge into existing insights', async (ctx) => {
     if (!serverUp) return ctx.skip()
+    // Use unique nonce to avoid reflection dedup (content-hash based, 1h window)
+    const nonce = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     // Submit a reflection that will merge into an existing insight cluster
     const reflectionRes = await fetch(`${BASE}/reflections`, {
       method: 'POST',
@@ -58,9 +60,9 @@ describe('GET /health/reflection-pipeline', () => {
       body: JSON.stringify({
         author: 'link',
         role_type: 'agent',
-        pain: 'Pipeline health check reports broken when reflections merge into existing insight clusters instead of creating new ones',
+        pain: `Pipeline health check reports broken when reflections merge into existing insight clusters instead of creating new ones [${nonce}]`,
         impact: 'False-positive SLA alerts fire, wasting review cycles on non-issues',
-        evidence: ['health/reflection-pipeline showed broken with recentInsights=0 despite active ingestion'],
+        evidence: [`health/reflection-pipeline showed broken with recentInsights=0 despite active ingestion [${nonce}]`],
         went_well: 'Ingestion path itself works correctly — clustering and merge logic are sound',
         suspected_why: 'Health check only counts created_at not updated_at on insights table',
         proposed_fix: 'Count both created and updated insights in health check window',
