@@ -19,6 +19,7 @@ import { chatManager } from './chat.js'
 import { slotManager } from './canvas-slots.js'
 import { getDb } from './db.js'
 import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions } from './usage-tracking.js'
+import { buildContextInjection } from './context-budget.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
@@ -61,6 +62,7 @@ interface CloudState {
   chatSyncTimer: ReturnType<typeof setInterval> | null
   canvasSyncTimer: ReturnType<typeof setInterval> | null
   usageSyncTimer: ReturnType<typeof setInterval> | null
+  commandPollTimer: ReturnType<typeof setInterval> | null
   heartbeatCount: number
   lastHeartbeat: number | null
   lastTaskSync: number | null
@@ -86,6 +88,7 @@ let state: CloudState = {
   chatSyncTimer: null,
   canvasSyncTimer: null,
   usageSyncTimer: null,
+  commandPollTimer: null,
   heartbeatCount: 0,
   lastHeartbeat: null,
   lastTaskSync: null,
@@ -320,9 +323,17 @@ export async function startCloudIntegration(): Promise<void> {
     }
   }
 
+  // Command polling — process queued commands from cloud dashboard
+  const commandPollMs = Number(process.env.REFLECTT_COMMAND_POLL_MS) || 10_000
+  pollCommands().catch(() => {})
+  state.commandPollTimer = setInterval(() => {
+    pollCommands().catch(() => {})
+  }, commandPollMs)
+
   console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s, chat sync every ${chatSyncMs / 1000}s`)
   console.log(`   ✅ Canvas sync: ${canvasSyncBaseMs / 1000}s active / ${canvasSyncIdleMs / 1000}s idle`)
   console.log(`   ✅ Usage sync: ${usageSyncBaseMs / 1000}s active / ${usageSyncIdleMs / 1000}s idle`)
+  console.log(`   ✅ Command poll every ${commandPollMs / 1000}s`)
 }
 
 /**
@@ -389,6 +400,10 @@ export function stopCloudIntegration(): void {
   if (state.canvasSyncTimer) {
     clearTimeout(state.canvasSyncTimer as unknown as ReturnType<typeof setTimeout>)
     state.canvasSyncTimer = null
+  }
+  if (state.commandPollTimer) {
+    clearInterval(state.commandPollTimer)
+    state.commandPollTimer = null
   }
   if (state.usageSyncTimer) {
     clearTimeout(state.usageSyncTimer as unknown as ReturnType<typeof setTimeout>)
@@ -868,6 +883,144 @@ async function syncUsage(): Promise<void> {
       console.warn(`☁️  [Usage] Sync error: ${(err as Error).message}`)
     }
   }
+}
+
+// ---- Command Polling ----
+
+interface CloudCommand {
+  id: string
+  type: string
+  payload: Record<string, unknown>
+  status: string
+  createdAt: number | string
+}
+
+let commandPollErrors = 0
+
+async function pollCommands(): Promise<void> {
+  if (!state.hostId || !config || !state.credential) return
+
+  try {
+    const url = `${config.cloudUrl}/api/hosts/${state.hostId}/commands?status=pending`
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${state.credential}` },
+    })
+
+    if (!response.ok) {
+      commandPollErrors++
+      if (commandPollErrors <= 3 || commandPollErrors % 20 === 0) {
+        console.warn(`☁️  [Commands] Poll failed (${commandPollErrors}): HTTP ${response.status}`)
+      }
+      return
+    }
+
+    const data = await response.json() as { commands?: CloudCommand[] }
+    const commands = data.commands || []
+
+    if (commands.length > 0 && commandPollErrors > 0) {
+      console.log(`☁️  [Commands] Poll recovered after ${commandPollErrors} errors`)
+      commandPollErrors = 0
+    }
+    if (commands.length === 0) {
+      if (commandPollErrors > 0) commandPollErrors = 0
+      return
+    }
+
+    for (const cmd of commands) {
+      await processCommand(cmd)
+    }
+  } catch (err) {
+    commandPollErrors++
+    if (commandPollErrors <= 3) {
+      console.warn(`☁️  [Commands] Poll error: ${(err as Error).message}`)
+    }
+  }
+}
+
+async function processCommand(cmd: CloudCommand): Promise<void> {
+  if (!state.hostId || !config || !state.credential) return
+
+  const ackUrl = `${config.cloudUrl}/api/hosts/${state.hostId}/commands/${cmd.id}/ack`
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${state.credential}`,
+  }
+
+  // Acknowledge immediately
+  try {
+    await fetch(ackUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action: 'ack' }),
+    })
+  } catch {
+    // best effort ack
+  }
+
+  try {
+    switch (cmd.type) {
+      case 'context_sync':
+        await handleContextSync(cmd)
+        break
+      default:
+        console.log(`☁️  [Commands] Unknown command type: ${cmd.type}, completing`)
+    }
+
+    // Mark complete
+    await fetch(ackUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action: 'complete', result: { processedAt: Date.now() } }),
+    })
+  } catch (err) {
+    const errMsg = (err as Error).message || 'Unknown error'
+    console.warn(`☁️  [Commands] Failed to process ${cmd.type}/${cmd.id}: ${errMsg}`)
+
+    // Mark failed
+    try {
+      await fetch(ackUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ action: 'fail', error: errMsg }),
+      })
+    } catch {
+      // best effort fail report
+    }
+  }
+}
+
+async function handleContextSync(cmd: CloudCommand): Promise<void> {
+  if (!state.hostId || !config || !state.credential) return
+
+  const agent = (cmd.payload?.agent as string) || 'link'
+  console.log(`☁️  [Commands] Processing context_sync for agent: ${agent}`)
+
+  // Build fresh context snapshot (empty session messages — we want the persistent context)
+  const snapshot = await buildContextInjection({ agent, sessionMessages: [] })
+
+  // POST to cloud sync endpoint
+  const syncUrl = `${config.cloudUrl}/api/hosts/${state.hostId}/context/sync`
+  const response = await fetch(syncUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${state.credential}`,
+    },
+    body: JSON.stringify({
+      agent,
+      computed_at: snapshot.computed_at || Date.now(),
+      budgets: snapshot.budgets,
+      autosummary_enabled: snapshot.autosummary_enabled,
+      layers: snapshot.layers,
+    }),
+  })
+
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => '')
+    throw new Error(`Context sync POST failed: HTTP ${response.status} ${errBody}`)
+  }
+
+  console.log(`☁️  [Commands] context_sync for ${agent} completed (synced to cloud)`)
 }
 
 // ---- HTTP helper ----
