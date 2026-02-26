@@ -305,7 +305,7 @@ class PresenceManager {
   /**
    * Record real activity (message, task action, etc.)
    */
-  recordActivity(agent: string, type: 'message' | 'task_completed'): void {
+  recordActivity(agent: string, type: 'message' | 'task_completed' | 'heartbeat'): void {
     const now = Date.now()
     const activity = this.getActivity(agent)
     

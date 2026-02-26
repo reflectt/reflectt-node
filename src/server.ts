@@ -7754,7 +7754,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
     const validatingTasks = taskManager.listTasks({ status: 'validating', assignee: agent })
 
-    const slim = (t: typeof activeTask) => t ? { id: t.id, title: t.title, status: t.status, priority: t.priority } : null
+    const slim = (t: Task | null | undefined) => t ? { id: t.id, title: t.title, status: t.status, priority: t.priority } : null
     presenceManager.recordActivity(agent, 'heartbeat')
 
     return {
