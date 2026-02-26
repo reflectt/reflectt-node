@@ -472,13 +472,17 @@ async function enforceLayerBudget(opts: {
 export async function buildContextInjection(opts: {
   agent: string
   sessionMessages: AgentMessage[]
+  /** Scope for session_local layer + its overflow memo bucketing */
+  sessionScopeId?: string
+  /** Scope for team_shared layer */
   teamScopeId?: string
 }): Promise<ContextInjectionResult> {
   const budgets = getContextBudgets()
   const autosummaryEnabled = isAutoSummaryEnabled()
 
   const agentScope = `agent:${opts.agent}`
-  const teamScope = opts.teamScopeId || 'team:default'
+  const sessionScope = (opts.sessionScopeId && opts.sessionScopeId.trim().length > 0) ? opts.sessionScopeId.trim() : agentScope
+  const teamScope = (opts.teamScopeId && opts.teamScopeId.trim().length > 0) ? opts.teamScopeId.trim() : 'team:default'
 
   const rawSession = buildSessionLocalItems(opts.sessionMessages, opts.agent)
   const rawPersistent = await buildAgentPersistentItems(opts.agent)
@@ -499,7 +503,7 @@ export async function buildContextInjection(opts: {
   const layerResults = {
     session_local: await enforceLayerBudget({
       layer: 'session_local',
-      scope_id: agentScope,
+      scope_id: sessionScope,
       budgetTokens: budgets.layers.session_local,
       items: rawSession,
       autosummaryEnabled,

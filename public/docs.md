@@ -223,7 +223,7 @@ Graceful degradation: if GitHub API is unavailable, the merge check is skipped (
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/context/inject/:agent` | Budgeted context injection for an agent. Returns per-layer items + `context_budget` attribution (token estimates, top contributors) and memo reuse metadata. Query: `limit` (default 60, max 200), `channel` (optional), `since` (epoch ms, default 4h), `scope_id`/`team_scope_id` (team scope; default `team:default`). |
+| GET | `/context/inject/:agent` | Budgeted context injection for an agent. Returns per-layer items + `context_budget` attribution (token estimates, top contributors) and memo reuse metadata. Query: `limit` (default 60, max 200), `channel` (optional; if omitted defaults to `general` → team scope), `since` (epoch ms, default 4h), `task_id` (optional), `peer` (optional), `scope_id` (explicit **session scope** override), `team_scope_id` (explicit **team_shared scope** override; default `team:default`). Default session scope routing (when `scope_id` not provided): `general/ops → team:default`, `task-* / task-comments → task:<taskId>`, `dm:* → user:<peer>`. |
 | GET | `/context/budgets` | Current configured context budgets (per-layer caps + optional total) and autosummary flag. |
 | GET | `/context/memo` | Read a persisted memo. Query: `scope_id` (required), `layer` (`session_local`\|`agent_persistent`\|`team_shared`). |
 | POST | `/context/memo` | Create/overwrite a persisted memo (useful for bootstrapping `team_shared`). Body: `{ scope_id, layer, content, source_window? }`. |

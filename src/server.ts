@@ -40,6 +40,7 @@ import type { AgentMessage, Task } from './types.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 import { memoryManager } from './memory.js'
 import { buildContextInjection, getContextBudgets, getContextMemo, upsertContextMemo, type ContextLayer } from './context-budget.js'
+import { deriveScopeId } from './scope-routing.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
@@ -3023,7 +3024,11 @@ export async function createServer(): Promise<FastifyInstance> {
     const limit = Math.min(Number(query.limit) || 60, 200)
     const channelFilter = query.channel || undefined
     const sinceMs = query.since ? Number(query.since) : Date.now() - (4 * 60 * 60 * 1000)
-    const teamScopeId = (query.scope_id || query.team_scope_id || 'team:default').trim()
+
+    // Deterministic scope routing (escape hatch: explicit scope override)
+    const scopeOverride = (query.scope_id || query.team_scope_id || '').trim()
+    const peer = (query.peer || '').trim()
+    const taskIdOverride = (query.task_id || '').trim()
 
     const allMessages = chatManager.getMessages({
       channel: channelFilter,
@@ -3074,9 +3079,26 @@ export async function createServer(): Promise<FastifyInstance> {
       .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
       .slice(-limit)
 
+    const discoveredTaskId = taskIdOverride || (selected
+      .map(m => (m.metadata as any)?.taskId)
+      .find(v => typeof v === 'string') as string | undefined)
+
+    // Deterministic: if caller doesn't provide channel, default to team scope.
+    const channelForScope = channelFilter || 'general'
+    const derivedSessionScopeId = deriveScopeId({
+      scope_id: scopeOverride,
+      channel: channelForScope,
+      task_id: discoveredTaskId,
+      peer,
+    })
+
+    // team_shared should remain team-scoped unless explicitly overridden.
+    const teamScopeId = (query.team_scope_id || 'team:default').trim()
+
     const injection = await buildContextInjection({
       agent,
       sessionMessages: selected,
+      sessionScopeId: derivedSessionScopeId,
       teamScopeId,
     })
 
