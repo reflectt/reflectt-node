@@ -266,6 +266,16 @@ export function sweepValidatingQueue(): SweepResult {
 
   for (const task of remainingValidating) {
     const meta = (task.metadata || {}) as Record<string, unknown>
+
+    // Skip tasks with approved review — they should auto-transition to done
+    // (prevents false CRITICAL alerts for approved-but-not-yet-transitioned tasks)
+    const reviewState = meta.review_state as string | undefined
+    const reviewerApproved = meta.reviewer_approved === true
+    if (reviewState === 'approved' || reviewerApproved) {
+      logDryRun('skipped_approved', `${task.id} — review_state=${reviewState}, reviewer_approved=${reviewerApproved}`)
+      continue
+    }
+
     const enteredAt = (meta.entered_validating_at as number) || task.updatedAt
     const lastActivity = (meta.review_last_activity_at as number) || enteredAt
     const ageSinceActivity = now - lastActivity

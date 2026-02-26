@@ -4762,8 +4762,20 @@ export async function createServer(): Promise<FastifyInstance> {
       review_last_activity_at: decidedAt,
     }
 
+    // ── Auto-transition: approved validating → done ──
+    const autoTransition = isApprove && task.status === 'validating'
+
     const updated = await taskManager.updateTask(task.id, {
-      metadata: mergedMetadata,
+      ...(autoTransition ? { status: 'done' as const } : {}),
+      metadata: {
+        ...mergedMetadata,
+        ...(autoTransition ? {
+          auto_closed: true,
+          auto_closed_at: decidedAt,
+          auto_close_reason: 'review_approved',
+          completed_at: decidedAt,
+        } : {}),
+      },
     })
 
     // ── Audit ledger: log review decision ──
