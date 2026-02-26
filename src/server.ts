@@ -4940,10 +4940,6 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Create task
-  // Task creation dedup: prevent parallel sessions from creating identical tasks
-  const TASK_DEDUP_WINDOW_MS = 10 * 60 * 1000 // 10 minutes (shorter than reflection — tasks are more varied)
-  const taskDedupMap = new Map<string, number>() // hash -> timestamp
-
   app.post('/tasks', async (request, reply) => {
     try {
       const data = CreateTaskSchema.parse(request.body)
@@ -4952,6 +4948,35 @@ export async function createServer(): Promise<FastifyInstance> {
       if (process.env.NODE_ENV === 'production' && typeof data.title === 'string' && data.title.startsWith('TEST:')) {
         reply.code(400)
         return { success: false, error: 'TEST: prefixed tasks are not allowed in production', code: 'TEST_TASK_REJECTED' }
+      }
+
+      // ── Task creation dedup: reject identical title+assignee within window ──
+      const skipDedup = data.title.startsWith('TEST:')
+        || (data.metadata as Record<string, unknown> | undefined)?.skip_dedup === true
+        || (data.metadata as Record<string, unknown> | undefined)?.is_test === true
+      if (!skipDedup && data.assignee) {
+        const TASK_DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000 // 4 hours
+        const cutoff = Date.now() - TASK_DEDUP_WINDOW_MS
+        const normalizedTitle = data.title.trim().toLowerCase()
+        const activeTasks = taskManager.listTasks({ includeTest: true }).filter(t =>
+          t.status !== 'done'
+          && t.assignee === data.assignee
+          && t.createdAt >= cutoff
+          && t.title.trim().toLowerCase() === normalizedTitle
+        )
+        if (activeTasks.length > 0) {
+          const existing = activeTasks[0]
+          reply.code(409)
+          return {
+            success: false,
+            error: 'Duplicate task',
+            code: 'DUPLICATE_TASK',
+            status: 409,
+            existing_id: existing.id,
+            existing_status: existing.status,
+            hint: `Task "${existing.title}" already exists for ${data.assignee} (${existing.id}, status: ${existing.status}). Created ${Math.round((Date.now() - existing.createdAt) / 60000)}m ago.`,
+          }
+        }
       }
 
       // Definition-of-ready check (skip for TEST: tasks and test environment)
@@ -4970,26 +4995,7 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
-      // Task creation dedup: reject identical title+assignee within window
-      const taskDedupKey = createHash('sha256')
-        .update([
-          (data.title || '').trim().toLowerCase(),
-          (data.assignee || '').trim().toLowerCase(),
-        ].join('|'))
-        .digest('hex')
-        .slice(0, 32)
-      const taskDedupNow = Date.now()
-      const taskDedupLastSeen = taskDedupMap.get(taskDedupKey)
-      if (taskDedupLastSeen && (taskDedupNow - taskDedupLastSeen) < TASK_DEDUP_WINDOW_MS) {
-        reply.code(409)
-        return {
-          success: false,
-          error: 'Duplicate task',
-          code: 'DUPLICATE_TASK',
-          status: 409,
-          hint: `A task with title "${data.title}" for assignee "${data.assignee}" was created ${Math.round((taskDedupNow - taskDedupLastSeen) / 1000)}s ago. Wait ${Math.round((TASK_DEDUP_WINDOW_MS - (taskDedupNow - taskDedupLastSeen)) / 60000)}m or change the title.`,
-        }
-      }
+
 
       const { eta, type, ...rest } = data
 
@@ -5047,15 +5053,6 @@ export async function createServer(): Promise<FastifyInstance> {
         metadata: newMetadata,
       })
 
-      // Record dedup hash after successful creation
-      taskDedupMap.set(taskDedupKey, taskDedupNow)
-      // Periodic cleanup of stale dedup entries
-      if (taskDedupMap.size > 200) {
-        const cutoff = taskDedupNow - TASK_DEDUP_WINDOW_MS
-        for (const [hash, ts] of taskDedupMap) {
-          if (ts < cutoff) taskDedupMap.delete(hash)
-        }
-      }
       
       // Auto-update presence: creating tasks = working
       if (data.createdBy) {
