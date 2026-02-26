@@ -167,19 +167,9 @@ export async function routeMessage(msg: RoutedMessage): Promise<RoutingResult> {
   }
   // ── End Noise Budget Check ───────────────────────────────────────────
 
-  // Send to resolved channel
-  try {
-    const sent = await chatManager.sendMessage({
-      from: msg.from,
-      channel: decision.channel,
-      content: msg.content,
-    })
-    messageId = sent?.id || null
-  } catch {
-    // Non-fatal
-  }
-
-  // Also add as task comment if applicable
+  // If routing to task comment, try comment FIRST to verify task exists.
+  // Only emit [task-comment:...] chat line if comment was actually created.
+  let taskCommentFailed = false
   if (decision.alsoComment && msg.taskId) {
     try {
       const comment = await taskManager.addTaskComment(
@@ -189,7 +179,23 @@ export async function routeMessage(msg: RoutedMessage): Promise<RoutingResult> {
       )
       commentId = comment?.id || null
     } catch {
-      // Non-fatal — task might not exist
+      // Task doesn't exist or comment failed — don't emit phantom chat line
+      taskCommentFailed = true
+    }
+  }
+
+  // Send to resolved channel (skip if this was purely a task-comment route and comment failed)
+  const skipChat = taskCommentFailed && decision.reason === 'status-update-to-task-comment'
+  if (!skipChat) {
+    try {
+      const sent = await chatManager.sendMessage({
+        from: msg.from,
+        channel: decision.channel,
+        content: msg.content,
+      })
+      messageId = sent?.id || null
+    } catch {
+      // Non-fatal
     }
   }
 
