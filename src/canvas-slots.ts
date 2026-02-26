@@ -24,10 +24,13 @@ export interface ActiveSlot {
   version: number       // increments on each update
 }
 
+type SlotSubscriber = (slot: ActiveSlot) => void
+
 class SlotManager {
   private slots = new Map<string, ActiveSlot>()
   private history: Array<{ event: SlotEvent; timestamp: number }> = []
   private maxHistory = 200
+  private subscribers = new Set<SlotSubscriber>()
 
   /**
    * Update or create a slot with new content.
@@ -56,7 +59,29 @@ class SlotManager {
       this.history = this.history.slice(-this.maxHistory)
     }
 
+    // Notify subscribers
+    this.notifySubscribers(slot)
+
     return slot
+  }
+
+  /**
+   * Subscribe to slot updates (same pattern as chatManager/taskManager).
+   * Returns an unsubscribe function.
+   */
+  subscribe(callback: SlotSubscriber): () => void {
+    this.subscribers.add(callback)
+    return () => this.subscribers.delete(callback)
+  }
+
+  private notifySubscribers(slot: ActiveSlot) {
+    this.subscribers.forEach(callback => {
+      try {
+        callback(slot)
+      } catch (err) {
+        console.error('[SlotManager] Subscriber error:', err)
+      }
+    })
   }
 
   /**
