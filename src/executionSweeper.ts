@@ -15,6 +15,8 @@
 
 import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
+import { presenceManager } from './presence.js'
+import { getAgentRoles } from './assignment.js'
 import type { Task } from './types.js'
 import { execSync } from 'child_process'
 import { processAutoMerge, generateRemediation } from './prAutoMerge.js'
@@ -88,6 +90,12 @@ const ORPHAN_PR_THRESHOLD_MS = 2 * 60 * 60 * 1000 // 2 hours
 
 /** Re-escalation cooldown: don't re-alert the same task within this window */
 const ESCALATION_COOLDOWN_MS = 4 * 60 * 60 * 1000 // 4 hours
+
+/** Reviewer reassignment: auto-reassign after this many ms without reviewer activity */
+const REVIEWER_REASSIGN_MS = 12 * 60 * 60 * 1000 // 12 hours
+
+/** Escalation fallback reviewer when no active agent is available */
+const FALLBACK_REVIEWER = 'ryan'
 
 /**
  * Format a duration in minutes to human-readable text.
@@ -211,6 +219,70 @@ export function isAutoClosable(task: Task, meta: Record<string, unknown>): boole
   return true
 }
 
+// ── Reviewer Reassignment ──────────────────────────────────────────────────
+
+/**
+ * Find the best available reviewer for a task, excluding the current reviewer and assignee.
+ * Prefers agents that are online and have reviewer-compatible roles.
+ * Falls back to FALLBACK_REVIEWER if no active agents available.
+ */
+export function findAlternateReviewer(currentReviewer: string, assignee: string): string {
+  const allPresence = presenceManager.getAllPresence()
+  const roles = getAgentRoles()
+  const onlineAgents = allPresence
+    .filter(p => p.status !== 'offline' && p.agent !== currentReviewer && p.agent !== assignee)
+    .map(p => p.agent)
+
+  // Prefer agents with known roles (not bots/test agents)
+  const knownAgents = onlineAgents.filter(a => roles.some(r => r.name === a))
+
+  if (knownAgents.length > 0) return knownAgents[0]
+  if (onlineAgents.length > 0) return onlineAgents[0]
+  return FALLBACK_REVIEWER
+}
+
+/**
+ * Auto-reassign reviewer on a task. Updates task metadata and notifies in chat.
+ */
+export function reassignReviewer(task: Task, newReviewer: string): boolean {
+  const meta = (task.metadata || {}) as Record<string, unknown>
+  try {
+    taskManager.updateTask(task.id, {
+      reviewer: newReviewer,
+      metadata: {
+        ...meta,
+        reviewer_reassigned: true,
+        reviewer_reassigned_at: Date.now(),
+        reviewer_reassigned_from: task.reviewer,
+        reviewer_reassigned_reason: 'inactive_reviewer_sla',
+        // Reset review state so new reviewer gets fresh start
+        review_state: 'queued',
+        review_last_activity_at: Date.now(),
+        // Reset escalation tracking for new reviewer
+        sweeper_escalation_level: null,
+        sweeper_escalated_at: null,
+        sweeper_escalation_count: 0,
+      },
+    } as any)
+
+    // Clear in-memory escalation tracking
+    escalated.delete(task.id)
+
+    // Notify in chat
+    chatManager.sendMessage({
+      from: 'system',
+      channel: 'task-notifications',
+      content: `🔄 Reviewer reassigned: "${task.title}" (${task.id}) — @${task.reviewer} inactive, reassigned to @${newReviewer}. @${task.assignee} your PR is unblocked.`,
+    }).catch(() => {})
+
+    logDryRun('reviewer_reassigned', `${task.id} — ${task.reviewer} → ${newReviewer}`)
+    return true
+  } catch (err) {
+    logDryRun('reassign_failed', `${task.id} — ${String(err)}`)
+    return false
+  }
+}
+
 // ── Core Sweep Logic ───────────────────────────────────────────────────────
 
 export function sweepValidatingQueue(): SweepResult {
@@ -297,6 +369,28 @@ export function sweepValidatingQueue(): SweepResult {
     const lastEscalatedAt = effective?.at || persistedAt || 0
     if (lastEscalatedAt && (now - lastEscalatedAt) < ESCALATION_COOLDOWN_MS) {
       continue // Still in cooldown
+    }
+
+    // ── Auto-reassign reviewer if past reassignment threshold ──
+    const alreadyReassigned = meta.reviewer_reassigned === true
+    if (ageSinceActivity >= REVIEWER_REASSIGN_MS && !alreadyReassigned && task.reviewer) {
+      const newReviewer = findAlternateReviewer(task.reviewer, task.assignee || '')
+      if (newReviewer !== task.reviewer) {
+        const reassigned = reassignReviewer(task, newReviewer)
+        if (reassigned) {
+          violations.push({
+            taskId: task.id,
+            title: task.title,
+            assignee: task.assignee,
+            reviewer: newReviewer,
+            type: 'reviewer_reassigned' as any,
+            age_minutes: ageMinutes,
+            message: `🔄 Auto-reassigned: "${task.title}" (${task.id}) reviewer changed from @${task.reviewer} → @${newReviewer} after ${formatReviewDuration(ageMinutes)} without review activity.`,
+            remediation: `New reviewer: @${newReviewer}. Previous: @${task.reviewer} (inactive ${formatReviewDuration(ageMinutes)}).`,
+          })
+          continue // Skip further escalation — reassignment resets the clock
+        }
+      }
     }
 
     if (ageSinceActivity >= VALIDATING_CRITICAL_MS && effective?.level !== 'critical') {
