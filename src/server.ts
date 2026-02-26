@@ -7805,6 +7805,60 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Capabilities: agent-facing endpoint discovery ──────────────────
+  app.get('/capabilities', async () => {
+    const pkg = await import('../package.json', { assert: { type: 'json' } }).catch(() => ({ default: { version: 'unknown' } }))
+
+    return {
+      version: pkg.default.version,
+      api_version: '1',
+      generated_at: Date.now(),
+      endpoints: {
+        tasks: {
+          list: { method: 'GET', path: '/tasks', compact: true, description: 'List tasks. Filters: status, assignee, priority, tags, q.' },
+          get: { method: 'GET', path: '/tasks/:id', compact: true },
+          create: { method: 'POST', path: '/tasks' },
+          update: { method: 'PATCH', path: '/tasks/:id' },
+          active: { method: 'GET', path: '/tasks/active', compact: true, description: 'Current doing task for agent.' },
+          next: { method: 'GET', path: '/tasks/next', compact: true, description: 'Pull next available task.' },
+          search: { method: 'GET', path: '/tasks/search', compact: true, description: 'Keyword search across title + description.' },
+          comment: { method: 'POST', path: '/tasks/:id/comments' },
+        },
+        chat: {
+          messages: { method: 'GET', path: '/chat/messages', compact: true },
+          send: { method: 'POST', path: '/chat/messages' },
+          context: { method: 'GET', path: '/chat/context/:agent', description: 'Compact deduplicated chat context for agent.' },
+        },
+        inbox: {
+          get: { method: 'GET', path: '/inbox/:agent', compact: true },
+          ack: { method: 'POST', path: '/inbox/:agent/ack' },
+        },
+        insights: {
+          list: { method: 'GET', path: '/insights', compact: true },
+          summary: { method: 'GET', path: '/loop/summary', compact: true, description: 'Top signals from the reflection loop.' },
+        },
+        reflections: {
+          submit: { method: 'POST', path: '/reflections' },
+          list: { method: 'GET', path: '/reflections' },
+        },
+        bootstrap: {
+          heartbeat: { method: 'GET', path: '/bootstrap/heartbeat/:agent', description: 'Generate optimal HEARTBEAT.md for agent.' },
+        },
+        system: {
+          health: { method: 'GET', path: '/health' },
+          capabilities: { method: 'GET', path: '/capabilities', description: 'This endpoint.' },
+          me: { method: 'GET', path: '/me/:agent', compact: true, description: 'Full agent dashboard.' },
+        },
+      },
+      recommendations: [
+        'Add ?compact=true to GET requests to reduce response size by 50-75%.',
+        'Use /tasks/active?agent=NAME&compact=true for heartbeat task checks.',
+        'Use /chat/context/:agent instead of /chat/messages for agent context.',
+        'Use /bootstrap/heartbeat/:agent to generate optimal HEARTBEAT.md config.',
+      ],
+    }
+  })
+
   // Per-agent cockpit summary (single-pane "My Now" payload)
   app.get<{ Params: { agent: string } }>('/me/:agent', async (request) => {
     const agent = String(request.params.agent || '').trim()

@@ -128,6 +128,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/next` | Pull-based assignment. Query: `agent`, `compact` |
 | GET | `/tasks/active` | Get active (doing) task for agent. Query: `agent`, `compact`. Returns null if no doing tasks. |
 | GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md content for agent. Adapts to agent role/lane. Includes version stamp and content hash for change detection. |
+| GET | `/capabilities` | Agent-facing endpoint discovery. Lists endpoints grouped by purpose with compact flags and usage recommendations. Includes version. |
 | GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action |
 | GET | `/tasks/intake-schema` | Task intake schema discovery — returns required/optional fields and per-type templates |
 | GET | `/tasks/templates/:type` | Get task creation template for a specific type (e.g. `feature`, `bug`, `chore`) |
