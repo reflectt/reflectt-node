@@ -12,6 +12,9 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
+  process.env.REFLECTT_ENABLE_INSIGHT_MUTATION_API = 'true'
+  delete process.env.REFLECTT_INSIGHT_MUTATION_TOKEN
+
   const db = getDb()
   db.prepare('DELETE FROM insights').run()
   _clearInsightMutationAuditLog()
@@ -58,6 +61,19 @@ function insertInsight(overrides: Record<string, unknown> = {}) {
 }
 
 describe('PATCH /insights/:id', () => {
+  it('is disabled by default (403) unless explicitly enabled', async () => {
+    process.env.REFLECTT_ENABLE_INSIGHT_MUTATION_API = 'false'
+    const id = insertInsight()
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/insights/${id}`,
+      payload: { actor: 'kai', reason: 'cleanup', status: 'closed' },
+    })
+
+    expect(res.statusCode).toBe(403)
+  })
+
   it('rejects missing actor/reason', async () => {
     const id = insertInsight()
 
@@ -86,8 +102,41 @@ describe('PATCH /insights/:id', () => {
     expect(body.error).toMatch(/Immutable\/unknown field/)
   })
 
-  it('updates status and records an audit entry', async () => {
-    const id = insertInsight({ status: 'candidate' })
+  it('rejects non-local requests (localhost-only)', async () => {
+    const id = insertInsight()
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/insights/${id}`,
+      remoteAddress: '10.0.0.5',
+      payload: { actor: 'kai', reason: 'cleanup', status: 'closed' },
+    })
+
+    expect(res.statusCode).toBe(403)
+  })
+
+  it('enforces optional admin token when configured', async () => {
+    process.env.REFLECTT_INSIGHT_MUTATION_TOKEN = 'secret'
+    const id = insertInsight()
+
+    const missing = await app.inject({
+      method: 'PATCH',
+      url: `/insights/${id}`,
+      payload: { actor: 'kai', reason: 'cleanup', status: 'closed' },
+    })
+    expect(missing.statusCode).toBe(403)
+
+    const ok = await app.inject({
+      method: 'PATCH',
+      url: `/insights/${id}`,
+      headers: { 'x-reflectt-admin-token': 'secret' },
+      payload: { actor: 'kai', reason: 'cleanup', status: 'closed' },
+    })
+    expect(ok.statusCode).toBe(200)
+  })
+
+  it('updates status and records an audit entry (preserves NULL metadata unless explicitly set)', async () => {
+    const id = insertInsight({ status: 'candidate', metadata: null })
 
     const res = await app.inject({
       method: 'PATCH',
@@ -99,6 +148,9 @@ describe('PATCH /insights/:id', () => {
     const body = JSON.parse(res.body)
     expect(body.success).toBe(true)
     expect(body.insight.status).toBe('closed')
+
+    const row = getDb().prepare('SELECT metadata FROM insights WHERE id = ?').get(id) as { metadata: string | null }
+    expect(row.metadata).toBe(null)
 
     const audits = getRecentInsightMutationAudits(10)
     expect(audits.length).toBeGreaterThan(0)
@@ -120,6 +172,24 @@ describe('PATCH /insights/:id', () => {
     expect(body.insight.workflow_stage).toBe('newstage')
     expect(body.insight.failure_family).toBe('newfam')
     expect(body.insight.impacted_unit).toBe('newunit')
+  })
+
+  it('rejects invalid status and invalid cluster_key format', async () => {
+    const id = insertInsight()
+
+    const badStatus = await app.inject({
+      method: 'PATCH',
+      url: `/insights/${id}`,
+      payload: { actor: 'kai', reason: 'cleanup', status: 'not-a-real-status' },
+    })
+    expect(badStatus.statusCode).toBe(400)
+
+    const badKey = await app.inject({
+      method: 'PATCH',
+      url: `/insights/${id}`,
+      payload: { actor: 'kai', reason: 'cleanup', cluster_key: 'nope' },
+    })
+    expect(badKey.statusCode).toBe(400)
   })
 
   it('allows metadata.notes and rejects other metadata keys', async () => {

@@ -4,12 +4,12 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { getDb, safeJsonParse, safeJsonStringify } from './db.js'
+import { DATA_DIR } from './config.js'
 import { INSIGHT_STATUSES, type Insight, type InsightStatus } from './insights.js'
 
 // ── Audit log ─────────────────────────────────────────────────────────────
 
-const DATA_DIR = process.env.REFLECTT_DATA_DIR || path.join(process.cwd(), 'data')
-const AUDIT_FILE = path.join(DATA_DIR, 'insight-mutation-audit.jsonl')
+const AUDIT_FILE = process.env.REFLECTT_INSIGHT_MUTATION_AUDIT_FILE || path.join(DATA_DIR, 'insight-mutation-audit.jsonl')
 
 export interface InsightMutationAuditEntry {
   timestamp: number
@@ -31,7 +31,7 @@ export async function recordInsightMutation(entry: InsightMutationAuditEntry): P
 
   // Best-effort append-only JSONL
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true })
+    await fs.mkdir(path.dirname(AUDIT_FILE), { recursive: true })
     await fs.appendFile(AUDIT_FILE, JSON.stringify(entry) + '\n', 'utf-8')
   } catch (err) {
     // Don't block mutations on audit I/O failure
@@ -138,11 +138,16 @@ export function patchInsightById(insightId: string, patch: InsightPatchRequest):
   }
 
   // Merge metadata (allowlist only)
-  const nextMeta: Record<string, unknown> = { ...(before.metadata ?? {}) }
+  // Preserve NULL unless metadata was explicitly provided.
+  const beforeMetaStr = (current.metadata ?? null) as string | null
+  const baseMeta = before.metadata ?? undefined
+  const nextMeta: Record<string, unknown> = { ...(baseMeta ?? {}) }
+  const shouldWriteMetadata = !!patch.metadata
   if (patch.metadata) {
     if (patch.metadata.notes !== undefined) nextMeta.notes = patch.metadata.notes
     if (patch.metadata.cluster_key_override !== undefined) nextMeta.cluster_key_override = patch.metadata.cluster_key_override
   }
+  const nextMetaStr = shouldWriteMetadata ? safeJsonStringify(nextMeta) : beforeMetaStr
 
   const now = Date.now()
   const nextStatus = patch.status ?? (before.status as InsightStatus)
@@ -167,7 +172,7 @@ export function patchInsightById(insightId: string, patch: InsightPatchRequest):
     nextWorkflowStage,
     nextFailureFamily,
     nextImpactedUnit,
-    safeJsonStringify(nextMeta),
+    nextMetaStr,
     now,
     insightId,
   )

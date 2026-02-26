@@ -7438,6 +7438,48 @@ export async function createServer(): Promise<FastifyInstance> {
   // Admin-only mutation endpoint: allow re-key + status changes for hygiene.
   // Safety rails: allowlisted fields only, requires actor + reason, and writes an audit record.
   app.patch<{ Params: { id: string } }>('/insights/:id', async (request, reply) => {
+    const enabled = process.env.REFLECTT_ENABLE_INSIGHT_MUTATION_API === 'true'
+      || process.env.REFLECTT_ENABLE_INSIGHT_MUTATION_API === '1'
+
+    if (!enabled) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'Insight mutation API is disabled',
+        hint: 'Set REFLECTT_ENABLE_INSIGHT_MUTATION_API=true to enable (and optionally REFLECTT_INSIGHT_MUTATION_TOKEN for auth).'
+      }
+    }
+
+    const ip = String((request as any).ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'Forbidden: localhost-only endpoint',
+        hint: `Request ip (${ip || 'unknown'}) is not loopback`,
+      }
+    }
+
+    const requiredToken = process.env.REFLECTT_INSIGHT_MUTATION_TOKEN
+    if (requiredToken) {
+      const raw = (request.headers as any)['x-reflectt-admin-token']
+      let provided = Array.isArray(raw) ? raw[0] : raw
+      const auth = (request.headers as any).authorization
+      if ((!provided || typeof provided !== 'string') && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+        provided = auth.slice('Bearer '.length)
+      }
+
+      if (typeof provided !== 'string' || provided !== requiredToken) {
+        reply.code(403)
+        return {
+          success: false,
+          error: 'Forbidden: missing/invalid admin token',
+          hint: 'Provide x-reflectt-admin-token header (or Authorization: Bearer ...) matching REFLECTT_INSIGHT_MUTATION_TOKEN.'
+        }
+      }
+    }
+
     const body = (request.body ?? {}) as Record<string, unknown>
 
     // Reject unexpected top-level keys (immutable fields protected)
