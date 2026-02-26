@@ -268,7 +268,9 @@ const MODEL_ALIASES: Record<string, string> = {
   sonnet: 'anthropic/claude-sonnet-4-5',
 }
 
-const DEFAULT_MODEL_ALIAS = 'gpt-codex'
+// Operator override: set DEFAULT_MODEL to an alias (gpt, gpt-codex, sonnet, opus)
+// or to provider/model format (e.g. anthropic/claude-sonnet-4-5)
+const DEFAULT_MODEL = (process.env.DEFAULT_MODEL || 'gpt-codex').trim() || 'gpt-codex'
 const PROVIDER_MODEL_PATTERN = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/i
 
 function normalizeConfiguredModel(value: unknown): { ok: boolean; value?: string; resolved?: string; error?: string } {
@@ -5767,11 +5769,21 @@ export async function createServer(): Promise<FastifyInstance> {
       if (parsed.status === 'doing' && existing.status !== 'doing') {
         const requestedModel = mergedMeta.model
         if (requestedModel === undefined || requestedModel === null || `${requestedModel}`.trim().length === 0) {
-          const fallback = MODEL_ALIASES[DEFAULT_MODEL_ALIAS]
-          mergedMeta.model = DEFAULT_MODEL_ALIAS
-          mergedMeta.model_resolved = fallback
-          mergedMeta.model_defaulted = true
-          mergedMeta.model_default_reason = 'No model configured at task start; default alias applied.'
+          // Default model can be overridden by ops via DEFAULT_MODEL env var.
+          const validatedDefault = normalizeConfiguredModel(DEFAULT_MODEL)
+
+          if (!validatedDefault.ok) {
+            // Hard fallback: should never happen, but don't break task starts due to misconfig.
+            mergedMeta.model = 'gpt-codex'
+            mergedMeta.model_resolved = MODEL_ALIASES['gpt-codex']
+            mergedMeta.model_defaulted = true
+            mergedMeta.model_default_reason = 'No model configured at task start; DEFAULT_MODEL misconfigured; fell back to gpt-codex.'
+          } else {
+            mergedMeta.model = validatedDefault.value
+            mergedMeta.model_resolved = validatedDefault.resolved
+            mergedMeta.model_defaulted = true
+            mergedMeta.model_default_reason = 'No model configured at task start; default model applied.'
+          }
         } else {
           const validatedModel = normalizeConfiguredModel(requestedModel)
           if (!validatedModel.ok) {
