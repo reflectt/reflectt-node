@@ -151,7 +151,7 @@ describe('sweepValidatingQueue artifact rejection', () => {
       },
     })
 
-    const result = sweepValidatingQueue()
+    await sweepValidatingQueue()
 
     // Task should still be validating (within 24h grace)
     const check = await app.inject({ method: 'GET', url: `/tasks/${taskId}` })
@@ -199,7 +199,7 @@ describe('sweepValidatingQueue artifact rejection', () => {
     })
     expect(patchRes.statusCode).toBe(200)
 
-    const result = sweepValidatingQueue()
+    const result = await sweepValidatingQueue()
 
     // Task should be auto-rejected back to todo
     const check = await app.inject({ method: 'GET', url: `/tasks/${taskId}` })
@@ -243,7 +243,7 @@ describe('sweepValidatingQueue artifact rejection', () => {
       },
     })
 
-    sweepValidatingQueue()
+    await sweepValidatingQueue()
 
     // Task should still be validating — has real PR artifact
     const check = await app.inject({ method: 'GET', url: `/tasks/${taskId}` })
