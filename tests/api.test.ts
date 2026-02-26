@@ -4914,37 +4914,63 @@ describe('Context budget', () => {
   })
 
   it('GET /context/inject enforces per-layer budgets and reuses persisted memos', async () => {
+    const prev = {
+      OPENCLAW_STATE_DIR: process.env.OPENCLAW_STATE_DIR,
+      REFLECTT_CONTEXT_AUTOSUMMARY: process.env.REFLECTT_CONTEXT_AUTOSUMMARY,
+      REFLECTT_CONTEXT_BUDGET_AGENT_PERSISTENT_TOKENS: process.env.REFLECTT_CONTEXT_BUDGET_AGENT_PERSISTENT_TOKENS,
+      REFLECTT_CONTEXT_BUDGET_SESSION_LOCAL_TOKENS: process.env.REFLECTT_CONTEXT_BUDGET_SESSION_LOCAL_TOKENS,
+    }
+
     // Create a fake OpenClaw state dir with a workspace for this agent.
     const tmp = await fs.mkdtemp(join(tmpdir(), 'reflectt-context-'))
-    process.env.OPENCLAW_STATE_DIR = tmp
 
-    const agent = 'testagent'
-    const ws = join(tmp, `workspace-${agent}`)
-    await fs.mkdir(ws, { recursive: true })
+    try {
+      process.env.OPENCLAW_STATE_DIR = tmp
 
-    // Write an oversized SOUL.md to force agent_persistent overflow.
-    const huge = 'A'.repeat(10_000)
-    await fs.writeFile(join(ws, 'SOUL.md'), huge, 'utf-8')
+      const agent = 'testagent'
+      const ws = join(tmp, `workspace-${agent}`)
+      await fs.mkdir(ws, { recursive: true })
 
-    // Force small budgets + enable autosummary.
-    process.env.REFLECTT_CONTEXT_AUTOSUMMARY = 'true'
-    process.env.REFLECTT_CONTEXT_BUDGET_AGENT_PERSISTENT_TOKENS = '80'
-    process.env.REFLECTT_CONTEXT_BUDGET_SESSION_LOCAL_TOKENS = '80'
+      // Write an oversized SOUL.md to force agent_persistent overflow.
+      const huge = 'A'.repeat(10_000)
+      await fs.writeFile(join(ws, 'SOUL.md'), huge, 'utf-8')
 
-    const first = await req('GET', `/context/inject/${agent}?limit=5&scope_id=team:default`)
-    expect(first.status).toBe(200)
-    expect(first.body.layers.agent_persistent.used_tokens).toBeLessThanOrEqual(first.body.layers.agent_persistent.budget_tokens)
-    expect(first.body.layers.agent_persistent.memo_used).toBe(true)
-    expect(first.body.layers.agent_persistent.memo_updated).toBe(true)
+      // Force small budgets + enable autosummary.
+      process.env.REFLECTT_CONTEXT_AUTOSUMMARY = 'true'
+      process.env.REFLECTT_CONTEXT_BUDGET_AGENT_PERSISTENT_TOKENS = '80'
+      process.env.REFLECTT_CONTEXT_BUDGET_SESSION_LOCAL_TOKENS = '80'
 
-    const second = await req('GET', `/context/inject/${agent}?limit=5&scope_id=team:default`)
-    expect(second.status).toBe(200)
-    expect(second.body.layers.agent_persistent.memo_used).toBe(true)
-    // Should reuse memo when the overflow window didn't change.
-    expect(second.body.layers.agent_persistent.memo_updated).toBe(false)
+      const first = await req('GET', `/context/inject/${agent}?limit=5&scope_id=team:default`)
+      expect(first.status).toBe(200)
+      expect(first.body.layers.agent_persistent.used_tokens).toBeLessThanOrEqual(first.body.layers.agent_persistent.budget_tokens)
+      expect(first.body.layers.agent_persistent.memo_used).toBe(true)
+      expect(first.body.layers.agent_persistent.memo_updated).toBe(true)
 
-    // Cleanup
-    const db = getDb()
-    db.prepare('DELETE FROM context_memos WHERE scope_id = ?').run(`agent:${agent}`)
+      const second = await req('GET', `/context/inject/${agent}?limit=5&scope_id=team:default`)
+      expect(second.status).toBe(200)
+      expect(second.body.layers.agent_persistent.memo_used).toBe(true)
+      // Should reuse memo when the overflow window didn't change.
+      expect(second.body.layers.agent_persistent.memo_updated).toBe(false)
+
+      // Cleanup memo row
+      const db = getDb()
+      db.prepare('DELETE FROM context_memos WHERE scope_id = ?').run(`agent:${agent}`)
+    } finally {
+      // Restore env
+      if (prev.OPENCLAW_STATE_DIR === undefined) delete process.env.OPENCLAW_STATE_DIR
+      else process.env.OPENCLAW_STATE_DIR = prev.OPENCLAW_STATE_DIR
+
+      if (prev.REFLECTT_CONTEXT_AUTOSUMMARY === undefined) delete process.env.REFLECTT_CONTEXT_AUTOSUMMARY
+      else process.env.REFLECTT_CONTEXT_AUTOSUMMARY = prev.REFLECTT_CONTEXT_AUTOSUMMARY
+
+      if (prev.REFLECTT_CONTEXT_BUDGET_AGENT_PERSISTENT_TOKENS === undefined) delete process.env.REFLECTT_CONTEXT_BUDGET_AGENT_PERSISTENT_TOKENS
+      else process.env.REFLECTT_CONTEXT_BUDGET_AGENT_PERSISTENT_TOKENS = prev.REFLECTT_CONTEXT_BUDGET_AGENT_PERSISTENT_TOKENS
+
+      if (prev.REFLECTT_CONTEXT_BUDGET_SESSION_LOCAL_TOKENS === undefined) delete process.env.REFLECTT_CONTEXT_BUDGET_SESSION_LOCAL_TOKENS
+      else process.env.REFLECTT_CONTEXT_BUDGET_SESSION_LOCAL_TOKENS = prev.REFLECTT_CONTEXT_BUDGET_SESSION_LOCAL_TOKENS
+
+      // Best-effort cleanup tmp dir
+      await fs.rm(tmp, { recursive: true, force: true }).catch(() => {})
+    }
   })
 })

@@ -237,6 +237,8 @@ function findAgentWorkspace(agent: string): string {
 async function buildAgentPersistentItems(agent: string): Promise<ContextItem[]> {
   const root = findAgentWorkspace(agent)
 
+  // Preference: keep core identity/config files over long memory tails.
+  // Budget enforcement keeps the most recent items, so we append core files LAST.
   const candidates: Array<{ id: string; title: string; path: string; maxChars?: number }> = [
     { id: 'SOUL.md', title: 'SOUL.md', path: join(root, 'SOUL.md'), maxChars: 16_000 },
     { id: 'TOOLS.md', title: 'TOOLS.md', path: join(root, 'TOOLS.md'), maxChars: 16_000 },
@@ -245,23 +247,8 @@ async function buildAgentPersistentItems(agent: string): Promise<ContextItem[]> 
     { id: 'HEARTBEAT.md', title: 'HEARTBEAT.md', path: join(root, 'HEARTBEAT.md'), maxChars: 16_000 },
   ]
 
-  const items: ContextItem[] = []
-
-  for (const c of candidates) {
-    const content = await readIfExists(c.path)
-    if (!content) continue
-    const clipped = typeof c.maxChars === 'number' && content.length > c.maxChars
-      ? content.slice(0, c.maxChars) + '\n\n…(file clipped)'
-      : content
-    items.push({
-      source: 'file',
-      id: c.id,
-      title: c.title,
-      content: clipped,
-      tokens_est: estimateTokens(clipped),
-      meta: { path: c.path },
-    })
-  }
+  const memoryItems: ContextItem[] = []
+  const coreItems: ContextItem[] = []
 
   // Include most recent memory files (bounded upstream by budget enforcement).
   try {
@@ -272,7 +259,7 @@ async function buildAgentPersistentItems(agent: string): Promise<ContextItem[]> 
 
     for (const mem of picked) {
       const content = mem.content.length > 20_000 ? mem.content.slice(0, 20_000) + '\n\n…(memory clipped)' : mem.content
-      items.push({
+      memoryItems.push({
         source: 'file',
         id: `memory:${mem.filename}`,
         title: `memory/${mem.filename}`,
@@ -285,7 +272,24 @@ async function buildAgentPersistentItems(agent: string): Promise<ContextItem[]> 
     // best-effort; memory not required
   }
 
-  return items
+  for (const c of candidates) {
+    const content = await readIfExists(c.path)
+    if (!content) continue
+    const clipped = typeof c.maxChars === 'number' && content.length > c.maxChars
+      ? content.slice(0, c.maxChars) + '\n\n…(file clipped)'
+      : content
+    coreItems.push({
+      source: 'file',
+      id: c.id,
+      title: c.title,
+      content: clipped,
+      tokens_est: estimateTokens(clipped),
+      meta: { path: c.path },
+    })
+  }
+
+  // Important: core files appended last so they survive keepMostRecentWithinBudget.
+  return [...memoryItems, ...coreItems]
 }
 
 function buildSessionLocalItems(messages: AgentMessage[], agent: string): ContextItem[] {
@@ -377,11 +381,11 @@ async function enforceLayerBudget(opts: {
 
   // Autosummary enabled.
   // Strategy (v1): summarize the items we are dropping (oldest) into a memo,
-  // and keep a recent tail.
+  // and keep a recent tail. Memo must always be included.
   const tailBudget = Math.max(300, Math.floor(opts.budgetTokens * 0.45))
   const memoBudget = Math.max(300, opts.budgetTokens - tailBudget)
 
-  const { kept: tail, suppressedTokens } = keepMostRecentWithinBudget(opts.items, tailBudget)
+  const { kept: tail } = keepMostRecentWithinBudget(opts.items, tailBudget)
   const tailIds = new Set(tail.map(i => i.id))
   const overflow = opts.items.filter(i => !tailIds.has(i.id))
 
@@ -410,33 +414,46 @@ async function enforceLayerBudget(opts: {
     memoUpdated = true
   }
 
+  const memoUsed = Boolean(memo && memo.content)
+
+  // Clamp memo to its reserved sub-budget (and never exceed full layer budget).
+  const memoClampBudget = Math.min(memoBudget, opts.budgetTokens)
+  const memoContent = clampTextToTokens(memo?.content || '', memoClampBudget)
   const memoItem: ContextItem = {
     source: 'memo',
     id: `memo:${opts.scope_id}:${opts.layer}:v${memo?.memo_version || 0}`,
     title: `Context memo (${opts.layer})`,
-    content: memo?.content || '',
-    tokens_est: estimateTokens(memo?.content || ''),
+    content: memoContent,
+    tokens_est: estimateTokens(memoContent),
     meta: {
       scope_id: opts.scope_id,
       layer: opts.layer,
       memo_version: memo?.memo_version || 0,
       memo_updated: memoUpdated,
+      clamped: memoContent !== (memo?.content || ''),
     },
   }
 
-  const combined = [memoItem, ...tail]
-  const combinedUsed = sumTokens(combined)
-  const memoUsed = Boolean(memo && memo.content)
-
-  // Safety: if memo+tail somehow exceed layer budget, truncate from the front of tail.
-  let finalItems = combined
-  if (combinedUsed > opts.budgetTokens) {
-    warnings.push('memo_plus_tail_exceeded_budget_truncated_tail')
-    const { kept } = keepMostRecentWithinBudget(combined, opts.budgetTokens)
-    finalItems = kept
+  // Fill remaining budget with the most recent tail. Ensure memo is never dropped.
+  const remaining = Math.max(0, opts.budgetTokens - memoItem.tokens_est)
+  let tailKept = tail
+  if (remaining === 0) {
+    warnings.push('memo_exhausted_layer_budget_tail_dropped')
+    tailKept = []
+  } else {
+    const before = sumTokens(tail)
+    const { kept } = keepMostRecentWithinBudget(tail, remaining)
+    tailKept = kept
+    const after = sumTokens(tailKept)
+    if (after < before) warnings.push('tail_truncated_to_fit_memo')
   }
 
+  const finalItems = [memoItem, ...tailKept]
   const finalUsed = sumTokens(finalItems)
+
+  // suppressed_tokens = raw tokens removed from the layer (memo not counted as raw)
+  const rawIncluded = sumTokens(tailKept)
+  const suppressed = Math.max(0, totalTokens - rawIncluded)
 
   return {
     layer: opts.layer,
@@ -448,7 +465,7 @@ async function enforceLayerBudget(opts: {
     memo_version: memo?.memo_version,
     warnings,
     items: finalItems,
-    suppressed_tokens: Math.max(0, totalTokens - finalUsed) + suppressedTokens,
+    suppressed_tokens: suppressed,
   }
 }
 
