@@ -281,6 +281,12 @@ export async function startCloudIntegration(): Promise<void> {
     }, 500)
   })
 
+  // Task changes also mark activity (ensures burst mode on task updates)
+  taskManager.subscribe(() => {
+    if (!state.running) return
+    markCloudActivity()
+  })
+
   // Canvas sync — adaptive: 5s when active, 60s when idle
   // Uses a single 5s tick that skips when idle (unless enough time has passed)
   let lastCanvasSyncAt = 0
