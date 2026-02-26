@@ -14,7 +14,7 @@
  * - Creates the PR via `gh pr create`
  */
 
-import { execSync } from 'node:child_process'
+import { execSync, execFileSync } from 'node:child_process'
 
 const args = process.argv.slice(2)
 const taskIdx = args.indexOf('--task')
@@ -115,8 +115,9 @@ ${doneCriteria || '- [ ] (none specified)'}
   // 5. Create PR
   console.log(`\n🚀 Creating PR: "${prTitle}"...`)
   try {
-    const result = execSync(
-      `gh pr create --title ${JSON.stringify(prTitle)} --body ${JSON.stringify(prBody)} --base main`,
+    const result = execFileSync(
+      'gh',
+      ['pr', 'create', '--title', prTitle, '--body', prBody, '--base', 'main'],
       { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
     ).trim()
     console.log(`\n✅ PR created: ${result}`)
