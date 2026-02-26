@@ -151,6 +151,50 @@ function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch | null 
   const allTasks = taskManager.listTasks({})
   const targetTitle = `[Insight] ${insight.title}`.toLowerCase()
 
+  // Evidence-based dedup: if an insight explicitly references an existing task or PR,
+  // treat it as covered even if the cluster_key differs (common in follow-up insights).
+  const evidence = (insight.evidence_refs || []).filter(Boolean)
+
+  // 0a) Direct task-id reference in evidence (e.g. "task-..." in links/logs)
+  const taskIdMatches = new Set<string>()
+  for (const line of evidence) {
+    const matches = String(line).match(/task-\d+-[a-z0-9]+/gi) || []
+    for (const m of matches) taskIdMatches.add(m)
+  }
+  if (taskIdMatches.size > 0) {
+    for (const task of allTasks) {
+      if (taskIdMatches.has(task.id)) {
+        return {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          alreadyAddressed: task.status === 'done' || task.status === 'validating',
+        }
+      }
+    }
+  }
+
+  // 0b) PR link reference in evidence (e.g. https://github.com/.../pull/123)
+  const prUrlMatches = new Set<string>()
+  for (const line of evidence) {
+    const matches = String(line).match(/https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+/gi) || []
+    for (const m of matches) prUrlMatches.add(m)
+  }
+  if (prUrlMatches.size > 0) {
+    for (const task of allTasks) {
+      const meta = (task.metadata || {}) as Record<string, unknown>
+      const prUrl = (meta.pr_url || (meta.review_handoff as any)?.pr_url || (meta.qa_bundle as any)?.pr_link) as string | undefined
+      if (prUrl && prUrlMatches.has(prUrl)) {
+        return {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          alreadyAddressed: task.status === 'done' || task.status === 'validating',
+        }
+      }
+    }
+  }
+
   for (const task of allTasks) {
     const meta = (task.metadata || {}) as Record<string, unknown>
 
