@@ -6924,6 +6924,15 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Reflections ────────────────────────────────────────────────────────
 
+  // Reflection dedup: track recent content hashes per author to reject duplicates
+  const REFLECTION_DEDUP_WINDOW_MS = 60 * 60 * 1000 // 1 hour
+  const reflectionDedupMap = new Map<string, number>() // hash -> timestamp
+
+  function reflectionContentHash(author: string, pain: string, evidence: unknown[]): string {
+    const normalized = [author, pain.trim().toLowerCase(), ...evidence.map(e => String(e).trim().toLowerCase()).sort()].join('|')
+    return createHash('sha256').update(normalized).digest('hex').slice(0, 32)
+  }
+
   app.post('/reflections', async (request, reply) => {
     const result = validateReflection(request.body)
     if (!result.valid) {
@@ -6936,7 +6945,34 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Dedup check: reject identical reflections from same author within window
+    const dedupHash = reflectionContentHash(result.data.author, result.data.pain, result.data.evidence)
+    const now = Date.now()
+    const lastSeen = reflectionDedupMap.get(dedupHash)
+    if (lastSeen && (now - lastSeen) < REFLECTION_DEDUP_WINDOW_MS) {
+      reply.code(409)
+      return {
+        success: false,
+        error: 'Duplicate reflection',
+        code: 'DUPLICATE_REFLECTION',
+        status: 409,
+        hint: `A reflection with identical content from "${result.data.author}" was submitted ${Math.round((now - lastSeen) / 1000)}s ago. Wait ${Math.round((REFLECTION_DEDUP_WINDOW_MS - (now - lastSeen)) / 60000)}m or change the content.`,
+        dedup_hash: dedupHash,
+      }
+    }
+
+    // Periodic cleanup of stale dedup entries
+    if (reflectionDedupMap.size > 500) {
+      const cutoff = now - REFLECTION_DEDUP_WINDOW_MS
+      for (const [hash, ts] of reflectionDedupMap) {
+        if (ts < cutoff) reflectionDedupMap.delete(hash)
+      }
+    }
+
     const reflection = createReflection(result.data)
+
+    // Record hash after successful creation
+    reflectionDedupMap.set(dedupHash, now)
 
     // Track reflection for automation (resets nudge timer)
     try {
