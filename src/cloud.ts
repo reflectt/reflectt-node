@@ -934,7 +934,17 @@ async function handleCommand(cmd: PendingCommand): Promise<void> {
 async function handleContextSync(cmd: PendingCommand): Promise<void> {
   if (!state.hostId) return
 
-  const agent = (cmd.payload?.agent as string) || 'link'
+  // Require payload.agent — no hardcoded fallback
+  const agent = cmd.payload?.agent as string | undefined
+  if (!agent || typeof agent !== 'string') {
+    console.warn(`☁️  [Commands] context_sync failed: missing payload.agent (${cmd.id})`)
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'fail',
+      error: 'Missing required payload.agent — cannot determine which agent to sync',
+    })
+    return
+  }
+
   console.log(`☁️  [Commands] Processing context_sync for agent=${agent} (${cmd.id})`)
 
   // Ack immediately (in-progress)
@@ -943,9 +953,10 @@ async function handleContextSync(cmd: PendingCommand): Promise<void> {
   })
 
   // Fetch context snapshot from local node
+  // Use REFLECTT_NODE_PORT (dedicated) with 4445 as default
   let contextData: Record<string, unknown>
   try {
-    const port = process.env.PORT || '4445'
+    const port = process.env.REFLECTT_NODE_PORT || process.env.PORT || '4445'
     const localRes = await fetch(`http://127.0.0.1:${port}/context/inject/${encodeURIComponent(agent)}`)
     if (!localRes.ok) throw new Error(`Local context fetch failed: ${localRes.status}`)
     contextData = await localRes.json() as Record<string, unknown>
@@ -958,10 +969,11 @@ async function handleContextSync(cmd: PendingCommand): Promise<void> {
     throw err
   }
 
-  // Push to cloud
+  // Push to cloud — use computed_at from injection payload when present
+  const computedAt = typeof contextData.computed_at === 'number' ? contextData.computed_at : Date.now()
   const syncResult = await cloudPost(`/api/hosts/${state.hostId}/context/sync`, {
     agent,
-    computed_at: Date.now(),
+    computed_at: computedAt,
     budgets: contextData.budgets || { totalTokens: 0, layers: {} },
     autosummary_enabled: Boolean(contextData.autosummary_enabled),
     layers: contextData.layers || {},
