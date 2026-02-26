@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { promises as fs } from 'fs'
 import { join } from 'path'
+import { tmpdir } from 'os'
 import { createServer } from '../src/server.js'
 import { DATA_DIR, REFLECTT_HOME } from '../src/config.js'
 import { getDb } from '../src/db.js'
@@ -4877,5 +4878,73 @@ describe('Shared Workspace Read API (HTTP)', () => {
 
     // Cleanup
     await app.inject({ method: 'DELETE', url: `/tasks/${taskId}` })
+  })
+})
+
+describe('Context budget', () => {
+  it('GET /context/budgets returns configured budgets', async () => {
+    const { status, body } = await req('GET', '/context/budgets')
+    expect(status).toBe(200)
+    expect(body.budgets).toBeTruthy()
+    expect(body.budgets.layers).toBeTruthy()
+    expect(body.budgets.layers.session_local).toBeGreaterThan(0)
+  })
+
+  it('POST/GET /context/memo persists memo content', async () => {
+    const scope_id = 'TEST:scope:context-memo'
+    const content = 'TEST memo content'
+
+    const created = await req('POST', '/context/memo', {
+      scope_id,
+      layer: 'team_shared',
+      content,
+      source_window: { test: true },
+    })
+    expect(created.status).toBe(200)
+    expect(created.body.success).toBe(true)
+    expect(created.body.memo.scope_id).toBe(scope_id)
+
+    const fetched = await req('GET', `/context/memo?scope_id=${encodeURIComponent(scope_id)}&layer=team_shared`)
+    expect(fetched.status).toBe(200)
+    expect(fetched.body.memo.content).toContain(content)
+
+    // Cleanup
+    const db = getDb()
+    db.prepare('DELETE FROM context_memos WHERE scope_id = ?').run(scope_id)
+  })
+
+  it('GET /context/inject enforces per-layer budgets and reuses persisted memos', async () => {
+    // Create a fake OpenClaw state dir with a workspace for this agent.
+    const tmp = await fs.mkdtemp(join(tmpdir(), 'reflectt-context-'))
+    process.env.OPENCLAW_STATE_DIR = tmp
+
+    const agent = 'testagent'
+    const ws = join(tmp, `workspace-${agent}`)
+    await fs.mkdir(ws, { recursive: true })
+
+    // Write an oversized SOUL.md to force agent_persistent overflow.
+    const huge = 'A'.repeat(10_000)
+    await fs.writeFile(join(ws, 'SOUL.md'), huge, 'utf-8')
+
+    // Force small budgets + enable autosummary.
+    process.env.REFLECTT_CONTEXT_AUTOSUMMARY = 'true'
+    process.env.REFLECTT_CONTEXT_BUDGET_AGENT_PERSISTENT_TOKENS = '80'
+    process.env.REFLECTT_CONTEXT_BUDGET_SESSION_LOCAL_TOKENS = '80'
+
+    const first = await req('GET', `/context/inject/${agent}?limit=5&scope_id=team:default`)
+    expect(first.status).toBe(200)
+    expect(first.body.layers.agent_persistent.used_tokens).toBeLessThanOrEqual(first.body.layers.agent_persistent.budget_tokens)
+    expect(first.body.layers.agent_persistent.memo_used).toBe(true)
+    expect(first.body.layers.agent_persistent.memo_updated).toBe(true)
+
+    const second = await req('GET', `/context/inject/${agent}?limit=5&scope_id=team:default`)
+    expect(second.status).toBe(200)
+    expect(second.body.layers.agent_persistent.memo_used).toBe(true)
+    // Should reuse memo when the overflow window didn't change.
+    expect(second.body.layers.agent_persistent.memo_updated).toBe(false)
+
+    // Cleanup
+    const db = getDb()
+    db.prepare('DELETE FROM context_memos WHERE scope_id = ?').run(`agent:${agent}`)
   })
 })
