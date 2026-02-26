@@ -39,6 +39,7 @@ import { getDb } from './db.js'
 import type { AgentMessage, Task } from './types.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 import { memoryManager } from './memory.js'
+import { buildContextInjection, getContextBudgets, getContextMemo, upsertContextMemo, type ContextLayer } from './context-budget.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
@@ -3005,6 +3006,153 @@ export async function createServer(): Promise<FastifyInstance> {
         system_deduped: systemAlerts.length - dedupedAlerts.length,
         total_scanned: allMessages.length,
       },
+    }
+  })
+
+  // ── Context injection with per-layer budgets (v1) ───────────────────────
+  // Returns a structured, bounded context payload with token estimates +
+  // (optional) persisted memo summaries when layers overflow their budgets.
+  app.get<{ Params: { agent: string } }>('/context/inject/:agent', async (request, reply) => {
+    const agent = String(request.params.agent || '').trim().toLowerCase()
+    if (!agent) {
+      reply.code(400)
+      return { error: 'agent is required' }
+    }
+
+    const query = request.query as Record<string, string>
+    const limit = Math.min(Number(query.limit) || 60, 200)
+    const channelFilter = query.channel || undefined
+    const sinceMs = query.since ? Number(query.since) : Date.now() - (4 * 60 * 60 * 1000)
+    const teamScopeId = (query.scope_id || query.team_scope_id || 'team:default').trim()
+
+    const allMessages = chatManager.getMessages({
+      channel: channelFilter,
+      limit: Math.min(limit * 6, 800),
+      since: sinceMs,
+    })
+
+    // Partition: mentions, system alerts, team messages
+    const mentions: typeof allMessages = []
+    const systemAlerts: typeof allMessages = []
+    const teamMessages: typeof allMessages = []
+
+    const agentPattern = new RegExp(`@${agent}\\b`, 'i')
+
+    for (const m of allMessages) {
+      const content = m.content || ''
+      if (m.from === 'system') systemAlerts.push(m)
+      else if (agentPattern.test(content)) mentions.push(m)
+      else teamMessages.push(m)
+    }
+
+    // Deduplicate system alerts by normalized content
+    const seenHashes = new Set<string>()
+    const dedupedAlerts = systemAlerts.filter(m => {
+      const normalized = (m.content || '')
+        .replace(/\d{10,}/g, '')
+        .replace(/task-\S+/g, 'TASK')
+        .replace(/@[\w-]+/g, '@AGENT')
+        .replace(/\d+\/\d+/g, 'N/M')
+        .replace(/\d+h\b/g, 'Nh')
+        .replace(/\d+m\b/g, 'Nm')
+        .replace(/\d+\s*hour/g, 'N hour')
+        .replace(/\d+\s*min/g, 'N min')
+        .replace(/\(need \d+ more\)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim().slice(0, 200)
+      const hash = `${m.channel}:${normalized}`
+      if (seenHashes.has(hash)) return false
+      seenHashes.add(hash)
+      return true
+    })
+
+    const selected = [
+      ...mentions.slice(-limit),
+      ...dedupedAlerts.slice(-Math.ceil(limit / 3)),
+      ...teamMessages.slice(-Math.ceil(limit / 3)),
+    ]
+      .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+      .slice(-limit)
+
+    const injection = await buildContextInjection({
+      agent,
+      sessionMessages: selected,
+      teamScopeId,
+    })
+
+    return {
+      ...injection,
+      session_source: {
+        since: sinceMs,
+        limit,
+        channel: channelFilter || null,
+        scanned: allMessages.length,
+        selected: selected.length,
+        suppressed: {
+          system_deduped: systemAlerts.length - dedupedAlerts.length,
+        },
+      },
+    }
+  })
+
+  // Read a persisted context memo (for UI/debug)
+  app.get('/context/memo', async (request, reply) => {
+    const querySchema = z.object({
+      scope_id: z.string().trim().min(1),
+      layer: z.enum(['session_local', 'agent_persistent', 'team_shared']),
+    })
+
+    const parsed = querySchema.safeParse(request.query ?? {})
+    if (!parsed.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const memo = getContextMemo(parsed.data.scope_id, parsed.data.layer as ContextLayer)
+    if (!memo) {
+      reply.code(404)
+      return { error: 'Memo not found' }
+    }
+    return { memo }
+  })
+
+  // Manually set/overwrite a memo (useful for team_shared bootstrapping)
+  app.post('/context/memo', async (request, reply) => {
+    const bodySchema = z.object({
+      scope_id: z.string().trim().min(1),
+      layer: z.enum(['session_local', 'agent_persistent', 'team_shared']),
+      content: z.string().trim().min(1),
+      source_window: z.record(z.any()).optional(),
+    })
+
+    const parsed = bodySchema.safeParse(request.body ?? {})
+    if (!parsed.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid body',
+        details: parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const memo = upsertContextMemo({
+      scope_id: parsed.data.scope_id,
+      layer: parsed.data.layer as ContextLayer,
+      content: parsed.data.content,
+      source_window: parsed.data.source_window,
+      source_hash: undefined,
+    })
+
+    return { success: true, memo }
+  })
+
+  // Get current configured budgets (for UI/debug)
+  app.get('/context/budgets', async () => {
+    return {
+      budgets: getContextBudgets(),
+      autosummary_enabled: String(process.env.REFLECTT_CONTEXT_AUTOSUMMARY || '').trim(),
     }
   })
 

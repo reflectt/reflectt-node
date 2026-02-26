@@ -444,6 +444,25 @@ export function runMigrations(db: Database.Database): void {
         ALTER TABLE chat_messages ADD COLUMN dedup_key TEXT;
       `,
     },
+    {
+      version: 15,
+      sql: `
+        -- Context budget memos (persisted summaries)
+        CREATE TABLE IF NOT EXISTS context_memos (
+          scope_id TEXT NOT NULL,
+          layer TEXT NOT NULL,
+          memo_version INTEGER NOT NULL DEFAULT 1,
+          content TEXT NOT NULL,
+          source_window TEXT, -- JSON object
+          source_hash TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (scope_id, layer)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_context_memos_updated_at ON context_memos(updated_at);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
