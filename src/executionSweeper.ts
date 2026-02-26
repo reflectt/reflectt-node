@@ -19,6 +19,7 @@ import type { Task } from './types.js'
 import { execSync } from 'child_process'
 import { processAutoMerge, generateRemediation } from './prAutoMerge.js'
 import { msToMinutes } from './format-duration.js'
+import { suggestReviewer } from './assignment.js'
 
 // ── Live PR State Check ────────────────────────────────────────────────────
 
@@ -82,6 +83,9 @@ const VALIDATING_SLA_MS = 2 * 60 * 60 * 1000 // 2 hours (was 30m — too aggress
 
 /** Critical SLA: second escalation tier */
 const VALIDATING_CRITICAL_MS = 8 * 60 * 60 * 1000 // 8 hours (was 60m — reviewers aren't real-time)
+
+/** Auto-reassign reviewer after this much time without reviewer activity */
+const VALIDATING_REASSIGN_MS = 2 * 60 * 60 * 1000 // 2 hours
 
 /** PR age threshold: flag PRs linked to non-active tasks older than this */
 const ORPHAN_PR_THRESHOLD_MS = 2 * 60 * 60 * 1000 // 2 hours
@@ -215,6 +219,18 @@ export function isAutoClosable(task: Task, meta: Record<string, unknown>): boole
 
 export function sweepValidatingQueue(): SweepResult {
   const now = Date.now()
+
+  // Snapshot tasks for load-balanced reviewer reassignment decisions
+  const tasksForScoring = taskManager.listTasks({}).map(t => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    assignee: t.assignee,
+    reviewer: t.reviewer,
+    tags: t.metadata?.tags as string[] | undefined,
+    metadata: t.metadata,
+  }))
+
   const validating = taskManager.listTasks({ status: 'validating' })
   const doneTasks = taskManager.listTasks({ status: 'done' })
   const doingTasks = taskManager.listTasks({ status: 'doing' })
@@ -296,6 +312,54 @@ export function sweepValidatingQueue(): SweepResult {
       })
     }
     const effective = escalated.get(task.id)
+
+    // Auto-reassign reviewer when a task sits in validating too long without activity.
+    // This mitigates "stuck in validating" states when the original reviewer is offline.
+    if (ageSinceActivity >= VALIDATING_REASSIGN_MS && meta.reviewer_auto_reassigned !== true) {
+      try {
+        const suggestion = suggestReviewer(
+          {
+            title: task.title,
+            assignee: task.assignee,
+            tags: meta.tags as string[] | undefined,
+            done_criteria: task.done_criteria,
+          },
+          tasksForScoring,
+        )
+
+        const currentReviewer = (task.reviewer || '').trim()
+        const nextReviewer = (suggestion.suggested || '').trim()
+
+        if (currentReviewer && nextReviewer && nextReviewer.toLowerCase() !== currentReviewer.toLowerCase()) {
+          taskManager.updateTask(task.id, {
+            reviewer: nextReviewer,
+            metadata: {
+              ...meta,
+              review_state: 'queued',
+              review_last_activity_at: now,
+              reviewer_previous: currentReviewer,
+              reviewer_auto_reassigned: true,
+              reviewer_auto_reassigned_at: now,
+              reviewer_reassign_reason: 'validating_no_reviewer_activity',
+              reviewer_scores: suggestion.scores.slice(0, 3),
+            },
+          } as any)
+
+          // Mutate local copy so subsequent alerts in this sweep use the new reviewer.
+          task.reviewer = nextReviewer
+
+          logDryRun('reviewer_auto_reassigned', `${task.id} — ${currentReviewer} -> ${nextReviewer} after ${ageMinutes}m without reviewer activity`)
+
+          chatManager.sendMessage({
+            from: 'system',
+            channel: 'task-notifications',
+            content: `🔁 Auto-reassigned reviewer for "${task.title}" (${task.id}) after ${ageMinutes}m without reviewer activity: @${currentReviewer} → @${nextReviewer}.`,
+          }).catch(() => {})
+        }
+      } catch (err) {
+        logDryRun('reviewer_auto_reassign_failed', `${task.id} — ${String(err)}`)
+      }
+    }
 
     // Skip if max escalations reached (silenced)
     if (persistedCount >= MAX_ESCALATION_COUNT) {
