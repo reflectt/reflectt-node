@@ -5,7 +5,7 @@
 // Triggered on task transition to validating or done.
 
 import { promises as fs } from 'fs'
-import { join, resolve, basename, dirname } from 'path'
+import { join, resolve, dirname } from 'path'
 import { homedir } from 'os'
 
 // ── Config (lazy for testability — env is read at call time) ──
@@ -19,7 +19,23 @@ import { homedir } from 'os'
  */
 
 function getWorkspaceRoot(): string {
-  return process.env.REFLECTT_WORKSPACE || resolve(process.cwd())
+  const explicit = process.env.REFLECTT_WORKSPACE
+  if (explicit) return resolve(explicit)
+
+  // reflectt-node commonly runs with CWD inside a nested project directory:
+  //   ~/.openclaw/workspace/projects/reflectt-node
+  // In that case, the actual workspace root is the parent *before* /projects/reflectt-node.
+  const cwd = resolve(process.cwd())
+  const normalized = cwd.replace(/\\/g, '/')
+  const marker = '/projects/reflectt-node'
+  const idx = normalized.lastIndexOf(marker)
+
+  if (idx !== -1) {
+    const root = normalized.slice(0, idx)
+    if (root) return root
+  }
+
+  return cwd
 }
 
 function getSharedWorkspace(): string {
@@ -40,6 +56,57 @@ export interface MirrorResult {
   error?: string
 }
 
+async function listCandidateWorkspaceRoots(): Promise<string[]> {
+  const roots: string[] = []
+  const seen = new Set<string>()
+
+  const add = (p: string) => {
+    if (!p) return
+    const r = resolve(p)
+    if (seen.has(r)) return
+    seen.add(r)
+    roots.push(r)
+  }
+
+  // Prefer the inferred runtime workspace root first (fast path).
+  add(getWorkspaceRoot())
+
+  // Then search all known OpenClaw workspaces so artifacts produced by other
+  // agents can still be mirrored on review transition.
+  const base = resolve(homedir(), '.openclaw')
+  try {
+    const entries = await fs.readdir(base, { withFileTypes: true })
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      if (!e.name.startsWith('workspace')) continue
+      if (e.name === 'workspace-shared') continue
+      add(resolve(base, e.name))
+    }
+  } catch {
+    // Non-fatal: in some deployments we may not have directory read access.
+  }
+
+  return roots
+}
+
+async function findArtifactSource(artifactPath: string): Promise<{
+  sourcePath: string
+  stat: any
+  checked: string[]
+} | null> {
+  const candidates = await listCandidateWorkspaceRoots()
+  const checked: string[] = []
+
+  for (const root of candidates) {
+    const candidate = resolve(root, artifactPath)
+    checked.push(candidate)
+    const stat = await fs.stat(candidate).catch(() => null)
+    if (stat) return { sourcePath: candidate, stat, checked }
+  }
+
+  return null
+}
+
 /**
  * Mirror a task's process artifacts to the shared workspace.
  *
@@ -51,15 +118,24 @@ export async function mirrorArtifacts(artifactPath: string): Promise<MirrorResul
     return { mirrored: false, source: artifactPath, destination: '', filesCopied: 0, error: 'Not a process/ artifact path' }
   }
 
-  const sourcePath = resolve(getWorkspaceRoot(), artifactPath)
   const destPath = resolve(getSharedWorkspace(), artifactPath)
 
+  let sourcePath = resolve(getWorkspaceRoot(), artifactPath)
+
   try {
-    // Check source exists
-    const stat = await fs.stat(sourcePath).catch(() => null)
-    if (!stat) {
-      return { mirrored: false, source: sourcePath, destination: destPath, filesCopied: 0, error: 'Source artifact not found' }
+    const lookup = await findArtifactSource(artifactPath)
+    if (!lookup) {
+      return {
+        mirrored: false,
+        source: sourcePath,
+        destination: destPath,
+        filesCopied: 0,
+        error: 'Source artifact not found (checked all ~/.openclaw/workspace* roots)',
+      }
     }
+
+    sourcePath = lookup.sourcePath
+    const stat = lookup.stat
 
     // Ensure destination directory exists
     await fs.mkdir(dirname(destPath), { recursive: true })
