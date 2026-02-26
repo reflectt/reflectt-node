@@ -251,6 +251,7 @@ export async function startCloudIntegration(): Promise<void> {
 
   state.heartbeatTimer = setInterval(() => {
     sendHeartbeat().catch(() => {})
+    pollAndProcessCommands().catch(() => {}) // Piggyback on heartbeat tick
   }, config.heartbeatIntervalMs)
 
   state.taskSyncTimer = setInterval(() => {
@@ -310,8 +311,13 @@ export async function startCloudIntegration(): Promise<void> {
     syncUsage().catch(() => {})
   }, ACTIVE_USAGE_SYNC_MS)
 
+  // Command polling — adaptive: 10s active, 60s idle
+  // Uses the same tick as canvas (5s) with interval gate
+  pollAndProcessCommands().catch(() => {})
+
   console.log(`   ✅ Heartbeat every ${config.heartbeatIntervalMs / 1000}s, task sync every ${config.taskSyncIntervalMs / 1000}s`)
   console.log(`   📊 Adaptive sync: chat/canvas/usage ${chatSyncActiveMs / 1000}s active → ${IDLE_SYNC_MS / 1000}s idle (idle after ${IDLE_THRESHOLD_MS / 1000}s)`)
+  console.log(`   📬 Command polling: ${COMMAND_POLL_ACTIVE_MS / 1000}s active → ${COMMAND_POLL_IDLE_MS / 1000}s idle`)
 }
 
 /**
@@ -859,12 +865,157 @@ async function syncUsage(): Promise<void> {
   }
 }
 
+// ---- Command polling + context_sync handler ----
+
+const COMMAND_POLL_ACTIVE_MS = 10_000   // 10s when active
+const COMMAND_POLL_IDLE_MS = 60_000     // 60s when idle
+let commandPollErrors = 0
+let lastCommandPollAt = 0
+
+interface PendingCommand {
+  id: string
+  type: string
+  payload: Record<string, unknown>
+  status: string
+}
+
+async function pollAndProcessCommands(): Promise<void> {
+  if (!state.hostId || !config || !state.running) return
+
+  const now = Date.now()
+  const interval = isIdle() ? COMMAND_POLL_IDLE_MS : COMMAND_POLL_ACTIVE_MS
+  if (now - lastCommandPollAt < interval) return
+  lastCommandPollAt = now
+
+  const result = await cloudGet<{ commands: PendingCommand[] }>(
+    `/api/hosts/${state.hostId}/commands?status=pending`
+  )
+
+  if (!result.success || !result.data?.commands) {
+    commandPollErrors++
+    if (commandPollErrors <= 3 || commandPollErrors % 20 === 0) {
+      console.warn(`☁️  [Commands] Poll failed (${commandPollErrors}): ${result.error}`)
+    }
+    return
+  }
+
+  if (commandPollErrors > 0) {
+    console.log(`☁️  [Commands] Poll recovered after ${commandPollErrors} errors`)
+    commandPollErrors = 0
+  }
+
+  for (const cmd of result.data.commands) {
+    try {
+      await handleCommand(cmd)
+    } catch (err: any) {
+      console.warn(`☁️  [Commands] Failed to handle ${cmd.type} (${cmd.id}): ${err?.message}`)
+      // Ack as failed so it doesn't re-run
+      await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+        action: 'fail',
+        error: err?.message || 'Handler error',
+      }).catch(() => {})
+    }
+  }
+}
+
+async function handleCommand(cmd: PendingCommand): Promise<void> {
+  if (cmd.type === 'context_sync') {
+    await handleContextSync(cmd)
+  } else {
+    console.log(`☁️  [Commands] Unknown command type: ${cmd.type} (${cmd.id}) — skipping`)
+    // Ack unknown commands so they don't pile up
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'complete',
+      result: { skipped: true, reason: 'unknown_type' },
+    })
+  }
+}
+
+async function handleContextSync(cmd: PendingCommand): Promise<void> {
+  if (!state.hostId) return
+
+  const agent = (cmd.payload?.agent as string) || 'link'
+  console.log(`☁️  [Commands] Processing context_sync for agent=${agent} (${cmd.id})`)
+
+  // Ack immediately (in-progress)
+  await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+    action: 'ack',
+  })
+
+  // Fetch context snapshot from local node
+  let contextData: Record<string, unknown>
+  try {
+    const port = process.env.PORT || '4445'
+    const localRes = await fetch(`http://127.0.0.1:${port}/context/inject/${encodeURIComponent(agent)}`)
+    if (!localRes.ok) throw new Error(`Local context fetch failed: ${localRes.status}`)
+    contextData = await localRes.json() as Record<string, unknown>
+  } catch (err: any) {
+    // Complete as failed
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'fail',
+      error: `Failed to fetch local context: ${err?.message}`,
+    })
+    throw err
+  }
+
+  // Push to cloud
+  const syncResult = await cloudPost(`/api/hosts/${state.hostId}/context/sync`, {
+    agent,
+    computed_at: Date.now(),
+    budgets: contextData.budgets || { totalTokens: 0, layers: {} },
+    autosummary_enabled: Boolean(contextData.autosummary_enabled),
+    layers: contextData.layers || {},
+  })
+
+  if (syncResult.success) {
+    console.log(`☁️  [Commands] context_sync completed for ${agent} (${cmd.id})`)
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'complete',
+      result: { syncedAt: Date.now(), agent },
+    })
+    markCloudActivity() // Mark as active
+  } else {
+    console.warn(`☁️  [Commands] context_sync failed for ${agent}: ${syncResult.error}`)
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'fail',
+      error: syncResult.error,
+    })
+  }
+}
+
 // ---- HTTP helper ----
 
 interface CloudApiResponse<T = unknown> {
   success: boolean
   data?: T
   error?: string
+}
+
+async function cloudGet<T = unknown>(path: string): Promise<CloudApiResponse<T>> {
+  if (!config) return { success: false, error: 'Not configured' }
+
+  try {
+    const url = `${config.cloudUrl}${path}`
+    const headers: Record<string, string> = {}
+
+    if (state.credential) {
+      headers['Authorization'] = `Bearer ${state.credential}`
+    } else {
+      headers['Authorization'] = `Bearer ${config.token}`
+    }
+
+    const response = await fetch(url, { method: 'GET', headers })
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({})) as Record<string, unknown>
+      return { success: false, error: (errBody.error as string) || `HTTP ${response.status}` }
+    }
+
+    const payload = await response.json() as T
+    return { success: true, data: payload }
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Request failed' }
+  }
 }
 
 async function cloudPost<T = unknown>(path: string, body: unknown): Promise<CloudApiResponse<T>> {
