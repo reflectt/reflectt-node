@@ -4928,6 +4928,10 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Create task
+  // Task creation dedup: prevent parallel sessions from creating identical tasks
+  const TASK_DEDUP_WINDOW_MS = 10 * 60 * 1000 // 10 minutes (shorter than reflection — tasks are more varied)
+  const taskDedupMap = new Map<string, number>() // hash -> timestamp
+
   app.post('/tasks', async (request, reply) => {
     try {
       const data = CreateTaskSchema.parse(request.body)
@@ -4951,6 +4955,27 @@ export async function createServer(): Promise<FastifyInstance> {
             problems: readinessProblems,
             hint: 'Fix the listed problems and retry. Tasks must have specific titles, verifiable done criteria, priority, and reviewer.',
           }
+        }
+      }
+
+      // Task creation dedup: reject identical title+assignee within window
+      const taskDedupKey = createHash('sha256')
+        .update([
+          (data.title || '').trim().toLowerCase(),
+          (data.assignee || '').trim().toLowerCase(),
+        ].join('|'))
+        .digest('hex')
+        .slice(0, 32)
+      const taskDedupNow = Date.now()
+      const taskDedupLastSeen = taskDedupMap.get(taskDedupKey)
+      if (taskDedupLastSeen && (taskDedupNow - taskDedupLastSeen) < TASK_DEDUP_WINDOW_MS) {
+        reply.code(409)
+        return {
+          success: false,
+          error: 'Duplicate task',
+          code: 'DUPLICATE_TASK',
+          status: 409,
+          hint: `A task with title "${data.title}" for assignee "${data.assignee}" was created ${Math.round((taskDedupNow - taskDedupLastSeen) / 1000)}s ago. Wait ${Math.round((TASK_DEDUP_WINDOW_MS - (taskDedupNow - taskDedupLastSeen)) / 60000)}m or change the title.`,
         }
       }
 
@@ -5009,6 +5034,16 @@ export async function createServer(): Promise<FastifyInstance> {
         ...(normalizedTeamId ? { teamId: normalizedTeamId } : {}),
         metadata: newMetadata,
       })
+
+      // Record dedup hash after successful creation
+      taskDedupMap.set(taskDedupKey, taskDedupNow)
+      // Periodic cleanup of stale dedup entries
+      if (taskDedupMap.size > 200) {
+        const cutoff = taskDedupNow - TASK_DEDUP_WINDOW_MS
+        for (const [hash, ts] of taskDedupMap) {
+          if (ts < cutoff) taskDedupMap.delete(hash)
+        }
+      }
       
       // Auto-update presence: creating tasks = working
       if (data.createdBy) {
