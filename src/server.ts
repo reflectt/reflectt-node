@@ -1643,6 +1643,44 @@ export async function createServer(): Promise<FastifyInstance> {
     await healthMonitor.recordSnapshot().catch(() => {}) // Silent fail
   })
 
+  // ── Global 404: markdown-formatted endpoint discovery ────────────────
+  app.setNotFoundHandler(async (request, reply) => {
+    const method = request.method
+    const url = request.url.split('?')[0]
+
+    const md = [
+      `# 404 — \`${method} ${url}\` not found`,
+      '',
+      `reflectt-node v${BUILD_VERSION} does not have this endpoint.`,
+      '',
+      '## Quick Reference',
+      '',
+      '| Method | Endpoint | Description |',
+      '|--------|----------|-------------|',
+      '| GET | `/health` | System health + version + stats |',
+      '| GET | `/version` | Current version + update availability |',
+      '| GET | `/capabilities` | Full endpoint discovery with compact flags |',
+      '| GET | `/tasks?compact=true` | List tasks (slim) |',
+      '| GET | `/tasks/active?agent=NAME&compact=true` | Current doing task |',
+      '| GET | `/tasks/next?agent=NAME&compact=true` | Pull next task |',
+      '| GET | `/tasks/:id` | Task details |',
+      '| PATCH | `/tasks/:id` | Update task |',
+      '| POST | `/tasks/:id/comments` | Add comment |',
+      '| GET | `/inbox/:agent` | Agent inbox |',
+      '| GET | `/chat/messages` | Chat messages |',
+      '| GET | `/chat/context/:agent` | Compact chat context |',
+      '| GET | `/insights?compact=true` | Insights list |',
+      '| GET | `/loop/summary` | Top reflection signals |',
+      '| GET | `/bootstrap/heartbeat/:agent` | Generate HEARTBEAT.md |',
+      '| GET | `/me/:agent` | Agent dashboard |',
+      '',
+      '> Use `GET /capabilities` for the complete list with descriptions.',
+    ].join('\n')
+
+    reply.code(404).header('content-type', 'text/markdown; charset=utf-8')
+    return md
+  })
+
   // Load agent roles from YAML config (or fall back to built-in defaults)
   loadAgentRoles()
   startConfigWatch()
