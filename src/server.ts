@@ -2768,6 +2768,32 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const data = parsedBody.data
+
+    // ── Phantom task-comment guard ──────────────────────────────────────
+    // Reject messages with [task-comment:task-...] tags if any referenced task
+    // doesn't exist. Only enforced in #task-comments channel (the spam vector).
+    // Other channels (e.g. #general) may quote tags in discussion without blocking.
+    if (data.channel === 'task-comments') {
+      const phantomIds: string[] = []
+      for (const m of data.content.matchAll(/\[task-comment:(task-[^\]]+)\]/g)) {
+        const referencedTaskId = m[1]
+        if (!taskManager.getTask(referencedTaskId)) {
+          phantomIds.push(referencedTaskId)
+        }
+      }
+      if (phantomIds.length > 0) {
+        reply.code(422)
+        return {
+          success: false,
+          error: `Phantom task-comment rejected: ${phantomIds.join(', ')} ${phantomIds.length === 1 ? 'does' : 'do'} not exist`,
+          code: 'PHANTOM_TASK_COMMENT',
+          hint: `Verify tasks exist before posting [task-comment:...] to #task-comments.`,
+          gate: 'phantom_task_comment',
+          phantom_ids: phantomIds,
+        }
+      }
+    }
+
     const actionValidation = validateActionRequiredMessage(data.content, data.channel)
     if (actionValidation.blockingError) {
       reply.code(400)
