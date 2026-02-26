@@ -6255,7 +6255,10 @@ export async function createServer(): Promise<FastifyInstance> {
       ) {
         try {
           const { onTaskReadyForReview } = await import('./artifact-mirror.js')
-          const mirrorResult = await onTaskReadyForReview(task.metadata as Record<string, unknown> || {})
+          const mirrorResult = await onTaskReadyForReview({
+            assignee: task.assignee,
+            metadata: task.metadata as Record<string, unknown> || {},
+          })
           if (mirrorResult?.mirrored) {
             console.log(`[ArtifactMirror] Mirrored ${mirrorResult.filesCopied} file(s) for ${task.id} → ${mirrorResult.destination}`)
           }

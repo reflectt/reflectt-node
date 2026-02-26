@@ -22,11 +22,13 @@ describe('Artifact Mirror', () => {
     await fs.mkdir(sharedDir, { recursive: true })
 
     // Set env BEFORE importing the module
+    process.env.OPENCLAW_STATE_DIR = tempDir
     process.env.REFLECTT_WORKSPACE = sourceDir
     process.env.REFLECTT_SHARED_WORKSPACE = sharedDir
   })
 
   afterAll(async () => {
+    delete process.env.OPENCLAW_STATE_DIR
     delete process.env.REFLECTT_WORKSPACE
     delete process.env.REFLECTT_SHARED_WORKSPACE
     await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {})
@@ -48,6 +50,24 @@ describe('Artifact Mirror', () => {
     const result = await mod.mirrorArtifacts('process/task-single-file.md')
     expect(result.mirrored).toBe(true)
     expect(result.filesCopied).toBe(1)
+  })
+
+  it('finds source artifact in OPENCLAW_STATE_DIR/workspace-<assignee> when REFLECTT_WORKSPACE is unset', async () => {
+    const wsLink = join(tempDir, 'workspace-link')
+    await fs.mkdir(join(wsLink, 'process', 'task-link-abc'), { recursive: true })
+    await fs.writeFile(join(wsLink, 'process', 'task-link-abc', 'review.md'), '# Link artifact')
+
+    const savedWorkspace = process.env.REFLECTT_WORKSPACE
+    delete process.env.REFLECTT_WORKSPACE
+    try {
+      const mod = await import('../src/artifact-mirror.js')
+      const result = await mod.mirrorArtifacts('process/task-link-abc', { assignee: 'link' })
+      expect(result.mirrored).toBe(true)
+      const content = await fs.readFile(join(sharedDir, 'process', 'task-link-abc', 'review.md'), 'utf-8')
+      expect(content).toContain('# Link artifact')
+    } finally {
+      if (savedWorkspace !== undefined) process.env.REFLECTT_WORKSPACE = savedWorkspace
+    }
   })
 
   it('returns error for non-process paths', async () => {

@@ -22,6 +22,50 @@ function getWorkspaceRoot(): string {
   return process.env.REFLECTT_WORKSPACE || resolve(process.cwd())
 }
 
+function getOpenClawStateDir(): string {
+  return process.env.OPENCLAW_STATE_DIR
+    || resolve(homedir(), '.openclaw')
+}
+
+function sanitizeAgentName(name: string): string {
+  return String(name || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
+}
+
+async function listWorkspaceCandidates(assignee?: string): Promise<string[]> {
+  const roots: string[] = []
+
+  // 1) Explicit override (used by tests/CI)
+  roots.push(getWorkspaceRoot())
+
+  // 2) OpenClaw state workspaces (best-effort)
+  const stateDir = getOpenClawStateDir()
+  const safe = assignee ? sanitizeAgentName(assignee) : ''
+  if (safe) roots.push(resolve(stateDir, `workspace-${safe}`))
+  roots.push(resolve(stateDir, 'workspace'))
+
+  // 3) Scan for any workspace-* (covers local multi-agent setups)
+  try {
+    const entries = await fs.readdir(stateDir, { withFileTypes: true })
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      if (!e.name.startsWith('workspace-')) continue
+      const full = resolve(stateDir, e.name)
+      roots.push(full)
+    }
+  } catch {
+    // ignore
+  }
+
+  // Dedupe while preserving order
+  const seen = new Set<string>()
+  return roots.filter(r => {
+    const key = r
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 function getSharedWorkspace(): string {
   return process.env.REFLECTT_SHARED_WORKSPACE
     || resolve(homedir(), '.openclaw', 'workspace-shared')
@@ -46,13 +90,38 @@ export interface MirrorResult {
  * Supports both directory-style artifacts (process/task-xxx/) and
  * single-file artifacts (process/task-xxx-proof.md).
  */
-export async function mirrorArtifacts(artifactPath: string): Promise<MirrorResult> {
+export async function mirrorArtifacts(
+  artifactPath: string,
+  opts?: { assignee?: string },
+): Promise<MirrorResult> {
   if (!artifactPath || !artifactPath.startsWith('process/')) {
     return { mirrored: false, source: artifactPath, destination: '', filesCopied: 0, error: 'Not a process/ artifact path' }
   }
 
-  const sourcePath = resolve(getWorkspaceRoot(), artifactPath)
   const destPath = resolve(getSharedWorkspace(), artifactPath)
+
+  // Try to locate the source artifact across likely OpenClaw workspaces.
+  const candidates = await listWorkspaceCandidates(opts?.assignee)
+  let sourcePath: string | null = null
+  for (const root of candidates) {
+    const candidate = resolve(root, artifactPath)
+    const stat = await fs.stat(candidate).catch(() => null)
+    if (stat) {
+      sourcePath = candidate
+      break
+    }
+  }
+
+  if (!sourcePath) {
+    return {
+      mirrored: false,
+      source: artifactPath,
+      destination: destPath,
+      filesCopied: 0,
+      error: `Source artifact not found in any candidate workspace (${candidates.length} checked)`
+        + (opts?.assignee ? ` (assignee=${opts.assignee})` : ''),
+    }
+  }
 
   try {
     // Check source exists
@@ -102,10 +171,14 @@ export async function mirrorArtifacts(artifactPath: string): Promise<MirrorResul
  * Called on task status transition to validating or done.
  * Extracts artifact_path from task metadata and mirrors it.
  */
-export async function onTaskReadyForReview(taskMeta: Record<string, unknown>): Promise<MirrorResult | null> {
-  const artifactPath = typeof taskMeta.artifact_path === 'string' ? taskMeta.artifact_path : null
+export async function onTaskReadyForReview(task: {
+  assignee?: string | null
+  metadata?: Record<string, unknown> | null
+}): Promise<MirrorResult | null> {
+  const meta = (task.metadata || {}) as Record<string, unknown>
+  const artifactPath = typeof meta.artifact_path === 'string' ? meta.artifact_path : null
   if (!artifactPath) return null
-  return mirrorArtifacts(artifactPath)
+  return mirrorArtifacts(artifactPath, { assignee: task.assignee || undefined })
 }
 
 /**
