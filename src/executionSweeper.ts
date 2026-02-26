@@ -198,7 +198,7 @@ export function isAutoClosable(task: Task, meta: Record<string, unknown>): boole
 
 // ── Core Sweep Logic ───────────────────────────────────────────────────────
 
-export function sweepValidatingQueue(): SweepResult {
+export async function sweepValidatingQueue(): Promise<SweepResult> {
   const now = Date.now()
 
   // Snapshot tasks for load-balanced reviewer reassignment decisions
@@ -229,7 +229,7 @@ export function sweepValidatingQueue(): SweepResult {
     const meta = (task.metadata || {}) as Record<string, unknown>
     if (isAutoClosable(task, meta)) {
       try {
-        taskManager.updateTask(task.id, {
+        await taskManager.updateTask(task.id, {
           status: 'done',
           metadata: {
             ...meta,
@@ -312,7 +312,7 @@ export function sweepValidatingQueue(): SweepResult {
         const nextReviewer = (suggestion.suggested || '').trim()
 
         if (currentReviewer && nextReviewer && nextReviewer.toLowerCase() !== currentReviewer.toLowerCase()) {
-          taskManager.updateTask(task.id, {
+          await taskManager.updateTask(task.id, {
             reviewer: nextReviewer,
             metadata: {
               ...meta,
@@ -792,23 +792,23 @@ export function startSweeper(): void {
 
   // Defer initial sweep to avoid blocking server startup
   setTimeout(() => {
-    try {
-      const initial = sweepValidatingQueue()
+    ;(async () => {
+      const initial = await sweepValidatingQueue()
       escalateViolations(initial.violations)
-    } catch (err) {
+    })().catch(err => {
       console.error('[Sweeper] Initial sweep failed:', err)
-    }
+    })
   }, 5000)
   logDryRun('sweeper_started', `interval=${SWEEP_INTERVAL_MS / 1000}s SLA=${VALIDATING_SLA_MS / 60_000}m critical=${VALIDATING_CRITICAL_MS / 60_000}m`)
 
   sweepTimer = setInterval(() => {
-    try {
-      const result = sweepValidatingQueue()
+    ;(async () => {
+      const result = await sweepValidatingQueue()
       escalateViolations(result.violations)
-    } catch (err) {
+    })().catch(err => {
       console.error('[Sweeper] Sweep failed:', err)
       logDryRun('sweep_error', String(err))
-    }
+    })
   }, SWEEP_INTERVAL_MS)
 
   sweepTimer.unref()

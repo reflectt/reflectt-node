@@ -132,7 +132,7 @@ describe('Sweeper skips approved tasks', () => {
       }),
     })
 
-    const result = sweepValidatingQueue()
+    const result = await sweepValidatingQueue()
     const violation = result.violations.find(v => v.taskId === id)
     expect(violation).toBeUndefined()
   })
