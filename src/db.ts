@@ -463,6 +463,28 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_context_memos_updated_at ON context_memos(updated_at);
       `,
     },
+    {
+      version: 16,
+      sql: `
+        -- Host registry: remote hosts phone-home via heartbeat
+        CREATE TABLE IF NOT EXISTS hosts (
+          id TEXT PRIMARY KEY,
+          hostname TEXT,
+          os TEXT,
+          arch TEXT,
+          ip TEXT,
+          version TEXT,
+          agents TEXT, -- JSON array of agent names
+          metadata TEXT, -- JSON object
+          status TEXT NOT NULL DEFAULT 'online',
+          last_seen_at INTEGER NOT NULL,
+          registered_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_hosts_last_seen ON hosts(last_seen_at);
+        CREATE INDEX IF NOT EXISTS idx_hosts_status ON hosts(status);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
