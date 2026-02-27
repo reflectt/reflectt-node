@@ -21,6 +21,7 @@ import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
 import { getDb } from './db.js'
 import { policyManager } from './policy.js'
+import { recordSystemLoopTick } from './system-loop-state.js'
 
 /**
  * Validate a task timestamp is within reasonable bounds.
@@ -1351,6 +1352,9 @@ class TeamHealthMonitor {
     const dryRun = options?.dryRun === true
     const alerts: string[] = []
 
+    // Persist tick time so /health/system can prove this watchdog is actually firing.
+    recordSystemLoopTick('cadence_watchdog', now)
+
     // Source of truth: unified policy config (file + env overlays).
     // Fallback: legacy env-based flags.
     const cadenceCfg = policyManager.get().cadenceWatchdog
@@ -1644,6 +1648,9 @@ class TeamHealthMonitor {
     const dryRun = options?.dryRun === true
     const rescued: string[] = []
 
+    // Persist tick time so /health/system can prove this watchdog is actually firing.
+    recordSystemLoopTick('mention_rescue', now)
+
     const policy = policyManager.get()
     const cfg = policy.mentionRescue
 
@@ -1797,6 +1804,9 @@ class TeamHealthMonitor {
     const dryRun = options?.dryRun === true
     const nudged: string[] = []
     const decisions: IdleNudgeDecision[] = []
+
+    // Persist tick time so /health/system can prove this watchdog is actually firing.
+    recordSystemLoopTick('idle_nudge', now)
 
     const presences = presenceManager.getAllPresence()
     const tasks = taskManager.listTasks({})

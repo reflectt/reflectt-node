@@ -82,7 +82,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
 | GET | `/health/backlog` | Backlog readiness health by lane (ready counts, floor compliance, breach status, blocked/todo/doing/validating rollups). Query: `include_test=1` to include test-harness tasks. |
-| GET | `/health/system` | System info (uptime, memory, versions) |
+| GET | `/health/system` | System + loop/timer health (quiet-hours suppression, sweeper status, watchdog tick timestamps, uptime/memory) |
 | GET | `/health/build` | Build/runtime identity (version, git SHA, branch, build timestamp, PID, uptime) |
 | GET | `/health/deploy` | Deploy attestation payload for dashboards (`version`, `gitSha`, `branch`, `buildTimestamp`, `startedAt`, `pid`) |
 | GET | `/health/team/summary` | Compact team health summary |
@@ -100,6 +100,14 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | POST | `/health/mention-rescue/tick` | Trigger mention-rescue fallback |
 | POST | `/health/working-contract/tick` | Evaluate working-contract enforcement: auto-requeue stale doing tasks (90m warning → 15m grace → auto todo) and fire alerts. |
 | GET | `/health/working-contract/gate/:agent` | Dry-run claim gate check for an agent. Returns `{ allowed, reason }` — whether the agent can claim a new task given current WIP and contract status. |
+
+### Quick system-loop check
+
+Verify watchdogs are actually running (and whether they’re suppressed by quiet hours):
+
+```bash
+curl -s http://127.0.0.1:4445/health/system | jq
+```
 
 ## Hosts (multi-host registry)
 

@@ -485,6 +485,16 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_hosts_status ON hosts(status);
       `,
     },
+    {
+      version: 17,
+      sql: `
+        -- Persisted loop tick timestamps for /health/system
+        CREATE TABLE IF NOT EXISTS system_loop_ticks (
+          name TEXT PRIMARY KEY,
+          last_tick_at INTEGER NOT NULL
+        );
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')

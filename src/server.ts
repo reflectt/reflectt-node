@@ -68,6 +68,7 @@ import type { PresenceStatus, FocusLevel } from './presence.js'
 import { analyticsManager } from './analytics.js'
 import { getDashboardHTML } from './dashboard.js'
 import { healthMonitor, computeActiveLane } from './health.js'
+import { getSystemLoopTicks, recordSystemLoopTick } from './system-loop-state.js'
 import { contentManager } from './content.js'
 import { experimentsManager } from './experiments.js'
 import { releaseManager } from './release.js'
@@ -1883,8 +1884,13 @@ export async function createServer(): Promise<FastifyInstance> {
   }
 
   const reflectionPipelineTimer = setInterval(() => {
-    if (isQuietHours(Date.now())) return
-    const health = computeReflectionPipelineHealth(Date.now())
+    const now = Date.now()
+    if (isQuietHours(now)) return
+
+    // Persist tick time so /health/system can prove this monitor is actually firing.
+    recordSystemLoopTick('reflection_pipeline', now)
+
+    const health = computeReflectionPipelineHealth(now)
 
     // Alert when reflections are flowing but insights remain zero past threshold
     if (health.status === 'broken') {
@@ -2579,9 +2585,42 @@ export async function createServer(): Promise<FastifyInstance> {
     return { history, count: history.length, days }
   })
 
-  // System health (uptime, performance, errors)
+  // System health + loop/timer status (prove watchdogs are actually running)
   app.get('/health/system', async () => {
-    return healthMonitor.getSystemHealth()
+    const now = Date.now()
+
+    const base = healthMonitor.getSystemHealth()
+    const qh = policyManager.get().quietHours
+    const suppressed = isQuietHours(now)
+
+    const ticks = getSystemLoopTicks()
+    const sweeper = getSweeperStatus()
+    const board = boardHealthWorker.getStatus()
+
+    const ageSec = (ts: number) => ts > 0 ? Math.floor((now - ts) / 1000) : null
+
+    return {
+      ...base,
+      quietHours: {
+        ...qh,
+        suppressedNow: suppressed,
+        nowMs: now,
+      },
+      sweeper: {
+        running: sweeper.running,
+        lastSweepAt: sweeper.lastSweepAt,
+      },
+      timers: {
+        idleNudge: { registered: Boolean(idleNudgeTimer), lastTickAt: ticks.idle_nudge, lastTickAgeSec: ageSec(ticks.idle_nudge) },
+        cadenceWatchdog: { registered: Boolean(cadenceWatchdogTimer), lastTickAt: ticks.cadence_watchdog, lastTickAgeSec: ageSec(ticks.cadence_watchdog) },
+        mentionRescue: { registered: Boolean(mentionRescueTimer), lastTickAt: ticks.mention_rescue, lastTickAgeSec: ageSec(ticks.mention_rescue) },
+        reflectionPipeline: { registered: Boolean(reflectionPipelineTimer), lastTickAt: ticks.reflection_pipeline, lastTickAgeSec: ageSec(ticks.reflection_pipeline) },
+        boardHealthWorker: { registered: board.running, lastTickAt: ticks.board_health || board.lastTickAt, lastTickAgeSec: ageSec(ticks.board_health || board.lastTickAt) },
+      },
+      reflectionPipelineHealth: {
+        ...reflectionPipelineHealth,
+      },
+    }
   })
 
   // Build info — git SHA, branch, PID, uptime
