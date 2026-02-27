@@ -4,7 +4,17 @@ Local coordination server for AI agent teams. Provides real-time chat, task mana
 
 Built for [OpenClaw](https://github.com/openclaw/openclaw) agent workflows.
 
-## 5-Minute Quickstart
+## Quick Start with Docker
+
+```bash
+docker run -d --name reflectt-node -p 4445:4445 -v reflectt-data:/data ghcr.io/reflectt/reflectt-node:latest
+```
+
+Open [http://localhost:4445/dashboard](http://localhost:4445/dashboard) — that's it.
+
+> See [docs/QUICKSTART.md](docs/QUICKSTART.md) for docker-compose, OpenClaw gateway connection, and troubleshooting.
+
+## From Source
 
 ### Prerequisites
 

@@ -2,9 +2,79 @@
 
 This guide gets you from nothing to a working team with agents you can chat with.
 
-**Prerequisites:** Node.js 22+ installed.
+Choose your path:
+- **[Docker](#docker-quickstart)** — fastest, no Node.js required
+- **[From source](#from-source)** — full control, requires Node.js 22+
 
 ---
+
+## Docker Quickstart
+
+### Option A: Pull from GHCR (recommended)
+
+```bash
+docker run -d --name reflectt-node \
+  -p 4445:4445 \
+  -v reflectt-data:/data \
+  ghcr.io/reflectt/reflectt-node:latest
+```
+
+### Option B: docker-compose
+
+```bash
+git clone https://github.com/reflectt/reflectt-node.git
+cd reflectt-node
+docker compose up -d
+```
+
+Verify it's running:
+```bash
+curl http://127.0.0.1:4445/health
+# → { "status": "ok", ... }
+```
+
+Open the dashboard: [http://localhost:4445/dashboard](http://localhost:4445/dashboard)
+
+### Connecting to OpenClaw
+
+To connect your Docker instance to an OpenClaw gateway, set these env vars:
+
+```bash
+docker run -d --name reflectt-node \
+  -p 4445:4445 \
+  -v reflectt-data:/data \
+  -e OPENCLAW_GATEWAY_URL=ws://host.docker.internal:18789 \
+  -e OPENCLAW_GATEWAY_TOKEN=your_token_here \
+  ghcr.io/reflectt/reflectt-node:latest
+```
+
+### Troubleshooting: "unauthorized" on docker pull
+
+If `docker pull ghcr.io/reflectt/reflectt-node:latest` returns **unauthorized**:
+
+1. **Check if the image is public** — it should be. If you see this error, the org may not have published a public release yet.
+
+2. **Authenticate with GHCR** (if the image is private):
+   ```bash
+   # Create a GitHub Personal Access Token (PAT) with read:packages scope
+   # at https://github.com/settings/tokens
+   echo YOUR_GITHUB_PAT | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+   docker pull ghcr.io/reflectt/reflectt-node:latest
+   ```
+
+3. **Build locally instead** (no auth needed):
+   ```bash
+   git clone https://github.com/reflectt/reflectt-node.git
+   cd reflectt-node
+   docker build -t reflectt-node .
+   docker run -d --name reflectt-node -p 4445:4445 -v reflectt-data:/data reflectt-node
+   ```
+
+---
+
+## From Source
+
+**Prerequisites:** Node.js 22+ installed.
 
 ## Step 1: Install OpenClaw (~1 min)
 
