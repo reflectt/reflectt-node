@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Doctor CLI support — collect onboarding diagnostics via HTTP endpoints.
 
-export type DoctorFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+// Node's fetch typings don't consistently expose RequestInfo, so keep this narrow.
+export type DoctorFetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
 export type DoctorSectionResult = {
   ok: boolean
@@ -40,14 +41,18 @@ async function getJson(fetchFn: DoctorFetch, baseUrl: string, path: string, time
     })
 
     const ms = Date.now() - started
-    const json = await res.json().catch(() => null)
+    const json: any = await res.json().catch(() => null)
 
     if (!res.ok) {
+      const errMsg = (json && (json.error || json.message))
+        ? String(json.error || json.message)
+        : `HTTP ${res.status}`
+
       return {
         ok: false,
         status: res.status,
         ms,
-        error: (json && (json.error || json.message)) ? String(json.error || json.message) : `HTTP ${res.status}`,
+        error: errMsg,
         data: json,
       }
     }
