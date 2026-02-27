@@ -148,6 +148,49 @@ curl -X POST http://127.0.0.1:4445/tasks \
   }'
 ```
 
+### Configure designer routing (optional)
+
+If your team has a dedicated designer, you can keep infra/onboarding plumbing work from being auto-routed to them.
+
+1) Copy the default roles file to your host config:
+
+```bash
+mkdir -p ~/.reflectt
+cp defaults/TEAM-ROLES.yaml ~/.reflectt/TEAM-ROLES.yaml
+```
+
+2) Edit `~/.reflectt/TEAM-ROLES.yaml`:
+- set your designer agent’s `role: designer`
+- optionally set `routingMode: opt-in` + `alwaysRoute` / `neverRoute` + `neverRouteUnlessLane: design`
+
+3) When creating tasks, set routing metadata to make intent explicit:
+
+- `metadata.lane`: `design | product | infra | ops | growth`
+- `metadata.surface`: `reflectt-node | reflectt-cloud-app | reflectt.ai | infra`
+
+Example payload that opts in to design review:
+
+```bash
+curl -X POST http://127.0.0.1:4445/tasks \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Dashboard polish: focus-visible + spacing",
+    "createdBy": "sage",
+    "assignee": "pixel",
+    "reviewer": "echo",
+    "eta": "45m",
+    "done_criteria": ["Before/after screenshots in process/"],
+    "priority": "P2",
+    "metadata": {
+      "lane": "design",
+      "surface": "reflectt-node",
+      "tags": ["ui", "a11y"]
+    }
+  }'
+```
+
+More details: see `docs/LANE_SURFACE_ROUTING.md`.
+
 ## Step 6: WebSocket (Real-time Chat)
 
 Using `wscat` (install with `npm i -g wscat`):
