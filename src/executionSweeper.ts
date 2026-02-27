@@ -306,12 +306,35 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   for (const task of slaValidating) {
     const meta = (task.metadata || {}) as Record<string, unknown>
 
-    // Skip tasks with approved review — they should auto-transition to done
-    // (prevents false CRITICAL alerts for approved-but-not-yet-transitioned tasks)
+    // Auto-close approved tasks still stuck in validating (drift repair)
+    // This catches chat approvals or any path that set reviewer_approved
+    // without transitioning status to done.
     const reviewState = meta.review_state as string | undefined
     const reviewerApproved = meta.reviewer_approved === true
     if (reviewState === 'approved' || reviewerApproved) {
-      logDryRun('skipped_approved', `${task.id} — review_state=${reviewState}, reviewer_approved=${reviewerApproved}`)
+      try {
+        await taskManager.updateTask(task.id, {
+          status: 'done',
+          metadata: {
+            ...meta,
+            auto_closed: true,
+            auto_closed_at: now,
+            auto_close_reason: 'sweeper_drift_repair_approved',
+            completed_at: now,
+          },
+        } as any)
+        autoClosedIds.add(task.id)
+        escalated.delete(task.id)
+        logDryRun('drift_repair_auto_closed', `${task.id} — approved but stuck in validating, auto-closed`)
+
+        chatManager.sendMessage({
+          from: 'system',
+          channel: 'task-notifications',
+          content: `✅ Drift repair: auto-closed "${task.title}" (${task.id}) — was approved but stuck in validating. reviewer: @${task.reviewer || 'unknown'}`,
+        }).catch(() => {})
+      } catch (err) {
+        logDryRun('drift_repair_auto_close_failed', `${task.id} — ${String(err)}`)
+      }
       continue
     }
 

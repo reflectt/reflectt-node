@@ -200,7 +200,11 @@ export async function applyApproval(
   // Double-check guard: don't approve twice
   if (isAlreadyApproved(task)) return task
 
+  // Auto-transition validating → done (matches POST /tasks/:id/review behavior)
+  const autoTransition = task.status === 'validating'
+
   const updated = await taskManager.updateTask(signal.taskId, {
+    ...(autoTransition ? { status: 'done' as const } : {}),
     metadata: {
       ...(task.metadata || {}),
       reviewer_approved: true,
@@ -216,6 +220,12 @@ export async function applyApproval(
       actor: signal.reviewer,
       review_state: 'approved',
       review_last_activity_at: now,
+      ...(autoTransition ? {
+        auto_closed: true,
+        auto_closed_at: now,
+        auto_close_reason: 'chat_approval_auto_transition',
+        completed_at: now,
+      } : {}),
     },
   })
 
@@ -224,10 +234,12 @@ export async function applyApproval(
       ? `(referenced ${signal.taskId} in message)`
       : `(sole validating task for ${signal.reviewer})`
 
+    const transitionNote = autoTransition ? ' Auto-transitioned validating → done.' : ''
+
     await taskManager.addTaskComment(
       signal.taskId,
       'system',
-      `[review] auto-approved: Detected approval signal from @${signal.reviewer} in chat ${sourceLabel}. Pattern: \`${signal.matchedPattern}\`. Original message: "${truncate(signal.comment, 200)}"`,
+      `[review] auto-approved: Detected approval signal from @${signal.reviewer} in chat ${sourceLabel}.${transitionNote} Pattern: \`${signal.matchedPattern}\`. Original message: "${truncate(signal.comment, 200)}"`,
     )
   }
 
