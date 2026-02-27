@@ -36,6 +36,13 @@ export function getDashboardHTML(): string {
     --orange-dim: rgba(224, 138, 32, 0.12);
     --radius: 10px;
     --radius-sm: 6px;
+
+    /* Interaction tokens (shared UI kit wedge) */
+    --focus-ring: 2px solid var(--accent);
+    --focus-offset: 2px;
+    --focus-offset-strong: 4px;
+    --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --shadow-active: 0 2px 6px rgba(0, 0, 0, 0.10);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -781,13 +788,18 @@ export function getDashboardHTML(): string {
     transition: all var(--transition-fast) var(--easing-smooth);
     position: relative;
   }
-  button:hover, .button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+
+  /* Avoid sticky hover on touch devices */
+  @media (hover: hover) and (pointer: fine) {
+    button:hover, .button:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-hover);
+    }
   }
+
   button:active, .button:active {
     transform: translateY(0);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-active);
   }
 
   /* Avatar Animations */
@@ -814,12 +826,22 @@ export function getDashboardHTML(): string {
 
   /* Focus States (Accessibility) */
   :focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
     transition: outline-offset var(--transition-fast) var(--easing-smooth);
   }
   :focus-visible:not(:active) {
-    outline-offset: 4px;
+    outline-offset: var(--focus-offset-strong);
+  }
+
+  /* Link interactions (make links feel like links) */
+  .panel a {
+    text-decoration: none;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+  }
+  .panel a:hover {
+    text-decoration: underline;
   }
 
   /* Focus-visible parity: match hover styles for keyboard navigation */
