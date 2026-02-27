@@ -36,6 +36,17 @@ agents:
       - ux
       - css
       - visual
+    neverRoute:
+      - ops
+      - infra
+      - ci
+      - deploy
+      - compliance
+      - backend
+      - api
+      - docker
+      - monitoring
+      - database
     wipCap: 1
 
   - name: agent-3
