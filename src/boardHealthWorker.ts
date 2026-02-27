@@ -21,6 +21,7 @@ import { getEffectiveActivity } from './activity-signal.js'
 import { presenceManager } from './presence.js'
 import type { Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
+import { recordSystemLoopTick } from './system-loop-state.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -172,6 +173,10 @@ export class BoardHealthWorker {
 
     this.tickCount++
     this.lastTickAt = now
+
+    // Persist tick time so /health/system can prove this worker is actually running.
+    recordSystemLoopTick('board_health', now)
+
     const actions: PolicyAction[] = []
 
     // 1. Detect stale doing tasks
