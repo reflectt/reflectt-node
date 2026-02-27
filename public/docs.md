@@ -174,6 +174,29 @@ When closing a code-lane task (`product`/`frontend`/`backend`/`infra` lane or `c
 Bypass: set `metadata.pr_waiver=true` + `metadata.pr_waiver_reason` to skip PR gates (hotfixes).
 Graceful degradation: if GitHub API is unavailable, the merge check is skipped (does not block).
 
+## GitHub approvals (per-agent identity routing)
+
+Reflectt needs to occasionally **approve** GitHub PRs. GitHub blocks self-approval (you cannot approve your own PR), so we support per-actor tokens.
+
+### Token configuration
+Store fine-grained PATs in the Secret Vault:
+
+- `github.pat.<actor>` (recommended, scope=`agent`)
+  - Example: `github.pat.harmony`, `github.pat.pixel`, `github.pat.kai`
+- Optional fallback shared reviewer identity:
+  - `github.pat.reviewer` (scope=`host`)
+
+Env var fallback is also supported:
+- `GH_TOKEN_<ACTOR>` / `GITHUB_TOKEN_<ACTOR>`
+- legacy: `GH_TOKEN` / `GITHUB_TOKEN`
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/github/whoami/:actor` | Validate which GitHub user a given actor token maps to (never returns the token). |
+| POST | `/github/pr/approve` | Approve a PR as a given actor. Body: `{ pr_url, actor, reason? }` |
+
 ## Recurring Tasks
 
 | Method | Path | Description |
