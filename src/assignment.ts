@@ -15,6 +15,14 @@ export interface AgentRole {
   neverRoute?: string[]        // explicit routing exclusions
   protectedDomains?: string[]  // hard-enforce: only this agent for these tags
   wipCap: number               // max doing tasks (default 1)
+
+  // Generic routing controls (config-driven; no hardcoded agent names in code).
+  // routingMode=opt-in means: exclude this agent from candidate set unless the task matches alwaysRoute.
+  routingMode?: 'default' | 'opt-in'
+
+  // Optional exception: ignore neverRoute blocks when task metadata.lane matches this value.
+  // Used for cases like “onboarding plumbing is excluded unless lane=design explicitly opts in”.
+  neverRouteUnlessLane?: string
 }
 
 // ── YAML config paths (checked in order) ──
@@ -39,6 +47,10 @@ const BUILTIN_ROLES: AgentRole[] = [
     role: 'designer',
     description: 'Example designer agent. Replace with your team\'s agents.',
     affinityTags: ['design', 'ui', 'brand'],
+    // If you want design-only routing, encode it in TEAM-ROLES.yaml via:
+    // routingMode: opt-in
+    // alwaysRoute: [design, ui, ux, copy, brand, marketing, ...]
+    // neverRoute + neverRouteUnlessLane
     wipCap: 2,
   },
   {
@@ -86,6 +98,8 @@ function parseRolesYaml(content: string): AgentRole[] {
       alwaysRoute: Array.isArray(a.alwaysRoute) ? a.alwaysRoute.map(String) : undefined,
       neverRoute: Array.isArray(a.neverRoute) ? a.neverRoute.map(String) : undefined,
       protectedDomains: Array.isArray(a.protectedDomains) ? a.protectedDomains.map(String) : undefined,
+      routingMode: (a.routingMode === 'opt-in' || a.routingMode === 'default') ? a.routingMode : undefined,
+      neverRouteUnlessLane: typeof a.neverRouteUnlessLane === 'string' ? a.neverRouteUnlessLane : undefined,
       wipCap: typeof a.wipCap === 'number' && a.wipCap > 0 ? a.wipCap : 1,
     }
   })
@@ -211,6 +225,8 @@ export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: stri
       role: r.role,
       ...(r.description ? { description: r.description } : {}),
       affinityTags: r.affinityTags,
+      ...(r.routingMode ? { routingMode: r.routingMode } : {}),
+      ...(r.neverRouteUnlessLane ? { neverRouteUnlessLane: r.neverRouteUnlessLane } : {}),
       ...(r.alwaysRoute?.length ? { alwaysRoute: r.alwaysRoute } : {}),
       ...(r.neverRoute?.length ? { neverRoute: r.neverRoute } : {}),
       ...(r.protectedDomains?.length ? { protectedDomains: r.protectedDomains } : {}),
@@ -250,23 +266,26 @@ interface AssignmentScore {
   overCap: boolean
 }
 
-// Extract scoring keywords from task title + tags + done_criteria
-function extractTaskKeywords(task: { title: string; tags?: string[]; done_criteria?: string[] }): string[] {
+// Extract scoring keywords from task title + tags + done_criteria + routing metadata
+function extractTaskKeywords(task: { title: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> }): string[] {
+  const meta = getTaskMeta(task)
+  const metaTags = Array.isArray((meta as any).tags) ? (meta as any).tags.map(String) : []
+
   const text = [
     task.title,
     ...(task.tags || []),
     ...(task.done_criteria || []),
+    String((meta as any).lane ?? ''),
+    String((meta as any).surface ?? ''),
+    String((meta as any).cluster_key ?? ''),
+    String((meta as any).failure_family ?? ''),
+    ...metaTags,
   ].join(' ').toLowerCase()
 
   return text.split(/[\s/\-_:,.()+]+/).filter(w => w.length > 2)
 }
 
-// ── Designer routing guardrail ────────────────────────────────────────────
-
-function normalizeTagList(tags: unknown): string[] {
-  if (!Array.isArray(tags)) return []
-  return tags.map(t => String(t).trim().toLowerCase()).filter(Boolean)
-}
+// ── Config-driven routing guardrails ─────────────────────────────────────
 
 function getTaskMeta(task: any): Record<string, unknown> {
   const meta = task?.metadata
@@ -274,47 +293,69 @@ function getTaskMeta(task: any): Record<string, unknown> {
   return {}
 }
 
-/**
- * Hard default: agents with role=designer are excluded unless the task explicitly opts in.
- * Opt-in signals (any):
- * - metadata.lane = design
- * - metadata.surface = user-facing OR known user-facing surfaces
- * - tags include UI/design or copy/brand/marketing
- *
- * Hard exclusion: onboarding plumbing families (ws-pairing/auth/preflight/etc)
- * exclude designers unless lane=design is explicitly set.
- */
-function designerEligibleForTask(task: { tags?: string[]; metadata?: Record<string, unknown> }): boolean {
+function buildTaskMatchText(task: { title: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> }): string {
   const meta = getTaskMeta(task)
+  const metaTags = Array.isArray((meta as any).tags) ? (meta as any).tags.map(String) : []
 
+  return [
+    task.title,
+    ...(task.tags || []),
+    ...(task.done_criteria || []),
+    String((meta as any).lane ?? ''),
+    String((meta as any).surface ?? ''),
+    String((meta as any).cluster_key ?? ''),
+    String((meta as any).failure_family ?? ''),
+    ...metaTags,
+  ].join(' ').toLowerCase()
+}
+
+function matchAnyPattern(ctx: { text: string; keywords: string[] }, patterns: string[]): string | null {
+  for (const p of patterns) {
+    const pat = String(p).trim().toLowerCase()
+    if (!pat) continue
+
+    // If the pattern has punctuation (hyphen, dot, colon, etc), treat it as a literal substring.
+    // This avoids accidental matches like pattern "code-review" matching keyword "review".
+    if (/[^a-z0-9]/.test(pat)) {
+      if (ctx.text.includes(pat)) return pat
+      continue
+    }
+
+    if (ctx.keywords.includes(pat)) return pat
+  }
+  return null
+}
+
+/**
+ * Generic, config-driven eligibility:
+ * - routingMode=opt-in: excluded unless task matches alwaysRoute
+ * - neverRoute: excluded if any pattern matches
+ * - neverRouteUnlessLane: ignore neverRoute when metadata.lane matches (explicit override)
+ */
+function agentEligibleForTask(agent: AgentRole, task: { title: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> }): boolean {
+  const meta = getTaskMeta(task)
   const lane = String((meta as any).lane ?? '').trim().toLowerCase()
-  const surfaceRaw = String((meta as any).surface ?? '').trim().toLowerCase()
 
-  const explicitDesign = lane === 'design'
+  const ctx = {
+    text: buildTaskMatchText(task),
+    keywords: extractTaskKeywords(task),
+  }
 
-  // Cluster-based routing guardrail (prefer metadata.cluster_key; tolerate cluster_key in tags)
-  const clusterKey = String((meta as any).cluster_key ?? (meta as any).cluster ?? '').trim().toLowerCase()
-  const onboardingPlumbing = /ws[-_ ]?pair|pairing|preflight|auth|provision|provisioning|gateway|join[-_ ]?token|token|ssh|deploy|docker|ci|infra/.test(clusterKey)
-  if (onboardingPlumbing && !explicitDesign) return false
+  // Hard exclusions
+  const ignoreNever = Boolean(agent.neverRouteUnlessLane) && lane === String(agent.neverRouteUnlessLane).trim().toLowerCase()
+  if (!ignoreNever && agent.neverRoute?.length) {
+    const hit = matchAnyPattern(ctx, agent.neverRoute)
+    if (hit) return false
+  }
 
-  const userFacingSurfaces = new Set([
-    'user-facing',
-    'reflectt-node',
-    'reflectt-cloud-app',
-    'reflectt.ai',
-    'app.reflectt.ai',
-  ])
-  const explicitUserFacing = userFacingSurfaces.has(surfaceRaw)
+  // Opt-in routing
+  if (agent.routingMode === 'opt-in') {
+    const allow = agent.alwaysRoute ?? []
+    const hit = matchAnyPattern(ctx, allow)
+    return Boolean(hit)
+  }
 
-  const tags = normalizeTagList(task.tags).concat(normalizeTagList((meta as any).tags))
-  const allowTags = [
-    'design', 'ui', 'ux', 'a11y', 'css', 'visual', 'dashboard',
-    // copy/visual polish tasks
-    'copy', 'brand', 'marketing',
-  ]
-  const hasAllowTag = tags.some(t => allowTags.some(a => t === a || t.includes(a)))
-
-  return explicitDesign || explicitUserFacing || hasAllowTag
+  return true
 }
 
 // Score how well an agent matches a task
@@ -362,7 +403,7 @@ export function suggestAssignee(
   allTasks: TaskForScoring[],
   recentCompletionsPerAgent?: Map<string, number>,
 ): { suggested: string | null; scores: AssignmentScore[]; protectedMatch?: string } {
-  const roles = getAgentRoles().filter(r => r.role !== 'designer' || designerEligibleForTask(task))
+  const roles = getAgentRoles().filter(r => agentEligibleForTask(r, task))
 
   // Check protected domains first (but still return full scoring for transparency)
   let protectedDecision: { agent: string; match: string } | null = null
@@ -411,7 +452,7 @@ export function suggestReviewer(
   task: { title: string; assignee?: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> },
   allTasks: TaskForScoring[],
 ): { suggested: string | null; scores: Array<{ agent: string; score: number; validatingLoad: number; role: string }> } {
-  const roles = getAgentRoles().filter(r => r.role !== 'designer' || designerEligibleForTask(task))
+  const roles = getAgentRoles().filter(r => agentEligibleForTask(r, task))
 
   // Exclude the assignee from reviewer candidates
   const candidates = roles.filter(r => 

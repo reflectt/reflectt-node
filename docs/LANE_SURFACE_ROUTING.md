@@ -23,17 +23,24 @@ Recommended values:
 - `reflectt.ai`
 - `infra`
 
-## Designer routing contract (hard default)
+## Designer routing contract (config-driven)
 
-Agents with role `designer` are **excluded by default** from assignee/reviewer auto-suggestions unless the task **explicitly opts in** via one of:
+Teams can encode “design-only” routing in `~/.reflectt/TEAM-ROLES.yaml` (or use the repo defaults) using:
+
+- `routingMode: opt-in` → exclude the agent unless the task matches `alwaysRoute`
+- `alwaysRoute` → allowlist keywords (e.g. `ui`, `ux`, `dashboard`, `copy`, `brand`, `marketing`, or surface strings)
+- `neverRoute` → denylist keywords / failure-family literals (e.g. `ws-pairing`, `preflight`, `auth`)
+- `neverRouteUnlessLane: design` → explicit override when the task sets `metadata.lane=design`
+
+In practice, designers are excluded by default unless the task explicitly opts in via one of:
 
 - `metadata.lane = "design"`
 - `metadata.surface` is a user-facing surface (`reflectt-node`, `reflectt-cloud-app`, `reflectt.ai`, or `user-facing`)
 - tags include any of: `design`, `ui`, `ux`, `a11y`, `css`, `visual`, `dashboard`, `copy`, `brand`, `marketing`
 
-### Hard exclusion (onboarding plumbing)
+### Onboarding plumbing guardrail
 
-If `metadata.cluster_key` indicates onboarding plumbing (e.g. `ws-pairing`, `auth`, `preflight`, `provisioning`, etc.), designers are excluded **unless** `metadata.lane="design"` is explicitly set.
+If `metadata.cluster_key` indicates onboarding plumbing (e.g. `ws-pairing`, `auth`, `preflight`, `provisioning`, etc.), designers are excluded unless `metadata.lane="design"` is explicitly set.
 
 ## How to opt into design review
 
