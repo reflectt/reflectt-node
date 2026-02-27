@@ -497,6 +497,7 @@ program
       console.log('✅ Server started in background')
       console.log(`   PID: ${pid}`)
       console.log(`   URL: http://${config.host}:${config.port}`)
+      console.log(`   Dashboard: http://${config.host}:${config.port}/dashboard`)
       if (config.cloud) {
         console.log(`   Cloud: ${config.cloud.cloudUrl} (host: ${config.cloud.hostName})`)
       }
@@ -505,6 +506,7 @@ program
       // Foreground mode
       console.log('🚀 Starting reflectt server...')
       console.log(`   URL: http://${config.host}:${config.port}`)
+      console.log(`   Dashboard: http://${config.host}:${config.port}/dashboard`)
       if (config.cloud) {
         console.log(`   Cloud: ${config.cloud.cloudUrl} (host: ${config.cloud.hostName})`)
       }
@@ -969,6 +971,7 @@ program
       // Verify
       const heartbeat = await waitForCloudHeartbeat()
       if (heartbeat) {
+        const dashboardUrl = `http://127.0.0.1:${nextConfig?.port || 4445}/dashboard`
         console.log('')
         console.log('✅ Bootstrap complete!')
         console.log(`   Host ID: ${registered.hostId}`)
@@ -976,10 +979,15 @@ program
         console.log(`   Heartbeats: ${heartbeat.heartbeatCount}`)
         console.log('')
         console.log('Your host is connected and reporting to Reflectt Cloud.')
+        console.log('')
+        console.log(`🖥️  Open your dashboard: ${dashboardUrl}`)
       } else {
+        const dashboardUrlTimeout = `http://127.0.0.1:${nextConfig?.port || 4445}/dashboard`
         console.log('')
         console.log('⚠️  Bootstrap complete but heartbeat verification timed out.')
         console.log('   Run `reflectt host status` to check.')
+        console.log('')
+        console.log(`🖥️  Open your dashboard: ${dashboardUrlTimeout}`)
         process.exitCode = 1
       }
     } catch (err: any) {
