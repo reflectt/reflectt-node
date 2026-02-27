@@ -113,18 +113,21 @@ function extractRoleNamesFromYaml(raw: string): { names: string[]; malformed: bo
       continue
     }
 
-    if (/^[A-Za-z0-9_-]+\s*:\s*$/.test(trimmed) && !/^agents\s*:/i.test(trimmed) && !/^roles\s*:/i.test(trimmed)) {
-      if (!line.startsWith(' ')) {
-        inAgentsSection = false
-        inRolesList = false
-      } else if (inAgentsSection) {
-        names.add(trimmed.replace(/\s*:$/, ''))
-      }
+    // Exit agents/roles sections when another top-level key starts
+    if (
+      /^[A-Za-z0-9_-]+\s*:\s*$/.test(trimmed) &&
+      !line.startsWith(' ') &&
+      !/^agents\s*:/i.test(trimmed) &&
+      !/^roles\s*:/i.test(trimmed)
+    ) {
+      inAgentsSection = false
+      inRolesList = false
     }
 
     const nameMatch = trimmed.match(/^-\s*name\s*:\s*([A-Za-z0-9_-]+)/i)
-    if (inRolesList && nameMatch) {
-      names.add(nameMatch[1])
+    if (nameMatch) {
+      if (inAgentsSection) names.add(nameMatch[1])
+      if (inRolesList) names.add(nameMatch[1])
     }
   }
 
