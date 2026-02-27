@@ -4377,7 +4377,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // ── Shared Workspace Read API ──────────────────────────────────────
-  // Read-only access to shared artifacts (process/ under ~/.openclaw/workspace-shared).
+  // Read-only access to shared artifacts (process/ under REFLECTT_SHARED_WORKSPACE).
   // Security: path validation, traversal protection, extension + size limits.
 
   app.get('/shared/list', async (request, reply) => {

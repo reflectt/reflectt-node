@@ -11,11 +11,11 @@ import { homedir } from 'os'
 // ── Config (lazy for testability — env is read at call time) ──
 
 /**
- * Canonical shared workspace: ~/.openclaw/workspace-shared
+ * Shared workspace root for artifact mirroring.
  *
- * Override with REFLECTT_SHARED_WORKSPACE env var.
- * The previous default (../workspace-shared relative to project root)
- * was wrong when running from a nested project directory.
+ * Set via REFLECTT_SHARED_WORKSPACE env var.
+ * Falls back to OPENCLAW_HOME/workspace-shared, then ~/.openclaw/workspace-shared.
+ * In Docker: set REFLECTT_SHARED_WORKSPACE explicitly.
  */
 
 function getWorkspaceRoot(): string {
@@ -40,6 +40,7 @@ function getWorkspaceRoot(): string {
 
 function getSharedWorkspace(): string {
   return process.env.REFLECTT_SHARED_WORKSPACE
+    || (process.env.OPENCLAW_HOME ? resolve(process.env.OPENCLAW_HOME, 'workspace-shared') : '')
     || resolve(homedir(), '.openclaw', 'workspace-shared')
 }
 
@@ -73,7 +74,7 @@ async function listCandidateWorkspaceRoots(): Promise<string[]> {
 
   // Then search all known OpenClaw workspaces so artifacts produced by other
   // agents can still be mirrored on review transition.
-  const base = resolve(homedir(), '.openclaw')
+  const base = process.env.OPENCLAW_HOME || resolve(homedir(), '.openclaw')
   try {
     const entries = await fs.readdir(base, { withFileTypes: true })
     for (const e of entries) {
@@ -130,7 +131,7 @@ export async function mirrorArtifacts(artifactPath: string): Promise<MirrorResul
         source: sourcePath,
         destination: destPath,
         filesCopied: 0,
-        error: 'Source artifact not found (checked all ~/.openclaw/workspace* roots)',
+        error: 'Source artifact not found (checked all workspace roots)',
       }
     }
 

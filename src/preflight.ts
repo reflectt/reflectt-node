@@ -266,47 +266,46 @@ async function checkOpenClawGateway(): Promise<PreflightResult> {
   const start = Date.now()
   const check = CHECKS.find(c => c.id === 'openclaw-gateway')!
 
-  if (process.platform !== 'darwin') {
-    return { check, passed: true, level: 'pass', message: 'Not macOS (skipped)', durationMs: Date.now() - start }
-  }
-
-  const res = await execFileText('openclaw', ['gateway', 'status', '--json', '--timeout', '5000'], { timeoutMs: 7_000 })
-  const text = `${res.stdout}\n${res.stderr}`
-  const json = extractJsonObject(text)
-
-  if (!json) {
+  const gatewayUrl = process.env.OPENCLAW_GATEWAY_URL
+  if (!gatewayUrl) {
     return {
       check,
       passed: true,
       level: 'warn',
-      message: 'Could not parse `openclaw gateway status` output',
-      recovery: ['Run: openclaw gateway status', 'If not running: openclaw gateway start'],
-      details: { ok: res.ok, stderr: res.stderr.slice(0, 500) },
+      message: 'OPENCLAW_GATEWAY_URL not set — gateway connection not configured',
+      recovery: ['Set OPENCLAW_GATEWAY_URL in your .env (e.g. ws://localhost:18789)', 'Set OPENCLAW_GATEWAY_TOKEN for authentication'],
       durationMs: Date.now() - start,
     }
   }
 
-  const status = json?.service?.runtime?.status
-  const rpcOk = json?.rpc?.ok
-  const url = json?.rpc?.url || json?.gateway?.probeUrl
-  const pid = json?.service?.runtime?.pid
-  const bindHost = json?.gateway?.bindHost
-  const port = json?.gateway?.port
-
-  const running = status === 'running' && rpcOk === true
-
-  return {
-    check,
-    passed: true,
-    level: running ? 'pass' : 'warn',
-    message: running
-      ? `Gateway running (pid ${pid}) at ${String(url || `ws://${bindHost}:${port}`)} ✓`
-      : `Gateway not reachable (status=${String(status)} rpc.ok=${String(rpcOk)})`,
-    recovery: running
-      ? undefined
-      : ['Start the gateway:', '  openclaw gateway start', 'Then verify:', '  openclaw gateway status'],
-    details: { status, rpcOk, url, pid, bindHost, port },
-    durationMs: Date.now() - start,
+  // Try HTTP health probe on the gateway (convert ws:// to http://)
+  const httpUrl = gatewayUrl.replace(/^ws(s)?:\/\//, 'http$1://')
+  try {
+    const res = await fetch(`${httpUrl}/health`, { signal: AbortSignal.timeout(5000) })
+    const running = res.ok
+    return {
+      check,
+      passed: true,
+      level: running ? 'pass' : 'warn',
+      message: running
+        ? `Gateway reachable at ${gatewayUrl} ✓`
+        : `Gateway at ${gatewayUrl} returned ${res.status}`,
+      recovery: running
+        ? undefined
+        : ['Check that the OpenClaw gateway is running at the configured URL', 'Verify OPENCLAW_GATEWAY_URL and OPENCLAW_GATEWAY_TOKEN are correct'],
+      details: { url: gatewayUrl, status: res.status },
+      durationMs: Date.now() - start,
+    }
+  } catch (err) {
+    return {
+      check,
+      passed: true,
+      level: 'warn',
+      message: `Gateway at ${gatewayUrl} not reachable: ${(err as Error).message}`,
+      recovery: ['Check that the OpenClaw gateway is running at the configured URL', 'Verify OPENCLAW_GATEWAY_URL is correct'],
+      details: { url: gatewayUrl, error: (err as Error).message },
+      durationMs: Date.now() - start,
+    }
   }
 }
 

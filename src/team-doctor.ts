@@ -149,7 +149,7 @@ function checkGateway(gatewayUrl?: string): DoctorCheck {
       name: 'gateway',
       status: 'fail',
       message: 'No gateway URL configured',
-      fix: 'Set OPENCLAW_GATEWAY_URL in .env or run `openclaw setup`',
+      fix: 'Set OPENCLAW_GATEWAY_URL in .env (e.g. ws://localhost:18789)',
     }
   }
 
@@ -158,7 +158,7 @@ function checkGateway(gatewayUrl?: string): DoctorCheck {
       name: 'gateway',
       status: 'warn',
       message: `Gateway URL set (${url}) but no token configured`,
-      fix: 'Set OPENCLAW_GATEWAY_TOKEN in .env (find it in ~/.openclaw/openclaw.json)',
+      fix: 'Set OPENCLAW_GATEWAY_TOKEN in .env',
     }
   }
 
@@ -202,7 +202,7 @@ function checkModelAuth(provider?: string): DoctorCheck {
 
 function checkOpenClawBootstrap(): DoctorCheck {
   try {
-    const stateDir = process.env.OPENCLAW_STATE_DIR || join(homedir(), '.openclaw')
+    const stateDir = process.env.OPENCLAW_STATE_DIR || process.env.OPENCLAW_HOME || join(homedir(), '.openclaw')
 
     const candidates: string[] = []
 
@@ -229,7 +229,7 @@ function checkOpenClawBootstrap(): DoctorCheck {
         name: 'openclaw_bootstrap',
         status: 'warn',
         message: `No OpenClaw workspaces found under ${stateDir}`,
-        fix: 'If OpenClaw is installed, ensure OPENCLAW_STATE_DIR is set correctly (or create ~/.openclaw/workspace)',
+        fix: 'Set OPENCLAW_STATE_DIR to point to your OpenClaw workspace root, or ensure workspaces exist under the configured path',
       }
     }
 

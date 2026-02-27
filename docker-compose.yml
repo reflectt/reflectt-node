@@ -19,6 +19,8 @@ services:
       - HOST=0.0.0.0
       - NODE_ENV=production
       - REFLECTT_HOME=/data
+      - OPENCLAW_HOME=/data
+      - REFLECTT_SHARED_WORKSPACE=/data/workspace-shared
       # ── OpenClaw gateway connection ──
       # Set these to connect to an OpenClaw instance running on the host
       # or another container. This is the only config needed — no CLI or
