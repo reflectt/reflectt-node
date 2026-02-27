@@ -14,6 +14,7 @@
 import { execSync } from 'node:child_process'
 import { taskManager } from './tasks.js'
 import type { Task } from './types.js'
+import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -361,6 +362,37 @@ export function tryAutoCloseTask(taskId: string): AutoCloseResult {
       detail: reason,
     })
     return { closed: false, reason, failedGates }
+  }
+
+  // Duplicate-closure contract: don't auto-close into a churny N/A packet.
+  // If this is a duplicate closure, require canonical refs; otherwise refuse auto-close.
+  const dupeErr = getDuplicateClosureCanonicalRefError(meta)
+  if (dupeErr) {
+    const reason = `Duplicate closure missing canonical refs: ${dupeErr}`
+    console.log(`[AutoMerge] Cannot auto-close ${taskId}: ${reason}`)
+
+    // Refuse auto-close and requeue to todo so the author can attach canonical refs.
+    taskManager.updateTask(lookup.resolvedId, {
+      status: 'todo',
+      metadata: {
+        ...meta,
+        auto_close_blocked: true,
+        auto_close_blocked_at: Date.now(),
+        auto_close_blocked_reason: reason,
+        review_state: 'needs_author',
+        reviewer_approved: undefined,
+        reviewer_decision: undefined,
+        reviewer_notes: undefined,
+      },
+    } as any).catch(() => {})
+
+    logMergeAttempt({
+      taskId,
+      prUrl: (meta.pr_url as string) || 'unknown',
+      action: 'close_gate_fail',
+      detail: reason,
+    })
+    return { closed: false, reason, failedGates: ['duplicate_canonical_refs'] }
   }
 
   // All gates pass — transition to done

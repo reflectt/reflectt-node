@@ -20,6 +20,7 @@ import { execSync } from 'child_process'
 import { processAutoMerge, generateRemediation } from './prAutoMerge.js'
 import { msToMinutes, formatDuration } from './format-duration.js'
 import { suggestReviewer } from './assignment.js'
+import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 
 // ── Live PR State Check ────────────────────────────────────────────────────
 
@@ -232,6 +233,32 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   for (const task of validating) {
     const meta = (task.metadata || {}) as Record<string, unknown>
     if (isAutoClosable(task, meta)) {
+      const dupeErr = getDuplicateClosureCanonicalRefError(meta)
+      if (dupeErr) {
+        // Don't auto-close into a churny N/A duplicate packet — requeue for canonical refs.
+        try {
+          await taskManager.updateTask(task.id, {
+            status: 'todo',
+            metadata: {
+              ...meta,
+              auto_close_blocked: true,
+              auto_close_blocked_at: now,
+              auto_close_blocked_reason: dupeErr,
+              review_state: 'needs_author',
+              reviewer_approved: undefined,
+              reviewer_decision: undefined,
+              reviewer_notes: undefined,
+            },
+          } as any)
+          chatManager.sendMessage({
+            from: 'system',
+            channel: 'task-notifications',
+            content: `⚠️ Auto-close blocked for duplicate closure without canonical refs: ${task.id}. Requeued to todo. @${task.assignee || 'unassigned'} please set duplicate_of + canonical_pr + canonical_commit.`,
+          }).catch(() => {})
+        } catch {}
+        continue
+      }
+
       try {
         await taskManager.updateTask(task.id, {
           status: 'done',
@@ -312,6 +339,31 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
     const reviewState = meta.review_state as string | undefined
     const reviewerApproved = meta.reviewer_approved === true
     if (reviewState === 'approved' || reviewerApproved) {
+      const dupeErr = getDuplicateClosureCanonicalRefError(meta)
+      if (dupeErr) {
+        try {
+          await taskManager.updateTask(task.id, {
+            status: 'todo',
+            metadata: {
+              ...meta,
+              auto_close_blocked: true,
+              auto_close_blocked_at: now,
+              auto_close_blocked_reason: dupeErr,
+              review_state: 'needs_author',
+              reviewer_approved: undefined,
+              reviewer_decision: undefined,
+              reviewer_notes: undefined,
+            },
+          } as any)
+          chatManager.sendMessage({
+            from: 'system',
+            channel: 'task-notifications',
+            content: `⚠️ Drift-repair auto-close blocked for duplicate closure without canonical refs: ${task.id}. Requeued to todo.`,
+          }).catch(() => {})
+        } catch {}
+        continue
+      }
+
       try {
         await taskManager.updateTask(task.id, {
           status: 'done',
