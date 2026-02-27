@@ -2,7 +2,7 @@
   "id": "reflectt-channel",
   "name": "Reflectt Channel",
   "description": "Real-time agent collaboration via reflectt-node SSE",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "channels": ["reflectt"],
   "configSchema": {
     "type": "object",

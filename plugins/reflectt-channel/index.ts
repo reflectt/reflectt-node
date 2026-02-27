@@ -65,13 +65,43 @@ function purgeSessionIndexEntry(agentId: string, sessionKey: string, ctx: any): 
   }
 }
 
-function resolveAccount(cfg: OpenClawConfig, accountId?: string | null): ReflecttAccount {
+function resolveAccount(cfg: OpenClawConfig, accountId?: string | null, log?: any): ReflecttAccount {
+  // Support both config paths:
+  //   1. channels.reflectt.url (canonical — per OpenClaw channel plugin convention)
+  //   2. plugins.entries.reflectt-channel.config.url (fallback — general plugin convention)
+  // channels.reflectt takes precedence.
   const ch = (cfg as any)?.channels?.reflectt ?? {};
+  const pluginCfg = (cfg as any)?.plugins?.entries?.["reflectt-channel"]?.config ?? {};
+
+  const hasChannelConfig = !!ch.url;
+  const hasPluginConfig = !!pluginCfg.url;
+  const url = ch.url || pluginCfg.url || DEFAULT_URL;
+  const enabled = ch.enabled !== undefined ? ch.enabled !== false
+    : pluginCfg.enabled !== undefined ? pluginCfg.enabled !== false
+    : true;
+  const configured = hasChannelConfig || hasPluginConfig;
+
+  if (!configured) {
+    log?.warn(
+      `[reflectt] No explicit URL configured — using default ${DEFAULT_URL}. ` +
+      `To configure, set one of:\n` +
+      `  1. channels.reflectt.url in ~/.openclaw/openclaw.json (recommended)\n` +
+      `  2. plugins.entries.reflectt-channel.config.url in ~/.openclaw/openclaw.json\n` +
+      `  Or run: openclaw config set channels.reflectt.url "http://your-node:4445"`
+    );
+  } else if (hasChannelConfig && hasPluginConfig && ch.url !== pluginCfg.url) {
+    log?.warn(
+      `[reflectt] Config found in both channels.reflectt.url (${ch.url}) and ` +
+      `plugins.entries.reflectt-channel.config.url (${pluginCfg.url}). ` +
+      `Using channels.reflectt.url (takes precedence).`
+    );
+  }
+
   return {
     accountId: accountId || DEFAULT_ACCOUNT_ID,
-    url: ch.url || DEFAULT_URL,
-    enabled: ch.enabled !== false,
-    configured: true,
+    url,
+    enabled,
+    configured,
   };
 }
 
@@ -606,7 +636,7 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
 
   config: {
     listAccountIds: () => [DEFAULT_ACCOUNT_ID],
-    resolveAccount: (cfg, accountId) => resolveAccount(cfg, accountId),
+    resolveAccount: (cfg, accountId) => resolveAccount(cfg, accountId, pluginRuntime?.logger),
     defaultAccountId: () => DEFAULT_ACCOUNT_ID,
     isConfigured: (account) => account.configured,
     describeAccount: (account) => ({
@@ -622,7 +652,7 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
     textChunkLimit: 4000,
     sendText: async ({ to, text, accountId }) => {
       const cfg = pluginRuntime?.config?.loadConfig?.() ?? {};
-      const account = resolveAccount(cfg, accountId);
+      const account = resolveAccount(cfg, accountId, pluginRuntime?.logger);
       // Determine agent name for "from" field
       const agentName = "kai"; // TODO: resolve from session context
       await postMessage(account.url, agentName, "general", text ?? "");
@@ -636,6 +666,25 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
       if (!account.enabled) return;
 
       stopped = false;
+
+      // Validate connectivity and show actionable error if server unreachable
+      try {
+        const healthRes = await fetch(`${account.url}/health`, { signal: AbortSignal.timeout(5000) });
+        if (!healthRes.ok) {
+          ctx.log?.warn(`[reflectt] Server at ${account.url} returned ${healthRes.status}. Will retry via SSE reconnect.`);
+        } else {
+          ctx.log?.info(`[reflectt] Server at ${account.url} is healthy ✓`);
+        }
+      } catch {
+        ctx.log?.error(
+          `[reflectt] Cannot reach reflectt-node at ${account.url}. ` +
+          `Make sure reflectt-node is running, then set the URL in your OpenClaw config:\n` +
+          `  Option 1 (recommended): channels.reflectt.url = "${account.url}"\n` +
+          `  Option 2: plugins.entries.reflectt-channel.config.url = "${account.url}"\n` +
+          `Will keep retrying via SSE reconnect.`
+        );
+      }
+
       ctx.setStatus({
         accountId: account.accountId,
         name: "Reflectt",
