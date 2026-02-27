@@ -116,11 +116,23 @@ Each check has: `id`, `severity`, `detect`, `fix`.
 - `PreflightResult[]` shape:
   - `id`, `title`, `severity`, `status`, `details`, `fixKind`, `fixPayload`
 
-### Proposed endpoints (reflectt-node)
-- `POST /apple/enroll/start` → returns `{ url, qr }`
-- `GET /apple/enroll/status` → returns `{ enrolled, hostId, workspace, lastSync }`
-- `POST /apple/preflight` → returns `PreflightResult[]`
-- `POST /apple/fix` body `{ id }` → executes safe fix action and returns updated check + logs
+### Existing building blocks (already in repo)
+- **Enrollment / host registry:** `POST /provisioning/provision`, `GET /provisioning/status` (see `docs/architecture/host-provisioning.md`)
+- **BYOH preflight:** `GET|POST /preflight` (see `src/preflight.ts`) — currently checks node version, port, cloud reachability, credential format/validation.
+- **Onboarding diagnostics:** `GET /health/team/doctor` (see `src/team-doctor.ts`) — gateway/model/auth/bootstrap sanity.
+
+### Minimal additions for “Apple layer” v1 (to avoid rebuilding enrollment)
+**Preferred: extend existing surfaces**
+- Extend `runPreflight()` (and the `/preflight` endpoint) with an `apple/*` category on macOS:
+  - Accessibility permission
+  - Screen Recording permission
+  - Notifications allowed (optional)
+  - Gateway running (or “OpenClaw reachable”) when automation is enabled
+- Add fix-it actions as *guided recovery* (often: open the exact System Settings pane + instructions; sometimes: run a safe local command like starting the gateway).
+
+**Fallback: separate namespace only if needed**
+- `POST /apple/preflight`
+- `POST /apple/fix` body `{ id }`
 
 ### Guardrails
 - Fix actions that run commands must:
