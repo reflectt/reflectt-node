@@ -146,6 +146,7 @@ import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from 
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
 import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CATEGORIES, type CreateDocInput, type UpdateDocInput, type DocCategory } from './knowledge-docs.js'
 import { onTaskShipped, onProcessFileWritten, onDecisionComment, isDecisionComment } from './knowledge-auto-index.js'
+import { upsertHostHeartbeat, getHost, listHosts, removeHost } from './host-registry.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -1982,6 +1983,49 @@ export async function createServer(): Promise<FastifyInstance> {
         promotions_flowing: health.recentPromotions > 0,
       },
     }
+  })
+
+  // ── Host Registry: remote hosts phone-home via heartbeat ──
+
+  app.post('/hosts/heartbeat', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const hostId = typeof body.hostId === 'string' ? body.hostId.trim() : ''
+    if (!hostId) {
+      return { success: false, error: 'hostId is required' }
+    }
+    const host = upsertHostHeartbeat({
+      hostId,
+      hostname: typeof body.hostname === 'string' ? body.hostname : undefined,
+      os: typeof body.os === 'string' ? body.os : undefined,
+      arch: typeof body.arch === 'string' ? body.arch : undefined,
+      ip: typeof body.ip === 'string' ? body.ip : undefined,
+      version: typeof body.version === 'string' ? body.version : undefined,
+      agents: Array.isArray(body.agents) ? body.agents.filter((a: unknown) => typeof a === 'string') : undefined,
+      metadata: typeof body.metadata === 'object' && body.metadata !== null && !Array.isArray(body.metadata)
+        ? body.metadata as Record<string, unknown>
+        : undefined,
+    })
+    return { success: true, host }
+  })
+
+  app.get('/hosts', async (request) => {
+    const query = request.query as Record<string, string>
+    const status = typeof query.status === 'string' ? query.status : undefined
+    const hosts = listHosts({ status })
+    return { hosts, count: hosts.length }
+  })
+
+  app.get('/hosts/:hostId', async (request) => {
+    const { hostId } = request.params as { hostId: string }
+    const host = getHost(hostId)
+    if (!host) return { success: false, error: 'Host not found' }
+    return { host }
+  })
+
+  app.delete('/hosts/:hostId', async (request) => {
+    const { hostId } = request.params as { hostId: string }
+    const removed = removeHost(hostId)
+    return { success: removed, hostId }
   })
 
   // Team configuration linter health (TEAM.md / TEAM-ROLES.yaml / TEAM-STANDARDS.md)
