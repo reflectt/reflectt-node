@@ -650,6 +650,71 @@ function enforceQaBundleGateForValidating(
   return { ok: true }
 }
 
+function enforceDuplicateClosureEvidence(
+  status: Task['status'] | undefined,
+  metadata: Record<string, unknown>,
+): { ok: true } | { ok: false; error: string; hint: string } {
+  // Only enforce when attempting to enter validating/done.
+  if (status !== 'validating' && status !== 'done') return { ok: true }
+
+  const reason = typeof metadata.auto_close_reason === 'string' ? metadata.auto_close_reason.trim().toLowerCase() : ''
+  const qaLane = (() => {
+    const qa = metadata.qa_bundle as Record<string, unknown> | undefined
+    const lane = qa?.lane
+    return typeof lane === 'string' ? lane.trim().toLowerCase() : ''
+  })()
+  const dupOfRaw = typeof metadata.duplicate_of === 'string' ? metadata.duplicate_of.trim() : ''
+
+  const isDuplicateClosure = reason.includes('duplicate') || qaLane === 'duplicate-closure' || dupOfRaw.length > 0
+  if (!isDuplicateClosure) return { ok: true }
+
+  // Canonical reference requirement: a real task id or a GitHub PR URL.
+  const dupOfIsTask = /^task-[a-z0-9-]+$/i.test(dupOfRaw)
+  const dupOfIsPr = !!parseGitHubPrUrl(dupOfRaw)
+
+  const canonicalPr = typeof metadata.canonical_pr === 'string' ? metadata.canonical_pr.trim() : ''
+  const canonicalPrIsValid = canonicalPr.length > 0 && !!parseGitHubPrUrl(canonicalPr)
+
+  const artifacts = Array.isArray(metadata.artifacts)
+    ? (metadata.artifacts as unknown[]).filter((v): v is string => typeof v === 'string').map(v => v.trim()).filter(Boolean)
+    : []
+  const artifactsHavePr = artifacts.some(a => !!parseGitHubPrUrl(a))
+  const artifactsHaveTask = artifacts.some(a => /^task-[a-z0-9-]+$/i.test(a) || /^duplicate:task-[a-z0-9-]+$/i.test(a))
+
+  if (!(dupOfIsTask || dupOfIsPr || canonicalPrIsValid || artifactsHavePr || artifactsHaveTask)) {
+    return {
+      ok: false,
+      error: 'Duplicate closure requires a canonical reference (task_id or GitHub PR URL) — not "N/A".',
+      hint: 'Set metadata.duplicate_of to a full task-... id or a GitHub PR URL, or set metadata.canonical_pr / metadata.artifacts with the canonical PR/task reference.',
+    }
+  }
+
+  // Proof requirement: prevent "duplicate w/ N/A proof" churn.
+  const handoff = (metadata.review_handoff || {}) as Record<string, unknown>
+  const handoffArtifact = typeof handoff.artifact_path === 'string' ? handoff.artifact_path.trim() : ''
+  const handoffProof = typeof handoff.test_proof === 'string' ? handoff.test_proof.trim() : ''
+  const explicitProof = typeof metadata.duplicate_proof === 'string' ? metadata.duplicate_proof.trim() : ''
+  const proof = explicitProof || handoffProof
+
+  if (!proof || /^n\/?a\b/i.test(proof)) {
+    return {
+      ok: false,
+      error: 'Duplicate closure requires proof text (metadata.duplicate_proof or review_handoff.test_proof) — not "N/A".',
+      hint: 'Provide a short proof like: "Canonical: https://github.com/<org>/<repo>/pull/123 (merged)" or "Duplicate of task-... (see artifacts)".',
+    }
+  }
+
+  if (handoffArtifact && /^n\/?a\b/i.test(handoffArtifact)) {
+    return {
+      ok: false,
+      error: 'Duplicate closure requires a real artifact path (process/...) in review_handoff.artifact_path — not "N/A".',
+      hint: 'Set review_handoff.artifact_path to a repo-relative process/... file that contains the duplicate closure packet.',
+    }
+  }
+
+  return { ok: true }
+}
+
 function applyReviewStateMetadata(
   existing: Task,
   parsed: z.infer<typeof UpdateTaskSchema>,
@@ -5993,6 +6058,19 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // QA bundle gate: validating requires structured review evidence.
       const effectiveStatus = parsed.status ?? existing.status
+
+      // Duplicate-closure proof gate: prevents "duplicate w/ N/A proof" churn.
+      const dupGate = enforceDuplicateClosureEvidence(parsed.status, mergedMeta)
+      if (!dupGate.ok) {
+        reply.code(400)
+        return {
+          success: false,
+          error: dupGate.error,
+          gate: 'duplicate_proof',
+          hint: dupGate.hint,
+        }
+      }
+
       const qaGate = enforceQaBundleGateForValidating(parsed.status, mergedMeta, existing.id)
       if (!qaGate.ok) {
         reply.code(400)
