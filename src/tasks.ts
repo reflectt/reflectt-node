@@ -12,6 +12,7 @@ import { DATA_DIR, LEGACY_DATA_DIR } from './config.js'
 import { createTaskStateAdapterFromEnv, type TaskStateAdapter } from './taskStateSync.js'
 import { getDb, importJsonlIfNeeded, safeJsonStringify, safeJsonParse } from './db.js'
 import { isTestHarnessTask, TEST_TASK_EXCLUDE_SQL } from './test-task-filter.js'
+import { assertDuplicateClosureHasCanonicalRefs } from './duplicateClosureGuard.js'
 import type Database from 'better-sqlite3'
 
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
@@ -271,6 +272,13 @@ class TaskManager {
     const hasEta = typeof eta === 'string' && eta.trim().length > 0
     const artifactPath = (task.metadata as any)?.artifact_path
     const hasArtifactPath = typeof artifactPath === 'string' && artifactPath.trim().length > 0
+
+    // Duplicate-closure contract (server-side): never allow a task to be closed as a
+    // "duplicate" without canonical refs (duplicate_of + canonical_pr + canonical_commit).
+    // Auto-close writers can bypass interactive precheck flows, so this belongs here.
+    if (task.status === 'done') {
+      assertDuplicateClosureHasCanonicalRefs(task.metadata as any)
+    }
 
     if (!hasDoneCriteria) {
       throw new Error('Lifecycle gate: done_criteria is required before starting task work')
