@@ -1987,7 +1987,38 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Host Registry: remote hosts phone-home via heartbeat ──
 
+  // Auth helper: verify heartbeat token if REFLECTT_HOST_HEARTBEAT_TOKEN is set
+  function verifyHeartbeatAuth(request: { headers: Record<string, string | undefined>; body?: Record<string, unknown> }): { ok: boolean; error?: string } {
+    const expectedToken = process.env.REFLECTT_HOST_HEARTBEAT_TOKEN
+    if (!expectedToken) return { ok: true } // No token configured → open access (backward compat)
+
+    // Check Authorization: Bearer <token> header first
+    const authHeader = request.headers.authorization || request.headers.Authorization
+    if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      const provided = authHeader.slice('Bearer '.length).trim()
+      if (provided === expectedToken) return { ok: true }
+    }
+
+    // Check x-heartbeat-token header
+    const headerToken = request.headers['x-heartbeat-token']
+    if (typeof headerToken === 'string' && headerToken === expectedToken) return { ok: true }
+
+    // Check token field in body
+    const bodyToken = (request.body as Record<string, unknown>)?.token
+    if (typeof bodyToken === 'string' && bodyToken === expectedToken) return { ok: true }
+
+    return {
+      ok: false,
+      error: 'Unauthorized: valid heartbeat token required. Set REFLECTT_HOST_HEARTBEAT_TOKEN on the server and provide it via Authorization: Bearer <token>, x-heartbeat-token header, or token body field.',
+    }
+  }
+
   app.post('/hosts/heartbeat', async (request) => {
+    const auth = verifyHeartbeatAuth(request as any)
+    if (!auth.ok) {
+      return { success: false, error: auth.error, status: 401 }
+    }
+
     const body = request.body as Record<string, unknown>
     const hostId = typeof body.hostId === 'string' ? body.hostId.trim() : ''
     if (!hostId) {
