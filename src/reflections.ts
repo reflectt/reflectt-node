@@ -368,6 +368,46 @@ function _linkToTask(reflection: Reflection): void {
   }
 }
 
+// ── Dedup helpers ──
+
+/**
+ * Best-effort duplicate counter for a canonical reflection.
+ * Used by POST /reflections dedup to leave an audit trail without creating new rows.
+ */
+export function recordReflectionDuplicate(
+  canonicalReflectionId: string,
+  duplicateAt: number = Date.now(),
+  signature?: string,
+): { ok: boolean; count: number } {
+  const db = getDb()
+
+  const row = db.prepare('SELECT metadata FROM reflections WHERE id = ?').get(canonicalReflectionId) as { metadata: string | null } | undefined
+  const meta = row?.metadata ? (safeJsonParse<Record<string, unknown>>(row.metadata) ?? {}) : {}
+
+  const rawDedup = (meta as any).dedup
+  const dedupObj = (rawDedup && typeof rawDedup === 'object' && !Array.isArray(rawDedup)) ? (rawDedup as Record<string, unknown>) : {}
+
+  const prev = typeof dedupObj.count === 'number' ? dedupObj.count : 0
+  const nextCount = prev + 1
+
+  const nextDedup = {
+    ...dedupObj,
+    count: nextCount,
+    last_duplicate_at: duplicateAt,
+    signature: signature ?? dedupObj.signature,
+  }
+
+  const nextMeta = { ...meta, dedup: nextDedup }
+
+  db.prepare('UPDATE reflections SET metadata = ?, updated_at = ? WHERE id = ?').run(
+    safeJsonStringify(nextMeta) ?? null,
+    duplicateAt,
+    canonicalReflectionId,
+  )
+
+  return { ok: true, count: nextCount }
+}
+
 // ── Test helpers ──
 
 export function _clearReflectionStore(): void {
