@@ -441,6 +441,8 @@ export class BoardHealthWorker {
 
   /** Track last alert time per agent to enforce cooldown */
   private readyQueueLastAlertAt: Record<string, number> = {}
+  /** Track last alerted ready count per agent for state-based debouncing */
+  private readyQueueLastState: Record<string, number> = {}
   /** Track when each agent's queue first went empty (for idle escalation) */
   private idleQueueSince: Record<string, number> = {}
 
@@ -469,13 +471,20 @@ export class BoardHealthWorker {
       const lastAlert = this.readyQueueLastAlertAt[agent] || 0
       const cooldownMs = (rqf.cooldownMin || 30) * 60_000
 
-      // Ready-queue floor warning
-      if (readyCount < rqf.minReady && now - lastAlert > cooldownMs) {
+      // Ready-queue floor warning — with state-based debouncing
+      const previousReadyCount = this.readyQueueLastState[agent]
+      const stateChanged = previousReadyCount === undefined || previousReadyCount !== readyCount
+      // Suppress if: below cooldown AND state hasn't changed (same count = same alert)
+      const suppressed = !stateChanged && now - lastAlert < cooldownMs
+
+      if (readyCount < rqf.minReady && !suppressed) {
         const deficit = rqf.minReady - readyCount
+        const snapshotAge = lastAlert > 0 ? Math.floor((now - lastAlert) / 60_000) : 0
+        const snapshotTs = new Date(now).toISOString().slice(11, 19) + ' UTC'
 
         // Build breakdown: show blocked tasks and why
         const blockedTasks = todoTasks.filter(t => !unblockedTodo.includes(t))
-        let breakdown = ''
+        let breakdown = `\n  🕐 Snapshot: ${snapshotTs}${snapshotAge > 0 ? ` (${snapshotAge}m since last alert)` : ' (first alert)'}`
         if (todoTasks.length > readyCount) {
           breakdown += `\n  📊 todo=${todoTasks.length}, unblocked=${readyCount}, blocked=${blockedTasks.length}`
           const capped = blockedTasks.slice(0, 5)
@@ -486,6 +495,9 @@ export class BoardHealthWorker {
           if (blockedTasks.length > 5) breakdown += `\n  … and ${blockedTasks.length - 5} more`
         } else {
           breakdown += `\n  📊 todo=${todoTasks.length} (all unblocked), doing=${doingTasks.length}`
+        }
+        if (stateChanged && previousReadyCount !== undefined) {
+          breakdown += `\n  Δ ready: ${previousReadyCount} → ${readyCount}`
         }
 
         const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}`
@@ -501,6 +513,7 @@ export class BoardHealthWorker {
             })
           } catch { /* chat may not be available in test */ }
           this.readyQueueLastAlertAt[agent] = now
+          this.readyQueueLastState[agent] = readyCount
         }
 
         const action: PolicyAction = {
@@ -555,6 +568,11 @@ export class BoardHealthWorker {
       } else {
         // Reset idle tracker when agent has work
         delete this.idleQueueSince[agent]
+      }
+
+      // Clear debounce state when floor is satisfied (so next breach alerts immediately)
+      if (readyCount >= rqf.minReady) {
+        delete this.readyQueueLastState[agent]
       }
     }
 
