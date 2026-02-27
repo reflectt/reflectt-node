@@ -3203,11 +3203,11 @@ export async function createServer(): Promise<FastifyInstance> {
         const key = norm
         const existing = map.get(key)
         if (!existing) {
-          map.set(key, { rep: m, count: 1, channels: new Set([m.channel]) })
+          map.set(key, { rep: m, count: 1, channels: new Set([m.channel || 'unknown']) })
           continue
         }
         existing.count += 1
-        existing.channels.add(m.channel)
+        existing.channels.add(m.channel || 'unknown')
         if (m.timestamp > existing.rep.timestamp) existing.rep = m
       }
 
