@@ -80,6 +80,8 @@ import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as tra
 import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
+import { initGitHubActorAuth, resolveGitHubTokenForActor } from './github-actor-auth.js'
+import { approvePullRequest, githubWhoami } from './github-reviews.js'
 import type { GitHubIdentityProvider } from './github-identity.js'
 import { computeCiFromCheckRuns, computeCiFromCombinedStatus } from './github-ci.js'
 import { createGitHubIdentityProvider } from './github-identity.js'
@@ -1770,6 +1772,7 @@ export async function createServer(): Promise<FastifyInstance> {
   try {
     vault.init()
     console.log(`[Vault] Initialized (${vault.getStats().secretCount} secrets)`)
+    initGitHubActorAuth(vault)
   } catch (err) {
     console.error('[Vault] Failed to initialize:', (err as Error).message)
   }
@@ -9402,6 +9405,143 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/secrets/audit', async (request) => {
     const limit = parseInt((request.query as Record<string, string>)?.limit || '100', 10)
     return { success: true, entries: vault.getAuditLog(limit) }
+  })
+
+  // ============ GITHUB APPROVALS / PER-ACTOR AUTH (OPS) ============
+
+  // Whoami for a given actor's token (never returns token)
+  app.get<{ Params: { actor: string } }>('/github/whoami/:actor', async (request, reply) => {
+    const enabled = process.env.REFLECTT_ENABLE_GITHUB_APPROVAL_API === 'true'
+      || process.env.REFLECTT_ENABLE_GITHUB_APPROVAL_API === '1'
+
+    if (!enabled) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'GitHub approval API is disabled',
+        hint: 'Set REFLECTT_ENABLE_GITHUB_APPROVAL_API=true to enable (and optionally REFLECTT_GITHUB_APPROVAL_TOKEN for auth).'
+      }
+    }
+
+    const ip = String((request as any).ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'Forbidden: localhost-only endpoint',
+        hint: `Request ip (${ip || 'unknown'}) is not loopback`,
+      }
+    }
+
+    const requiredToken = process.env.REFLECTT_GITHUB_APPROVAL_TOKEN
+    if (requiredToken) {
+      const raw = (request.headers as any)['x-reflectt-admin-token']
+      let provided = Array.isArray(raw) ? raw[0] : raw
+      const auth = (request.headers as any).authorization
+      if ((!provided || typeof provided !== 'string') && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+        provided = auth.slice('Bearer '.length)
+      }
+
+      if (typeof provided !== 'string' || provided !== requiredToken) {
+        reply.code(403)
+        return {
+          success: false,
+          error: 'Forbidden: missing/invalid admin token',
+          hint: 'Provide x-reflectt-admin-token header (or Authorization: Bearer ...) matching REFLECTT_GITHUB_APPROVAL_TOKEN.'
+        }
+      }
+    }
+
+    const actor = request.params.actor
+    const resolved = resolveGitHubTokenForActor(actor)
+    if (!resolved?.token) {
+      reply.code(404)
+      return { success: false, error: `No GitHub token configured for actor: ${actor}` }
+    }
+
+    const user = await githubWhoami({ token: resolved.token })
+    if (!user) {
+      reply.code(502)
+      return { success: false, error: 'GitHub whoami failed', source: resolved.source, hint: 'Token may be invalid or missing scopes.' }
+    }
+
+    return { success: true, actor, user, source: resolved.source, secretName: resolved.secretName, envKey: resolved.envKey }
+  })
+
+  // Approve a PR as a specific actor (token selected via vault/env mapping)
+  app.post('/github/pr/approve', async (request, reply) => {
+    const enabled = process.env.REFLECTT_ENABLE_GITHUB_APPROVAL_API === 'true'
+      || process.env.REFLECTT_ENABLE_GITHUB_APPROVAL_API === '1'
+
+    if (!enabled) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'GitHub approval API is disabled',
+        hint: 'Set REFLECTT_ENABLE_GITHUB_APPROVAL_API=true to enable (and optionally REFLECTT_GITHUB_APPROVAL_TOKEN for auth).'
+      }
+    }
+
+    const ip = String((request as any).ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'Forbidden: localhost-only endpoint',
+        hint: `Request ip (${ip || 'unknown'}) is not loopback`,
+      }
+    }
+
+    const requiredToken = process.env.REFLECTT_GITHUB_APPROVAL_TOKEN
+    if (requiredToken) {
+      const raw = (request.headers as any)['x-reflectt-admin-token']
+      let provided = Array.isArray(raw) ? raw[0] : raw
+      const auth = (request.headers as any).authorization
+      if ((!provided || typeof provided !== 'string') && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+        provided = auth.slice('Bearer '.length)
+      }
+
+      if (typeof provided !== 'string' || provided !== requiredToken) {
+        reply.code(403)
+        return {
+          success: false,
+          error: 'Forbidden: missing/invalid admin token',
+          hint: 'Provide x-reflectt-admin-token header (or Authorization: Bearer ...) matching REFLECTT_GITHUB_APPROVAL_TOKEN.'
+        }
+      }
+    }
+
+    const body = request.body as { pr_url?: string; actor?: string; reason?: string }
+    const prUrl = typeof body?.pr_url === 'string' ? body.pr_url : ''
+    const actor = typeof body?.actor === 'string' ? body.actor : ''
+    const reason = typeof body?.reason === 'string' ? body.reason : ''
+
+    if (!prUrl || !actor) {
+      reply.code(400)
+      return { success: false, error: 'pr_url and actor are required' }
+    }
+
+    const resolved = resolveGitHubTokenForActor(actor)
+    if (!resolved?.token) {
+      reply.code(404)
+      return { success: false, error: `No GitHub token configured for actor: ${actor}` }
+    }
+
+    // Best-effort: include reason but avoid dumping huge strings.
+    const approveRes = await approvePullRequest({
+      token: resolved.token,
+      prUrl,
+      body: reason ? `Approved via Reflectt as @${actor}. Reason: ${reason.slice(0, 500)}` : `Approved via Reflectt as @${actor}.`,
+    })
+
+    if (!approveRes.ok) {
+      reply.code(approveRes.status || 502)
+      return { success: false, error: 'PR approval failed', details: approveRes.message || 'unknown', source: resolved.source }
+    }
+
+    return { success: true, pr_url: prUrl, actor, source: resolved.source }
   })
 
   // ============ ANALYTICS ENDPOINTS ============
