@@ -6,6 +6,7 @@
  */
 import { Command } from 'commander'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs'
+import { collectDoctorReport, formatDoctorHuman } from './doctor.js'
 import { homedir, hostname } from 'os'
 import { join, dirname } from 'path'
 import { spawn, execSync } from 'child_process'
@@ -593,6 +594,34 @@ program
     } catch (err) {
       console.log('\n⚠️  Server process exists but not responding')
     }
+  })
+
+// ============ DOCTOR COMMAND ============
+program
+  .command('doctor')
+  .description('Run self-serve diagnostics (onboarding + support bundle)')
+  .option('--url <baseUrl>', 'Override base URL (default from ~/.reflectt/config.json)')
+  .option('--json', 'Print JSON output')
+  .option('--timeout <ms>', 'Per-request timeout in ms', '4000')
+  .action(async (options) => {
+    const config = loadConfig()
+    const clientHost = (config.host === '0.0.0.0' || config.host === '::') ? '127.0.0.1' : config.host
+    const baseUrl = String(options.url || `http://${clientHost}:${config.port}`).replace(/\/+$/, '')
+    const timeoutMs = Math.max(250, Number(options.timeout || 4000))
+
+    const report = await collectDoctorReport({ baseUrl, timeoutMs })
+
+    if (options.json) {
+      console.log(JSON.stringify(report, null, 2))
+      if (report.overall === 'fail') process.exit(2)
+      if (report.overall === 'warn') process.exit(1)
+      return
+    }
+
+    console.log(formatDoctorHuman(report))
+
+    if (report.overall === 'fail') process.exit(2)
+    if (report.overall === 'warn') process.exit(1)
   })
 
 // ============ CHAT COMMANDS ============

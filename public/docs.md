@@ -101,6 +101,17 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | POST | `/health/working-contract/tick` | Evaluate working-contract enforcement: auto-requeue stale doing tasks (90m warning → 15m grace → auto todo) and fire alerts. |
 | GET | `/health/working-contract/gate/:agent` | Dry-run claim gate check for an agent. Returns `{ allowed, reason }` — whether the agent can claim a new task given current WIP and contract status. |
 
+## Hosts (multi-host registry)
+
+Remote hosts (Pis/robots/other machines) can phone-home to a central reflectt-node.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/hosts/heartbeat` | Upsert a host heartbeat. Body: `{ hostId, hostname?, os?, arch?, ip?, version?, agents? (string[]), metadata? (object) }`. Returns `{ success, host }`. |
+| GET | `/hosts` | List hosts. Query: `status` (optional). Returns `{ hosts, count }`. |
+| GET | `/hosts/:hostId` | Fetch one host by id. Returns `{ host }` or `{ success:false, error }`. |
+| DELETE | `/hosts/:hostId` | Remove a host from registry. Returns `{ success, hostId }`. |
+
 ### Team Pulse
 
 | Method | Path | Description |
