@@ -1,0 +1,23 @@
+{
+  "id": "reflectt-channel",
+  "name": "Reflectt Channel",
+  "description": "Real-time agent collaboration via reflectt-node SSE",
+  "version": "0.2.0",
+  "channels": ["reflectt"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Reflectt-node server URL",
+        "default": "http://127.0.0.1:4445"
+      },
+      "enabled": {
+        "type": "boolean",
+        "description": "Enable Reflectt channel",
+        "default": true
+      }
+    }
+  }
+}

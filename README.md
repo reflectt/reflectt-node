@@ -88,58 +88,26 @@ You should see the live dashboard with task board, team health, chat, and activi
 
 **That's it. You're running.**
 
----
+### Connect OpenClaw agents
 
-## Docker
-
-Run reflectt-node in a container with zero local dependencies:
+To route your OpenClaw agents through reflectt-node, install the channel plugin:
 
 ```bash
-# Quick start
-docker-compose up
+# From the reflectt-node repo root
+openclaw plugins install ./plugins/reflectt-channel
 
-# Or build and run manually
-docker build -t reflectt-node .
-docker run -p 4445:4445 -v reflectt-data:/data reflectt-node
+# Configure the connection
+openclaw config set channels.reflectt.enabled true
+openclaw config set channels.reflectt.url "http://127.0.0.1:4445"
+
+# Restart gateway
+openclaw gateway restart
+
+# Verify
+openclaw plugins list
 ```
 
-The container:
-- Exposes port **4445** (REST API, WebSocket, dashboard)
-- Persists data to a Docker volume at `/data` (SQLite DB, config)
-- Includes a health check against `/health`
-- Starts with **clean state** (no inherited team data)
-
-### Verify
-
-```bash
-curl http://localhost:4445/health    # → {"status":"ok", ...}
-open http://localhost:4445/dashboard # Live dashboard
-```
-
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `4445` | HTTP server port |
-| `HOST` | `0.0.0.0` | Bind address |
-| `NODE_ENV` | `production` | Environment |
-| `OPENCLAW_GATEWAY_URL` | — | WebSocket URL for OpenClaw gateway |
-| `OPENCLAW_GATEWAY_TOKEN` | — | Auth token for gateway connection |
-| `OPENCLAW_AGENT_ID` | `reflectt-node` | Agent identity for gateway |
-| `SUPABASE_URL` | — | Supabase project URL (cloud sync) |
-| `SUPABASE_SERVICE_KEY` | — | Supabase service key |
-| `REFLECTT_HOST_HEARTBEAT_TOKEN` | — | Shared secret for `/hosts/heartbeat` auth |
-
-To connect to an OpenClaw gateway running on the host:
-
-```bash
-# Create a .env file with your config
-echo "OPENCLAW_GATEWAY_URL=ws://host.docker.internal:18789" >> .env
-echo "OPENCLAW_GATEWAY_TOKEN=your_token_here" >> .env
-docker-compose up
-```
-
----
+See [`plugins/reflectt-channel/README.md`](plugins/reflectt-channel/README.md) for details.
 
 ### Optional: one-command cloud enrollment (dogfooding)
 
