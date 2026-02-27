@@ -379,6 +379,11 @@ export function resolveAssignment(insight: Insight, teamId?: string): Assignment
   const syntheticTask = {
     title: `[Insight] ${insight.title}`,
     tags: [insight.cluster_key, insight.failure_family].filter(Boolean) as string[],
+    metadata: {
+      cluster_key: insight.cluster_key,
+      failure_family: insight.failure_family,
+      // surface/lane may be absent for auto-created tasks; routing guardrails use cluster_key.
+    } as Record<string, unknown>,
   }
 
   let assignee: string
@@ -486,7 +491,15 @@ function resolveReviewer(
   } catch { /* ok */ }
 
   const suggestion = suggestReviewer(
-    { title: `[Insight] ${insight.title}`, assignee },
+    {
+      title: `[Insight] ${insight.title}`,
+      assignee,
+      tags: [insight.cluster_key, insight.failure_family].filter(Boolean) as string[],
+      metadata: {
+        cluster_key: insight.cluster_key,
+        failure_family: insight.failure_family,
+      } as Record<string, unknown>,
+    },
     allTasks as any,
   )
 

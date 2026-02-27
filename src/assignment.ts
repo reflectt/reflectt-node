@@ -261,10 +261,66 @@ function extractTaskKeywords(task: { title: string; tags?: string[]; done_criter
   return text.split(/[\s/\-_:,.()+]+/).filter(w => w.length > 2)
 }
 
+// ── Pixel routing guardrail ───────────────────────────────────────────────
+
+function normalizeTagList(tags: unknown): string[] {
+  if (!Array.isArray(tags)) return []
+  return tags.map(t => String(t).trim().toLowerCase()).filter(Boolean)
+}
+
+function getTaskMeta(task: any): Record<string, unknown> {
+  const meta = task?.metadata
+  if (meta && typeof meta === 'object' && !Array.isArray(meta)) return meta as Record<string, unknown>
+  return {}
+}
+
+/**
+ * Hard default: Pixel is excluded unless the task explicitly opts in.
+ * Opt-in signals (any):
+ * - metadata.lane = design
+ * - metadata.surface = user-facing OR known user-facing surfaces
+ * - tags include UI/design or copy/brand/marketing
+ *
+ * Hard exclusion: onboarding plumbing families (ws-pairing/auth/preflight/etc)
+ * exclude Pixel unless lane=design is explicitly set.
+ */
+function pixelEligibleForTask(task: { tags?: string[]; metadata?: Record<string, unknown> }): boolean {
+  const meta = getTaskMeta(task)
+
+  const lane = String((meta as any).lane ?? '').trim().toLowerCase()
+  const surfaceRaw = String((meta as any).surface ?? '').trim().toLowerCase()
+
+  const explicitDesign = lane === 'design'
+
+  // Cluster-based routing guardrail (prefer metadata.cluster_key; tolerate cluster_key in tags)
+  const clusterKey = String((meta as any).cluster_key ?? (meta as any).cluster ?? '').trim().toLowerCase()
+  const onboardingPlumbing = /ws[-_ ]?pair|pairing|preflight|auth|provision|provisioning|gateway|join[-_ ]?token|token|ssh|deploy|docker|ci|infra/.test(clusterKey)
+  if (onboardingPlumbing && !explicitDesign) return false
+
+  const userFacingSurfaces = new Set([
+    'user-facing',
+    'reflectt-node',
+    'reflectt-cloud-app',
+    'reflectt.ai',
+    'app.reflectt.ai',
+  ])
+  const explicitUserFacing = userFacingSurfaces.has(surfaceRaw)
+
+  const tags = normalizeTagList(task.tags).concat(normalizeTagList((meta as any).tags))
+  const allowTags = [
+    'design', 'ui', 'ux', 'a11y', 'css', 'visual', 'dashboard',
+    // copy/visual polish tasks
+    'copy', 'brand', 'marketing',
+  ]
+  const hasAllowTag = tags.some(t => allowTags.some(a => t === a || t.includes(a)))
+
+  return explicitDesign || explicitUserFacing || hasAllowTag
+}
+
 // Score how well an agent matches a task
 export function scoreAssignment(
   agent: AgentRole,
-  task: { title: string; tags?: string[]; done_criteria?: string[] },
+  task: { title: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> },
   currentWip: number,
   recentCompletions: number = 0,
 ): AssignmentScore {
@@ -302,13 +358,14 @@ export function scoreAssignment(
 
 // Suggest best assignee for a task
 export function suggestAssignee(
-  task: { title: string; tags?: string[]; done_criteria?: string[] },
+  task: { title: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> },
   allTasks: TaskForScoring[],
   recentCompletionsPerAgent?: Map<string, number>,
 ): { suggested: string | null; scores: AssignmentScore[]; protectedMatch?: string } {
-  const roles = getAgentRoles()
+  const roles = getAgentRoles().filter(r => r.name.toLowerCase() !== 'pixel' || pixelEligibleForTask(task))
 
-  // Check protected domains first
+  // Check protected domains first (but still return full scoring for transparency)
+  let protectedDecision: { agent: string; match: string } | null = null
   const keywords = extractTaskKeywords(task)
   for (const agent of roles) {
     if (agent.protectedDomains) {
@@ -316,11 +373,8 @@ export function suggestAssignee(
         keywords.some(kw => kw.includes(domain) || domain.includes(kw))
       )
       if (protectedMatch) {
-        return {
-          suggested: agent.name,
-          scores: [],
-          protectedMatch: `Protected domain "${protectedMatch}" → ${agent.name}`,
-        }
+        protectedDecision = { agent: agent.name, match: protectedMatch }
+        break
       }
     }
   }
@@ -341,15 +395,23 @@ export function suggestAssignee(
   const top = scores[0]
   const suggested = top && top.score > 0 && !top.overCap ? top.agent : null
 
+  if (protectedDecision) {
+    return {
+      suggested: protectedDecision.agent,
+      scores,
+      protectedMatch: `Protected domain "${protectedDecision.match}" → ${protectedDecision.agent}`,
+    }
+  }
+
   return { suggested, scores }
 }
 
 // Suggest best reviewer for a task (load-balanced)
 export function suggestReviewer(
-  task: { title: string; assignee?: string; tags?: string[]; done_criteria?: string[] },
+  task: { title: string; assignee?: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> },
   allTasks: TaskForScoring[],
 ): { suggested: string | null; scores: Array<{ agent: string; score: number; validatingLoad: number; role: string }> } {
-  const roles = getAgentRoles()
+  const roles = getAgentRoles().filter(r => r.name.toLowerCase() !== 'pixel' || pixelEligibleForTask(task))
 
   // Exclude the assignee from reviewer candidates
   const candidates = roles.filter(r => 

@@ -86,6 +86,26 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
         hint: 'Assign a reviewer who can validate the work.',
       })
     }
+
+    // Warn-only: lane + surface metadata (routing + ownership discipline)
+    // Do not hard-block yet — just surface what to add.
+    if (!String(meta.lane || '').trim()) {
+      items.push({
+        field: 'metadata.lane',
+        severity: 'warning',
+        message: 'metadata.lane missing (recommended for routing + lane ownership)',
+        hint: 'Set metadata.lane to one of: design | product | infra | ops | growth',
+      })
+    }
+
+    if (!String(meta.surface || '').trim()) {
+      items.push({
+        field: 'metadata.surface',
+        severity: 'warning',
+        message: 'metadata.surface missing (recommended for routing + priority triage)',
+        hint: 'Set metadata.surface to one of: reflectt-node | reflectt-cloud-app | reflectt.ai | infra',
+      })
+    }
   }
 
   // ── doing ───────────────────────────────────────────────────────────

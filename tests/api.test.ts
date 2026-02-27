@@ -3247,9 +3247,11 @@ describe('Suggest assignee', () => {
     }
   })
 
-  it('scores dashboard tasks highest for pixel', async () => {
+  it('scores dashboard tasks highest for pixel (explicit design opt-in)', async () => {
     const { body } = await req('POST', '/tasks/suggest-assignee', {
       title: 'Dashboard UI layout fix: modal animation and CSS cleanup',
+      tags: ['ui', 'design'],
+      metadata: { lane: 'design', surface: 'reflectt-node' },
     })
     const pixelScore = body.scores.find((s: any) => s.agent === 'pixel')
     expect(pixelScore).toBeDefined()
