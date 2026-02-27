@@ -204,15 +204,11 @@ export class BoardHealthWorker {
       }
     }
 
-    // 3. Ready-queue floor check
-    const rqfActions = await this.checkReadyQueueFloor(now, dryRun)
-    actions.push(...rqfActions)
-
-    // 3a. Review SLA auto-reassignment
+    // 3. Review SLA auto-reassignment
     const reviewActions = await this.checkReviewSla(now, dryRun)
     actions.push(...reviewActions)
 
-    // 3b. Reflection automation nudges
+    // 3a. Reflection automation nudges
     if (!dryRun) {
       try {
         const { tickReflectionNudges } = await import('./reflection-automation.js')
@@ -220,7 +216,7 @@ export class BoardHealthWorker {
       } catch { /* reflection automation may not be loaded */ }
     }
 
-    // 3c. Working contract enforcement (auto-requeue stale doing tasks)
+    // 3b. Working contract enforcement (auto-requeue stale doing tasks)
     if (!dryRun) {
       try {
         const { tickWorkingContract } = await import('./working-contract.js')
@@ -244,7 +240,8 @@ export class BoardHealthWorker {
       } catch { /* working-contract module may not be loaded */ }
     }
 
-    // 3d. Continuity loop: auto-replenish queues from promoted insights
+    // 3c. Continuity loop: auto-replenish queues from promoted insights
+    // IMPORTANT: run before ready-queue floor alerts to avoid false positives when the loop replenishes in the same tick.
     if (!dryRun) {
       try {
         const { tickContinuityLoop } = await import('./continuity-loop.js')
@@ -265,6 +262,10 @@ export class BoardHealthWorker {
         }
       } catch { /* continuity loop may not be loaded */ }
     }
+
+    // 3d. Ready-queue floor check (post-replenish)
+    const rqfActions = await this.checkReadyQueueFloor(now, dryRun)
+    actions.push(...rqfActions)
 
     // 4. Emit digest if interval elapsed
     let digest: BoardHealthDigest | null = null
@@ -441,6 +442,8 @@ export class BoardHealthWorker {
 
   /** Track last alert time per agent to enforce cooldown */
   private readyQueueLastAlertAt: Record<string, number> = {}
+  /** Track when an agent first breached ready-floor (debounce false positives) */
+  private readyQueueBreachSince: Record<string, number> = {}
   /** Track when each agent's queue first went empty (for idle escalation) */
   private idleQueueSince: Record<string, number> = {}
 
@@ -452,71 +455,96 @@ export class BoardHealthWorker {
     const actions: PolicyAction[] = []
 
     for (const agent of rqf.agents) {
-      // Count unblocked todo tasks for this agent
-      const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
-      const unblockedTodo = todoTasks.filter(t => {
-        const blocked = t.metadata?.blocked_by
-        if (!blocked) return true
-        // Check if blocker is still open
-        const blocker = taskManager.getTask(blocked as string)
-        return !blocker || blocker.status === 'done'
-      })
+      const computeReadyState = () => {
+        const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
+        const unblockedTodo = todoTasks.filter(t => {
+          const blocked = t.metadata?.blocked_by
+          if (!blocked) return true
+          const blocker = taskManager.getTask(blocked as string)
+          return !blocker || blocker.status === 'done'
+        })
+        const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
+        const readyCount = unblockedTodo.length
+        return { todoTasks, unblockedTodo, doingTasks, readyCount }
+      }
 
-      const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
-      const readyCount = unblockedTodo.length
+      // Initial snapshot (may change during the tick if continuity loop replenishes)
+      let { todoTasks, unblockedTodo, doingTasks, readyCount } = computeReadyState()
+
+      // Debounce: only alert if the breach persists for N minutes (suppresses false positives / transient breaches).
+      const debounceMin = typeof (rqf as any).debounceMin === 'number' ? (rqf as any).debounceMin : 5
+      const debounceMs = Math.max(0, debounceMin) * 60_000
+
+      if (readyCount >= rqf.minReady) {
+        delete this.readyQueueBreachSince[agent]
+      } else {
+        if (!this.readyQueueBreachSince[agent]) this.readyQueueBreachSince[agent] = now
+      }
+
+      const breachSince = this.readyQueueBreachSince[agent] || 0
+      const breachAgeMs = breachSince ? (now - breachSince) : 0
+      const debounceSatisfied = readyCount < rqf.minReady && (debounceMs === 0 || breachAgeMs >= debounceMs)
 
       // Check cooldown
       const lastAlert = this.readyQueueLastAlertAt[agent] || 0
       const cooldownMs = (rqf.cooldownMin || 30) * 60_000
 
-      // Ready-queue floor warning
-      if (readyCount < rqf.minReady && now - lastAlert > cooldownMs) {
-        const deficit = rqf.minReady - readyCount
+      // Ready-queue floor warning (reconciled at emit time)
+      if (debounceSatisfied && now - lastAlert > cooldownMs) {
+        // Re-check immediately before emitting (avoid stale alerts)
+        ;({ todoTasks, unblockedTodo, doingTasks, readyCount } = computeReadyState())
 
-        // Build breakdown: show blocked tasks and why
-        const blockedTasks = todoTasks.filter(t => !unblockedTodo.includes(t))
-        let breakdown = ''
-        if (todoTasks.length > readyCount) {
-          breakdown += `\n  📊 todo=${todoTasks.length}, unblocked=${readyCount}, blocked=${blockedTasks.length}`
-          const capped = blockedTasks.slice(0, 5)
-          for (const bt of capped) {
-            const blockedBy = bt.metadata?.blocked_by || 'unknown'
-            breakdown += `\n  • ${bt.id} (${(bt.title || '').slice(0, 50)}) — blocked_by: ${blockedBy}`
-          }
-          if (blockedTasks.length > 5) breakdown += `\n  … and ${blockedTasks.length - 5} more`
+        if (readyCount >= rqf.minReady) {
+          // Recovered between initial compute and emit — suppress.
+          delete this.readyQueueBreachSince[agent]
         } else {
-          breakdown += `\n  📊 todo=${todoTasks.length} (all unblocked), doing=${doingTasks.length}`
-        }
+          const deficit = rqf.minReady - readyCount
 
-        const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}`
+          // Build breakdown: show blocked tasks and why
+          const blockedTasks = todoTasks.filter(t => !unblockedTodo.includes(t))
+          let breakdown = ''
+          if (todoTasks.length > readyCount) {
+            breakdown += `\n  📊 todo=${todoTasks.length}, unblocked=${readyCount}, blocked=${blockedTasks.length}`
+            const capped = blockedTasks.slice(0, 5)
+            for (const bt of capped) {
+              const blockedBy = bt.metadata?.blocked_by || 'unknown'
+              breakdown += `\n  • ${bt.id} (${(bt.title || '').slice(0, 50)}) — blocked_by: ${blockedBy}`
+            }
+            if (blockedTasks.length > 5) breakdown += `\n  … and ${blockedTasks.length - 5} more`
+          } else {
+            breakdown += `\n  📊 todo=${todoTasks.length} (all unblocked), doing=${doingTasks.length}`
+          }
 
-        if (!dryRun) {
-          try {
-            await routeMessage({
-              from: 'system',
-              content: msg,
-              category: 'watchdog-alert',
-              severity: 'warning',
-              forceChannel: rqf.channel || 'general',
-            })
-          } catch { /* chat may not be available in test */ }
-          this.readyQueueLastAlertAt[agent] = now
-        }
+          const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}`
 
-        const action: PolicyAction = {
-          id: `rqf-${agent}-${now}`,
-          kind: 'ready-queue-warning',
-          taskId: null,
-          agent,
-          description: `Ready queue below floor: ${readyCount}/${rqf.minReady} for @${agent}`,
-          previousState: { readyCount, doingCount: doingTasks.length },
-          appliedAt: now,
-          rolledBack: false,
-          rolledBackAt: null,
-          rollbackBy: null,
+          if (!dryRun) {
+            try {
+              await routeMessage({
+                from: 'system',
+                content: msg,
+                category: 'watchdog-alert',
+                severity: 'warning',
+                forceChannel: rqf.channel || 'general',
+              })
+            } catch { /* chat may not be available in test */ }
+            this.readyQueueLastAlertAt[agent] = now
+          }
+
+          const action: PolicyAction = {
+            id: `rqf-${agent}-${now}`,
+            kind: 'ready-queue-warning',
+            taskId: null,
+            agent,
+            description: `Ready queue below floor: ${readyCount}/${rqf.minReady} for @${agent}`,
+            previousState: { readyCount, doingCount: doingTasks.length, breachAgeMs },
+            appliedAt: now,
+            rolledBack: false,
+            rolledBackAt: null,
+            rollbackBy: null,
+          }
+          this.auditLog.push(action)
+          actions.push(action)
         }
-        this.auditLog.push(action)
-        actions.push(action)
       }
 
       // Idle escalation: agent has 0 doing + 0 todo for too long
