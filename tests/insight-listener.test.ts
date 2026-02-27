@@ -206,25 +206,31 @@ describe('Cross-insight dedup in auto-create', () => {
       tags: [`stage:diff1-${suffix}`, `family:cluster-a-${suffix}`, `unit:diff1-${suffix}`],
     })
 
-    // Wait for EventBus auto-create
-    await new Promise(r => setTimeout(r, 50))
-
     const { insight: insight2 } = createTestInsight({
       severity: 'high',
       pain: `Different cluster beta ${suffix}`,
       tags: [`stage:diff2-${suffix}`, `family:cluster-b-${suffix}`, `unit:diff2-${suffix}`],
     })
 
-    // Wait for EventBus auto-create
-    await new Promise(r => setTimeout(r, 50))
+    const waitForTaskCreated = async (insightId: string, timeoutMs = 1500) => {
+      const start = Date.now()
+      while (Date.now() - start < timeoutMs) {
+        const i = getInsight(insightId)
+        if (i?.status === 'task_created' && i.task_id) return i
+        await new Promise(r => setTimeout(r, 25))
+      }
+      return getInsight(insightId)
+    }
 
     // Both insights should have tasks (different clusters = different tasks)
-    const updated1 = getInsight(insight1.id)
-    const updated2 = getInsight(insight2.id)
+    const updated1 = await waitForTaskCreated(insight1.id)
+    const updated2 = await waitForTaskCreated(insight2.id)
+
     expect(updated1?.status).toBe('task_created')
     expect(updated1?.task_id).toBeTruthy()
     expect(updated2?.status).toBe('task_created')
     expect(updated2?.task_id).toBeTruthy()
+
     // Tasks should be different
     expect(updated1?.task_id).not.toBe(updated2?.task_id)
   })
