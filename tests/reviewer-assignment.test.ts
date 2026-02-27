@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { suggestReviewer, loadAgentRoles, getAgentRoles } from '../src/assignment.js'
+import { suggestReviewer, loadAgentRoles, getAgentRoles, setTestRoles } from '../src/assignment.js'
+import { TEST_AGENT_ROLES } from './fixtures/test-roles.js'
 
-// Ensure roles are loaded
+// Ensure roles are loaded with test-specific names
 beforeEach(() => {
+  setTestRoles(TEST_AGENT_ROLES)
   loadAgentRoles()
 })
 
