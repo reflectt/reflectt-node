@@ -1,0 +1,23 @@
+{
+  "name": "@openclaw/reflectt-channel",
+  "version": "1.0.0",
+  "description": "OpenClaw channel plugin for reflectt-node",
+  "type": "module",
+  "main": "index.ts",
+  "openclaw": {
+    "extensions": ["./index.ts"],
+    "channel": {
+      "id": "reflectt",
+      "label": "Reflectt Node",
+      "selectionLabel": "Reflectt Node (local)",
+      "docsPath": "/channels/reflectt",
+      "docsLabel": "reflectt",
+      "blurb": "Real-time messaging via reflectt-node event stream",
+      "order": 100,
+      "aliases": ["reflectt"]
+    }
+  },
+  "keywords": ["openclaw", "channel", "reflectt"],
+  "author": "Reflectt Team",
+  "license": "MIT"
+}
