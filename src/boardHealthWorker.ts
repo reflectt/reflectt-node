@@ -441,6 +441,8 @@ export class BoardHealthWorker {
 
   /** Track last alert time per agent to enforce cooldown */
   private readyQueueLastAlertAt: Record<string, number> = {}
+  /** Track last alert state fingerprint per agent to suppress duplicate alerts */
+  private readyQueueLastState: Record<string, string> = {}
   /** Track when each agent's queue first went empty (for idle escalation) */
   private idleQueueSince: Record<string, number> = {}
 
@@ -473,8 +475,16 @@ export class BoardHealthWorker {
       if (readyCount < rqf.minReady && now - lastAlert > cooldownMs) {
         const deficit = rqf.minReady - readyCount
 
-        // Build breakdown: show blocked tasks and why
+        // State fingerprint: suppress if identical to last alert
         const blockedTasks = todoTasks.filter(t => !unblockedTodo.includes(t))
+        const stateFingerprint = `${readyCount}:${todoTasks.length}:${blockedTasks.map(t => t.id).sort().join(',')}`
+        const lastState = this.readyQueueLastState[agent]
+        if (lastState === stateFingerprint) {
+          // State unchanged since last alert — skip (debounce)
+          continue
+        }
+
+        // Build breakdown: show blocked tasks and why
         let breakdown = ''
         if (todoTasks.length > readyCount) {
           breakdown += `\n  📊 todo=${todoTasks.length}, unblocked=${readyCount}, blocked=${blockedTasks.length}`
@@ -488,7 +498,9 @@ export class BoardHealthWorker {
           breakdown += `\n  📊 todo=${todoTasks.length} (all unblocked), doing=${doingTasks.length}`
         }
 
-        const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}`
+        // Snapshot timestamp for freshness judgment
+        const snapshotTime = new Date(now).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+        const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}\n  🕐 snapshot: ${snapshotTime}`
 
         if (!dryRun) {
           try {
@@ -501,6 +513,7 @@ export class BoardHealthWorker {
             })
           } catch { /* chat may not be available in test */ }
           this.readyQueueLastAlertAt[agent] = now
+          this.readyQueueLastState[agent] = stateFingerprint
         }
 
         const action: PolicyAction = {
@@ -519,6 +532,11 @@ export class BoardHealthWorker {
         actions.push(action)
       }
 
+      // Clear state fingerprint when floor is met (so next breach alerts fresh)
+      if (readyCount >= rqf.minReady) {
+        delete this.readyQueueLastState[agent]
+      }
+
       // Idle escalation: agent has 0 doing + 0 todo for too long
       const totalActive = doingTasks.length + readyCount
       if (totalActive === 0) {
@@ -528,7 +546,8 @@ export class BoardHealthWorker {
         const idleMinutes = Math.floor((now - this.idleQueueSince[agent]) / 60_000)
 
         if (idleMinutes >= (rqf.escalateAfterMin || 60) && now - lastAlert > cooldownMs) {
-          const msg = `🚨 Idle escalation: @${agent} has had 0 tasks (doing + todo) for ${idleMinutes}m. Immediate assignment needed. @sage`
+          const idleSnapshotTime = new Date(now).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+          const msg = `🚨 Idle escalation: @${agent} has had 0 tasks (doing + todo) for ${idleMinutes}m. Immediate assignment needed. @sage\n  🕐 snapshot: ${idleSnapshotTime}`
 
           if (!dryRun) {
             try {
