@@ -104,6 +104,17 @@ Expected output:
 }
 ```
 
+### Verify loops are running (watchdogs/sweeper)
+
+```bash
+curl -s http://127.0.0.1:4445/health/system
+```
+
+Look for:
+- `quietHours.suppressedNow`
+- `sweeper.running`
+- `timers.*.registered` and `timers.*.lastTickAt`
+
 ### Send a test message
 
 ```bash

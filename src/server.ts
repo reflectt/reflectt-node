@@ -1882,24 +1882,38 @@ export async function createServer(): Promise<FastifyInstance> {
     reportIntervalMs: parseInt(process.env.REFLECTT_TELEMETRY_INTERVAL || '300000', 10),
   })
 
+  // Loop/timer tick timestamps (for /health/system proof)
+  const loopTicks = {
+    idleNudge: 0,
+    cadenceWatchdog: 0,
+    mentionRescue: 0,
+    reflectionPipeline: 0,
+  }
+
   // System idle nudge watchdog (process-in-code guardrail)
   const idleNudgeTimer = setInterval(() => {
-    if (isQuietHours(Date.now())) return
-    healthMonitor.runIdleNudgeTick().catch(() => {})
+    const now = Date.now()
+    if (isQuietHours(now)) return
+    loopTicks.idleNudge = now
+    healthMonitor.runIdleNudgeTick(now).catch(() => {})
   }, 60 * 1000)
   idleNudgeTimer.unref()
 
   // Collaboration cadence watchdog (trio silence + stale working alerts)
   const cadenceWatchdogTimer = setInterval(() => {
-    if (isQuietHours(Date.now())) return
-    healthMonitor.runCadenceWatchdogTick().catch(() => {})
+    const now = Date.now()
+    if (isQuietHours(now)) return
+    loopTicks.cadenceWatchdog = now
+    healthMonitor.runCadenceWatchdogTick(now).catch(() => {})
   }, 60 * 1000)
   cadenceWatchdogTimer.unref()
 
   // Mention rescue fallback (if Ryan mentions trio and no response arrives)
   const mentionRescueTimer = setInterval(() => {
-    if (isQuietHours(Date.now())) return
-    healthMonitor.runMentionRescueTick().catch(() => {})
+    const now = Date.now()
+    if (isQuietHours(now)) return
+    loopTicks.mentionRescue = now
+    healthMonitor.runMentionRescueTick(now).catch(() => {})
   }, 30 * 1000)
   mentionRescueTimer.unref()
 
@@ -1960,8 +1974,10 @@ export async function createServer(): Promise<FastifyInstance> {
   }
 
   const reflectionPipelineTimer = setInterval(() => {
-    if (isQuietHours(Date.now())) return
-    const health = computeReflectionPipelineHealth(Date.now())
+    const now = Date.now()
+    if (isQuietHours(now)) return
+    loopTicks.reflectionPipeline = now
+    const health = computeReflectionPipelineHealth(now)
 
     // Alert when reflections are flowing but insights remain zero past threshold
     if (health.status === 'broken') {
@@ -2506,6 +2522,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    loopTicks.idleNudge = now
     const result = await healthMonitor.runIdleNudgeTick(now, { dryRun })
     return {
       success: true,
@@ -2551,6 +2568,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    loopTicks.cadenceWatchdog = now
     const result = await healthMonitor.runCadenceWatchdogTick(now, { dryRun })
     return {
       success: true,
@@ -2596,6 +2614,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    loopTicks.mentionRescue = now
     const result = await healthMonitor.runMentionRescueTick(now, { dryRun })
     return {
       success: true,
@@ -2656,9 +2675,41 @@ export async function createServer(): Promise<FastifyInstance> {
     return { history, count: history.length, days }
   })
 
-  // System health (uptime, performance, errors)
+  // System health + loop/timer status (prove watchdogs are actually running)
   app.get('/health/system', async () => {
-    return healthMonitor.getSystemHealth()
+    const now = Date.now()
+
+    const base = healthMonitor.getSystemHealth()
+    const qh = policyManager.get().quietHours
+    const suppressedNow = isQuietHours(now)
+
+    const sweeper = getSweeperStatus()
+    const board = boardHealthWorker.getStatus()
+
+    const ageSec = (ts: number) => ts > 0 ? Math.floor((now - ts) / 1000) : null
+
+    return {
+      ...base,
+      quietHours: {
+        ...qh,
+        suppressedNow,
+        nowMs: now,
+      },
+      sweeper: {
+        running: sweeper.running,
+        lastSweepAt: sweeper.lastSweepAt,
+      },
+      timers: {
+        idleNudge: { registered: Boolean(idleNudgeTimer), lastTickAt: loopTicks.idleNudge, lastTickAgeSec: ageSec(loopTicks.idleNudge) },
+        cadenceWatchdog: { registered: Boolean(cadenceWatchdogTimer), lastTickAt: loopTicks.cadenceWatchdog, lastTickAgeSec: ageSec(loopTicks.cadenceWatchdog) },
+        mentionRescue: { registered: Boolean(mentionRescueTimer), lastTickAt: loopTicks.mentionRescue, lastTickAgeSec: ageSec(loopTicks.mentionRescue) },
+        reflectionPipeline: { registered: Boolean(reflectionPipelineTimer), lastTickAt: loopTicks.reflectionPipeline, lastTickAgeSec: ageSec(loopTicks.reflectionPipeline) },
+        boardHealthWorker: { registered: board.running, lastTickAt: board.lastTickAt, lastTickAgeSec: ageSec(board.lastTickAt) },
+      },
+      reflectionPipelineHealth: {
+        ...reflectionPipelineHealth,
+      },
+    }
   })
 
   // Build info — git SHA, branch, PID, uptime
