@@ -3148,13 +3148,19 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get<{ Params: { agent: string } }>('/chat/context/:agent', async (request) => {
     const agent = String(request.params.agent || '').trim().toLowerCase()
     const query = request.query as Record<string, string>
+
     const limit = Math.min(Number(query.limit) || 30, 100)
     const channelFilter = query.channel || undefined
     const sinceMs = query.since ? Number(query.since) : Date.now() - (4 * 60 * 60 * 1000) // default 4h
 
+    // Strict compact mode: enforce a small char budget while preserving key signals.
+    // This is used for agent context injection where token bloat hurts reliability.
+    const strictCompact = query.compact === '1' || query.compact === 'true'
+    const maxChars = Math.max(400, Math.min(Number(query.max_chars) || 1200, 8000))
+
     const allMessages = chatManager.getMessages({
       channel: channelFilter,
-      limit: Math.min(limit * 5, 500), // fetch more, then filter
+      limit: Math.min(limit * 6, 800), // fetch more, then filter
       since: sinceMs,
     })
 
@@ -3167,59 +3173,154 @@ export async function createServer(): Promise<FastifyInstance> {
 
     for (const m of allMessages) {
       const content = m.content || ''
-      if (m.from === 'system') {
-        systemAlerts.push(m)
-      } else if (agentPattern.test(content)) {
-        mentions.push(m)
-      } else {
-        teamMessages.push(m)
-      }
+      if (m.from === 'system') systemAlerts.push(m)
+      else if (agentPattern.test(content)) mentions.push(m)
+      else teamMessages.push(m)
     }
 
-    // Deduplicate system alerts by normalized content (aggressive normalization)
-    const seenHashes = new Set<string>()
-    const dedupedAlerts = systemAlerts.filter(m => {
-      const normalized = (m.content || '')
-        .replace(/\d{10,}/g, '')           // strip epoch timestamps
-        .replace(/task-\S+/g, 'TASK')      // normalize task IDs
-        .replace(/@[\w-]+/g, '@AGENT')     // normalize @mentions (incl. hyphens)
-        .replace(/\d+\/\d+/g, 'N/M')      // normalize counts like "0/2"
-        .replace(/\d+h\b/g, 'Nh')         // normalize durations like "10h", "28h"
-        .replace(/\d+m\b/g, 'Nm')         // normalize minutes
+    const normalizeForDedup = (content: string): string => {
+      return (content || '')
+        .replace(/\d{10,}/g, '') // strip epoch timestamps
+        .replace(/task-\S+/g, 'TASK') // normalize task IDs
+        .replace(/@[\w-]+/g, '@AGENT') // normalize @mentions (incl. hyphens)
+        .replace(/\d+\/\d+/g, 'N/M') // normalize counts like "0/2"
+        .replace(/\b\d+h\b/g, 'Nh') // normalize durations like "10h", "28h"
+        .replace(/\b\d+m\b/g, 'Nm') // normalize minutes
         .replace(/\d+\s*hour/g, 'N hour')
         .replace(/\d+\s*min/g, 'N min')
         .replace(/\(need \d+ more\)/g, '') // normalize "need N more"
-        .replace(/\s+/g, ' ')             // collapse whitespace
-        .trim().slice(0, 200)
-      const hash = `${m.channel}:${normalized}`
-      if (seenHashes.has(hash)) return false
-      seenHashes.add(hash)
-      return true
-    })
+        .replace(/\s+/g, ' ') // collapse whitespace
+        .trim()
+        .slice(0, 220)
+    }
 
-    // Slim format: strip id, reactions, replyCount
-    const slim = (m: typeof allMessages[0]) => ({
-      from: m.from,
-      content: m.content,
-      ts: m.timestamp,
-      ch: m.channel,
-    })
+    // Deduplicate system alerts across channels (keep newest instance), and collapse repeats into one line with count.
+    const collapseSystemAlerts = (msgs: typeof allMessages) => {
+      const map = new Map<string, { rep: (typeof allMessages)[0]; count: number; channels: Set<string> }>()
+      for (const m of msgs) {
+        const norm = normalizeForDedup(m.content || '')
+        if (!norm) continue
+        const key = norm
+        const existing = map.get(key)
+        if (!existing) {
+          map.set(key, { rep: m, count: 1, channels: new Set([m.channel || 'unknown']) })
+          continue
+        }
+        existing.count += 1
+        existing.channels.add(m.channel || 'unknown')
+        if (m.timestamp > existing.rep.timestamp) existing.rep = m
+      }
+
+      const out = Array.from(map.values()).map(item => {
+        const rep = item.rep as any
+        rep.__dedup_count = item.count
+        rep.__dedup_channels = Array.from(item.channels)
+        return rep as typeof allMessages[0]
+      })
+
+      // Preserve rough chronological order by representative timestamp
+      return out.sort((a, b) => a.timestamp - b.timestamp)
+    }
+
+    const dedupedAlerts = collapseSystemAlerts(systemAlerts)
+
+    // Slim format: strip id, reactions, replyCount; include repeat count + channels when collapsed.
+    const slim = (m: typeof allMessages[0]) => {
+      const anyM = m as any
+      const n = typeof anyM.__dedup_count === 'number' ? anyM.__dedup_count : 1
+      const chs = Array.isArray(anyM.__dedup_channels) ? anyM.__dedup_channels as string[] : [m.channel]
+      const ch = chs.length === 1 ? chs[0] : 'multi'
+      const rawContent = String(m.content || '')
+      const content = n > 1 ? `${rawContent} (x${n})` : rawContent
+      return {
+        from: m.from,
+        content: strictCompact ? content.slice(0, 260) : content,
+        ts: m.timestamp,
+        ch,
+        ...(n > 1 ? { n, chs } : {}),
+      }
+    }
 
     // Assemble: prioritize mentions, then deduped alerts, then team msgs
     const result = [
       ...mentions.slice(-limit).map(slim),
       ...dedupedAlerts.slice(-Math.ceil(limit / 3)).map(slim),
       ...teamMessages.slice(-Math.ceil(limit / 3)).map(slim),
-    ].sort((a, b) => a.ts - b.ts).slice(-limit)
+    ]
+      .sort((a, b) => a.ts - b.ts)
+      .slice(-limit)
+
+    // Strict compact: render a small text packet with a hard char budget.
+    let compact_text: string | undefined
+    if (strictCompact) {
+      const doing = taskManager.listTasks({ status: 'doing', assignee: agent })[0] || null
+
+      // "Next task": highest priority unblocked todo task (unassigned or assigned to this agent)
+      const priorityOrder: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
+      const isBlockedByDeps = (t: any): boolean => {
+        if (!Array.isArray(t.blocked_by) || t.blocked_by.length === 0) return false
+        return t.blocked_by.some((blockerId: string) => {
+          const blocker = taskManager.getTask(blockerId)
+          return blocker && blocker.status !== 'done'
+        })
+      }
+      const nextTodo = taskManager
+        .listTasks({ status: 'todo', includeBlocked: false })
+        .filter(t => (!t.assignee || t.assignee === agent))
+        .filter(t => !isBlockedByDeps(t))
+        .sort((a, b) => {
+          const ap = priorityOrder[a.priority || 'P3'] ?? 999
+          const bp = priorityOrder[b.priority || 'P3'] ?? 999
+          if (ap !== bp) return ap - bp
+          return a.createdAt - b.createdAt
+        })[0] || null
+
+      const blocked = taskManager.listTasks({ status: 'blocked', assignee: agent })
+
+      const lastMention = mentions.length > 0 ? slim(mentions[mentions.length - 1]) : null
+
+      const lines: string[] = []
+      const push = (s: string) => { if (s) lines.push(s) }
+
+      push(`AGENT: ${agent}`)
+      push('')
+      push('ACTIVE TASK:')
+      push(doing ? `- ${doing.id} [${doing.priority}] ${doing.title}` : '- none')
+      push('NEXT TASK:')
+      push(nextTodo ? `- ${nextTodo.id} [${nextTodo.priority}] ${nextTodo.title}` : '- none')
+      push('BLOCKERS:')
+      if (blocked.length === 0) push('- none')
+      else {
+        for (const t of blocked.slice(0, 3)) {
+          const blockedBy = Array.isArray(t.blocked_by) && t.blocked_by.length > 0 ? ` (blocked_by: ${t.blocked_by.join(', ')})` : ''
+          push(`- ${t.id} ${t.title}${blockedBy}`)
+        }
+        if (blocked.length > 3) push(`- (+${blocked.length - 3} more)`) 
+      }
+      push('LAST MENTION:')
+      push(lastMention ? `- [${lastMention.ch}] ${String(lastMention.content || '').slice(0, 220)}` : '- none')
+      push('RECENT CHAT (DEDUPED):')
+      for (const m of result.slice(-8)) {
+        const prefix = m.from === 'system' ? '[sys]' : `[${m.from}]`
+        push(`- ${prefix} ${String(m.content || '').slice(0, 180)}`)
+      }
+
+      const joined = lines.join('\n').trim()
+      compact_text = joined.length <= maxChars ? joined : joined.slice(0, maxChars - 1)
+    }
+
+    const messagesOut = strictCompact ? result.slice(-10) : result
 
     return {
       agent,
       since: sinceMs,
-      count: result.length,
-      messages: result,
+      count: messagesOut.length,
+      messages: messagesOut,
+      ...(strictCompact ? { compact: true, max_chars: maxChars, compact_text } : {}),
       suppressed: {
         system_deduped: systemAlerts.length - dedupedAlerts.length,
         total_scanned: allMessages.length,
+        ...(strictCompact ? { truncated: result.length - messagesOut.length } : {}),
       },
     }
   })
