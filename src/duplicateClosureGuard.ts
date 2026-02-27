@@ -46,30 +46,61 @@ function isHttpUrl(s: string | null): boolean {
 }
 
 /**
- * Throws if a task is being closed as a duplicate without canonical refs.
+ * Throws if a task is being closed as a duplicate without canonical proof.
  *
- * Required fields:
- * - metadata.duplicate_of (canonical task id)
- * - metadata.canonical_pr (or metadata.review_handoff.pr_url or metadata.pr_url)
- * - metadata.canonical_commit (or metadata.review_handoff.commit_sha)
+ * Intended acceptance rule (2026-02-26):
+ * - metadata.duplicate_of must be a canonical task id (must start with "task-")
+ * - metadata.duplicate_proof (or duplicate_of.proof) must be present and not "N/A"
+ * - AND at least one of:
+ *   - metadata.canonical_pr (GitHub PR URL) OR
+ *   - metadata.canonical_commit (>=7 hex)
+ *
+ * Fallbacks allowed:
+ * - PR/commit may also come from metadata.review_handoff.{pr_url,commit_sha} or metadata.pr_url
+ *
+ * Note: we do NOT require both PR+commit.
  */
 export function assertDuplicateClosureHasCanonicalRefs(meta: DuplicateClosureMeta | null | undefined): void {
   if (!isDuplicateClosure(meta)) return
   const m = (meta || {}) as any
 
-  const dupeOf = firstString(m.duplicate_of)
-  if (!dupeOf) {
+  const dupeOfId = firstString(
+    m.duplicate_of,
+    m.duplicateOf,
+    m.duplicate_of?.task_id,
+    m.duplicateOf?.task_id,
+  )
+
+  if (!dupeOfId) {
     throw new Error('Duplicate closure requires metadata.duplicate_of (canonical task id)')
   }
 
-  const canonicalPr = firstString(m.canonical_pr, m.canonicalPr, m.review_handoff?.pr_url, m.pr_url)
-  if (!isHttpUrl(canonicalPr)) {
-    throw new Error('Duplicate closure requires a canonical PR URL (metadata.canonical_pr or review_handoff.pr_url)')
+  if (!/^task-/.test(dupeOfId)) {
+    throw new Error('Duplicate closure requires metadata.duplicate_of to be a canonical task id (must start with "task-")')
   }
 
+  const proof = firstString(
+    m.duplicate_proof,
+    m.duplicateProof,
+    m.duplicate_of?.proof,
+    m.duplicateOf?.proof,
+    m.duplicate_of_proof,
+  )
+
+  if (!proof || /^n\/?a$/i.test(proof.trim())) {
+    throw new Error('Duplicate closure requires metadata.duplicate_proof (non-empty, not "N/A")')
+  }
+
+  const canonicalPr = firstString(m.canonical_pr, m.canonicalPr, m.review_handoff?.pr_url, m.pr_url)
   const canonicalCommit = firstString(m.canonical_commit, m.canonicalCommit, m.review_handoff?.commit_sha)
-  if (!canonicalCommit || canonicalCommit.length < 7) {
-    throw new Error('Duplicate closure requires metadata.canonical_commit (or review_handoff.commit_sha)')
+
+  const hasPr = isHttpUrl(canonicalPr)
+  const hasCommit = typeof canonicalCommit === 'string'
+    && canonicalCommit.length >= 7
+    && /^[0-9a-f]+$/i.test(canonicalCommit)
+
+  if (!hasPr && !hasCommit) {
+    throw new Error('Duplicate closure requires canonical_pr (PR URL) or canonical_commit (>=7 hex)')
   }
 }
 
