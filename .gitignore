@@ -10,4 +10,6 @@ coverage/
 data/
 
 # Task artifacts
-process/
+process/*
+# Allow committing the specific task artifact needed for review/proof
+!process/TASK-47sxe374r.md

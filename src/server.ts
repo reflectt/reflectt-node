@@ -9263,6 +9263,48 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Whoami for a given actor's token (never returns token)
   app.get<{ Params: { actor: string } }>('/github/whoami/:actor', async (request, reply) => {
+    const enabled = process.env.REFLECTT_ENABLE_GITHUB_APPROVAL_API === 'true'
+      || process.env.REFLECTT_ENABLE_GITHUB_APPROVAL_API === '1'
+
+    if (!enabled) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'GitHub approval API is disabled',
+        hint: 'Set REFLECTT_ENABLE_GITHUB_APPROVAL_API=true to enable (and optionally REFLECTT_GITHUB_APPROVAL_TOKEN for auth).'
+      }
+    }
+
+    const ip = String((request as any).ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'Forbidden: localhost-only endpoint',
+        hint: `Request ip (${ip || 'unknown'}) is not loopback`,
+      }
+    }
+
+    const requiredToken = process.env.REFLECTT_GITHUB_APPROVAL_TOKEN
+    if (requiredToken) {
+      const raw = (request.headers as any)['x-reflectt-admin-token']
+      let provided = Array.isArray(raw) ? raw[0] : raw
+      const auth = (request.headers as any).authorization
+      if ((!provided || typeof provided !== 'string') && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+        provided = auth.slice('Bearer '.length)
+      }
+
+      if (typeof provided !== 'string' || provided !== requiredToken) {
+        reply.code(403)
+        return {
+          success: false,
+          error: 'Forbidden: missing/invalid admin token',
+          hint: 'Provide x-reflectt-admin-token header (or Authorization: Bearer ...) matching REFLECTT_GITHUB_APPROVAL_TOKEN.'
+        }
+      }
+    }
+
     const actor = request.params.actor
     const resolved = resolveGitHubTokenForActor(actor)
     if (!resolved?.token) {
@@ -9281,6 +9323,48 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Approve a PR as a specific actor (token selected via vault/env mapping)
   app.post('/github/pr/approve', async (request, reply) => {
+    const enabled = process.env.REFLECTT_ENABLE_GITHUB_APPROVAL_API === 'true'
+      || process.env.REFLECTT_ENABLE_GITHUB_APPROVAL_API === '1'
+
+    if (!enabled) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'GitHub approval API is disabled',
+        hint: 'Set REFLECTT_ENABLE_GITHUB_APPROVAL_API=true to enable (and optionally REFLECTT_GITHUB_APPROVAL_TOKEN for auth).'
+      }
+    }
+
+    const ip = String((request as any).ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'Forbidden: localhost-only endpoint',
+        hint: `Request ip (${ip || 'unknown'}) is not loopback`,
+      }
+    }
+
+    const requiredToken = process.env.REFLECTT_GITHUB_APPROVAL_TOKEN
+    if (requiredToken) {
+      const raw = (request.headers as any)['x-reflectt-admin-token']
+      let provided = Array.isArray(raw) ? raw[0] : raw
+      const auth = (request.headers as any).authorization
+      if ((!provided || typeof provided !== 'string') && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+        provided = auth.slice('Bearer '.length)
+      }
+
+      if (typeof provided !== 'string' || provided !== requiredToken) {
+        reply.code(403)
+        return {
+          success: false,
+          error: 'Forbidden: missing/invalid admin token',
+          hint: 'Provide x-reflectt-admin-token header (or Authorization: Bearer ...) matching REFLECTT_GITHUB_APPROVAL_TOKEN.'
+        }
+      }
+    }
+
     const body = request.body as { pr_url?: string; actor?: string; reason?: string }
     const prUrl = typeof body?.pr_url === 'string' ? body.pr_url : ''
     const actor = typeof body?.actor === 'string' ? body.actor : ''

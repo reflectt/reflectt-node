@@ -192,6 +192,13 @@ Env var fallback is also supported:
 
 ### Endpoints
 
+**Security:** These endpoints are **disabled by default**. Enable with:
+- `REFLECTT_ENABLE_GITHUB_APPROVAL_API=true`
+
+They are **localhost-only** and can be additionally protected by token:
+- set `REFLECTT_GITHUB_APPROVAL_TOKEN=<token>`
+- send `x-reflectt-admin-token: <token>` (or `Authorization: Bearer <token>`)
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/github/whoami/:actor` | Validate which GitHub user a given actor token maps to (never returns the token). |
