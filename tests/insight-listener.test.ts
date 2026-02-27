@@ -175,7 +175,6 @@ describe('Cross-insight dedup in auto-create', () => {
     const updated1 = getInsight(insight1.id)
     expect(updated1?.status).toBe('task_created')
     expect(updated1?.task_id).toBeTruthy()
-    const firstTaskId = updated1!.task_id
 
     // Second insight with SAME cluster key — should link to existing task, not create new
     const { insight: insight2 } = createTestInsight({
@@ -195,6 +194,49 @@ describe('Cross-insight dedup in auto-create', () => {
     const updated2 = getInsight(insight2.id)
     expect(updated2?.status).toBe('task_created')
     expect(updated2?.task_id).toBeTruthy()
+  })
+
+  it('prevents duplicate task when evidence references an existing task id (follow-up insights)', async () => {
+    const statsBefore = getInsightTaskBridgeStats()
+
+    // First insight creates a task
+    const { insight: insight1 } = createTestInsight({
+      severity: 'high',
+      pain: 'Evidence dedup alpha',
+      tags: ['stage:evdedup-a', 'family:evdedup-a', 'unit:evdedup-a'],
+    })
+
+    await _handlePromotedInsight({
+      id: `evt-evdedup1-${Date.now()}`,
+      type: 'task_created',
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: insight1.id },
+    })
+
+    const updated1 = getInsight(insight1.id)
+    expect(updated1?.task_id).toBeTruthy()
+    const firstTaskId = updated1!.task_id
+
+    // Second insight with a DIFFERENT cluster key, but referencing the first task in evidence
+    const { insight: insight2 } = createTestInsight({
+      severity: 'high',
+      pain: 'Evidence dedup beta',
+      evidence: [`See follow-up details in ${firstTaskId}`],
+      tags: ['stage:evdedup-b', 'family:evdedup-b', 'unit:evdedup-b'],
+    })
+
+    await _handlePromotedInsight({
+      id: `evt-evdedup2-${Date.now()}`,
+      type: 'task_created',
+      timestamp: Date.now(),
+      data: { kind: 'insight:promoted', insightId: insight2.id },
+    })
+
+    const updated2 = getInsight(insight2.id)
+    expect(updated2?.task_id).toBe(firstTaskId)
+
+    const statsAfter = getInsightTaskBridgeStats()
+    expect(statsAfter.duplicatesSkipped - statsBefore.duplicatesSkipped).toBeGreaterThanOrEqual(1)
   })
 
   it('allows tasks from different cluster keys', async () => {
