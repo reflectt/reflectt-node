@@ -573,6 +573,32 @@ function enforceQaBundleGateForValidating(
 
   const root = ((metadata ?? {}) as Record<string, unknown>)
 
+  // ── Lightweight close path for duplicate/superseded tasks ──
+  // Tasks closed as duplicate or superseded only need a canonical reference + reason,
+  // not a full QA bundle with PR integrity checks.
+  const closeReason = typeof root.close_reason === 'string' ? root.close_reason.toLowerCase().trim() : ''
+  if (closeReason === 'duplicate' || closeReason === 'superseded') {
+    const dupOf = (root.duplicate_of ?? root.canonical_ref ?? {}) as Record<string, unknown>
+    const hasRef = (
+      (typeof dupOf.task_id === 'string' && /^task-/.test(dupOf.task_id)) ||
+      (typeof dupOf.pr_url === 'string' && /github\.com/.test(dupOf.pr_url)) ||
+      (typeof dupOf.commit === 'string' && /^[a-f0-9]{7,40}$/i.test(dupOf.commit))
+    )
+    const reason = typeof dupOf.reason === 'string' ? dupOf.reason.trim() : ''
+    const hasReason = reason.length >= 10
+
+    if (hasRef && hasReason) return { ok: true }
+
+    const missing: string[] = []
+    if (!hasRef) missing.push('canonical reference (task_id, pr_url, or commit)')
+    if (!hasReason) missing.push('reason (>=10 chars explaining why)')
+    return {
+      ok: false,
+      error: `Close as ${closeReason}: missing ${missing.join(' + ')}.`,
+      hint: `Set metadata.close_reason="${closeReason}" and metadata.duplicate_of={ task_id?: "task-...", pr_url?: "https://...", reason: "Why this is ${closeReason}..." }`,
+    }
+  }
+
   // Non-code/doc-only/config-only tasks can satisfy validating via review_handoff alone.
   // Requiring a code-shaped qa_bundle.review_packet (PR/commit/files) blocks strategic tasks.
   const handoff = ReviewHandoffSchema.safeParse(root.review_handoff ?? {})
@@ -898,6 +924,11 @@ function enforceReviewHandoffGateForValidating(
   if (isTaskAutomatedRecurring(metadata)) return { ok: true }
 
   const root = (metadata as Record<string, unknown> | null) || {}
+
+  // Duplicate/superseded tasks bypass review handoff — handled by QA bundle gate's lighter path
+  const closeReason = typeof root.close_reason === 'string' ? root.close_reason.toLowerCase().trim() : ''
+  if (closeReason === 'duplicate' || closeReason === 'superseded') return { ok: true }
+
   const parsed = ReviewHandoffSchema.safeParse(root.review_handoff ?? {})
   if (!parsed.success) {
     return {
