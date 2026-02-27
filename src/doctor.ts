@@ -98,6 +98,7 @@ export async function collectDoctorReport(input: {
   if (teamDoctor.ok && teamOverall === 'fail') hints.push('Team doctor reports failures — fix the first failing check and re-run `reflectt doctor`')
   if (teamDoctor.ok && teamOverall === 'warn') hints.push('Team doctor reports warnings — fix warnings to improve reliability and re-run `reflectt doctor`')
   if (execution.ok && execution.data?.sweeper?.running === false) hints.push('Execution sweeper is not running — validating queue may not be enforced')
+  if (preflight.ok && preflight.data?.allPassed === false) hints.push('Preflight checks failing — run `curl -s /preflight | jq` and fix failing checks before onboarding users')
 
   return {
     baseUrl,
@@ -162,9 +163,16 @@ export function formatDoctorHuman(report: DoctorReport): string {
     return parts.join(' ')
   })
   section('preflight', '/preflight', (d) => {
-    const ok = d?.ok
-    const issues = Array.isArray(d?.issues) ? d.issues.length : (Array.isArray(d?.checks) ? d.checks.length : 'n/a')
-    return `ok=${String(ok)} issues=${issues}`
+    // /preflight returns { success, allPassed, results[] }
+    const allPassed = d?.allPassed
+    const results = Array.isArray(d?.results) ? d.results : []
+    const failing = results.filter((r: any) => r && r.passed === false)
+    const failCount = failing.length
+    const failIds = failing.map((r: any) => r?.check?.id).filter(Boolean)
+    const parts = [`allPassed=${String(allPassed)}`]
+    parts.push(`failCount=${failCount}`)
+    if (failIds.length) parts.push(`fails=${failIds.join(',')}`)
+    return parts.join(' ')
   })
 
   if (report.hints.length) {
