@@ -13,6 +13,7 @@
 import { createHash } from 'crypto'
 import { promises as fs } from 'fs'
 import { join } from 'path'
+import { homedir } from 'os'
 import { getDb, safeJsonParse, safeJsonStringify } from './db.js'
 import type { AgentMessage } from './types.js'
 import { memoryManager } from './memory.js'
@@ -240,7 +241,7 @@ function findAgentWorkspace(agent: string): string {
   // Keep consistent with memory.ts; env override supported for CI.
   const base = process.env.OPENCLAW_STATE_DIR
     ? join(process.env.OPENCLAW_STATE_DIR, '')
-    : '/Users/ryan/.openclaw'
+    : (process.env.OPENCLAW_HOME || join(homedir(), '.openclaw'))
   return join(base, `workspace-${agent}`)
 }
 
