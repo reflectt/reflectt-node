@@ -76,6 +76,14 @@ You should see:
 
 ### Health check
 
+Quick green/red sanity pass:
+
+```bash
+./scripts/healthcheck.sh
+```
+
+(Or hit the endpoint directly:)
+
 ```bash
 curl http://127.0.0.1:4445/health
 ```
