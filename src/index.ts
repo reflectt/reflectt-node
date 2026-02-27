@@ -101,10 +101,12 @@ async function main() {
       host: serverConfig.host,
     })
 
-    console.log(`✅ Server running at http://${serverConfig.host}:${serverConfig.port}`)
-    console.log(`   - REST API: http://${serverConfig.host}:${serverConfig.port}`)
+    const baseUrl = `http://${serverConfig.host}:${serverConfig.port}`
+    console.log(`✅ Server running at ${baseUrl}`)
+    console.log(`   - Dashboard: ${baseUrl}/dashboard`)
+    console.log(`   - REST API: ${baseUrl}`)
     console.log(`   - WebSocket: ws://${serverConfig.host}:${serverConfig.port}/chat/ws`)
-    console.log(`   - Health: http://${serverConfig.host}:${serverConfig.port}/health`)
+    console.log(`   - Health: ${baseUrl}/health`)
     console.log(`   - PID: ${process.pid}`)
 
     // Cloud integration (checks env vars + config.json for credentials)
