@@ -401,7 +401,9 @@ export function resolveAssignment(insight: Insight, teamId?: string): Assignment
     // Compare author's role-fit score vs best non-author
     const authorScore = scores.find(s => s.agent === authorName)
     const nonAuthorScored = scores
-      .filter(s => !authors.includes(s.agent) && s.score > 0 && !s.overCap &&
+      // Prefer any non-author candidate with non-negative score.
+      // If all scores are 0 (no clear affinity), we still want to avoid self-assignment.
+      .filter(s => !authors.includes(s.agent) && s.score >= 0 && !s.overCap &&
         (candidates.length === 0 || candidates.includes(s.agent)))
     const bestNonAuthor = nonAuthorScored[0] // Already sorted desc
 

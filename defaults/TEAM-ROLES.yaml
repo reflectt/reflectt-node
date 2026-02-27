@@ -3,6 +3,10 @@
 # Falls back to these defaults if not found.
 
 agents:
+  # Optional: aliases — additional assignee names that should be treated as this agent for task lookup.
+  # Example: if OpenClaw only runs an agent named "main" but tasks are assigned to "finance-agent":
+  #   - name: main
+  #     aliases: [finance-agent]
   - name: link
     role: builder
     description: Core implementation owner for backend/api/integration work.

@@ -13,6 +13,7 @@ import { createTaskStateAdapterFromEnv, type TaskStateAdapter } from './taskStat
 import { getDb, importJsonlIfNeeded, safeJsonStringify, safeJsonParse } from './db.js'
 import { isTestHarnessTask, TEST_TASK_EXCLUDE_SQL } from './test-task-filter.js'
 import { assertDuplicateClosureHasCanonicalRefs } from './duplicateClosureGuard.js'
+import { getAgentAliases } from './assignment.js'
 import type Database from 'better-sqlite3'
 
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
@@ -1145,7 +1146,10 @@ class TaskManager {
 
   listTasks(options?: {
     status?: Task['status']
+    /** Exact assignee match (legacy). Prefer assigneeIn when supporting aliases. */
     assignee?: string
+    /** Assignee set match (case-insensitive) */
+    assigneeIn?: string[]
     assignedTo?: string // Backward compatibility
     createdBy?: string
     teamId?: string
@@ -1183,7 +1187,15 @@ class TaskManager {
     }
 
     const assigneeFilter = options?.assignee || options?.assignedTo
-    if (assigneeFilter) {
+    const assigneeIn = options?.assigneeIn
+
+    if (assigneeIn && assigneeIn.length > 0) {
+      const normalized = assigneeIn.map(a => String(a || '').trim().toLowerCase()).filter(Boolean)
+      if (normalized.length > 0) {
+        conditions.push(`LOWER(assignee) IN (${normalized.map(() => '?').join(', ')})`)
+        params.push(...normalized)
+      }
+    } else if (assigneeFilter) {
       conditions.push('assignee = ?')
       params.push(assigneeFilter)
     }
@@ -1567,13 +1579,17 @@ class TaskManager {
     // This ensures agents resume in-progress work before picking up new tasks
     const db = getDb()
     if (agent) {
-      const doingRows = db.prepare(
-        'SELECT * FROM tasks WHERE status = ? AND assignee = ?'
-      ).all('doing', agent) as TaskRow[]
-      const doingTasks = doingRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t)).sort(sortByPriority)
+      const agentNames = getAgentAliases(agent)
+      if (agentNames.length > 0) {
+        const inClause = agentNames.map(() => '?').join(', ')
+        const doingRows = db.prepare(
+          `SELECT * FROM tasks WHERE status = ? AND LOWER(assignee) IN (${inClause})`
+        ).all('doing', ...agentNames) as TaskRow[]
+        const doingTasks = doingRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t)).sort(sortByPriority)
 
-      if (doingTasks.length > 0) {
-        return doingTasks[0]
+        if (doingTasks.length > 0) {
+          return doingTasks[0]
+        }
       }
     }
 
@@ -1584,10 +1600,14 @@ class TaskManager {
     let tasks = todoUnassignedRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t))
 
     if (agent) {
-      const agentTodoRows = db.prepare(
-        'SELECT * FROM tasks WHERE status = ? AND assignee = ?'
-      ).all('todo', agent) as TaskRow[]
-      tasks = [...tasks, ...agentTodoRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t))]
+      const agentNames = getAgentAliases(agent)
+      if (agentNames.length > 0) {
+        const inClause = agentNames.map(() => '?').join(', ')
+        const agentTodoRows = db.prepare(
+          `SELECT * FROM tasks WHERE status = ? AND LOWER(assignee) IN (${inClause})`
+        ).all('todo', ...agentNames) as TaskRow[]
+        tasks = [...tasks, ...agentTodoRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t))]
+      }
     }
 
     if (tasks.length === 0) return undefined

@@ -10,6 +10,8 @@ export interface AgentRole {
   name: string
   role: string
   description?: string
+  /** Optional: additional names that should be treated as this agent for task lookup (e.g. OpenClaw agent "main" can act as "finance-agent"). */
+  aliases?: string[]
   affinityTags: string[]
   alwaysRoute?: string[]       // soft routing preference for assignment suggestions
   neverRoute?: string[]        // explicit routing exclusions
@@ -94,6 +96,7 @@ function parseRolesYaml(content: string): AgentRole[] {
       name: a.name,
       role: a.role,
       description: typeof a.description === 'string' ? a.description : undefined,
+      aliases: Array.isArray(a.aliases) ? a.aliases.map(String) : undefined,
       affinityTags: Array.isArray(a.affinityTags) ? a.affinityTags.map(String) : [],
       alwaysRoute: Array.isArray(a.alwaysRoute) ? a.alwaysRoute.map(String) : undefined,
       neverRoute: Array.isArray(a.neverRoute) ? a.neverRoute.map(String) : undefined,
@@ -121,6 +124,14 @@ function loadFromFile(path: string): AgentRole[] | null {
 /** Load roles from YAML config or fall back to built-in defaults */
 export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
   const isTest = Boolean(process.env.VITEST) || process.env.NODE_ENV === 'test'
+
+  // Test-only override: if set, prefer it over any on-disk roles for determinism.
+  if (isTest && testRolesOverride) {
+    loadedRoles = testRolesOverride
+    loadedFromPath = null
+    console.log(`[Assignment] Using ${testRolesOverride.length} test-override agent roles`)
+    return { roles: testRolesOverride, source: 'test-override' }
+  }
 
   // Try user config paths first (but never during tests; tests must be hermetic)
   if (!isTest) {
@@ -166,6 +177,9 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
 /** Start watching the config file for changes (hot-reload) */
 export function startConfigWatch(): void {
   if (watchActive) return
+
+  const isTest = Boolean(process.env.VITEST) || process.env.NODE_ENV === 'test'
+  if (isTest) return
   
   // Watch user config paths
   for (const configPath of CONFIG_PATHS) {
@@ -213,6 +227,22 @@ export function getAgentRole(name: string): AgentRole | undefined {
   return loadedRoles.find(a => a.name.toLowerCase() === name.toLowerCase())
 }
 
+/**
+ * Resolve an "agent identity" (e.g. OpenClaw agent name) into all task-assignee names
+ * that should be treated as equivalent for lookup.
+ */
+export function getAgentAliases(name: string): string[] {
+  const base = String(name || '').trim().toLowerCase()
+  if (!base) return []
+
+  const role = getAgentRole(base)
+  const aliases = (role?.aliases || [])
+    .map(a => String(a || '').trim().toLowerCase())
+    .filter(Boolean)
+
+  return Array.from(new Set([base, ...aliases]))
+}
+
 /** Save updated agent roles to YAML config file */
 export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: string; version: number } {
   const targetPath = CONFIG_PATHS[0] // ~/.reflectt/TEAM-ROLES.yaml
@@ -224,6 +254,7 @@ export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: stri
       name: r.name,
       role: r.role,
       ...(r.description ? { description: r.description } : {}),
+      ...(r.aliases?.length ? { aliases: r.aliases } : {}),
       affinityTags: r.affinityTags,
       ...(r.routingMode ? { routingMode: r.routingMode } : {}),
       ...(r.neverRouteUnlessLane ? { neverRouteUnlessLane: r.neverRouteUnlessLane } : {}),

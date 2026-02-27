@@ -76,7 +76,7 @@ import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
 import { appendStoredLog, readStoredLogs, getStoredLogPath } from './logStore.js'
-import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole } from './assignment.js'
+import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
@@ -8555,7 +8555,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // Get next task (pull-based assignment)
   app.get('/tasks/next', async (request) => {
     const query = request.query as Record<string, string>
-    const agent = query.agent
+    const agent = typeof query.agent === 'string' ? query.agent.trim().toLowerCase() : undefined
     const includeTest = query.include_test === '1' || query.include_test === 'true'
     const task = taskManager.getNextTask(agent, { includeTest })
     if (!task) {
@@ -8568,11 +8568,11 @@ export async function createServer(): Promise<FastifyInstance> {
   // Get active (doing) task for an agent
   app.get('/tasks/active', async (request) => {
     const query = request.query as Record<string, string>
-    const agent = query.agent
+    const agent = typeof query.agent === 'string' ? query.agent.trim().toLowerCase() : undefined
     if (!agent) {
       return { task: null, message: 'agent query param required' }
     }
-    const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
+    const doingTasks = taskManager.listTasks({ status: 'doing', assigneeIn: getAgentAliases(agent) })
     const task = doingTasks[0] || null
     if (!task) {
       return { task: null, message: 'No active tasks' }
@@ -8642,7 +8642,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const agent = String(request.params.agent || '').trim().toLowerCase()
     if (!agent) return { error: 'agent is required' }
 
-    const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
+    const doingTasks = taskManager.listTasks({ status: 'doing', assigneeIn: getAgentAliases(agent) })
     const activeTask = doingTasks[0] || null
     const nextTask = activeTask ? null : (taskManager.getNextTask(agent) || null)
 
@@ -8656,8 +8656,8 @@ export async function createServer(): Promise<FastifyInstance> {
       ...(m.priority ? { p: m.priority } : {}),
     }))
 
-    const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
-    const validatingTasks = taskManager.listTasks({ status: 'validating', assignee: agent })
+    const todoTasks = taskManager.listTasks({ status: 'todo', assigneeIn: getAgentAliases(agent) })
+    const validatingTasks = taskManager.listTasks({ status: 'validating', assigneeIn: getAgentAliases(agent) })
 
     const slim = (t: Task | null | undefined) => t ? { id: t.id, title: t.title, status: t.status, priority: t.priority } : null
     presenceManager.recordActivity(agent, 'heartbeat')
