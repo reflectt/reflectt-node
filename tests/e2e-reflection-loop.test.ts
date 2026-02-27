@@ -9,6 +9,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { createServer } from '../src/server.js'
+import { setTestRoles } from '../src/assignment.js'
+import { TEST_AGENT_ROLES } from './fixtures/test-roles.js'
 import { getDb } from '../src/db.js'
 import { createReflection } from '../src/reflections.js'
 import { ingestReflection, getInsight } from '../src/insights.js'
@@ -23,6 +25,7 @@ import type { FastifyInstance } from 'fastify'
 let app: FastifyInstance
 
 beforeAll(async () => {
+  setTestRoles(TEST_AGENT_ROLES)
   app = await createServer()
   await app.ready()
 })

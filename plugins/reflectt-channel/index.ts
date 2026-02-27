@@ -14,8 +14,11 @@ import path from "node:path";
 
 const DEFAULT_URL = "http://127.0.0.1:4445";
 
-const WATCHED_AGENTS = ["kai", "link", "pixel", "echo", "harmony", "rhythm", "sage", "scout", "spark"] as const;
-const WATCHED_SET = new Set<string>(WATCHED_AGENTS);
+// Agent roster — loaded dynamically from reflectt-node /agents endpoint on connect.
+// Falls back to this static list only if the API call fails.
+const FALLBACK_AGENTS = ["agent-1", "agent-2", "agent-3"] as const;
+let WATCHED_AGENTS: readonly string[] = FALLBACK_AGENTS;
+let WATCHED_SET = new Set<string>(WATCHED_AGENTS);
 const IDLE_NUDGE_WINDOW_MS = 15 * 60 * 1000; // 15m
 const WATCHDOG_INTERVAL_MS = 60 * 1000; // 1m
 const ESCALATION_COOLDOWN_MS = 20 * 60 * 1000;
@@ -148,6 +151,32 @@ function shouldEscalate(key: string, now: number): boolean {
   if (now - last < ESCALATION_COOLDOWN_MS) return false;
   lastEscalationAt.set(key, now);
   return true;
+}
+
+async function refreshAgentRoster(url: string, log?: any): Promise<void> {
+  // Try /health/agents first (returns { agents: [{ agent: "name", ... }] })
+  // Then /health (returns { inbox: { agents: N } } — less useful but indicates activity)
+  const endpoints = [
+    { path: '/health/agents', extract: (d: any) => (d?.agents || []).map((a: any) => a?.agent || a?.name).filter(Boolean) },
+    { path: '/capabilities', extract: (d: any) => (d?.assignment?.agents || []).map((a: any) => a?.name).filter(Boolean) },
+  ];
+
+  for (const ep of endpoints) {
+    try {
+      const res = await fetch(`${url}${ep.path}`, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) {
+        const data = await res.json() as any;
+        const names: string[] = ep.extract(data);
+        if (names.length > 0) {
+          WATCHED_AGENTS = Object.freeze(names);
+          WATCHED_SET = new Set<string>(names);
+          log?.info(`[reflectt] Loaded ${names.length} agents from ${ep.path}: ${names.join(', ')}`);
+          return;
+        }
+      }
+    } catch { /* try next endpoint */ }
+  }
+  log?.warn(`[reflectt] Could not load agent roster from ${url} — using fallback list (${FALLBACK_AGENTS.join(', ')})`);
 }
 
 async function fetchRecentMessages(url: string): Promise<Array<Record<string, unknown>>> {
@@ -691,6 +720,9 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
         enabled: true,
         configured: true,
       });
+
+      // Load agent roster from reflectt-node before starting SSE
+      await refreshAgentRoster(account.url, ctx.log);
 
       seedAgentActivity(account.url, ctx.log).catch((err) => {
         ctx.log?.warn?.(`[reflectt][watchdog] seed failed: ${err}`);

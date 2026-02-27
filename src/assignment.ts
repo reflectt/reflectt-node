@@ -23,65 +23,42 @@ const CONFIG_PATHS = [
   join(homedir(), '.reflectt', 'TEAM-ROLES.yml'),
 ]
 
-// ── Built-in fallback (identical to defaults/TEAM-ROLES.yaml) ──
+// ── Built-in fallback (matches defaults/TEAM-ROLES.yaml) ──
+// These are generic starter agents. Users should customize TEAM-ROLES.yaml
+// with their actual team members.
 const BUILTIN_ROLES: AgentRole[] = [
   {
-    name: 'link',
+    name: 'agent-1',
     role: 'builder',
-    description: 'Core implementation owner for backend/api/integration work.',
-    affinityTags: ['backend', 'api', 'integration', 'bug', 'test', 'webhook', 'server', 'fastify', 'typescript', 'task-lifecycle', 'watchdog', 'database'],
-    alwaysRoute: ['backend', 'integration', 'api'],
-    neverRoute: ['brand-copy'],
+    description: 'Example builder agent. Replace with your team\'s agents.',
+    affinityTags: ['backend', 'api', 'integration'],
     wipCap: 2,
   },
   {
-    name: 'pixel',
+    name: 'agent-2',
     role: 'designer',
-    description: 'UX and dashboard experience owner.',
-    affinityTags: ['dashboard', 'ui', 'css', 'visual', 'animation', 'frontend', 'layout', 'ux', 'modal', 'chart'],
-    alwaysRoute: ['ui', 'ux', 'dashboard'],
-    neverRoute: ['infra'],
-    wipCap: 1,
-  },
-  {
-    name: 'sage',
-    role: 'ops',
-    description: 'Process/ops strategist focused on reliability and execution quality.',
-    affinityTags: ['ci', 'deploy', 'ops', 'merge', 'infra', 'github-actions', 'docker', 'pipeline', 'release', 'codeowners'],
-    alwaysRoute: ['ops', 'ci', 'release'],
-    neverRoute: ['visual-polish'],
-    protectedDomains: ['deploy', 'ci', 'release'],
-    wipCap: 1,
-  },
-  {
-    name: 'echo',
-    role: 'voice',
-    description: 'Content and messaging execution owner.',
-    affinityTags: ['content', 'docs', 'landing', 'copy', 'brand', 'marketing', 'social', 'blog', 'readme', 'onboarding'],
-    alwaysRoute: ['docs', 'content', 'standards'],
-    neverRoute: ['db-migration'],
-    wipCap: 1,
-  },
-  {
-    name: 'harmony',
-    role: 'reviewer',
-    description: 'Quality gate and audit owner.',
-    affinityTags: ['qa', 'review', 'validation', 'audit', 'security', 'compliance', 'testing', 'quality'],
-    alwaysRoute: ['qa', 'audit', 'security-review'],
-    neverRoute: ['feature-spec'],
-    protectedDomains: ['security', 'audit'],
+    description: 'Example designer agent. Replace with your team\'s agents.',
+    affinityTags: ['design', 'ui', 'brand'],
     wipCap: 2,
   },
   {
-    name: 'scout',
-    role: 'analyst',
-    description: 'Analytics/research owner for insights and prioritization inputs.',
-    affinityTags: ['research', 'analysis', 'metrics', 'monitoring', 'analytics', 'data', 'reporting', 'benchmark'],
-    alwaysRoute: ['analytics', 'research', 'sla'],
-    neverRoute: ['frontend-polish'],
-    wipCap: 1,
+    name: 'agent-3',
+    role: 'ops',
+    description: 'Example ops agent. Replace with your team\'s agents.',
+    affinityTags: ['infra', 'ci', 'monitoring'],
+    wipCap: 3,
   },
 ]
+
+// ── Test-only role override ──
+// Tests that depend on specific agent names can call setTestRoles() before
+// server creation. In production, BUILTIN_ROLES is the last-resort fallback.
+let testRolesOverride: AgentRole[] | null = null
+
+/** Override built-in roles for tests. Call with null to reset. */
+export function setTestRoles(roles: AgentRole[] | null): void {
+  testRolesOverride = roles
+}
 
 // ── Loaded state ──
 let loadedRoles: AgentRole[] = BUILTIN_ROLES
@@ -156,15 +133,20 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
       loadedRoles = roles
       loadedFromPath = 'defaults/TEAM-ROLES.yaml'
       console.log(`[Assignment] Loaded ${roles.length} agent roles from defaults/TEAM-ROLES.yaml`)
+      console.log(`[Assignment] ⚠️  Using default placeholder agents. Customize your team:`)
+      console.log(`[Assignment]    cp defaults/TEAM-ROLES.yaml ~/.reflectt/TEAM-ROLES.yaml`)
+      console.log(`[Assignment]    # Then edit with your agent names and roles`)
       return { roles, source: 'defaults/TEAM-ROLES.yaml' }
     }
   } catch { /* ignore */ }
 
-  // Fall back to built-in
-  loadedRoles = BUILTIN_ROLES
+  // Fall back to test override or built-in
+  const fallbackRoles = testRolesOverride || BUILTIN_ROLES
+  const source = testRolesOverride ? 'test-override' : 'builtin'
+  loadedRoles = fallbackRoles
   loadedFromPath = null
-  console.log(`[Assignment] Using ${BUILTIN_ROLES.length} built-in agent roles (no YAML found)`)
-  return { roles: BUILTIN_ROLES, source: 'builtin' }
+  console.log(`[Assignment] Using ${fallbackRoles.length} ${source} agent roles (no YAML found)`)
+  return { roles: fallbackRoles, source }
 }
 
 /** Start watching the config file for changes (hot-reload) */

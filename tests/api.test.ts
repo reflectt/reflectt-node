@@ -10,6 +10,8 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { createServer } from '../src/server.js'
 import { DATA_DIR, REFLECTT_HOME } from '../src/config.js'
+import { setTestRoles } from '../src/assignment.js'
+import { TEST_AGENT_ROLES } from './fixtures/test-roles.js'
 import { getDb } from '../src/db.js'
 import { _clearFeedbackStore } from '../src/feedback.js'
 import type { FastifyInstance } from 'fastify'
@@ -17,6 +19,7 @@ import type { FastifyInstance } from 'fastify'
 let app: FastifyInstance
 
 beforeAll(async () => {
+  setTestRoles(TEST_AGENT_ROLES)
   app = await createServer()
   await app.ready()
 })

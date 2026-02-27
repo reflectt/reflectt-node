@@ -1,6 +1,11 @@
 # reflectt-node Docker Compose
 # Usage: docker-compose up
 # Dashboard: http://localhost:4445
+#
+# NOTE: This starts with a clean identity (no inherited team data).
+# To customize your team, mount a TEAM-ROLES.yaml:
+#   volumes:
+#     - ./my-team-roles.yaml:/app/defaults/TEAM-ROLES.yaml:ro
 
 services:
   reflectt-node:
