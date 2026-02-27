@@ -22,6 +22,7 @@
 
 import { taskManager } from './tasks.js'
 import type { Task } from './types.js'
+import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 
 // ── Approval signal patterns ──
 
@@ -202,6 +203,38 @@ export async function applyApproval(
 
   // Auto-transition validating → done (matches POST /tasks/:id/review behavior)
   const autoTransition = task.status === 'validating'
+
+  if (autoTransition) {
+    const candidateMeta = {
+      ...(task.metadata || {}),
+      reviewer_approved: true,
+      reviewer_decision: {
+        decision: 'approved',
+        reviewer: signal.reviewer,
+        comment: `[auto-detected from chat] ${signal.comment}`,
+        decidedAt: now,
+        source: 'chat-approval-detector',
+        resolution: signal.source,
+      },
+      reviewer_notes: signal.comment,
+      actor: signal.reviewer,
+      review_state: 'approved',
+      review_last_activity_at: now,
+      auto_closed: true,
+      auto_closed_at: now,
+      auto_close_reason: 'chat_approval_auto_transition',
+      completed_at: now,
+    }
+    const dupeErr = getDuplicateClosureCanonicalRefError(candidateMeta)
+    if (dupeErr) {
+      await taskManager.addTaskComment(
+        signal.taskId,
+        'system',
+        `⚠️ Auto-approval skipped: duplicate closure missing canonical refs. ${dupeErr}. Set metadata.duplicate_of + canonical_pr + canonical_commit, then re-approve.`,
+      ).catch(() => {})
+      return task
+    }
+  }
 
   const updated = await taskManager.updateTask(signal.taskId, {
     ...(autoTransition ? { status: 'done' as const } : {}),

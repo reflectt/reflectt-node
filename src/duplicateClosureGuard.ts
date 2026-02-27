@@ -18,10 +18,20 @@ export function isDuplicateClosure(meta: DuplicateClosureMeta | null | undefined
   const hasDupeReason = typeof autoCloseReason === 'string' && autoCloseReason.toLowerCase().includes('duplicate')
 
   const hasDupeOf = Boolean((meta as any).duplicate_of)
+
   const lane = (meta as any).qa_bundle?.lane
   const hasDupeLane = typeof lane === 'string' && lane === 'duplicate-closure'
 
-  return hasDupeReason || hasDupeOf || hasDupeLane
+  // Some older flows only record duplicates in artifacts (e.g., "duplicate:task-...")
+  const artifacts = (meta as any).artifacts
+  const hasDupeArtifact = Array.isArray(artifacts) && artifacts.some(a => typeof a === 'string' && a.startsWith('duplicate:'))
+
+  // Future-proof: allow explicit resolution/outcome flags.
+  const outcome = (meta as any).outcome
+  const resolution = (meta as any).resolution
+  const hasDupeOutcome = outcome === 'duplicate' || resolution === 'duplicate'
+
+  return hasDupeReason || hasDupeOf || hasDupeLane || hasDupeArtifact || hasDupeOutcome
 }
 
 function firstString(...candidates: unknown[]): string | null {
@@ -60,5 +70,18 @@ export function assertDuplicateClosureHasCanonicalRefs(meta: DuplicateClosureMet
   const canonicalCommit = firstString(m.canonical_commit, m.canonicalCommit, m.review_handoff?.commit_sha)
   if (!canonicalCommit || canonicalCommit.length < 7) {
     throw new Error('Duplicate closure requires metadata.canonical_commit (or review_handoff.commit_sha)')
+  }
+}
+
+/**
+ * Convenience helper for auto-close writers: returns a human-readable reason
+ * when canonical refs are missing for a duplicate closure.
+ */
+export function getDuplicateClosureCanonicalRefError(meta: DuplicateClosureMeta | null | undefined): string | null {
+  try {
+    assertDuplicateClosureHasCanonicalRefs(meta)
+    return null
+  } catch (err: any) {
+    return err?.message || 'Duplicate closure missing canonical refs'
   }
 }

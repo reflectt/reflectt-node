@@ -45,6 +45,7 @@ import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
 import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog } from './prAutoMerge.js'
+import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
 import { listSharedFiles, readSharedFile, resolveTaskArtifact, validatePath, ALLOWED_EXTENSIONS } from './shared-workspace-api.js'
 import { normalizeArtifactPath, normalizeTaskArtifactPaths, buildGitHubBlobUrl, buildGitHubRawUrl } from './artifact-resolver.js'
@@ -4990,6 +4991,24 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // ── Auto-transition: approved validating → done ──
     const autoTransition = isApprove && task.status === 'validating'
+
+    if (autoTransition) {
+      const candidateMeta = {
+        ...mergedMetadata,
+        auto_closed: true,
+        auto_closed_at: decidedAt,
+        auto_close_reason: 'review_approved',
+        completed_at: decidedAt,
+      }
+      const dupeErr = getDuplicateClosureCanonicalRefError(candidateMeta)
+      if (dupeErr) {
+        reply.code(409)
+        return {
+          success: false,
+          error: `Auto-close blocked: duplicate closure missing canonical refs. ${dupeErr}. Set metadata.duplicate_of + canonical_pr + canonical_commit and resubmit before approving.`,
+        }
+      }
+    }
 
     const updated = await taskManager.updateTask(task.id, {
       ...(autoTransition ? { status: 'done' as const } : {}),
