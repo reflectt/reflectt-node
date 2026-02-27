@@ -1065,6 +1065,46 @@ export function getDashboardHTML(): string {
     content: ' (click to expand)';
     font-size: 11px; color: var(--text-muted); font-weight: 400; font-style: italic;
   }
+
+  /* Getting Started panel */
+  .getting-started { background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); overflow: hidden; }
+  .getting-started.hidden { display: none; }
+  .getting-started .panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; font-weight: 600; font-size: 15px; color: var(--text-bright);
+    border-bottom: 1px solid var(--border);
+  }
+  .getting-started .dismiss-btn {
+    background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 13px;
+    padding: 4px 8px; border-radius: var(--radius-sm);
+  }
+  .getting-started .dismiss-btn:hover { color: var(--text); background: var(--accent-dim); }
+  .getting-started .dismiss-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .getting-started .gs-steps { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+  .getting-started .gs-step {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 10px 14px; border-radius: var(--radius-sm);
+    background: var(--surface-raised); border: 1px solid var(--border-subtle);
+  }
+  .getting-started .gs-step.done { opacity: 0.6; }
+  .getting-started .gs-step .gs-icon {
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; background: var(--accent-dim); color: var(--accent);
+  }
+  .getting-started .gs-step.done .gs-icon { background: var(--green-dim); color: var(--green); }
+  .getting-started .gs-step .gs-content { flex: 1; }
+  .getting-started .gs-step .gs-title {
+    font-size: 13px; font-weight: 600; color: var(--text-bright); margin-bottom: 2px;
+  }
+  .getting-started .gs-step .gs-desc {
+    font-size: 12px; color: var(--text-muted); line-height: 1.4;
+  }
+  .getting-started .gs-step .gs-link {
+    display: inline-block; margin-top: 4px; font-size: 12px;
+    color: var(--accent); text-decoration: none;
+  }
+  .getting-started .gs-step .gs-link:hover { text-decoration: underline; }
 </style>
 <link rel="stylesheet" href="/dashboard-animations.css">
 </head>
@@ -1088,6 +1128,40 @@ export function getDashboardHTML(): string {
 <div class="agent-strip" id="agent-strip"></div>
 
 <div class="main">
+  <!-- Getting Started panel — hidden when configured -->
+  <div class="getting-started" id="getting-started">
+    <div class="panel-header">
+      🚀 Getting Started
+      <button class="dismiss-btn" onclick="dismissGettingStarted()" aria-label="Dismiss Getting Started panel">Dismiss ✕</button>
+    </div>
+    <div class="gs-steps" id="gs-steps">
+      <div class="gs-step" id="gs-preflight">
+        <div class="gs-icon">1</div>
+        <div class="gs-content">
+          <div class="gs-title">Run preflight checks</div>
+          <div class="gs-desc">Verify your system is ready — checks connectivity, config, and dependencies.</div>
+          <a class="gs-link" href="/health" target="_blank">Open /health →</a>
+        </div>
+      </div>
+      <div class="gs-step" id="gs-connect">
+        <div class="gs-icon">2</div>
+        <div class="gs-content">
+          <div class="gs-title">Connect to your team</div>
+          <div class="gs-desc">Bootstrap your host or connect to Reflectt Cloud for team coordination.</div>
+          <a class="gs-link" href="/docs" target="_blank">Setup docs →</a>
+        </div>
+      </div>
+      <div class="gs-step" id="gs-task">
+        <div class="gs-icon">3</div>
+        <div class="gs-content">
+          <div class="gs-title">Create your first task</div>
+          <div class="gs-desc">Post a task or message — your agents will pick it up automatically.</div>
+          <a class="gs-link" href="/docs" target="_blank">API docs →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="panel">
     <div class="panel-header">🧭 Runtime Truth Card <span class="count" id="truth-count">loading…</span></div>
     <div class="panel-body" id="truth-body"></div>
