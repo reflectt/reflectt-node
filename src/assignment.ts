@@ -261,7 +261,7 @@ function extractTaskKeywords(task: { title: string; tags?: string[]; done_criter
   return text.split(/[\s/\-_:,.()+]+/).filter(w => w.length > 2)
 }
 
-// ── Pixel routing guardrail ───────────────────────────────────────────────
+// ── Designer routing guardrail ────────────────────────────────────────────
 
 function normalizeTagList(tags: unknown): string[] {
   if (!Array.isArray(tags)) return []
@@ -275,16 +275,16 @@ function getTaskMeta(task: any): Record<string, unknown> {
 }
 
 /**
- * Hard default: Pixel is excluded unless the task explicitly opts in.
+ * Hard default: agents with role=designer are excluded unless the task explicitly opts in.
  * Opt-in signals (any):
  * - metadata.lane = design
  * - metadata.surface = user-facing OR known user-facing surfaces
  * - tags include UI/design or copy/brand/marketing
  *
  * Hard exclusion: onboarding plumbing families (ws-pairing/auth/preflight/etc)
- * exclude Pixel unless lane=design is explicitly set.
+ * exclude designers unless lane=design is explicitly set.
  */
-function pixelEligibleForTask(task: { tags?: string[]; metadata?: Record<string, unknown> }): boolean {
+function designerEligibleForTask(task: { tags?: string[]; metadata?: Record<string, unknown> }): boolean {
   const meta = getTaskMeta(task)
 
   const lane = String((meta as any).lane ?? '').trim().toLowerCase()
@@ -362,7 +362,7 @@ export function suggestAssignee(
   allTasks: TaskForScoring[],
   recentCompletionsPerAgent?: Map<string, number>,
 ): { suggested: string | null; scores: AssignmentScore[]; protectedMatch?: string } {
-  const roles = getAgentRoles().filter(r => r.name.toLowerCase() !== 'pixel' || pixelEligibleForTask(task))
+  const roles = getAgentRoles().filter(r => r.role !== 'designer' || designerEligibleForTask(task))
 
   // Check protected domains first (but still return full scoring for transparency)
   let protectedDecision: { agent: string; match: string } | null = null
@@ -411,7 +411,7 @@ export function suggestReviewer(
   task: { title: string; assignee?: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> },
   allTasks: TaskForScoring[],
 ): { suggested: string | null; scores: Array<{ agent: string; score: number; validatingLoad: number; role: string }> } {
-  const roles = getAgentRoles().filter(r => r.name.toLowerCase() !== 'pixel' || pixelEligibleForTask(task))
+  const roles = getAgentRoles().filter(r => r.role !== 'designer' || designerEligibleForTask(task))
 
   // Exclude the assignee from reviewer candidates
   const candidates = roles.filter(r => 

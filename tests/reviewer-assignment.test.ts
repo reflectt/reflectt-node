@@ -124,8 +124,8 @@ describe('suggestReviewer', () => {
       [],
     )
     // Should have all eligible agents minus the assignee.
-    // Pixel is excluded by default unless the task explicitly opts into design/user-facing.
-    const expected = roles.filter(r => r.name !== 'link' && r.name !== 'pixel').length
+    // Designers are excluded by default unless the task explicitly opts into design/user-facing.
+    const expected = roles.filter(r => r.name !== 'link' && r.role !== 'designer').length
     expect(result.scores.length).toBe(expected)
     // Scores should be sorted descending
     for (let i = 1; i < result.scores.length; i++) {

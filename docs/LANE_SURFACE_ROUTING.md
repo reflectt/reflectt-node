@@ -1,6 +1,6 @@
 # Lane + Surface routing (task metadata)
 
-We use two lightweight metadata fields to keep routing predictable and to keep **Pixel** focused on **design/UX work**.
+We use two lightweight metadata fields to keep routing predictable and to keep **designers** focused on **design/UX work**.
 
 These are *metadata-only* fields (no DB migration required).
 
@@ -23,9 +23,9 @@ Recommended values:
 - `reflectt.ai`
 - `infra`
 
-## Pixel routing contract (hard default)
+## Designer routing contract (hard default)
 
-Pixel is **excluded by default** from assignee/reviewer auto-suggestions unless the task **explicitly opts in** via one of:
+Agents with role `designer` are **excluded by default** from assignee/reviewer auto-suggestions unless the task **explicitly opts in** via one of:
 
 - `metadata.lane = "design"`
 - `metadata.surface` is a user-facing surface (`reflectt-node`, `reflectt-cloud-app`, `reflectt.ai`, or `user-facing`)
@@ -33,7 +33,7 @@ Pixel is **excluded by default** from assignee/reviewer auto-suggestions unless 
 
 ### Hard exclusion (onboarding plumbing)
 
-If `metadata.cluster_key` indicates onboarding plumbing (e.g. `ws-pairing`, `auth`, `preflight`, `provisioning`, etc.), Pixel is excluded **unless** `metadata.lane="design"` is explicitly set.
+If `metadata.cluster_key` indicates onboarding plumbing (e.g. `ws-pairing`, `auth`, `preflight`, `provisioning`, etc.), designers are excluded **unless** `metadata.lane="design"` is explicitly set.
 
 ## How to opt into design review
 
