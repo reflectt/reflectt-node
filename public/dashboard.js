@@ -1,4 +1,13 @@
 const BASE = location.origin;
+
+// Keyboard a11y: activate [role="button"] on Enter/Space
+document.addEventListener('keydown', function(e) {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.getAttribute('role') === 'button') {
+    e.preventDefault();
+    e.target.click();
+  }
+});
+
 let currentChannel = 'all';
 let currentProject = 'all';
 let allMessages = [];
@@ -669,7 +678,7 @@ function renderBacklog() {
     const criteriaCount = criteriaList.length;
     const criteriaPreview = criteriaCount > 0 ? esc(truncate(criteriaList[0], 72)) : 'No done criteria listed';
 
-    return `<div class="backlog-item" style="padding:10px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="openTaskModal('${t.id}')">
+    return `<div class="backlog-item" role="button" tabindex="0" style="padding:10px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="openTaskModal('${t.id}')">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
         ${t.priority ? '<span class="priority-badge ' + t.priority + '">' + t.priority + '</span>' : ''}
         <span style="color:var(--text-bright);font-size:13px;font-weight:500">${esc(truncate(t.title, 70))}</span>
@@ -1474,7 +1483,7 @@ function renderReviewQueue() {
     const duration = formatDuration(t.timeInReview);
     const tags = renderTaskTags(t.tags);
 
-    return '<div class="review-item" onclick="openTaskModal(\'' + esc(t.id) + '\')">'
+    return '<div class="review-item" role="button" tabindex="0" onclick="openTaskModal(\'' + esc(t.id) + '\')">'
       + '<div class="review-item-left">'
       + '<div class="review-item-title">' + esc(truncate(t.title, 70)) + '</div>'
       + '<div class="review-item-meta">'
@@ -1896,7 +1905,7 @@ async function runTaskSearch() {
       const title = esc(truncate(t.title || t.id, 80));
       const id = esc(t.id);
       const status = esc(t.status || 'todo');
-      return '<div class="backlog-item" style="padding:10px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="openTaskModal(\'' + id + '\')">'
+      return '<div class="backlog-item" role="button" tabindex="0" style="padding:10px 14px;border-bottom:1px solid var(--border-subtle);cursor:pointer" onclick="openTaskModal(\'' + id + '\')">'
         + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'
         + pri
         + '<span style="color:var(--text-bright);font-size:13px;font-weight:500">' + title + '</span>'
