@@ -651,6 +651,80 @@ function enforceQaBundleGateForValidating(
   return { ok: true }
 }
 
+function enforceDuplicateClosureEvidenceGateForValidating(
+  status: Task['status'] | undefined,
+  metadata: unknown,
+): { ok: true } | { ok: false; error: string; hint: string } {
+  if (status !== 'validating') return { ok: true }
+
+  const root = (metadata ?? {}) as Record<string, unknown>
+  if (root.auto_closed !== true) return { ok: true }
+
+  const reasonStr = typeof root.auto_close_reason === 'string'
+    ? root.auto_close_reason.toLowerCase()
+    : ''
+  const reasonList = Array.isArray(root.auto_close_reasons)
+    ? root.auto_close_reasons
+      .map(r => (typeof r === 'string' ? r.toLowerCase() : ''))
+      .filter(Boolean)
+    : []
+
+  const isDuplicate = reasonStr.includes('duplicate') || reasonList.some(r => r.includes('duplicate'))
+  if (!isDuplicate) return { ok: true }
+
+  const qaReviewPacket = (root.qa_bundle as any)?.review_packet as Record<string, unknown> | undefined
+
+  const dupObj = (root.duplicate_of ?? root.duplicate ?? {}) as Record<string, unknown>
+
+  const candidateTaskId = dupObj.task_id
+    ?? root.duplicate_of_task_id
+    ?? root.duplicate_of_task
+    ?? root.duplicate_task_id
+
+  const candidatePrUrl = dupObj.pr_url
+    ?? qaReviewPacket?.pr_url
+    ?? (root.review_handoff as any)?.pr_url
+    ?? root.pr_url
+
+  const candidateCommit = dupObj.commit
+    ?? qaReviewPacket?.commit
+    ?? (root.review_handoff as any)?.commit_sha
+    ?? root.commit_sha
+    ?? root.commit
+
+  const proofCandidate = dupObj.proof
+    ?? root.duplicate_proof
+    ?? root.duplicate_proof_snippet
+    ?? root.proof_snippet
+    ?? root.proof
+
+  const hasTaskId = typeof candidateTaskId === 'string' && /^task-[a-z0-9-]+$/i.test(candidateTaskId.trim())
+  const hasPrUrl = typeof candidatePrUrl === 'string'
+    && /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:$|[/?#])/i.test(candidatePrUrl.trim())
+  const hasCommit = typeof candidateCommit === 'string' && /^[a-f0-9]{7,40}$/i.test(candidateCommit.trim())
+
+  const hasCanonical = hasTaskId || hasPrUrl || hasCommit
+
+  const proof = typeof proofCandidate === 'string' ? proofCandidate.trim() : ''
+  const placeholderProof = ['n/a', 'na', 'none', 'null', '-', 'tbd', 'todo', 'duplicate', 'dupe'].includes(proof.toLowerCase())
+  const hasProof = proof.length >= 10 && !placeholderProof
+
+  if (!hasCanonical || !hasProof) {
+    const missing: string[] = []
+    if (!hasCanonical) missing.push('canonical reference (task_id OR pr_url OR commit)')
+    if (!hasProof) missing.push('proof snippet')
+
+    return {
+      ok: false,
+      error: `Duplicate-closure validating gate: missing ${missing.join(' + ')}.`,
+      hint: 'Set metadata.duplicate_of = { task_id?: "task-...", pr_url?: "https://github.com/.../pull/123", commit?: "abcdef1", proof: "Why this is a duplicate..." } (proof required). ' +
+        'Alternatively provide metadata.qa_bundle.review_packet { pr_url, commit } plus metadata.duplicate_proof.',
+    }
+  }
+
+  return { ok: true }
+}
+
 function applyReviewStateMetadata(
   existing: Task,
   parsed: z.infer<typeof UpdateTaskSchema>,
@@ -5991,6 +6065,17 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // TEST: prefixed tasks bypass gates (WIP cap, etc.)
       const isTestTask = typeof existing.title === 'string' && existing.title.startsWith('TEST:')
+
+      const duplicateGate = enforceDuplicateClosureEvidenceGateForValidating(parsed.status, mergedMeta)
+      if (!duplicateGate.ok) {
+        reply.code(400)
+        return {
+          success: false,
+          error: duplicateGate.error,
+          gate: 'duplicate_evidence',
+          hint: duplicateGate.hint,
+        }
+      }
 
       // QA bundle gate: validating requires structured review evidence.
       const effectiveStatus = parsed.status ?? existing.status

@@ -4974,3 +4974,122 @@ describe('Context budget', () => {
     }
   })
 })
+
+describe('Duplicate-closure validating evidence gate', () => {
+  let taskId: string
+  let dupeOfTaskId: string
+
+  beforeAll(async () => {
+    // Fixture artifact used by artifact mirroring when a task enters validating.
+    await fs.mkdir(join(process.cwd(), 'process'), { recursive: true })
+    await fs.writeFile(
+      join(process.cwd(), 'process', 'TASK-duplicate-gate-proof.md'),
+      '# TASK-duplicate-gate-proof\n\nTest fixture for validating transition tests.\n',
+      'utf8',
+    )
+
+    const dupeOf = await req('POST', '/tasks', {
+      title: 'TEST: duplicate-of target',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P3',
+      done_criteria: ['exists'],
+      eta: '1h',
+    })
+    dupeOfTaskId = dupeOf.body.task.id
+
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: duplicate closure evidence gate',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Duplicate closures require evidence'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+    await advanceTo(taskId, 'doing')
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+    await req('DELETE', `/tasks/${dupeOfTaskId}`)
+    await fs.rm(join(process.cwd(), 'process', 'TASK-duplicate-gate-proof.md'), { force: true }).catch(() => {})
+  })
+
+  it('rejects validating transition for duplicate auto-closure without canonical reference/proof', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        auto_closed: true,
+        auto_close_reason: 'duplicate',
+        artifact_path: 'process/TASK-duplicate-gate-proof.md',
+        qa_bundle: validQaBundle({
+          summary: 'ok bundle (but missing duplicate evidence)',
+          artifact_links: ['process/TASK-duplicate-gate-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/5',
+            commit: 'abcd123',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-duplicate-gate-proof.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/5',
+          commit_sha: 'abcd123',
+          artifact_path: 'process/TASK-duplicate-gate-proof.md',
+          test_proof: 'npm test (pass)',
+          known_caveats: 'none',
+        },
+      },
+    })
+
+    expect(status).toBe(400)
+    expect(body.gate).toBe('duplicate_evidence')
+    expect(body.error).toContain('Duplicate-closure validating gate')
+  })
+
+  it('accepts validating transition for duplicate auto-closure with canonical reference + proof', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        auto_closed: true,
+        auto_close_reason: 'duplicate_task',
+        duplicate_of: {
+          task_id: dupeOfTaskId,
+          proof: `Duplicate of ${dupeOfTaskId}: same root cause and same fix path; keeping one canonical task.`,
+        },
+        artifact_path: 'process/TASK-duplicate-gate-proof.md',
+        qa_bundle: validQaBundle({
+          summary: 'ok bundle + duplicate evidence',
+          artifact_links: ['process/TASK-duplicate-gate-proof.md'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/5',
+            commit: 'abcd123',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/TASK-duplicate-gate-proof.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/5',
+          commit_sha: 'abcd123',
+          artifact_path: 'process/TASK-duplicate-gate-proof.md',
+          test_proof: 'npm test (pass)',
+          known_caveats: 'none',
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.task.status).toBe('validating')
+  })
+})
