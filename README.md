@@ -14,6 +14,22 @@ Open [http://localhost:4445/dashboard](http://localhost:4445/dashboard) — that
 
 > See [docs/QUICKSTART.md](docs/QUICKSTART.md) for docker-compose, OpenClaw gateway connection, and troubleshooting.
 
+## Deployment Requirements
+
+reflectt-node is a **stateful server** — it stores tasks, reflections, config, and history in a local SQLite database and JSONL files under `~/.reflectt/data/`. It requires a **persistent filesystem**.
+
+**Supported:**
+- Bare metal / VPS (any Linux, macOS, or Windows with Node.js 22+)
+- Docker (with a mounted volume for `/data`)
+- Raspberry Pi, home server, cloud VM
+
+**Not supported:**
+- ❌ Cloudflare Workers (ephemeral filesystem — all state lost on cold start)
+- ❌ AWS Lambda / serverless functions (same reason)
+- ❌ Any platform without persistent local storage
+
+> **Why?** Serverless platforms wipe the filesystem between invocations. reflectt-node needs its data to survive restarts. A $5/mo VPS or Docker container with a volume mount is the right deployment target.
+
 ## From Source
 
 ### Prerequisites
