@@ -1023,6 +1023,92 @@ async function loadResearch() {
   }
 }
 
+// ---- Shared Artifacts (shared workspace: process/) ----
+async function loadSharedArtifacts() {
+  const body = document.getElementById('shared-artifacts-body');
+  const count = document.getElementById('shared-artifacts-count');
+  if (!body || !count) return;
+
+  const fmtBytes = (n) => {
+    if (typeof n !== 'number' || !isFinite(n)) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  };
+
+  try {
+    const res = await fetch(BASE + '/shared/list?path=process/&limit=80');
+    const data = await res.json();
+
+    if (!data || data.success !== true) {
+      count.textContent = 'unavailable';
+      const msg = esc((data && data.error) ? data.error : 'Shared workspace not available');
+      body.innerHTML = `<div class="empty" style="color:var(--text-muted)">${msg}</div>`;
+      return;
+    }
+
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    const files = entries.filter(e => e && e.type === 'file');
+    count.textContent = files.length + ' files';
+
+    // Pinned: Ryan's thoughts (if symlinked into shared workspace process/)
+    const pinned = [
+      { name: "RYANS-THOUGHTS.md", label: "Ryan's thoughts" },
+    ];
+
+    const pinnedRows = pinned.map(p => {
+      const found = files.find(f => (String(f.name || '')).toLowerCase() === p.name.toLowerCase());
+      if (!found) {
+        return `<div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <div style="font-size:13px;color:var(--text-bright);font-weight:600">${esc(p.label)}</div>
+            <span class="assignee-tag" style="color:var(--yellow)">missing</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+            To make this available here, create a symlink in the shared workspace:<br/>
+            <code>ln -s ../RYANS-THOUGHTS.md ~/.openclaw/workspace-shared/process/RYANS-THOUGHTS.md</code>
+          </div>
+        </div>`;
+      }
+      const href = '/shared/view?path=' + encodeURIComponent(found.path);
+      return `<div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <a href="${href}" target="_blank" style="font-size:13px;color:var(--accent);font-weight:600;text-decoration:none">${esc(p.label)} ↗</a>
+          <span class="assignee-tag" style="color:var(--green)">ready</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">path: <code>${esc(found.path)}</code></div>
+      </div>`;
+    }).join('');
+
+    // Listing: show most relevant files first (TASK- docs later)
+    const nonTask = files.filter(f => !(String(f.name || '').startsWith('TASK-')));
+    const taskDocs = files.filter(f => (String(f.name || '').startsWith('TASK-')));
+    const ordered = [...nonTask, ...taskDocs].slice(0, 40);
+
+    const listRows = ordered.map(e => {
+      const href = '/shared/view?path=' + encodeURIComponent(e.path);
+      const size = fmtBytes(e.size);
+      return `<div class="backlog-item" style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <a href="${href}" target="_blank" style="color:var(--text-bright);text-decoration:none;font-size:12px">${esc(truncate(e.name || e.path, 70))}</a>
+          <span style="font-size:11px;color:var(--text-muted)">${esc(size)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(e.path)}</div>
+      </div>`;
+    }).join('');
+
+    body.innerHTML = `
+      <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden">${pinnedRows}</div>
+      <div style="height:10px"></div>
+      <div style="font-size:11px;color:var(--text-muted);margin:0 0 8px">Shared workspace directory: <code>process/</code></div>
+      <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden">${listRows}</div>
+    `;
+  } catch (e) {
+    count.textContent = 'error';
+    body.innerHTML = '<div class="empty" style="color:var(--red)">Failed to load shared artifacts</div>';
+  }
+}
+
 // ---- Team Health ----
 async function loadHealth() {
   try {
@@ -1831,7 +1917,7 @@ async function refresh() {
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback()]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback()]);
   await renderPromotionSSOT();
 }
 
