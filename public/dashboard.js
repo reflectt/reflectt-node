@@ -2471,8 +2471,76 @@ function renderQaContract(task) {
   } catch {}
 })();
 
+// ── Getting Started panel ──────────────────────────────────
+async function checkGettingStarted() {
+  const panel = document.getElementById('getting-started');
+  if (!panel) return;
+
+  // Respect manual dismiss
+  try {
+    if (localStorage.getItem('reflectt-gs-dismissed') === '1') {
+      panel.classList.add('hidden');
+      return;
+    }
+  } catch {}
+
+  // Check system state to auto-hide and mark steps done
+  try {
+    const res = await fetch(BASE + '/health');
+    if (!res.ok) return;
+    const health = await res.json();
+
+    const hasHeartbeat = health.uptime_seconds > 0;
+    const hasTasks = (health.tasks?.total || 0) > 0;
+    const hasMessages = (health.chat?.total || 0) > 0;
+
+    // Step 1: preflight — done if server is healthy
+    const step1 = document.getElementById('gs-preflight');
+    if (step1 && hasHeartbeat) {
+      step1.classList.add('done');
+      step1.querySelector('.gs-icon').textContent = '✓';
+    }
+
+    // Step 2: connect — check if cloud/host is enrolled
+    const step2 = document.getElementById('gs-connect');
+    try {
+      const hostRes = await fetch(BASE + '/hosts');
+      if (hostRes.ok) {
+        const hostData = await hostRes.json();
+        const hosts = hostData.hosts || hostData || [];
+        if (Array.isArray(hosts) && hosts.length > 0) {
+          if (step2) {
+            step2.classList.add('done');
+            step2.querySelector('.gs-icon').textContent = '✓';
+          }
+        }
+      }
+    } catch {}
+
+    // Step 3: first task/message — done if any exist
+    const step3 = document.getElementById('gs-task');
+    if (step3 && (hasTasks || hasMessages)) {
+      step3.classList.add('done');
+      step3.querySelector('.gs-icon').textContent = '✓';
+    }
+
+    // Auto-hide if all steps done
+    const allDone = panel.querySelectorAll('.gs-step.done').length === 3;
+    if (allDone) {
+      panel.classList.add('hidden');
+    }
+  } catch {}
+}
+
+function dismissGettingStarted() {
+  const panel = document.getElementById('getting-started');
+  if (panel) panel.classList.add('hidden');
+  try { localStorage.setItem('reflectt-gs-dismissed', '1'); } catch {}
+}
+
 updateClock();
 setInterval(updateClock, 30000);
+checkGettingStarted();
 refresh();
 connectEventStream();
 startAdaptiveRefresh();
