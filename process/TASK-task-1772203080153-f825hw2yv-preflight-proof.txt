@@ -1,0 +1,26 @@
+Proof (Mac Daddy) — /preflight/text?skipNetwork=true
+
+─── Preflight Checks ───
+
+✅ Node.js Version: Node.js v25.5.0 ✓
+✅ Home Directory: /tmp/reflectt-preflight-proof exists and is writable ✓
+✅ Port Available: Port 4445 is available ✓
+⚠️ macOS Screen Recording Permission: Screen Recording: no permission record found for com.apple.Terminal, com.googlecode.iterm2
+
+   Recovery:
+   Open System Settings → Privacy & Security → Screen Recording
+   Enable for: com.apple.Terminal, com.googlecode.iterm2
+   Quick open: open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+   Then restart the app (Terminal/iTerm) and re-run preflight.
+
+⚠️ macOS Accessibility Permission: Accessibility: no permission record found for com.apple.Terminal, com.googlecode.iterm2
+
+   Recovery:
+   Open System Settings → Privacy & Security → Accessibility
+   Enable for: com.apple.Terminal, com.googlecode.iterm2
+   Quick open: open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+   Then restart the app (Terminal/iTerm) and re-run preflight.
+
+✅ OpenClaw Gateway: Gateway running (pid 4048) at ws://127.0.0.1:18789 ✓
+────────────────────────
+All 6 preflight checks passed ✓

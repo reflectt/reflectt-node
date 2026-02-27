@@ -14,9 +14,10 @@
  * Each check returns a PreflightResult with pass/fail + recovery guidance.
  */
 
-import { existsSync, accessSync, constants, statSync } from 'node:fs'
+import { existsSync, accessSync, constants } from 'node:fs'
 import { join } from 'node:path'
-import { hostname } from 'node:os'
+import { hostname, homedir } from 'node:os'
+import { execFile } from 'node:child_process'
 import { REFLECTT_HOME } from './config.js'
 import { emitActivationEvent } from './activationEvents.js'
 
@@ -26,12 +27,16 @@ export interface PreflightCheck {
   id: string
   name: string
   description: string
-  category: 'version' | 'network' | 'auth' | 'system'
+  category: 'version' | 'network' | 'auth' | 'system' | 'apple'
 }
+
+export type PreflightLevel = 'pass' | 'warn' | 'fail'
 
 export interface PreflightResult {
   check: PreflightCheck
   passed: boolean
+  /** Optional display severity. If omitted, inferred from passed boolean. */
+  level?: PreflightLevel
   message: string
   /** Actionable recovery steps if failed */
   recovery?: string[]
@@ -87,7 +92,223 @@ const CHECKS: PreflightCheck[] = [
     description: 'Join token or API key is valid',
     category: 'auth',
   },
+  {
+    id: 'macos-screen-recording',
+    name: 'macOS Screen Recording Permission',
+    description: 'Required to capture screen context on macOS',
+    category: 'apple',
+  },
+  {
+    id: 'macos-accessibility',
+    name: 'macOS Accessibility Permission',
+    description: 'Required for local UI automation on macOS',
+    category: 'apple',
+  },
+  {
+    id: 'openclaw-gateway',
+    name: 'OpenClaw Gateway',
+    description: 'Gateway must be running and reachable for tool execution',
+    category: 'system',
+  },
 ]
+
+// ── Helpers ──
+
+function inferLevel(result: PreflightResult): PreflightLevel {
+  if (result.level) return result.level
+  return result.passed ? 'pass' : 'fail'
+}
+
+async function execFileText(
+  file: string,
+  args: string[],
+  opts?: { timeoutMs?: number },
+): Promise<{ ok: boolean; stdout: string; stderr: string; code?: number }> {
+  const timeoutMs = opts?.timeoutMs ?? 6_000
+  return await new Promise((resolve) => {
+    execFile(file, args, { timeout: timeoutMs }, (error, stdout, stderr) => {
+      if (error) {
+        const anyErr = error as any
+        resolve({
+          ok: false,
+          stdout: String(stdout || ''),
+          stderr: String(stderr || anyErr.message || ''),
+          code: typeof anyErr.code === 'number' ? anyErr.code : undefined,
+        })
+        return
+      }
+      resolve({ ok: true, stdout: String(stdout || ''), stderr: String(stderr || '') })
+    })
+  })
+}
+
+function extractJsonObject(text: string): any | null {
+  const start = text.indexOf('{')
+  if (start === -1) return null
+  try {
+    return JSON.parse(text.slice(start))
+  } catch {
+    const last = text.lastIndexOf('{')
+    if (last === -1) return null
+    try {
+      return JSON.parse(text.slice(last))
+    } catch {
+      return null
+    }
+  }
+}
+
+// ── Apple layer: macOS checks (best-effort) ──
+
+async function checkMacTccPermission(opts: {
+  checkId: 'macos-screen-recording' | 'macos-accessibility'
+  service: 'kTCCServiceScreenCapture' | 'kTCCServiceAccessibility'
+  systemSettingsName: string
+  deepLink: string
+  clients: string[]
+}): Promise<PreflightResult> {
+  const start = Date.now()
+  const check = CHECKS.find(c => c.id === opts.checkId)!
+
+  if (process.platform !== 'darwin') {
+    return { check, passed: true, level: 'pass', message: 'Not macOS (skipped)', durationMs: Date.now() - start }
+  }
+
+  const dbPath = join(homedir(), 'Library', 'Application Support', 'com.apple.TCC', 'TCC.db')
+
+  if (!existsSync(dbPath)) {
+    return {
+      check,
+      passed: true,
+      level: 'warn',
+      message: `TCC database not found; cannot verify ${opts.systemSettingsName}`,
+      recovery: [
+        `Open System Settings → Privacy & Security → ${opts.systemSettingsName}`,
+        'Enable permission for the app you run Reflectt/OpenClaw from (often Terminal or iTerm).',
+        `Quick open: open "${opts.deepLink}"`,
+      ],
+      details: { dbPath },
+      durationMs: Date.now() - start,
+    }
+  }
+
+  const quotedClients = opts.clients.map(c => `'${c.replace(/'/g, "''")}'`).join(',')
+  const queries = [
+    `SELECT client,auth_value FROM access WHERE service='${opts.service}' AND client IN (${quotedClients});`,
+    `SELECT client,allowed FROM access WHERE service='${opts.service}' AND client IN (${quotedClients});`,
+  ]
+
+  let rows: Array<{ client: string; value: number }> = []
+  let lastErr = ''
+
+  for (const q of queries) {
+    const res = await execFileText('sqlite3', ['-readonly', '-separator', '|', dbPath, q], { timeoutMs: 2_500 })
+    if (!res.ok) {
+      lastErr = (res.stderr || res.stdout).trim() || lastErr
+      continue
+    }
+
+    const lines = res.stdout.split('\n').map(l => l.trim()).filter(Boolean)
+    rows = lines.map((line) => {
+      const [client, raw] = line.split('|')
+      const value = Number.parseInt(String(raw ?? '').trim(), 10)
+      return {
+        client: String(client || '').trim(),
+        value: Number.isFinite(value) ? value : 0,
+      }
+    }).filter(r => r.client)
+
+    break
+  }
+
+  if (rows.length === 0) {
+    return {
+      check,
+      passed: true,
+      level: 'warn',
+      message: `${opts.systemSettingsName}: no permission record found for ${opts.clients.join(', ')}`,
+      recovery: [
+        `Open System Settings → Privacy & Security → ${opts.systemSettingsName}`,
+        `Enable for: ${opts.clients.join(', ')}`,
+        `Quick open: open "${opts.deepLink}"`,
+        'Then restart the app (Terminal/iTerm) and re-run preflight.',
+      ],
+      details: { dbPath, service: opts.service, note: lastErr || 'no rows' },
+      durationMs: Date.now() - start,
+    }
+  }
+
+  // Heuristic: any positive value indicates granted.
+  const allowed = rows.some(r => r.value > 0)
+  const snapshot = rows.map(r => `${r.client}=${r.value}`).join(', ')
+
+  return {
+    check,
+    passed: true,
+    level: allowed ? 'pass' : 'warn',
+    message: allowed
+      ? `${opts.systemSettingsName}: granted (${snapshot}) ✓`
+      : `${opts.systemSettingsName}: not granted (${snapshot})`,
+    recovery: allowed
+      ? undefined
+      : [
+          `Open System Settings → Privacy & Security → ${opts.systemSettingsName}`,
+          `Enable for: ${opts.clients.join(', ')}`,
+          `Quick open: open "${opts.deepLink}"`,
+          'Then restart the app (Terminal/iTerm) and re-run preflight.',
+        ],
+    details: { dbPath, service: opts.service, rows },
+    durationMs: Date.now() - start,
+  }
+}
+
+async function checkOpenClawGateway(): Promise<PreflightResult> {
+  const start = Date.now()
+  const check = CHECKS.find(c => c.id === 'openclaw-gateway')!
+
+  if (process.platform !== 'darwin') {
+    return { check, passed: true, level: 'pass', message: 'Not macOS (skipped)', durationMs: Date.now() - start }
+  }
+
+  const res = await execFileText('openclaw', ['gateway', 'status', '--json', '--timeout', '5000'], { timeoutMs: 7_000 })
+  const text = `${res.stdout}\n${res.stderr}`
+  const json = extractJsonObject(text)
+
+  if (!json) {
+    return {
+      check,
+      passed: true,
+      level: 'warn',
+      message: 'Could not parse `openclaw gateway status` output',
+      recovery: ['Run: openclaw gateway status', 'If not running: openclaw gateway start'],
+      details: { ok: res.ok, stderr: res.stderr.slice(0, 500) },
+      durationMs: Date.now() - start,
+    }
+  }
+
+  const status = json?.service?.runtime?.status
+  const rpcOk = json?.rpc?.ok
+  const url = json?.rpc?.url || json?.gateway?.probeUrl
+  const pid = json?.service?.runtime?.pid
+  const bindHost = json?.gateway?.bindHost
+  const port = json?.gateway?.port
+
+  const running = status === 'running' && rpcOk === true
+
+  return {
+    check,
+    passed: true,
+    level: running ? 'pass' : 'warn',
+    message: running
+      ? `Gateway running (pid ${pid}) at ${String(url || `ws://${bindHost}:${port}`)} ✓`
+      : `Gateway not reachable (status=${String(status)} rpc.ok=${String(rpcOk)})`,
+    recovery: running
+      ? undefined
+      : ['Start the gateway:', '  openclaw gateway start', 'Then verify:', '  openclaw gateway status'],
+    details: { status, rpcOk, url, pid, bindHost, port },
+    durationMs: Date.now() - start,
+  }
+}
 
 // ── Individual Checks ──
 
@@ -476,6 +697,29 @@ export async function runPreflight(opts: PreflightOptions = {}): Promise<Preflig
   results.push(checkHomeWritable())
   results.push(await checkPortAvailable(opts.port || 4445))
 
+  // Phase 1b: Apple layer checks (macOS-only, best-effort; do not block bootstrap)
+  if (process.platform === 'darwin') {
+    const commonClients = ['com.apple.Terminal', 'com.googlecode.iterm2']
+
+    results.push(await checkMacTccPermission({
+      checkId: 'macos-screen-recording',
+      service: 'kTCCServiceScreenCapture',
+      systemSettingsName: 'Screen Recording',
+      deepLink: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+      clients: commonClients,
+    }))
+
+    results.push(await checkMacTccPermission({
+      checkId: 'macos-accessibility',
+      service: 'kTCCServiceAccessibility',
+      systemSettingsName: 'Accessibility',
+      deepLink: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+      clients: commonClients,
+    }))
+
+    results.push(await checkOpenClawGateway())
+  }
+
   // Phase 2: Network checks
   if (!opts.skipNetwork) {
     results.push(await checkCloudReachable(opts.cloudUrl))
@@ -548,9 +792,10 @@ export function formatPreflightReport(report: PreflightReport): string {
   lines.push('')
 
   for (const result of report.results) {
-    const icon = result.passed ? '✅' : '❌'
+    const level = inferLevel(result)
+    const icon = level === 'pass' ? '✅' : level === 'warn' ? '⚠️' : '❌'
     lines.push(`${icon} ${result.check.name}: ${result.message}`)
-    if (!result.passed && result.recovery) {
+    if (level !== 'pass' && result.recovery) {
       lines.push('')
       lines.push('   Recovery:')
       for (const step of result.recovery) {
