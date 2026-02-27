@@ -652,7 +652,7 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
     textChunkLimit: 4000,
     sendText: async ({ to, text, accountId }) => {
       const cfg = pluginRuntime?.config?.loadConfig?.() ?? {};
-      const account = resolveAccount(cfg, accountId);
+      const account = resolveAccount(cfg, accountId, pluginRuntime?.logger);
       // Determine agent name for "from" field
       const agentName = "kai"; // TODO: resolve from session context
       await postMessage(account.url, agentName, "general", text ?? "");

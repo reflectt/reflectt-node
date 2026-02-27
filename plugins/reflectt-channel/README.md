@@ -58,6 +58,15 @@ Add to `~/.openclaw/openclaw.json`. Two config paths are supported:
 
 > **Precedence:** `channels.reflectt` takes priority over `plugins.entries`. If both are set, `channels.reflectt.url` wins.
 
+> **Default:** If neither is configured, the plugin falls back to `http://127.0.0.1:4445` and logs a warning with the exact config keys to set.
+
+Or use the CLI shorthand:
+
+```bash
+openclaw config set channels.reflectt.enabled true
+openclaw config set channels.reflectt.url "http://127.0.0.1:4445"
+```
+
 Then restart the gateway:
 
 ```bash
