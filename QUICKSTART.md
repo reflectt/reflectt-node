@@ -8,6 +8,20 @@ Get reflectt-node running in 5 minutes.
 - OpenClaw installed and running
 - Git
 
+## Docker option (skip local Node install)
+
+If you prefer running reflectt-node as a container:
+
+```bash
+docker run --rm -p 4445:4445 \
+  -v reflectt-node:/reflectt \
+  -e OPENCLAW_GATEWAY_URL=ws://host.docker.internal:18789 \
+  -e OPENCLAW_GATEWAY_TOKEN=your_token_here \
+  ghcr.io/reflectt/reflectt-node:latest
+```
+
+Then jump to **Step 5: Test It**.
+
 ## Step 1: Clone
 
 ```bash

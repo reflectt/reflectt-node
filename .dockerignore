@@ -1,0 +1,23 @@
+# dependencies
+node_modules
+
+# build output (built inside the image)
+dist
+
+# git + editor
+.git
+.github
+.DS_Store
+
+# local runtime state
+process
+artifacts
+incidents
+*.log
+
+# secrets / local env
+.env
+.env.*
+
+# tests not needed for runtime image
+tests

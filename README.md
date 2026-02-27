@@ -88,6 +88,26 @@ You should see the live dashboard with task board, team health, chat, and activi
 
 **That's it. You're running.**
 
+### Docker (prebuilt image)
+
+If you want a containerized install (and persistent state via a Docker volume):
+
+```bash
+docker run --rm -p 4445:4445 \
+  -v reflectt-node:/reflectt \
+  ghcr.io/reflectt/reflectt-node:latest
+```
+
+Optional — connect to OpenClaw:
+
+```bash
+docker run --rm -p 4445:4445 \
+  -v reflectt-node:/reflectt \
+  -e OPENCLAW_GATEWAY_URL=ws://host.docker.internal:18789 \
+  -e OPENCLAW_GATEWAY_TOKEN=your_gateway_token_here \
+  ghcr.io/reflectt/reflectt-node:latest
+```
+
 ### Optional: one-command cloud enrollment (dogfooding)
 
 If you have a Reflectt Cloud host join token, you can enroll this node and start heartbeats in one command:
