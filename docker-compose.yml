@@ -1,0 +1,22 @@
+# reflectt-node Docker Compose
+# Usage: docker-compose up
+# Dashboard: http://localhost:4445
+
+services:
+  reflectt-node:
+    build: .
+    ports:
+      - "4445:4445"
+    volumes:
+      - reflectt-data:/data
+    environment:
+      - PORT=4445
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+      # Uncomment and set these for OpenClaw gateway connection:
+      # - OPENCLAW_GATEWAY_URL=ws://host.docker.internal:18789
+      # - OPENCLAW_GATEWAY_TOKEN=your_token_here
+    restart: unless-stopped
+
+volumes:
+  reflectt-data:
