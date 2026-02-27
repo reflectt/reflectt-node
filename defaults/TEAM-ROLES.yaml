@@ -41,12 +41,39 @@ agents:
       - ux
       - modal
       - chart
+    # Hard default: Pixel is opt-in only.
+    routingMode: opt-in
+    # Allow explicit override when lane is explicitly set to design.
+    neverRouteUnlessLane: design
     alwaysRoute:
+      - design
+      - user-facing
+      - reflectt-node
+      - reflectt-cloud-app
+      - reflectt.ai
+      - app.reflectt.ai
       - ui
       - ux
       - dashboard
+      - a11y
+      - css
+      - visual
+      - copy
+      - brand
+      - marketing
     neverRoute:
       - infra
+      - ws-pairing
+      - pairing
+      - preflight
+      - auth
+      - provisioning
+      - deploy
+      - ci
+      - docker
+      - ssh
+      - gateway
+      - token
     wipCap: 1
 
   - name: sage

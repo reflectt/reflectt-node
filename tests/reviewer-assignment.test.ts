@@ -123,8 +123,10 @@ describe('suggestReviewer', () => {
       { title: 'Some task', assignee: 'link' },
       [],
     )
-    // Should have all agents minus the assignee
-    expect(result.scores.length).toBe(roles.length - 1)
+    // Should have all eligible agents minus the assignee.
+    // Designers are excluded by default unless the task explicitly opts into design/user-facing.
+    const expected = roles.filter(r => r.name !== 'link' && r.role !== 'designer').length
+    expect(result.scores.length).toBe(expected)
     // Scores should be sorted descending
     for (let i = 1; i < result.scores.length; i++) {
       expect(result.scores[i - 1]!.score).toBeGreaterThanOrEqual(result.scores[i]!.score)

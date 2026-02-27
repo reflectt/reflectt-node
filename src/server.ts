@@ -5337,6 +5337,14 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
 
+      // Warn-only: encourage lane/surface metadata for routing discipline.
+      // (Do not block creation yet; onboarding still needs to be lightweight.)
+      const creationWarnings: string[] = []
+      const metaIn = (data.metadata || {}) as Record<string, unknown>
+      const lane = String((metaIn as any).lane || '').trim()
+      const surface = String((metaIn as any).surface || '').trim()
+      if (!lane) creationWarnings.push('metadata.lane missing (recommended: design|product|infra|ops|growth)')
+      if (!surface) creationWarnings.push('metadata.surface missing (recommended: reflectt-node|reflectt-cloud-app|reflectt.ai|infra)')
 
       const { eta, type, ...rest } = data
 
@@ -5408,7 +5416,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       
       trackTaskEvent('created')
-      return { success: true, task: enrichTaskWithComments(task) }
+      return { success: true, task: enrichTaskWithComments(task), warnings: creationWarnings }
     } catch (err: any) {
       reply.code(400)
       return { success: false, error: err.message || 'Failed to create task' }
