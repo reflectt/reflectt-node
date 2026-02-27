@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 /**
- * Content lane compliance reporter (Echo)
- * - Posts compliance snapshot to task-1771427184904-mu356v5md
+ * Content lane compliance reporter
+ * - Posts a content-lane snapshot (ready_v0) to CONTROL_TASK_ID
  * - Checks: WIP<=1, ready floor>=2 (ready = todo tasks w/ reviewer + ready_v0_artifact_path + review_ask)
+ *
+ * NOTE: this is a lane-level operational signal, not a system-wide "ready floor" page.
+ * We intentionally avoid paging ops by default; the lane owner should triage first.
  */
 
 const API = process.env.REFLECTT_NODE_URL ?? 'http://127.0.0.1:4445'
@@ -74,8 +77,8 @@ async function main() {
   const breach = active && (wip > 1 || readyCount < 2)
 
   const lines = [
-    `compliance snapshot @ ${CONTROL_TASK_ID} (${fmtLocal(now)}; active_hours=${active ? 'Y' : 'N'})`,
-    `- Ready floor: ${readyCount}/2 → ${readyTasks.slice(0, 6).join(', ') || '(none)'}`,
+    `content-lane compliance snapshot (ready_v0) @ ${CONTROL_TASK_ID} (${fmtLocal(now)}; active_hours=${active ? 'Y' : 'N'})`,
+    `- Ready floor (ready_v0): ${readyCount}/2 → ${readyTasks.slice(0, 6).join(', ') || '(none)'}`,
     `- WIP: ${wip} → ${doingTasks.slice(0, 6).join(', ') || '(none)'}`,
     `- Breach: ${breach ? 'Y' : 'N'}`,
   ]
@@ -83,7 +86,7 @@ async function main() {
   if (breach) {
     lines.push(`- Recovery: ${recoveryPlan({ wip, readyCount })}`)
     lines.push(`- Owner: ${ASSIGNEE} | ETA: 30m`)
-    lines.push(`- Escalation: @kai ${CONTROL_TASK_ID} breach during active hours; needs recovery within 30m`)
+    lines.push(`- Escalation: @${ASSIGNEE} ${CONTROL_TASK_ID} content-lane breach during active hours; aim recovery within 30m (tag @kai if blocked)`)
   }
 
   await postComment(CONTROL_TASK_ID, lines.join('\n'))

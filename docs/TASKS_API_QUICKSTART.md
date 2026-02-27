@@ -14,7 +14,7 @@ BASE="http://localhost:4445"
 |---|---|
 | `todo` | `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria[]`, `eta` |
 | `doing` | `reviewer` + `metadata.eta` |
-| `validating` | `metadata.artifact_path` + `metadata.review_handoff { task_id, artifact_path, test_proof, known_caveats, (pr_url+commit_sha unless doc_only/config_only/non_code) }`. **Code lanes** additionally require `metadata.qa_bundle.review_packet { task_id, pr_url, commit, changed_files[], artifact_path, caveats }` + bundle fields. **Non-code/doc-only/config-only** tasks may omit `metadata.qa_bundle` entirely (set `review_handoff.doc_only=true` or `review_handoff.non_code=true` or `review_handoff.config_only=true`). |
+| `validating` | `metadata.artifact_path` + `metadata.review_handoff { task_id, artifact_path, test_proof, known_caveats, (pr_url+commit_sha unless doc_only/config_only/non_code) }`. **Code lanes** additionally require `metadata.qa_bundle.review_packet { task_id, pr_url, commit, changed_files[], artifact_path, caveats }` + bundle fields. **Non-code/doc-only/config-only** tasks may omit `metadata.qa_bundle` entirely (set `review_handoff.doc_only=true` or `review_handoff.non_code=true` or `review_handoff.config_only=true`). **Duplicate auto-closures:** if `metadata.auto_closed=true` and `metadata.auto_close_reason` contains `duplicate`, you must also include canonical duplicate evidence: `metadata.duplicate_of { task_id?, pr_url?, commit?, proof }` (proof required; at least one of task_id/pr_url/commit required) OR `metadata.qa_bundle.review_packet { pr_url, commit }` plus `metadata.duplicate_proof`. |
 | `done` | No extra required field (recommended: reviewer sign-off comment) |
 
 ## 1) Create a task
