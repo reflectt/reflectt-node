@@ -405,6 +405,17 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | GET | `/webhooks/stats` | Webhook delivery statistics: counts by status, config, oldest pending. |
 | PATCH | `/webhooks/config` | Update webhook delivery config (maxAttempts, backoff, retention, timeout, concurrency). |
 | GET | `/webhooks/idempotency/:key` | Lookup webhook event by idempotency key. |
+## Host Registry
+
+Multi-host management: remote hosts register via heartbeat and are tracked by status (online/stale/offline based on `last_seen_at`).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/hosts/heartbeat` | Register or update a host. Body: `{ hostId, name?, version?, capabilities?, meta? }`. Requires `Authorization: Bearer <HEARTBEAT_SECRET>` header. Returns upserted host record. |
+| GET | `/hosts` | List all registered hosts. Each includes computed `status` (online: <5min, stale: 5-15min, offline: >15min). Query: `status` filter. |
+| GET | `/hosts/:hostId` | Get a single host by ID with computed status. |
+| DELETE | `/hosts/:hostId` | Remove a host from the registry. |
+
 | GET | `/portability/export` | One-click export: team config, server config (redacted), encrypted secrets, webhook routes, provisioning state. |
 | GET | `/portability/export/download` | Download export bundle as JSON file attachment. |
 | POST | `/portability/import` | Import from export bundle. Body: `{ bundle, overwrite?, skipSecrets?, skipConfig? }`. Rehydrates ~/.reflectt/ on a new host. |
