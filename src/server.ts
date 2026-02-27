@@ -4675,6 +4675,24 @@ export async function createServer(): Promise<FastifyInstance> {
 
     try {
       const data = CreateTaskCommentSchema.parse(request.body)
+
+      // ── Task ID reference validation ──
+      const TASK_REF_RE = /\btask-[\w-]{8,}\b/g
+      const referencedIds = [...new Set(data.content.match(TASK_REF_RE) || [])]
+      const invalidRefs: string[] = []
+      const suggestions: Record<string, string[]> = {}
+      for (const refId of referencedIds) {
+        // Skip the task we're commenting on
+        if (refId === resolved.resolvedId) continue
+        const match = taskManager.resolveTaskId(refId)
+        if (match.matchType === 'not_found') {
+          invalidRefs.push(refId)
+          if (match.suggestions?.length) {
+            suggestions[refId] = match.suggestions
+          }
+        }
+      }
+
       const comment = await taskManager.addTaskComment(
         resolved.resolvedId,
         data.author,
@@ -4768,7 +4786,16 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
-      return { success: true, comment, ...(heartbeatWarning ? { heartbeatWarning } : {}) }
+      const result: Record<string, unknown> = { success: true, comment }
+      if (heartbeatWarning) result.heartbeatWarning = heartbeatWarning
+      if (invalidRefs.length > 0) {
+        result.warning = `${invalidRefs.length} task ID reference(s) not found: ${invalidRefs.join(', ')}`
+        result.invalid_task_refs = invalidRefs
+        if (Object.keys(suggestions).length > 0) {
+          result.suggestions = suggestions
+        }
+      }
+      return result
     } catch (err: any) {
       return { success: false, error: err.message || 'Failed to add comment' }
     }
