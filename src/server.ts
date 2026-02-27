@@ -36,6 +36,7 @@ import { taskManager } from './tasks.js'
 import { detectApproval, applyApproval } from './chat-approval-detector.js'
 import { inboxManager } from './inbox.js'
 import { getDb } from './db.js'
+import { getSystemStateSnapshot, setSystemStateInt } from './system-state.js'
 import type { AgentMessage, Task } from './types.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 import { memoryManager } from './memory.js'
@@ -1854,6 +1855,13 @@ export async function createServer(): Promise<FastifyInstance> {
     reflectionPipelineHealth.recentPromotions = recentPromotions
     reflectionPipelineHealth.lastCheckedAt = now
 
+    // Persist last pipeline tick timestamp for /health/system proof.
+    try {
+      setSystemStateInt('reflection_pipeline_last_tick_at', now)
+    } catch {
+      // non-critical
+    }
+
     if (recentReflections === 0) {
       reflectionPipelineHealth.status = 'healthy'
       reflectionPipelineHealth.firstZeroInsightAt = 0
@@ -2500,9 +2508,66 @@ export async function createServer(): Promise<FastifyInstance> {
     return { history, count: history.length, days }
   })
 
-  // System health (uptime, performance, errors)
+  // System health (uptime, performance, errors) + loop/timer proofs
   app.get('/health/system', async () => {
-    return healthMonitor.getSystemHealth()
+    const now = Date.now()
+
+    const qh = policyManager.get().quietHours
+
+    const sweeper = getSweeperStatus()
+
+    const tickKeys = [
+      'idle_nudge_last_tick_at',
+      'cadence_watchdog_last_tick_at',
+      'mention_rescue_last_tick_at',
+      'reflection_pipeline_last_tick_at',
+    ]
+
+    let ticks: Record<string, number | string | null> = {}
+    try {
+      ticks = getSystemStateSnapshot(tickKeys)
+    } catch {
+      // Older DBs may not yet have system_state — non-critical.
+      ticks = {}
+    }
+
+    return {
+      ...healthMonitor.getSystemHealth(),
+      now,
+      quietHours: {
+        enabled: qh.enabled,
+        startHour: qh.startHour,
+        endHour: qh.endHour,
+        timezone: qh.timezone,
+        active: isQuietHours(now),
+      },
+      loops: {
+        sweeper: {
+          running: sweeper.running,
+          lastSweepAt: sweeper.lastSweepAt,
+        },
+        idleNudge: {
+          timerRegistered: Boolean(idleNudgeTimer),
+          enabled: process.env.IDLE_NUDGE_ENABLED !== 'false',
+          lastTickAt: (ticks['idle_nudge_last_tick_at'] as number | null) ?? null,
+        },
+        cadenceWatchdog: {
+          timerRegistered: Boolean(cadenceWatchdogTimer),
+          enabled: (policyManager.get().cadenceWatchdog?.enabled ?? (process.env.CADENCE_WATCHDOG_ENABLED !== 'false')),
+          lastTickAt: (ticks['cadence_watchdog_last_tick_at'] as number | null) ?? null,
+        },
+        mentionRescue: {
+          timerRegistered: Boolean(mentionRescueTimer),
+          enabled: Boolean(policyManager.get().mentionRescue?.enabled),
+          lastTickAt: (ticks['mention_rescue_last_tick_at'] as number | null) ?? null,
+        },
+        reflectionPipeline: {
+          timerRegistered: Boolean(reflectionPipelineTimer),
+          lastTickAt: (ticks['reflection_pipeline_last_tick_at'] as number | null) ?? null,
+          status: reflectionPipelineHealth,
+        },
+      },
+    }
   })
 
   // Build info — git SHA, branch, PID, uptime

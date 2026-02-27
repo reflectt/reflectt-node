@@ -71,7 +71,7 @@ Operationally:
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
 | GET | `/health/backlog` | Backlog readiness health by lane (ready counts, floor compliance, breach status, blocked/todo/doing/validating rollups). Query: `include_test=1` to include test-harness tasks. |
-| GET | `/health/system` | System info (uptime, memory, versions) |
+| GET | `/health/system` | System info + loop proofs (quiet hours state, sweeper/watchdog timers, last tick timestamps) |
 | GET | `/health/build` | Build/runtime identity (version, git SHA, branch, build timestamp, PID, uptime) |
 | GET | `/health/deploy` | Deploy attestation payload for dashboards (`version`, `gitSha`, `branch`, `buildTimestamp`, `startedAt`, `pid`) |
 | GET | `/health/team/summary` | Compact team health summary |
@@ -104,9 +104,17 @@ Operationally:
 
 ### Quiet hours behavior (watchdogs)
 
-Watchdog endpoints currently execute whenever called (manual or scheduled). Quiet-hours suppression is not enforced by these endpoints at the API layer yet.
+- The scheduled watchdog timers (idle nudge / cadence / mention rescue / reflection pipeline) **skip work during quiet hours**.
+- The manual tick endpoints (`POST /health/*/tick`) also suppress by default when quiet hours are active.
+  - Override with `?force=true` when you need deterministic debugging.
 
-If your deployment needs quiet-hours behavior today, enforce it in scheduler/gateway policy (for example: only trigger watchdog ticks during allowed windows).
+To verify in ~10s:
+
+```bash
+curl -s http://127.0.0.1:4445/health/system | jq
+```
+
+Look at `quietHours.active`, `loops.*.timerRegistered`, and `loops.*.lastTickAt`.
 
 ## Tasks
 

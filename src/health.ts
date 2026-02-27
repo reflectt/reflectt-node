@@ -21,6 +21,7 @@ import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
 import { getDb } from './db.js'
 import { policyManager } from './policy.js'
+import { setSystemStateInt } from './system-state.js'
 
 /**
  * Validate a task timestamp is within reasonable bounds.
@@ -1351,6 +1352,13 @@ class TeamHealthMonitor {
     const dryRun = options?.dryRun === true
     const alerts: string[] = []
 
+    // Persist last tick timestamp for deterministic "is it running?" proof.
+    try {
+      setSystemStateInt('cadence_watchdog_last_tick_at', now)
+    } catch {
+      // non-critical
+    }
+
     // Source of truth: unified policy config (file + env overlays).
     // Fallback: legacy env-based flags.
     const cadenceCfg = policyManager.get().cadenceWatchdog
@@ -1644,6 +1652,13 @@ class TeamHealthMonitor {
     const dryRun = options?.dryRun === true
     const rescued: string[] = []
 
+    // Persist last tick timestamp for deterministic "is it running?" proof.
+    try {
+      setSystemStateInt('mention_rescue_last_tick_at', now)
+    } catch {
+      // non-critical
+    }
+
     const policy = policyManager.get()
     const cfg = policy.mentionRescue
 
@@ -1797,6 +1812,13 @@ class TeamHealthMonitor {
     const dryRun = options?.dryRun === true
     const nudged: string[] = []
     const decisions: IdleNudgeDecision[] = []
+
+    // Persist last tick timestamp for deterministic "is it running?" proof.
+    try {
+      setSystemStateInt('idle_nudge_last_tick_at', now)
+    } catch {
+      // non-critical
+    }
 
     const presences = presenceManager.getAllPresence()
     const tasks = taskManager.listTasks({})

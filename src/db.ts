@@ -463,6 +463,20 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_context_memos_updated_at ON context_memos(updated_at);
       `,
     },
+    {
+      version: 16,
+      sql: `
+        -- Minimal persistent runtime state (timestamps, last-seen markers)
+        CREATE TABLE IF NOT EXISTS system_state (
+          key TEXT PRIMARY KEY,
+          value_int INTEGER,
+          value_text TEXT,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_system_state_updated_at ON system_state(updated_at);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
