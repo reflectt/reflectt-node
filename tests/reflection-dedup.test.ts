@@ -38,18 +38,18 @@ describe('Reflection dedup', () => {
     expect(body.reflection.id).toBeTruthy()
   })
 
-  it('rejects identical reflection from same author within dedup window', async () => {
+  it('dedups identical reflection from same author within dedup window', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/reflections',
       payload: VALID_REFLECTION,
     })
-    expect(res.statusCode).toBe(409)
+    expect(res.statusCode).toBe(200)
     const body = JSON.parse(res.body)
-    expect(body.success).toBe(false)
-    expect(body.code).toBe('DUPLICATE_REFLECTION')
-    expect(body.dedup_hash).toBeTruthy()
-    expect(body.hint).toContain('dedup-test-agent')
+    expect(body.success).toBe(true)
+    expect(body.deduped).toBe(true)
+    expect(body.canonical_reflection_id).toBeTruthy()
+    expect(body.reflection?.id).toBe(body.canonical_reflection_id)
   })
 
   it('accepts same content from a different author', async () => {
@@ -85,6 +85,9 @@ describe('Reflection dedup', () => {
       url: '/reflections',
       payload: { ...VALID_REFLECTION, author: 'case-test', pain: 'case test pain' },
     })
-    expect(res2.statusCode).toBe(409)
+    expect(res2.statusCode).toBe(200)
+    const body2 = JSON.parse(res2.body)
+    expect(body2.success).toBe(true)
+    expect(body2.deduped).toBe(true)
   })
 })

@@ -126,7 +126,7 @@ import {
   type EscalationStatus,
 } from './escalation.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
-import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS } from './reflections.js'
+import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS, recordReflectionDuplicate } from './reflections.js'
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary } from './insights.js'
 import { patchInsightById } from './insight-mutation.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
@@ -7438,13 +7438,37 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Reflections ────────────────────────────────────────────────────────
 
-  // Reflection dedup: track recent content hashes per author to reject duplicates
-  const REFLECTION_DEDUP_WINDOW_MS = 60 * 60 * 1000 // 1 hour
-  const reflectionDedupMap = new Map<string, number>() // hash -> timestamp
+  // Reflection dedup (DB-backed): suppress identical reflections from the same author
+  // within a 24h window, and point callers at the canonical reflection.
+  // This survives restarts (unlike in-memory dedup maps) and prevents reflection spam loops.
+  const REFLECTION_DEDUP_WINDOW_MS = 24 * 60 * 60 * 1000 // 24 hours
+  const REFLECTION_DEDUP_MAX_SCAN = 200
 
-  function reflectionContentHash(author: string, pain: string, evidence: unknown[]): string {
-    const normalized = [author, pain.trim().toLowerCase(), ...evidence.map(e => String(e).trim().toLowerCase()).sort()].join('|')
-    return createHash('sha256').update(normalized).digest('hex').slice(0, 32)
+  function normalizeDedupText(s: string): string {
+    return String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+  }
+
+  function normalizeDedupEvidence(evidence: unknown): string[] {
+    if (!Array.isArray(evidence)) return []
+    return evidence
+      .map((e) => normalizeDedupText(String(e)))
+      .filter(Boolean)
+      .sort()
+  }
+
+  function reflectionDedupSignature(input: { author: string; pain: string; impact: string; evidence: unknown; went_well: string; suspected_why: string; proposed_fix: string; role_type: string; severity?: string | null }): string {
+    const parts = [
+      normalizeDedupText(input.author),
+      normalizeDedupText(input.pain),
+      normalizeDedupText(input.impact),
+      ...normalizeDedupEvidence(input.evidence),
+      normalizeDedupText(input.went_well),
+      normalizeDedupText(input.suspected_why),
+      normalizeDedupText(input.proposed_fix),
+      normalizeDedupText(input.role_type),
+      normalizeDedupText(input.severity ?? ''),
+    ]
+    return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 32)
   }
 
   app.post('/reflections', async (request, reply) => {
@@ -7459,34 +7483,60 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
-    // Dedup check: reject identical reflections from same author within window
-    const dedupHash = reflectionContentHash(result.data.author, result.data.pain, result.data.evidence)
+    // DB-backed dedup: if an identical reflection was submitted by the same author in the last 24h,
+    // return the canonical reflection instead of creating a new one.
     const now = Date.now()
-    const lastSeen = reflectionDedupMap.get(dedupHash)
-    if (lastSeen && (now - lastSeen) < REFLECTION_DEDUP_WINDOW_MS) {
-      reply.code(409)
+    const dedupSignature = reflectionDedupSignature({
+      author: result.data.author,
+      pain: result.data.pain,
+      impact: result.data.impact,
+      evidence: result.data.evidence,
+      went_well: result.data.went_well,
+      suspected_why: result.data.suspected_why,
+      proposed_fix: result.data.proposed_fix,
+      role_type: result.data.role_type,
+      severity: result.data.severity ?? null,
+    })
+
+    const since = now - REFLECTION_DEDUP_WINDOW_MS
+    const recent = listReflections({ author: result.data.author, since, limit: REFLECTION_DEDUP_MAX_SCAN })
+    const canonical = recent.find((r) =>
+      reflectionDedupSignature({
+        author: r.author,
+        pain: r.pain,
+        impact: r.impact,
+        evidence: r.evidence,
+        went_well: r.went_well,
+        suspected_why: r.suspected_why,
+        proposed_fix: r.proposed_fix,
+        role_type: r.role_type,
+        severity: r.severity ?? null,
+      }) === dedupSignature
+    )
+
+    if (canonical) {
+      // Best-effort: annotate canonical reflection metadata with duplicate counter.
+      try {
+        recordReflectionDuplicate(canonical.id, now, dedupSignature)
+      } catch {}
+
+      reply.code(200)
       return {
-        success: false,
-        error: 'Duplicate reflection',
-        code: 'DUPLICATE_REFLECTION',
-        status: 409,
-        hint: `A reflection with identical content from "${result.data.author}" was submitted ${Math.round((now - lastSeen) / 1000)}s ago. Wait ${Math.round((REFLECTION_DEDUP_WINDOW_MS - (now - lastSeen)) / 60000)}m or change the content.`,
-        dedup_hash: dedupHash,
+        success: true,
+        reflection: canonical,
+        insight: null,
+        deduped: true,
+        canonical_reflection_id: canonical.id,
+        dedup_window_hours: 24,
+        dedup_signature: dedupSignature,
+        hint: `Duplicate suppressed (24h). Canonical reflection: /reflections/${canonical.id}`,
       }
     }
 
-    // Periodic cleanup of stale dedup entries
-    if (reflectionDedupMap.size > 500) {
-      const cutoff = now - REFLECTION_DEDUP_WINDOW_MS
-      for (const [hash, ts] of reflectionDedupMap) {
-        if (ts < cutoff) reflectionDedupMap.delete(hash)
-      }
-    }
+    // Stamp signature into metadata for traceability (best-effort)
+    result.data.metadata = { ...(result.data.metadata ?? {}), dedup_signature: dedupSignature }
 
     const reflection = createReflection(result.data)
-
-    // Record hash after successful creation
-    reflectionDedupMap.set(dedupHash, now)
 
     // Track reflection for automation (resets nudge timer)
     try {
@@ -7566,6 +7616,11 @@ export async function createServer(): Promise<FastifyInstance> {
       severity_levels: SEVERITY_LEVELS,
       confidence_range: { min: 0, max: 10 },
       evidence_note: 'Array of strings — at least one evidence link, path, or reference required',
+      dedup: {
+        window_hours: 24,
+        scope: 'Identical reflections from the same author within the window are suppressed and the canonical reflection is returned.',
+        signature_fields: ['author', 'pain', 'impact', 'evidence[] (normalized)', 'went_well', 'suspected_why', 'proposed_fix', 'role_type', 'severity'],
+      },
     }
   })
 
