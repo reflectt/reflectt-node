@@ -2063,14 +2063,22 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Health check
+  // Ultra-lightweight ping — no DB, no stats, instant response.
+  // Use for keepalive cron triggers (Cloudflare, load balancers, uptime monitors).
+  app.get('/health/ping', async () => {
+    return { status: 'ok', uptime_seconds: Math.round((Date.now() - BUILD_STARTED_AT) / 1000), ts: Date.now() }
+  })
+
   app.get('/health', async (request) => {
     const query = request.query as Record<string, string>
     const includeTest = query.include_test === '1' || query.include_test === 'true'
+    const uptimeSeconds = Math.round((Date.now() - BUILD_STARTED_AT) / 1000)
     return {
       status: 'ok',
       version: BUILD_VERSION,
       commit: BUILD_COMMIT,
-      uptime_seconds: Math.round((Date.now() - BUILD_STARTED_AT) / 1000),
+      uptime_seconds: uptimeSeconds,
+      cold_start: uptimeSeconds < 60, // Flag recent restarts for monitoring
       openclaw: 'not configured',
       chat: chatManager.getStats(),
       tasks: taskManager.getStats({ includeTest }),
