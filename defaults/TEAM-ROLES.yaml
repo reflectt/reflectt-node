@@ -1,196 +1,53 @@
-# TEAM-ROLES.yaml — Agent role registry for assignment engine
-# Place at ~/.reflectt/TEAM-ROLES.yaml to customize for your team.
-# Falls back to these defaults if not found.
+# TEAM-ROLES.yaml — Agent role configuration
+#
+# This is the default starter config. Customize it for your team:
+#   cp defaults/TEAM-ROLES.yaml ~/.reflectt/TEAM-ROLES.yaml
+#   nano ~/.reflectt/TEAM-ROLES.yaml
+#
+# reflectt-node hot-reloads changes — no restart needed.
+# See docs/TEAM-ROLES.md for full reference.
 
 agents:
-  # Optional: aliases — additional assignee names that should be treated as this agent for task lookup.
-  # Example: if OpenClaw only runs an agent named "main" but tasks are assigned to "finance-agent":
-  #   - name: main
-  #     aliases: [finance-agent]
-  - name: link
+  - name: agent-1
     role: builder
-    description: Core implementation owner for backend/api/integration work.
+    description: General-purpose builder agent. Rename to match your team.
     affinityTags:
       - backend
       - api
       - integration
       - bug
       - test
-      - webhook
-      - server
-      - fastify
       - typescript
-      - task-lifecycle
-      - watchdog
-      - database
-    alwaysRoute:
-      - backend
-      - integration
-      - api
-    neverRoute:
-      - brand-copy
     wipCap: 2
 
-  - name: pixel
+  - name: agent-2
     role: designer
-    description: UX and dashboard experience owner.
+    description: UI/UX agent. Rename to match your team.
     affinityTags:
-      - dashboard
+      - design
       - ui
       - css
       - visual
-      - animation
       - frontend
-      - layout
-      - ux
-      - modal
-      - chart
-    # Hard default: Pixel is opt-in only.
     routingMode: opt-in
-    # Allow explicit override when lane is explicitly set to design.
-    neverRouteUnlessLane: design
     alwaysRoute:
       - design
-      - user-facing
-      - reflectt-node
-      - reflectt-cloud-app
-      - reflectt.ai
-      - app.reflectt.ai
       - ui
       - ux
-      - dashboard
-      - a11y
       - css
       - visual
-      - copy
-      - brand
-      - marketing
-    neverRoute:
-      - infra
-      - ws-pairing
-      - pairing
-      - preflight
-      - auth
-      - provisioning
-      - deploy
-      - ci
-      - docker
-      - ssh
-      - gateway
-      - token
     wipCap: 1
 
-  - name: sage
+  - name: agent-3
     role: ops
-    description: Process/ops strategist focused on reliability and execution quality.
+    description: Operations/infra agent. Rename to match your team.
     affinityTags:
       - ci
       - deploy
       - ops
-      - merge
-      - infra
-      - github-actions
       - docker
-      - pipeline
-      - release
-      - codeowners
-    alwaysRoute:
-      - ops
-      - ci
-      - release
-    neverRoute:
-      - visual-polish
+      - monitoring
     protectedDomains:
       - deploy
       - ci
-      - release
-    wipCap: 1
-
-  - name: echo
-    role: voice
-    description: Content and messaging execution owner.
-    affinityTags:
-      - content
-      - docs
-      - landing
-      - copy
-      - brand
-      - marketing
-      - social
-      - blog
-      - readme
-      - onboarding
-    alwaysRoute:
-      - docs
-      - content
-      - standards
-    neverRoute:
-      - db-migration
-    wipCap: 1
-
-  - name: harmony
-    role: agent-health
-    description: Agent health and team culture owner (coordination quality, risk flags, role fit, communication hygiene).
-    affinityTags:
-      - agent-health
-      - team-health
-      - coordination
-      - communication
-      - culture
-      - conflict-prevention
-      - workload-balance
-      - burnout-risk
-      - operating-rhythm
-    alwaysRoute:
-      - agent-health
-      - team-health
-      - coordination
-    neverRoute:
-      - backend
-      - security-review
-      - code-review
-    protectedDomains:
-      - agent-health
-      - team-health
-    wipCap: 1
-
-  - name: scout
-    role: analyst
-    description: Analytics/research owner for insights and prioritization inputs.
-    affinityTags:
-      - research
-      - analysis
-      - metrics
-      - monitoring
-      - analytics
-      - data
-      - reporting
-      - benchmark
-    alwaysRoute:
-      - analytics
-      - research
-      - sla
-    neverRoute:
-      - frontend-polish
-    wipCap: 1
-
-  - name: spark
-    role: growth
-    description: Growth and activation execution owner across funnel, onboarding, and distribution experiments.
-    affinityTags:
-      - growth
-      - activation
-      - funnel
-      - onboarding
-      - distribution
-      - experiment
-      - telemetry
-      - dashboard
-      - conversion
-    alwaysRoute:
-      - growth
-      - activation
-      - experiment
-    neverRoute:
-      - security-review
-    wipCap: 1
+    wipCap: 2

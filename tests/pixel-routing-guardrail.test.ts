@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { loadAgentRoles, suggestAssignee, suggestReviewer } from '../src/assignment.js'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { loadAgentRoles, suggestAssignee, suggestReviewer, setTestRoles } from '../src/assignment.js'
+import { TEST_AGENT_ROLES as testRoles } from './fixtures/test-roles.js'
 
 function getDesigners(): string[] {
   const { roles } = loadAgentRoles()
@@ -10,7 +11,12 @@ function getDesigners(): string[] {
 
 describe('Designer routing guardrail', () => {
   beforeEach(() => {
+    setTestRoles(testRoles)
     loadAgentRoles()
+  })
+
+  afterEach(() => {
+    setTestRoles(null)
   })
 
   it('excludes designers by default when no explicit design opt-in exists', () => {
