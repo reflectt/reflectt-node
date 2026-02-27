@@ -270,3 +270,104 @@ describe('failure mode: reviewer override suppression', () => {
     expect(_testing.isReviewerOverride(task)).toBe(false)
   })
 })
+
+// ── Zombie Cleanup & N/A Review Packet Suppression (Regression) ──
+
+describe('suppression: zombie cleanup transitions', () => {
+  it('handleTaskEvent suppresses zombie cleanup transition', async () => {
+    const task = makeTask({
+      metadata: {
+        artifact_path: 'process/TASK-zombie.md',
+        transition: { type: 'resume', reason: 'Zombie cleanup' },
+        qa_bundle: {
+          review_packet: { pr_url: 'N/A', commit: 'N/A' },
+        },
+      },
+    })
+    const event = { type: 'task_updated' as const, data: task, timestamp: Date.now() }
+    await _testing.handleTaskEvent(event)
+    expect(_testing.stats.totalEmitted).toBe(0)
+    expect(_testing.stats.suppressionReasons['zombie_cleanup']).toBe(1)
+  })
+
+  it('handleTaskEvent suppresses auto_close_reason zombie cleanup', async () => {
+    const task = makeTask({
+      metadata: {
+        artifact_path: 'process/TASK-zombie2.md',
+        auto_close_reason: 'Zombie task cleanup',
+        qa_bundle: {
+          review_packet: { pr_url: 'N/A', commit: 'N/A' },
+        },
+      },
+    })
+    const event = { type: 'task_updated' as const, data: task, timestamp: Date.now() }
+    await _testing.handleTaskEvent(event)
+    expect(_testing.stats.totalEmitted).toBe(0)
+    expect(_testing.stats.suppressionReasons['zombie_cleanup']).toBe(1)
+  })
+})
+
+describe('suppression: N/A review packet', () => {
+  it('handleTaskEvent suppresses when pr_url and commit are N/A', async () => {
+    const task = makeTask({
+      metadata: {
+        artifact_path: 'process/TASK-fake.md',
+        qa_bundle: {
+          review_packet: { pr_url: 'N/A', commit: 'N/A' },
+        },
+      },
+    })
+    const event = { type: 'task_updated' as const, data: task, timestamp: Date.now() }
+    await _testing.handleTaskEvent(event)
+    expect(_testing.stats.totalEmitted).toBe(0)
+    expect(_testing.stats.suppressionReasons['invalid_review_packet']).toBe(1)
+  })
+
+  it('handleTaskEvent suppresses when pr_url is missing and commit is short', async () => {
+    const task = makeTask({
+      metadata: {
+        artifact_path: 'process/TASK-missing.md',
+        qa_bundle: {
+          review_packet: { commit: 'abc' },
+        },
+      },
+    })
+    const event = { type: 'task_updated' as const, data: task, timestamp: Date.now() }
+    await _testing.handleTaskEvent(event)
+    expect(_testing.stats.totalEmitted).toBe(0)
+    expect(_testing.stats.suppressionReasons['invalid_review_packet']).toBe(1)
+  })
+
+  it('handleTaskEvent allows valid pr_url even without commit', async () => {
+    const task = makeTask({
+      metadata: {
+        artifact_path: 'process/TASK-valid.md',
+        eta: '~1h',
+        qa_bundle: {
+          review_packet: { pr_url: 'https://github.com/reflectt/reflectt-node/pull/432' },
+        },
+      },
+    })
+    const event = { type: 'task_updated' as const, data: task, timestamp: Date.now() }
+    await _testing.handleTaskEvent(event)
+    // Should not be suppressed by review packet check
+    // (may be suppressed by reviewer override or other checks, but not invalid_review_packet)
+    expect(_testing.stats.suppressionReasons['invalid_review_packet']).toBeUndefined()
+  })
+
+  it('handleTaskEvent allows valid commit SHA even without pr_url', async () => {
+    const task = makeTask({
+      metadata: {
+        artifact_path: 'process/TASK-sha.md',
+        eta: '~1h',
+        commit_sha: 'c6c2f0660a99b49a2fe45bfd3fb8a165c9b4654f',
+        qa_bundle: {
+          review_packet: { commit: 'c6c2f0660a99b49a2fe45bfd3fb8a165c9b4654f' },
+        },
+      },
+    })
+    const event = { type: 'task_updated' as const, data: task, timestamp: Date.now() }
+    await _testing.handleTaskEvent(event)
+    expect(_testing.stats.suppressionReasons['invalid_review_packet']).toBeUndefined()
+  })
+})

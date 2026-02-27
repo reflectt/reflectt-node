@@ -215,6 +215,28 @@ async function handleTaskEvent(event: Event): Promise<void> {
     return
   }
 
+  // Suppression: zombie cleanup transitions
+  const meta = task.metadata as Record<string, any> | undefined
+  const transitionReason = meta?.transition?.reason
+  if (transitionReason === 'Zombie cleanup' || meta?.auto_close_reason === 'Zombie task cleanup') {
+    console.log(`[ShippedHeartbeat] Task ${task.id} suppressed (zombie cleanup transition)`)
+    recordSuppression('zombie_cleanup')
+    return
+  }
+
+  // Suppression: N/A review packet (no real shipped work)
+  const reviewPacket = meta?.qa_bundle?.review_packet
+  const prUrl = reviewPacket?.pr_url ?? reviewPacket?.pr_link ?? meta?.qa_bundle?.pr_link
+  const commitSha = reviewPacket?.commit ?? meta?.commit_sha
+  const isValidPrUrl = typeof prUrl === 'string' && /^https:\/\/github\.com\/.+\/pull\/\d+/.test(prUrl)
+  const isValidCommit = typeof commitSha === 'string' && commitSha.length >= 7 && commitSha !== 'N/A'
+
+  if (!isValidPrUrl && !isValidCommit) {
+    console.log(`[ShippedHeartbeat] Task ${task.id} suppressed (N/A review packet: pr_url=${prUrl}, commit=${commitSha})`)
+    recordSuppression('invalid_review_packet')
+    return
+  }
+
   // Suppression: dedup window
   if (isDuplicate(task.id)) {
     console.log(`[ShippedHeartbeat] Task ${task.id} suppressed (dedup 30m window)`)
