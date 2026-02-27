@@ -137,6 +137,7 @@ import { processRender, logRejection, getRecentRejections, subscribeCanvas } fro
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
+import { bootstrapTeam, type BootstrapTeamRequest } from './bootstrap-team.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
@@ -1682,6 +1683,7 @@ export async function createServer(): Promise<FastifyInstance> {
       '| GET | `/capabilities` | **Start here.** All endpoints grouped by purpose |',
       '| GET | `/heartbeat/:agent` | Single compact heartbeat (~200 tokens) |',
       '| GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md for your agent |',
+      '| POST | `/bootstrap/team` | Recommend team composition + initial tasks + heartbeat configs |',
       '| GET | `/health` | System health + version + stats |',
       '| GET | `/version` | Current version + update availability |',
       '',
@@ -8524,6 +8526,20 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Bootstrap Team: recommend composition + initial tasks + heartbeat configs ──
+  app.post<{ Body: BootstrapTeamRequest }>('/bootstrap/team', async (request) => {
+    const body = request.body as BootstrapTeamRequest
+    if (!body?.useCase || typeof body.useCase !== 'string' || body.useCase.trim().length < 3) {
+      return { error: 'useCase is required (min 3 chars). Describe what this team will do.', status: 400 }
+    }
+    return bootstrapTeam({
+      useCase: body.useCase.trim(),
+      constraints: body.constraints,
+      models: body.models,
+      channels: body.channels,
+    })
+  })
+
   // ── Capabilities: lightweight, queryable alternative to /docs ────────
   // Full docs: GET /docs (68K chars / ~17K tokens)
   // This endpoint: ~2K chars filtered, ~4K unfiltered — 90%+ reduction
@@ -8538,6 +8554,7 @@ export async function createServer(): Promise<FastifyInstance> {
         endpoints: [
           { method: 'GET', path: '/heartbeat/:agent', hint: 'Single compact payload (~200 tokens). Replaces /tasks/active + /tasks/next + /inbox.' },
           { method: 'GET', path: '/bootstrap/heartbeat/:agent', hint: 'Generate optimal HEARTBEAT.md. Re-fetch when version changes.' },
+          { method: 'POST', path: '/bootstrap/team', hint: 'Recommend team composition, initial tasks, and heartbeat configs. Body: { useCase, constraints?, models?, channels? }' },
         ],
       },
       tasks: {

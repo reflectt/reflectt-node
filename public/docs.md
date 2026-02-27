@@ -152,6 +152,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/active` | Get active (doing) task for agent. Query: `agent`, `compact`. Returns null if no doing tasks. |
 | GET | `/heartbeat/:agent` | Single compact heartbeat payload (~200 tokens). Returns active task, next task, slim inbox, queue counts, and suggested action. Replaces 3 separate API calls. |
 | GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md content for agent. References best endpoints. Includes version stamp and content hash for change detection. |
+| POST | `/bootstrap/team` | Recommend team composition, initial tasks, and heartbeat configs for a use case. Body: `{ useCase, constraints?, models?, channels? }`. Returns `{ agents[], initialTasks[], heartbeatSnippets{}, teamRolesYaml, nextSteps[] }`. |
 | GET | `/capabilities` | Agent-facing endpoint discovery. Lists all endpoints grouped by purpose, compact support flags, and usage recommendations. |
 | GET | `/version` | Current version + latest available from GitHub releases. Includes `update_available` boolean. Caches GitHub check for 15 minutes. |
 | GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action. Supports `compact`. |
@@ -916,3 +917,23 @@ Export → import preserves: summary, description, organizer, attendees, locatio
 | GET | `/calendar/export.ics` | Export events as .ics file. Query: `organizer`, `attendee`, `from`, `to`. Returns `text/calendar` with Content-Disposition. |
 | GET | `/calendar/events/:id/export.ics` | Export single event as .ics file. |
 | POST | `/calendar/import` | Import events from .ics content. Body: `{ ics: string, organizer?: string }` or raw .ics string. Returns created/updated events. UID-based dedup on re-import. |
+
+## Bootstrap: Team Composition
+
+`POST /bootstrap/team` recommends a team based on your use case. Returns agents, ready-to-create task payloads, HEARTBEAT.md snippets, and a TEAM-ROLES.yaml you can save directly.
+
+### Example: Support Team
+
+```bash
+curl -s -X POST http://127.0.0.1:4445/bootstrap/team \
+  -H 'Content-Type: application/json' \
+  -d '{"useCase": "managed node support team", "constraints": {"maxAgents": 3}}' | jq .
+```
+
+### Example: Content Launch
+
+```bash
+curl -s -X POST http://127.0.0.1:4445/bootstrap/team \
+  -H 'Content-Type: application/json' \
+  -d '{"useCase": "content and growth launch"}' | jq .
+```
