@@ -9,7 +9,9 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 import { eventBus } from './events.js'
 
-const WORKSPACE_BASE = '/Users/ryan/.openclaw'
+import { homedir } from 'os'
+
+const WORKSPACE_BASE = process.env.OPENCLAW_HOME || join(homedir(), '.openclaw')
 
 interface MemoryEntry {
   path: string
