@@ -2490,7 +2490,8 @@ async function checkGettingStarted() {
     if (!res.ok) return;
     const health = await res.json();
 
-    const hasHeartbeat = health.uptime_seconds > 0;
+    // Step 1 done: check if system health loops are ticking (not just uptime > 0)
+    const hasHeartbeat = !!(health.system?.loops?.lastTickAt || (health.tasks?.total > 0));
     const hasTasks = (health.tasks?.total || 0) > 0;
     const hasMessages = (health.chat?.total || 0) > 0;
 

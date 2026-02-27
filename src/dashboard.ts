@@ -1079,6 +1079,7 @@ export function getDashboardHTML(): string {
     padding: 4px 8px; border-radius: var(--radius-sm);
   }
   .getting-started .dismiss-btn:hover { color: var(--text); background: var(--accent-dim); }
+  .getting-started .dismiss-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .getting-started .gs-steps { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
   .getting-started .gs-step {
     display: flex; align-items: flex-start; gap: 12px;
@@ -1131,7 +1132,7 @@ export function getDashboardHTML(): string {
   <div class="getting-started" id="getting-started">
     <div class="panel-header">
       🚀 Getting Started
-      <button class="dismiss-btn" onclick="dismissGettingStarted()">Dismiss ✕</button>
+      <button class="dismiss-btn" onclick="dismissGettingStarted()" aria-label="Dismiss Getting Started panel">Dismiss ✕</button>
     </div>
     <div class="gs-steps" id="gs-steps">
       <div class="gs-step" id="gs-preflight">
@@ -1147,7 +1148,7 @@ export function getDashboardHTML(): string {
         <div class="gs-content">
           <div class="gs-title">Connect to your team</div>
           <div class="gs-desc">Bootstrap your host or connect to Reflectt Cloud for team coordination.</div>
-          <a class="gs-link" href="/bootstrap/team" target="_blank">POST /bootstrap/team →</a>
+          <a class="gs-link" href="/docs" target="_blank">Setup docs →</a>
         </div>
       </div>
       <div class="gs-step" id="gs-task">
