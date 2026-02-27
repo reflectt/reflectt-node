@@ -183,6 +183,56 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
         items.push({ field: 'metadata.qa_bundle.changed_files', severity: 'warning', message: 'qa_bundle.changed_files recommended' })
       }
     }
+
+    // Duplicate-closure contract
+    // If a task is being closed/validated as a "duplicate", we must include a canonical reference
+    // (PR/commit/task id) so reviewers aren't asked to approve an N/A proof packet.
+    const isDuplicateClosure =
+      (typeof (meta as any).auto_close_reason === 'string' && ((meta as any).auto_close_reason as string).toLowerCase().includes('duplicate')) ||
+      Boolean((meta as any).duplicate_of) ||
+      ((meta as any).qa_bundle && (meta as any).qa_bundle.lane === 'duplicate-closure')
+
+    if (isDuplicateClosure) {
+      const dupeOf = (meta as any).duplicate_of as string | undefined
+      const canonicalPr = ((meta as any).canonical_pr || (meta as any).canonicalPr) as string | undefined
+      const canonicalCommit = ((meta as any).canonical_commit || (meta as any).canonicalCommit) as string | undefined
+
+      if (!dupeOf?.trim()) {
+        items.push({
+          field: 'metadata.duplicate_of',
+          severity: 'error',
+          message: 'duplicate closure requires duplicate_of (canonical task id)',
+          hint: "Set metadata.duplicate_of to the canonical task id you're duplicating (e.g. task-...).",
+        })
+      }
+
+      const hasCanonicalRef =
+        (typeof canonicalPr === 'string' && canonicalPr.startsWith('http')) ||
+        (typeof (handoff as any)?.pr_url === 'string' && ((handoff as any).pr_url as string).startsWith('http'))
+
+      if (!hasCanonicalRef) {
+        items.push({
+          field: 'metadata.canonical_pr',
+          severity: 'error',
+          message: 'duplicate closure requires a canonical PR link (canonical_pr or review_handoff.pr_url)',
+          hint: 'Provide the shipped PR URL that satisfies the done criteria.',
+        })
+      }
+
+      const hasCommitRef =
+        (typeof canonicalCommit === 'string' && canonicalCommit.length >= 7) ||
+        (typeof (handoff as any)?.commit_sha === 'string' && (((handoff as any).commit_sha as string).length >= 7))
+
+      if (!hasCommitRef) {
+        items.push({
+          field: 'metadata.canonical_commit',
+          severity: 'warning',
+          message: 'duplicate closure should include a canonical commit SHA (canonical_commit or review_handoff.commit_sha)',
+          hint: 'Include a commit SHA so reviewers can trace the exact shipped state.',
+        })
+      }
+    }
+
   }
 
   // ── done ────────────────────────────────────────────────────────────
