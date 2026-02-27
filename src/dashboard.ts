@@ -822,6 +822,28 @@ export function getDashboardHTML(): string {
     outline-offset: 4px;
   }
 
+  /* Focus-visible parity: match hover styles for keyboard navigation */
+  button:focus-visible, .button:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+  .task-card:focus-visible { border-color: var(--accent); }
+  .health-card:focus-visible { border-color: var(--accent); }
+  .agent-card:focus-visible .agent-emoji { transform: scale(1.1) rotate(5deg); }
+  .channel-tab:focus-visible { background: var(--surface-raised); color: var(--text); }
+  .project-tab:focus-visible { color: var(--text); }
+  .focus-toggle:focus-visible { border-color: var(--accent); color: var(--text); }
+  .status-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
+  .artifact-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
+  .modal-copy-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
+  .copy-template-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
+  .modal-close:focus-visible { color: var(--text); }
+  .modal-btn-primary:focus-visible { opacity: 0.85; }
+  .modal-btn-secondary:focus-visible { background: var(--text-muted); }
+  .done-toggle:focus-visible { color: var(--text); }
+  .review-item:focus-visible { background: var(--surface-raised); }
+  .gs-link:focus-visible { text-decoration: underline; }
+
   /* Reduced Motion Preferences */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
