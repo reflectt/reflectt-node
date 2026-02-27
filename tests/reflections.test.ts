@@ -209,8 +209,8 @@ describe('createReflection + getReflection', () => {
   })
 
   it('handles confidence boundary values (0 and 10)', () => {
-    const ref0 = createReflection({ ...VALID_INPUT, confidence: 0 })
-    const ref10 = createReflection({ ...VALID_INPUT, confidence: 10 })
+    const ref0 = createReflection({ ...VALID_INPUT, pain: 'Confidence zero test', confidence: 0 })
+    const ref10 = createReflection({ ...VALID_INPUT, pain: 'Confidence ten test', confidence: 10 })
     expect(ref0.confidence).toBe(0)
     expect(ref10.confidence).toBe(10)
   })
@@ -243,8 +243,8 @@ describe('listReflections + countReflections', () => {
   })
 
   it('filters by role_type', () => {
-    createReflection(VALID_INPUT) // agent
-    createReflection({ ...VALID_INPUT, role_type: 'human' })
+    createReflection({ ...VALID_INPUT, pain: 'Agent role test pain' }) // agent
+    createReflection({ ...VALID_INPUT, pain: 'Human role test pain', role_type: 'human' })
     const list = listReflections({ role_type: 'human' })
     expect(list).toHaveLength(1)
     expect(list[0].role_type).toBe('human')

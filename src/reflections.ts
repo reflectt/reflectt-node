@@ -186,9 +186,40 @@ function rowToReflection(row: ReflectionRow): Reflection {
 
 // ── CRUD (standalone functions matching server.ts import) ──
 
+// ── Dedup ──
+
+const REFLECTION_DEDUP_WINDOW_MS = 60 * 60 * 1000 // 1 hour cooldown for same-pain reflections
+
+/**
+ * Check if a near-identical reflection was already filed recently.
+ * Matches on: same author + same pain text (trimmed, case-insensitive).
+ */
+export function findRecentDuplicate(author: string, pain: string): Reflection | null {
+  const db = getDb()
+  const since = Date.now() - REFLECTION_DEDUP_WINDOW_MS
+  const normalizedPain = pain.trim().toLowerCase().replace(/\s*\[run-[^\]]+\]/g, '') // strip run IDs for comparison
+  const rows = db.prepare(
+    'SELECT * FROM reflections WHERE author = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 20'
+  ).all(author, since) as ReflectionRow[]
+  for (const row of rows) {
+    const rowPain = row.pain.trim().toLowerCase().replace(/\s*\[run-[^\]]+\]/g, '')
+    if (rowPain === normalizedPain) {
+      return rowToReflection(row)
+    }
+  }
+  return null
+}
+
 export function createReflection(input: ReflectionInput): Reflection {
   const db = getDb()
   const now = Date.now()
+
+  // Dedup: reject near-identical reflections from the same author within cooldown
+  const existing = findRecentDuplicate(input.author, input.pain)
+  if (existing) {
+    return existing // Return the existing reflection instead of creating a duplicate
+  }
+
   const id = generateId()
 
   const reflection: Reflection = { ...input, id, created_at: now, updated_at: now }
