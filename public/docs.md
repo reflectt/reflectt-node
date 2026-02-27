@@ -153,6 +153,11 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/heartbeat/:agent` | Single compact heartbeat payload (~200 tokens). Returns active task, next task, slim inbox, queue counts, and suggested action. Replaces 3 separate API calls. |
 | GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md content for agent. References best endpoints. Includes version stamp and content hash for change detection. |
 | POST | `/bootstrap/team` | Recommend team composition, initial tasks, and heartbeat configs for a use case. Body: `{ useCase, constraints?, models?, channels? }`. Returns `{ agents[], initialTasks[], heartbeatSnippets{}, teamRolesYaml, nextSteps[] }`. |
+| GET | `/manage/status` | Remote management: unified status (version + health + uptime). Auth: `x-manage-token` header or `Authorization: Bearer`. |
+| GET | `/manage/config` | Remote management: config introspection with secrets redacted. Auth required. |
+| GET | `/manage/logs` | Remote management: bounded log tail. Query: `level`, `since`, `limit`, `format=text`. Auth required. |
+| POST | `/manage/restart` | Remote management: graceful restart (Docker/systemd/CLI). Auth required. |
+| GET | `/manage/disk` | Remote management: data directory sizes. Auth required. |
 | GET | `/capabilities` | Agent-facing endpoint discovery. Lists all endpoints grouped by purpose, compact support flags, and usage recommendations. |
 | GET | `/version` | Current version + latest available from GitHub releases. Includes `update_available` boolean. Caches GitHub check for 15 minutes. |
 | GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action. Supports `compact`. |
@@ -917,6 +922,39 @@ Export → import preserves: summary, description, organizer, attendees, locatio
 | GET | `/calendar/export.ics` | Export events as .ics file. Query: `organizer`, `attendee`, `from`, `to`. Returns `text/calendar` with Content-Disposition. |
 | GET | `/calendar/events/:id/export.ics` | Export single event as .ics file. |
 | POST | `/calendar/import` | Import events from .ics content. Body: `{ ics: string, organizer?: string }` or raw .ics string. Returns created/updated events. UID-based dedup on re-import. |
+
+## Remote Node Management
+
+Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `REFLECTT_MANAGE_TOKEN` env var; authenticate via `x-manage-token` header or `Authorization: Bearer <token>`. Loopback (localhost) access is always allowed.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/manage/status` | Unified status: version, build info, health stats, uptime |
+| GET | `/manage/config` | Config introspection with secrets redacted (server config, auth token status, team files) |
+| GET | `/manage/logs` | Bounded log tail. Query: `level` (error/warn/info), `since` (epoch ms), `limit` (max 200), `format=text` for plain text |
+| POST | `/manage/restart` | Graceful restart. Works with Docker, systemd, and reflectt CLI (PID file). Returns 501 if unsupported. |
+| GET | `/manage/disk` | Data directory sizes for capacity monitoring |
+
+### Example: Check Remote Node Status
+
+```bash
+curl -s http://your-node:4445/manage/status \
+  -H 'x-manage-token: YOUR_TOKEN' | jq .
+```
+
+### Example: Tail Error Logs (Plain Text)
+
+```bash
+curl -s 'http://your-node:4445/manage/logs?level=error&limit=20&format=text' \
+  -H 'x-manage-token: YOUR_TOKEN'
+```
+
+### Example: Inspect Config (Secrets Redacted)
+
+```bash
+curl -s http://your-node:4445/manage/config \
+  -H 'x-manage-token: YOUR_TOKEN' | jq .
+```
 
 ## Bootstrap: Team Composition
 

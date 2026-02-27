@@ -6,6 +6,10 @@ import process from 'node:process'
 const ROOT = process.cwd()
 const SERVER_PATH = path.join(ROOT, 'src', 'server.ts')
 const DOCS_PATH = path.join(ROOT, 'public', 'docs.md')
+// Additional source files that register routes via helper functions
+const EXTRA_ROUTE_SOURCES = [
+  path.join(ROOT, 'src', 'manage.ts'),
+]
 
 const IGNORE_ROUTES = new Set([
   'GET /avatars/:filename',
@@ -55,7 +59,11 @@ function diff(a, b) {
 }
 
 function main() {
-  const serverSource = read(SERVER_PATH)
+  let serverSource = read(SERVER_PATH)
+  // Include routes from helper modules
+  for (const extra of EXTRA_ROUTE_SOURCES) {
+    if (fs.existsSync(extra)) serverSource += '\n' + read(extra)
+  }
   const docsSource = read(DOCS_PATH)
 
   const serverRoutes = extractServerRoutes(serverSource)

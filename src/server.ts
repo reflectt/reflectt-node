@@ -138,6 +138,7 @@ import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeam
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
 import { bootstrapTeam, type BootstrapTeamRequest } from './bootstrap-team.js'
+import { registerManageRoutes } from './manage.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
@@ -1684,6 +1685,7 @@ export async function createServer(): Promise<FastifyInstance> {
       '| GET | `/heartbeat/:agent` | Single compact heartbeat (~200 tokens) |',
       '| GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md for your agent |',
       '| POST | `/bootstrap/team` | Recommend team composition + initial tasks + heartbeat configs |',
+      '| GET | `/manage/status` | Remote management: unified status (auth-gated) |',
       '| GET | `/health` | System health + version + stats |',
       '| GET | `/version` | Current version + update availability |',
       '',
@@ -2635,6 +2637,23 @@ export async function createServer(): Promise<FastifyInstance> {
         details: String(err?.message || err),
       }
     }
+  })
+
+  // ============ REMOTE MANAGEMENT API ============
+  registerManageRoutes(app, {
+    getBuildInfo: () => getBuildInfo() as unknown as Record<string, unknown>,
+    getHealthStats: async () => {
+      return {
+        status: 'ok',
+        version: BUILD_VERSION,
+        uptime_seconds: Math.round((Date.now() - BUILD_STARTED_AT) / 1000),
+        chat: chatManager.getStats(),
+        tasks: taskManager.getStats({}),
+        inbox: inboxManager.getStats(),
+      } as unknown as Record<string, unknown>
+    },
+    readStoredLogs,
+    getStoredLogPath,
   })
 
   // ============ RELEASE / DEPLOY ENDPOINTS ============
@@ -8607,6 +8626,16 @@ export async function createServer(): Promise<FastifyInstance> {
           { method: 'GET', path: '/capabilities', hint: 'This endpoint. Query: category to filter' },
           { method: 'GET', path: '/me/:agent', compact: true, hint: 'Full dashboard. Use /heartbeat/:agent for polls.' },
           { method: 'GET', path: '/docs', hint: 'Full API reference (68K chars). Use /capabilities instead when possible.' },
+        ],
+      },
+      manage: {
+        description: 'Remote node management (auth-gated)',
+        endpoints: [
+          { method: 'GET', path: '/manage/status', hint: 'Unified status: version + health + uptime. Auth: x-manage-token or Bearer.' },
+          { method: 'GET', path: '/manage/config', hint: 'Config introspection (secrets redacted). Auth required.' },
+          { method: 'GET', path: '/manage/logs', hint: 'Bounded log tail. Query: level, since, limit, format=text. Auth required.' },
+          { method: 'POST', path: '/manage/restart', hint: 'Graceful restart (Docker/systemd/CLI). Auth required.' },
+          { method: 'GET', path: '/manage/disk', hint: 'Data directory sizes. Auth required.' },
         ],
       },
     }
