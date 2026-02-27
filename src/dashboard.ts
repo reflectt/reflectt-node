@@ -1093,6 +1093,11 @@ export function getDashboardHTML(): string {
     <div class="panel-body" id="truth-body"></div>
   </div>
 
+  <div class="panel focus-collapse" id="shared-artifacts-panel">
+    <div class="panel-header">📚 Shared Artifacts <span class="count" id="shared-artifacts-count">loading…</span></div>
+    <div class="panel-body" id="shared-artifacts-body" style="max-height:260px;overflow-y:auto"></div>
+  </div>
+
   <div class="panel">
     <div class="panel-header">📋 Task Board <span class="count" id="task-count"></span></div>
     <div class="project-tabs" id="project-tabs"></div>
