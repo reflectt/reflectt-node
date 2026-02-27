@@ -36,12 +36,19 @@ export class OpenClawClient {
   private ws: WebSocket | null = null
   private connected = false
   private reconnectTimer: NodeJS.Timeout | null = null
+  private pingInterval: NodeJS.Timeout | null = null
+  private reconnectAttempts = 0
   private requestId = 0
   private pendingRequests = new Map<string, {
     resolve: (value: unknown) => void
     reject: (error: Error) => void
   }>()
   private eventHandlers = new Map<string, Set<(payload: unknown) => void>>()
+
+  // Reconnect backoff: 1s, 2s, 4s, 8s, 16s, 30s (cap)
+  private static readonly BASE_RECONNECT_MS = 1000
+  private static readonly MAX_RECONNECT_MS = 30000
+  private static readonly PING_INTERVAL_MS = 25000 // Keep-alive ping every 25s
 
   constructor() {
     this.connect()
@@ -54,6 +61,8 @@ export class OpenClawClient {
 
     this.ws.on('open', () => {
       console.log('[OpenClaw] WebSocket connected, performing handshake...')
+      this.reconnectAttempts = 0 // Reset backoff on successful connection
+      this.startPing()
       this.handshake()
     })
 
@@ -69,20 +78,48 @@ export class OpenClawClient {
     this.ws.on('close', () => {
       console.log('[OpenClaw] Connection closed, will reconnect...')
       this.connected = false
+      this.stopPing()
       this.scheduleReconnect()
     })
 
     this.ws.on('error', (err) => {
       console.error('[OpenClaw] WebSocket error:', err.message)
     })
+
+    this.ws.on('pong', () => {
+      // Keep-alive pong received — connection is healthy
+    })
+  }
+
+  private startPing() {
+    this.stopPing()
+    this.pingInterval = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.ping()
+      }
+    }, OpenClawClient.PING_INTERVAL_MS)
+    this.pingInterval.unref() // Don't block process exit
+  }
+
+  private stopPing() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval)
+      this.pingInterval = null
+    }
   }
 
   private scheduleReconnect() {
     if (this.reconnectTimer) return
+    const delay = Math.min(
+      OpenClawClient.BASE_RECONNECT_MS * Math.pow(2, this.reconnectAttempts),
+      OpenClawClient.MAX_RECONNECT_MS,
+    )
+    this.reconnectAttempts++
+    console.log(`[OpenClaw] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       this.connect()
-    }, 5000)
+    }, delay)
   }
 
   private async handshake() {
@@ -203,6 +240,7 @@ export class OpenClawClient {
   }
 
   close() {
+    this.stopPing()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null

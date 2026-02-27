@@ -61,6 +61,40 @@ class EventBus {
   private batchWindowMs = 2000 // Default: 2 seconds
   private pendingEvents: Event[] = []
   private batchTimer: NodeJS.Timeout | null = null
+  private keepaliveTimer: NodeJS.Timeout | null = null
+  private static readonly KEEPALIVE_INTERVAL_MS = 30000 // SSE keepalive every 30s
+
+  constructor() {
+    this.startKeepalive()
+  }
+
+  /**
+   * Send SSE keepalive comments to prevent proxy/Docker network timeouts.
+   * SSE comment lines (starting with ':') are ignored by EventSource clients.
+   */
+  private startKeepalive() {
+    this.keepaliveTimer = setInterval(() => {
+      for (const [id, sub] of this.subscriptions) {
+        try {
+          if (!sub.reply.raw.destroyed) {
+            sub.reply.raw.write(`:keepalive ${Date.now()}\n\n`)
+          } else {
+            this.subscriptions.delete(id)
+          }
+        } catch {
+          this.subscriptions.delete(id)
+        }
+      }
+    }, EventBus.KEEPALIVE_INTERVAL_MS)
+    this.keepaliveTimer.unref()
+  }
+
+  stopKeepalive() {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer)
+      this.keepaliveTimer = null
+    }
+  }
 
   /**
    * Register an in-process listener for events.
