@@ -410,7 +410,7 @@ async function handleChatMessage(
 
 function extractAgentMentions(content: string, cfg: OpenClawConfig): string[] {
   const mentions: string[] = [];
-  const mentionPattern = /@(\w+)/g;
+  const mentionPattern = /@([\w][\w-]*[\w]|[\w]+)/g;
   
   let match;
   while ((match = mentionPattern.exec(content)) !== null) {
