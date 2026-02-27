@@ -61,6 +61,17 @@ Operationally:
 | GET | `/preflight/text` | Run preflight checks and return a plain-text formatted report for CLI/terminal display. Same query params as GET. |
 | POST | `/preflight` | Run preflight checks with custom config. Body: `{ cloudUrl?, port?, skipNetwork?, joinToken?, apiKey?, userId? }`. When `userId` is provided, emits `host_preflight_passed` or `host_preflight_failed` activation funnel events for onboarding drop-off tracking. |
 
+## Hosts (registry)
+
+Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the dashboard can show which machines are online.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/hosts/heartbeat` | Upsert a host heartbeat. Body: `{ hostId (string, required), hostname?, os?, arch?, ip?, version?, agents? (string[]), metadata? (object) }`. Returns `{ success, host }`.
+| GET | `/hosts` | List all known hosts. Query: `status=online|stale|offline` (optional). Returns `{ hosts, count }`.
+| GET | `/hosts/:hostId` | Fetch one host by ID. Returns `{ host }` or `{ success:false, error:"Host not found" }`.
+| DELETE | `/hosts/:hostId` | Remove a host from the registry. Returns `{ success, hostId }`.
+
 ## Health
 
 | Method | Path | Description |
