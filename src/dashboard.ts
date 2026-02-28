@@ -127,6 +127,20 @@ export function getDashboardHTML(): string {
   .header-logo { font-size: var(--text-xl); font-weight: var(--font-weight-bold); color: var(--text-bright); letter-spacing: var(--letter-spacing-tight); }
   .header-logo span { color: var(--accent); }
   .header-right { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-base); color: var(--text-muted); }
+  .pause-banner {
+    display: flex; align-items: center; gap: var(--space-4);
+    padding: var(--space-3) var(--space-8);
+    background: linear-gradient(90deg, #2d1b00 0%, #1a1000 100%);
+    border-bottom: 2px solid #f59e0b;
+    color: #fbbf24; font-size: var(--text-base); font-weight: var(--font-weight-medium);
+  }
+  .pause-icon { font-size: var(--text-lg); }
+  .pause-resume-btn {
+    margin-left: auto; padding: var(--space-1) var(--space-4);
+    background: transparent; border: 1px solid #f59e0b; border-radius: var(--radius-md);
+    color: #fbbf24; cursor: pointer; font-size: var(--text-sm);
+  }
+  .pause-resume-btn:hover { background: rgba(245, 158, 11, 0.15); }
   .release-badge {
     display: inline-flex;
     align-items: center;
@@ -1232,6 +1246,11 @@ export function getDashboardHTML(): string {
     <span id="build-badge" class="release-badge" title="Build info">build: loading…</span>
     <span id="clock"></span>
   </div>
+</div>
+<div id="pause-banner" class="pause-banner" style="display:none">
+  <span class="pause-icon">⏸️</span>
+  <span id="pause-message">Team paused</span>
+  <button onclick="resumeFromBanner()" class="pause-resume-btn">Resume</button>
 </div>
 
 <div class="agent-strip" id="agent-strip"></div>

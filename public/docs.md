@@ -691,6 +691,9 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/team/manifest` | Team charter manifest from `~/.reflectt/TEAM.md`. Returns parsed sections, version hash, update timestamp, and raw markdown. Returns `404` if TEAM.md is missing with creation hint. |
+| POST | `/pause` | Pause an agent or team. Body: `{ target: "team"|"agent-name", durationMinutes?, reason?, pausedBy? }`. Auto-resumes when duration expires. |
+| DELETE | `/pause` | Resume (unpause) an agent or team. Query: `target=team|agent-name`. |
+| GET | `/pause/status` | Current pause status. Query: `agent` (optional). Returns paused flag, remaining time, reason. |
 | GET | `/team/roles` | TEAM-ROLES routing matrix — agent skills, affinity scores, WIP caps |
 
 ## Other
