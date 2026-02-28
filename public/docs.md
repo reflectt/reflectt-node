@@ -71,6 +71,8 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/hosts` | List all known hosts. Query: `status=online|stale|offline` (optional). Returns `{ hosts, count }`.
 | GET | `/hosts/:hostId` | Fetch one host by ID. Returns `{ host }` or `{ success:false, error:"Host not found" }`.
 | DELETE | `/hosts/:hostId` | Remove a host from the registry. Returns `{ success, hostId }`.
+| GET | `/hosts/keepalive` | Keepalive status for all managed hosts — last ping times, intervals, health. |
+| POST | `/hosts/keepalive/ping` | Manually trigger a keepalive ping to all or a specific host. Body: `{ hostId? }`. Returns `{ success, results }`. |
 
 ## Health
 
