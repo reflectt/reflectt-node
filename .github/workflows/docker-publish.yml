@@ -58,5 +58,5 @@ jobs:
           PACKAGE: ${{ github.event.repository.name }}
         run: |
           echo "Attempting to set GHCR package visibility to public for $OWNER/$PACKAGE"
-          gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE" -f visibility=public || \
-          gh api -X PATCH "/user/packages/container/$PACKAGE" -f visibility=public || true
+          gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE/visibility" -f visibility=public || \
+          gh api -X PATCH "/user/packages/container/$PACKAGE/visibility" -f visibility=public || true
