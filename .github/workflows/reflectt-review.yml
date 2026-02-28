@@ -1,0 +1,126 @@
+name: reflectt-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  repository_dispatch:
+    types: [reflectt-review-update]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to re-check'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  reflectt-review-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check reflectt-node task review state
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // ── Resolve PR ──
+            let pr;
+            if (context.eventName === 'pull_request') {
+              pr = context.payload.pull_request;
+            } else {
+              // workflow_dispatch or repository_dispatch — look up PR by number
+              const prNumber = context.payload.inputs?.pr_number
+                || context.payload.client_payload?.pr_number;
+              if (!prNumber) {
+                core.info('No PR context — nothing to check.');
+                return;
+              }
+              const { data } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: Number(prNumber),
+              });
+              pr = data;
+            }
+
+            if (!pr || pr.state !== 'open') {
+              core.info('PR not open — skipping.');
+              return;
+            }
+
+            const nodeUrl = '${{ vars.REFLECTT_NODE_URL }}'.trim();
+
+            // ── Extract task ID from branch or PR body ──
+            const taskIdPattern = /task-\d+-[a-z0-9]+/;
+            const branchMatch = pr.head.ref.match(taskIdPattern);
+            const bodyMatch = (pr.body || '').match(taskIdPattern);
+            const taskId = branchMatch?.[0] || bodyMatch?.[0];
+
+            async function setStatus(state, description) {
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: pr.head.sha,
+                state,
+                context: 'reflectt-review',
+                description: description.slice(0, 140),
+              });
+            }
+
+            // ── No task ID → pass with warning ──
+            if (!taskId) {
+              await setStatus('success', 'No task ID found — non-task PR, passing');
+              core.warning('No task ID in branch or PR body. Passing (non-task PR).');
+              return;
+            }
+
+            // ── No node URL configured → pass with warning ──
+            if (!nodeUrl) {
+              await setStatus(
+                'success',
+                `Task ${taskId} — REFLECTT_NODE_URL not configured, skipping review check`
+              );
+              core.warning('REFLECTT_NODE_URL not set. Cannot verify review state.');
+              return;
+            }
+
+            // ── Query reflectt-node ──
+            const url = `${nodeUrl.replace(/\/$/, '')}/tasks/${taskId}`;
+            let task;
+            try {
+              const resp = await fetch(url, {
+                headers: { 'Accept': 'application/json' },
+                signal: AbortSignal.timeout(10000),
+              });
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              const data = await resp.json();
+              task = data.task || data;
+            } catch (err) {
+              // Network failure → don't block the PR, but warn
+              await setStatus(
+                'success',
+                `Cannot reach reflectt-node (${err.message}) — passing with warning`
+              );
+              core.warning(`Failed to reach reflectt-node at ${url}: ${err.message}`);
+              return;
+            }
+
+            // ── Check review_state ──
+            const reviewState = task.metadata?.review_state || 'none';
+            const reviewer = task.reviewer || task.metadata?.reviewer || 'unknown';
+
+            if (reviewState === 'approved') {
+              await setStatus(
+                'success',
+                `✅ Task ${taskId} review approved (reviewer: ${reviewer})`
+              );
+              core.info(`Task ${taskId} review approved by ${reviewer}.`);
+            } else {
+              await setStatus(
+                'pending',
+                `⏳ Task ${taskId} review: ${reviewState} (reviewer: ${reviewer})`
+              );
+              core.info(`Task ${taskId} review state: ${reviewState}. Waiting for approval.`);
+            }
