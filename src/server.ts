@@ -153,6 +153,7 @@ import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CAT
 import { onTaskShipped, onProcessFileWritten, onDecisionComment, isDecisionComment } from './knowledge-auto-index.js'
 import { upsertHostHeartbeat, getHost, listHosts, removeHost } from './host-registry.js'
 import { startKeepalive, stopKeepalive, getKeepaliveStatus, triggerKeepalivePing } from './host-keepalive.js'
+import { startSelfKeepalive, stopSelfKeepalive, getSelfKeepaliveStatus, detectWarmBoot, getBootInfo } from './cf-keepalive.js'
 // polls.ts imported dynamically where needed
 import { pauseTarget, unpauseTarget, checkPauseStatus, listPauseEntries } from './pause-controls.js'
 
@@ -2051,6 +2052,14 @@ export async function createServer(): Promise<FastifyInstance> {
     })
   })
 
+  // ── Warm boot detection ──
+  // Detect if this is a cold start or warm boot (recovering from restart)
+  try {
+    detectWarmBoot(getDb())
+  } catch (err) {
+    console.warn('[Server] Warm boot detection failed:', (err as Error).message)
+  }
+
   // Insight:promoted → auto-task bridge (severity-aware)
   startInsightTaskBridge()
 
@@ -2073,6 +2082,7 @@ export async function createServer(): Promise<FastifyInstance> {
     stopTeamPulse()
     stopReminderEngine()
     stopKeepalive()
+    stopSelfKeepalive()
     wsHeartbeat.stop()
   })
 
@@ -2104,6 +2114,7 @@ export async function createServer(): Promise<FastifyInstance> {
       ...(coldStart ? {
         remediation: 'Instance recently restarted. If this happens frequently, add a keepalive cron — see docs/KEEPALIVE.md',
       } : {}),
+      boot_info: getBootInfo(),
     }
   })
 
@@ -2221,6 +2232,17 @@ export async function createServer(): Promise<FastifyInstance> {
     const { hostId } = request.params as { hostId: string }
     const removed = removeHost(hostId)
     return { success: removed, hostId }
+  })
+
+  // ── Self Keepalive (Cloudflare / serverless) ──
+
+  // Start self-keepalive to prevent container eviction in serverless environments
+  const serverPort = Number(process.env['PORT'] || process.env['REFLECTT_PORT'] || 4445)
+  startSelfKeepalive(serverPort)
+
+  // Self-keepalive status + warm boot info
+  app.get('/health/keepalive', async () => {
+    return getSelfKeepaliveStatus()
   })
 
   // ── Host Keepalive ──
