@@ -276,6 +276,7 @@ export function getDashboardHTML(): string {
     padding: var(--space-3) var(--space-4); background: var(--surface-raised); border: 1px solid var(--border);
     border-radius: var(--radius-md); min-width: 200px; transition: border-color var(--transition-fast) var(--easing-smooth);
   }
+  .agent-card:hover { border-color: var(--accent); }
   .agent-card.active { border-left: 3px solid var(--green); }
   .agent-card.idle { opacity: 0.6; }
   .agent-card.offline { opacity: 0.35; }
@@ -1058,16 +1059,27 @@ export function getDashboardHTML(): string {
     text-decoration: underline;
   }
 
-  /* Focus-visible parity: match hover styles for keyboard navigation */
+  /* ── Focus-visible parity: match hover styles for keyboard nav ── */
+
+  /* Buttons: lift effect on focus matches hover */
   button:focus-visible, .button:focus-visible {
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    box-shadow: var(--shadow-hover, 0 4px 12px rgba(0, 0, 0, 0.15));
   }
+
+  /* Cards: accent border on focus matches hover */
   .task-card:focus-visible { border-color: var(--accent); }
+  .task-card:focus-visible:not(:active) { box-shadow: 0 0 0 1px var(--accent-dim); }
   .health-card:focus-visible { border-color: var(--accent); }
+  .health-card:focus-visible:not(:active) { box-shadow: 0 0 0 1px var(--accent-dim); }
+  .agent-card:focus-visible { border-color: var(--accent); }
   .agent-card:focus-visible .agent-emoji { transform: scale(1.1) rotate(5deg); }
+
+  /* Tabs: background + text highlight matches hover */
   .channel-tab:focus-visible { background: var(--surface-raised); color: var(--text); }
-  .project-tab:focus-visible { color: var(--text); }
+  .project-tab:focus-visible { color: var(--text); border-bottom-color: var(--text-muted); }
+
+  /* Interactive controls: border highlight matches hover */
   .focus-toggle:focus-visible { border-color: var(--accent); color: var(--text); }
   .status-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
   .artifact-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
@@ -1077,8 +1089,20 @@ export function getDashboardHTML(): string {
   .modal-btn-primary:focus-visible { opacity: 0.85; }
   .modal-btn-secondary:focus-visible { background: var(--text-muted); }
   .done-toggle:focus-visible { color: var(--text); }
-  .review-item:focus-visible { background: var(--surface-raised); }
   .gs-link:focus-visible { text-decoration: underline; }
+
+  /* Panels: row highlight on focus matches hover */
+  .panel-row:focus-visible { background: var(--surface-raised); }
+  .panel-row:hover { background: var(--surface-raised); }
+  .review-item:focus-visible { background: var(--surface-raised); }
+
+  /* Table rows: highlight on focus matches hover */
+  .table tr:focus-visible td,
+  table tr:focus-visible td { background: var(--surface-raised); }
+
+  /* Feedback cards: interactive elements focus parity */
+  .feedback-card:focus-visible { border-color: var(--accent); }
+  .fb-vote-btn:focus-visible { border-color: var(--accent); color: var(--accent); }
 
   /* Reduced Motion Preferences */
   @media (prefers-reduced-motion: reduce) {
@@ -1381,7 +1405,7 @@ export function getDashboardHTML(): string {
     padding: 2px 8px; border-radius: var(--radius-sm, 4px); cursor: pointer;
   }
   .poll-new-btn:hover { border-color: var(--accent, #60a5fa); color: var(--text-primary, #e0e0e0); }
-  .poll-new-btn:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+  .poll-new-btn:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
   .poll-create-form {
     border-top: 1px solid var(--border-subtle, #222); padding: 12px;
   }
@@ -1412,14 +1436,14 @@ export function getDashboardHTML(): string {
     color: #fff; padding: 4px 12px; border-radius: var(--radius-sm, 4px); cursor: pointer;
   }
   .poll-btn-primary:hover { opacity: 0.9; }
-  .poll-btn-primary:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+  .poll-btn-primary:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
   .poll-btn-secondary {
     font-size: var(--text-xs, 11px); background: none;
     border: 1px solid var(--border, #2a2a4a); color: var(--text-muted, #888);
     padding: 4px 8px; border-radius: var(--radius-sm, 4px); cursor: pointer;
   }
   .poll-btn-secondary:hover { border-color: var(--accent, #60a5fa); color: var(--text-primary, #e0e0e0); }
-  .poll-btn-secondary:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+  .poll-btn-secondary:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 
   /* Poll cards */
   .poll-card {
@@ -1448,7 +1472,7 @@ export function getDashboardHTML(): string {
     transition: border-color 0.15s;
   }
   .poll-option:hover { border-color: var(--accent, #60a5fa); }
-  .poll-option:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: -2px; }
+  .poll-option:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
   .poll-option[aria-checked="true"] { border-color: var(--accent, #60a5fa); background: rgba(96,165,250,0.04); }
   .poll-option-bar {
     position: absolute; top: 0; left: 0; height: 100%;
@@ -1497,7 +1521,7 @@ export function getDashboardHTML(): string {
     cursor: pointer; transition: all 0.15s ease;
   }
   .intensity-btn:hover { border-color: var(--accent, #60a5fa); color: var(--text-primary, #e0e0e0); }
-  .intensity-btn:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+  .intensity-btn:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
   .intensity-btn.intensity-active {
     background: var(--accent, #60a5fa); color: #fff; border-color: var(--accent, #60a5fa);
   }
@@ -1509,7 +1533,7 @@ export function getDashboardHTML(): string {
     cursor: pointer; transition: all 0.15s ease;
   }
   .pause-toggle-btn:hover { border-color: var(--red, #f87171); color: var(--red, #f87171); }
-  .pause-toggle-btn:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+  .pause-toggle-btn:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
   .pause-toggle-btn.paused {
     background: var(--red-dim, rgba(248,113,113,0.12)); color: var(--red, #f87171);
     border-color: var(--red, #f87171);
