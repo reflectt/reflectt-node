@@ -2075,6 +2075,30 @@ export async function createServer(): Promise<FastifyInstance> {
     return { status: 'ok', uptime_seconds: Math.round((Date.now() - BUILD_STARTED_AT) / 1000), ts: Date.now() }
   })
 
+  // Watchdog: richer keepalive that surfaces recovery state for monitoring dashboards.
+  // Returns cold_start flag, task/chat stats, and remediation hints when unhealthy.
+  app.get('/health/watchdog', async () => {
+    const uptimeSeconds = Math.round((Date.now() - BUILD_STARTED_AT) / 1000)
+    const coldStart = uptimeSeconds < 60
+    const taskStats = taskManager.getStats({})
+    const chatStats = chatManager.getStats()
+    const healthy = !coldStart || uptimeSeconds > 10 // Allow 10s grace for init
+
+    return {
+      status: healthy ? 'ok' : 'recovering',
+      uptime_seconds: uptimeSeconds,
+      cold_start: coldStart,
+      ts: Date.now(),
+      stats: {
+        tasks: { total: taskStats.total, byStatus: taskStats.byStatus },
+        chat: { rooms: chatStats.rooms, totalMessages: chatStats.totalMessages },
+      },
+      ...(coldStart ? {
+        remediation: 'Instance recently restarted. If this happens frequently, add a keepalive cron — see docs/KEEPALIVE.md',
+      } : {}),
+    }
+  })
+
   app.get('/health', async (request) => {
     const query = request.query as Record<string, string>
     const includeTest = query.include_test === '1' || query.include_test === 'true'
