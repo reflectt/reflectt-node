@@ -1539,6 +1539,369 @@ export function getDashboardHTML(): string {
     border-color: var(--red, #f87171);
   }
   .pause-toggle-btn.paused:hover { background: var(--green-dim, rgba(74,222,128,0.12)); color: var(--green, #4ade80); border-color: var(--green, #4ade80); }
+
+  /* ============================================================
+     FILE UPLOAD — drop zone, progress queue, file browser, attachments
+     ============================================================ */
+
+  /* Drop zone */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-6) var(--space-4);
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--transition-normal) var(--easing-smooth);
+    position: relative;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+  }
+  .drop-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .drop-zone:hover {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+  }
+  .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    border-style: solid;
+    transform: scale(1.01);
+  }
+  .drop-zone:focus-within {
+    outline: var(--focus-ring);
+    outline-offset: var(--focus-offset);
+    border-color: var(--accent);
+  }
+
+  /* Upload progress queue */
+  .upload-queue {
+    margin-top: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .upload-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-raised);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+  }
+  .upload-item .file-icon { font-size: 18px; flex-shrink: 0; width: 24px; text-align: center; }
+  .upload-item .file-info { flex: 1; min-width: 0; }
+  .upload-item .file-name {
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .upload-item .file-size { font-size: var(--text-xs); color: var(--text-muted); }
+  .upload-item .progress-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--border-subtle);
+    border-radius: 2px;
+    overflow: hidden;
+    max-width: 200px;
+  }
+  .upload-item .progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width var(--transition-normal) var(--easing-smooth);
+  }
+  .upload-item .progress-fill.uploading { background: var(--accent); width: 40%; }
+  .upload-item .progress-fill.done { background: var(--green); width: 100%; }
+  .upload-item .progress-fill.error { background: var(--red); width: 100%; }
+  .upload-item .status-icon { flex-shrink: 0; font-size: var(--text-sm); }
+  .upload-item .status-icon.done { color: var(--green); }
+  .upload-item .status-icon.error { color: var(--red); }
+  .upload-item .cancel-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast);
+    font-family: inherit;
+  }
+  .upload-item .cancel-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+  @media (hover: hover) and (pointer: fine) {
+    .upload-item .cancel-btn:hover { color: var(--red); }
+  }
+
+  /* File browser toolbar */
+  .file-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+    flex-wrap: wrap;
+  }
+  .file-search {
+    flex: 1;
+    min-width: 180px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    color: var(--text);
+    font-size: var(--text-sm);
+    font-family: inherit;
+    transition: border-color var(--transition-fast);
+  }
+  .file-search:focus { outline: none; border-color: var(--accent); }
+  .file-search::placeholder { color: var(--text-muted); }
+  .view-toggle {
+    display: flex;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .view-toggle button {
+    background: var(--surface-raised);
+    border: none;
+    color: var(--text-muted);
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-family: inherit;
+    transition: all var(--transition-fast);
+  }
+  .view-toggle button:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+  .view-toggle button.active { background: var(--accent-dim); color: var(--accent); }
+  .view-toggle button + button { border-left: 1px solid var(--border-subtle); }
+  @media (hover: hover) and (pointer: fine) {
+    .view-toggle button:not(.active):hover { background: var(--surface-raised); color: var(--text); }
+  }
+
+  /* File grid */
+  .file-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--space-3);
+  }
+  .file-card {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    cursor: pointer;
+    transition: all var(--transition-normal) var(--easing-smooth);
+    text-align: center;
+  }
+  .file-card:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+  @media (hover: hover) and (pointer: fine) {
+    .file-card:hover {
+      border-color: var(--border);
+      box-shadow: var(--shadow-hover);
+      transform: translateY(-1px);
+    }
+  }
+  .file-card .thumb {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .file-card .thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-sm); }
+  .file-card .thumb .type-icon { font-size: 28px; opacity: 0.5; }
+  .file-card .card-name {
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .file-card .card-meta { font-size: var(--text-xs); color: var(--text-muted); margin-top: 2px; }
+  .file-card .card-actions { display: flex; gap: var(--space-1); justify-content: center; margin-top: var(--space-2); opacity: 0; transition: opacity var(--transition-fast); }
+  .file-card:focus-within .card-actions { opacity: 1; }
+  @media (hover: hover) and (pointer: fine) {
+    .file-card:hover .card-actions { opacity: 1; }
+  }
+
+  /* File list */
+  .file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .file-list-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-raised);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+  }
+  .file-list-item:focus-visible { outline: var(--focus-ring); outline-offset: -2px; position: relative; z-index: 1; }
+  @media (hover: hover) and (pointer: fine) {
+    .file-list-item:hover { background: var(--bg); }
+  }
+  .file-list-item .list-icon { font-size: 16px; flex-shrink: 0; width: 24px; text-align: center; }
+  .file-list-item .list-thumb { width: 32px; height: 32px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+  .file-list-item .list-name {
+    flex: 1;
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .file-list-item .list-meta { font-size: var(--text-xs); color: var(--text-muted); flex-shrink: 0; }
+  .file-list-item .list-actions {
+    display: flex;
+    gap: var(--space-1);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+  }
+  .file-list-item:focus-within .list-actions { opacity: 1; }
+  @media (hover: hover) and (pointer: fine) {
+    .file-list-item:hover .list-actions { opacity: 1; }
+  }
+  .action-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    font-family: inherit;
+    transition: color var(--transition-fast);
+  }
+  .action-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+  @media (hover: hover) and (pointer: fine) {
+    .action-btn:hover { color: var(--text); }
+    .action-btn.delete:hover { color: var(--red); }
+  }
+
+  /* Chat attachment button */
+  .attach-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 18px;
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast);
+    flex-shrink: 0;
+    font-family: inherit;
+    position: relative;
+    line-height: 1;
+  }
+  .attach-btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+  @media (hover: hover) and (pointer: fine) {
+    .attach-btn:hover { color: var(--accent); }
+  }
+
+  /* Attachment preview strip (above chat input) */
+  .attachment-preview {
+    display: flex;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    flex-wrap: wrap;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--surface-raised);
+  }
+  .attachment-chip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+    max-width: 200px;
+  }
+  .attachment-chip .chip-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    color: var(--text);
+  }
+  .attachment-chip .chip-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: var(--text-xs);
+    padding: 0 2px;
+    font-family: inherit;
+  }
+  .attachment-chip .chip-remove:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+  @media (hover: hover) and (pointer: fine) {
+    .attachment-chip .chip-remove:hover { color: var(--red); }
+  }
+
+  /* File card in chat messages */
+  .msg-file-card {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-decoration: none;
+    color: var(--text);
+    max-width: 100%;
+  }
+  .msg-file-card:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+  @media (hover: hover) and (pointer: fine) {
+    .msg-file-card:hover { border-color: var(--border); background: var(--bg); }
+  }
+  .msg-file-card .file-thumb-placeholder {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .msg-file-card .msg-file-info { min-width: 0; }
+  .msg-file-card .msg-file-info .name {
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .msg-file-card .msg-file-info .meta { font-size: var(--text-xs); color: var(--text-muted); }
 </style>
 <link rel="stylesheet" href="/dashboard-animations.css">
 </head>
@@ -1724,6 +2087,10 @@ export function getDashboardHTML(): string {
         <option value="blockers">#blockers</option>
         <option value="problems">#problems</option>
       </select>
+      <button class="attach-btn" id="chatAttachBtn" aria-label="Attach file" title="Attach file"
+              onclick="document.getElementById('chatFileInput').click()">📎</button>
+      <input type="file" id="chatFileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.txt,.md"
+             aria-label="Choose file to attach" style="display:none">
       <input type="text" id="chat-input" placeholder="Message as ryan…" autocomplete="off" />
       <button id="chat-send" onclick="sendChat()">Send</button>
     </div>
@@ -1815,6 +2182,42 @@ export function getDashboardHTML(): string {
   <!-- ═══ PAGE: Artifacts ═══ -->
   <div class="page" id="page-artifacts">
 
+  <!-- Upload Zone -->
+  <div class="panel" style="margin-bottom:var(--space-4)">
+    <div class="panel-header">📤 Upload Files</div>
+    <div class="panel-body" style="max-height:none">
+      <div class="drop-zone" id="dropZone" role="button" tabindex="0"
+           aria-label="Upload files — drag and drop or click to browse">
+        <div style="font-size:32px;opacity:0.6;pointer-events:none">📂</div>
+        <div style="color:var(--text-muted);pointer-events:none">Drag files here or <strong style="color:var(--accent);font-weight:var(--font-weight-medium)">browse</strong></div>
+        <div style="font-size:var(--text-xs);color:var(--text-muted);pointer-events:none">PDF, PNG, JPG, CSV, XLSX, TXT, MD — up to 50MB</div>
+        <input type="file" id="fileInput" multiple accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.txt,.md" aria-label="Choose files to upload">
+      </div>
+      <div class="upload-queue" id="uploadQueue" role="log" aria-label="Upload progress" aria-live="polite" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- File Browser -->
+  <div class="panel" style="margin-bottom:var(--space-4)">
+    <div class="panel-header">📁 Files <span class="count" id="files-count"></span></div>
+    <div class="panel-body" style="max-height:none">
+      <div class="file-toolbar">
+        <input class="file-search" type="search" id="fileSearch" placeholder="Search files…"
+               aria-label="Search files" oninput="filterFiles(this.value)">
+        <div class="view-toggle" role="radiogroup" aria-label="View mode">
+          <button class="active" id="viewGridBtn" role="radio" aria-checked="true"
+                  onclick="toggleFileView('grid')" aria-label="Grid view">▦</button>
+          <button id="viewListBtn" role="radio" aria-checked="false"
+                  onclick="toggleFileView('list')" aria-label="List view">☰</button>
+        </div>
+      </div>
+      <div id="files-grid" class="file-grid"></div>
+      <div id="files-list" class="file-list" style="display:none"></div>
+      <div id="files-empty" class="empty" style="display:none">No files yet. Drop some files above to get started.</div>
+    </div>
+  </div>
+
+  <!-- Shared Artifacts (existing) -->
   <div class="panel" id="shared-artifacts-panel">
     <div class="panel-header">📚 Shared Artifacts <span class="count" id="shared-artifacts-count">loading…</span></div>
     <div class="panel-body" id="shared-artifacts-body" style="max-height:none;overflow-y:auto"></div>
