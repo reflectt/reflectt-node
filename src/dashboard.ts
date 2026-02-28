@@ -14,17 +14,32 @@ export function getDashboardHTML(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>reflectt-node dashboard</title>
 <style>
+  /* ============================================================
+     REFLECTT DESIGN SYSTEM TOKENS v1
+     Source of truth for node + cloud UI parity.
+     Cloud should import/mirror these variables.
+     ============================================================ */
   :root {
+    /* --- Color: Backgrounds --- */
     --bg: #0a0e14;
     --surface: #141920;
     --surface-raised: #1a2028;
+
+    /* --- Color: Borders --- */
     --border: #252d38;
     --border-subtle: #1e2530;
+
+    /* --- Color: Text --- */
     --text: #d4dae3;
     --text-bright: #eef1f5;
     --text-muted: #6b7a8d;
+
+    /* --- Color: Brand / Accent --- */
     --accent: #4da6ff;
     --accent-dim: rgba(77, 166, 255, 0.12);
+    --accent-hover: #6ab8ff;
+
+    /* --- Color: Semantic --- */
     --green: #3fb950;
     --green-dim: rgba(63, 185, 80, 0.12);
     --yellow: #d4a017;
@@ -34,34 +49,84 @@ export function getDashboardHTML(): string {
     --purple: #b48eff;
     --orange: #e08a20;
     --orange-dim: rgba(224, 138, 32, 0.12);
-    --radius: 10px;
-    --radius-sm: 6px;
 
-    /* Interaction tokens (shared UI kit wedge) */
+    /* --- Typography: Scale (modular, base 14px) --- */
+    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    --text-xs: 10px;
+    --text-sm: 11px;
+    --text-base: 13px;
+    --text-md: 14px;
+    --text-lg: 16px;
+    --text-xl: 18px;
+    --text-2xl: 22px;
+    --text-3xl: 28px;
+    --line-height-tight: 1.3;
+    --line-height-normal: 1.55;
+    --line-height-relaxed: 1.7;
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+    --letter-spacing-tight: -0.3px;
+    --letter-spacing-normal: 0;
+    --letter-spacing-wide: 0.5px;
+
+    /* --- Spacing: Scale (4px base) --- */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
+
+    /* --- Radii --- */
+    --radius-sm: 4px;
+    --radius: 8px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-full: 999px;
+
+    /* --- Shadows --- */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.12);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.2);
+    --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.15);
+    --shadow-active: 0 2px 6px rgba(0, 0, 0, 0.10);
+
+    /* --- Transitions --- */
+    --transition-fast: 150ms;
+    --transition-normal: 250ms;
+    --transition-slow: 400ms;
+    --easing-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* --- Interaction (focus / hover) --- */
     --focus-ring: 2px solid var(--accent);
     --focus-offset: 2px;
     --focus-offset-strong: 4px;
-    --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.15);
-    --shadow-active: 0 2px 6px rgba(0, 0, 0, 0.10);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    font-family: var(--font-family);
     background: var(--bg);
     color: var(--text);
-    line-height: 1.55;
-    font-size: 14px;
+    line-height: var(--line-height-normal);
+    font-size: var(--text-md);
   }
   .header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 28px;
+    padding: var(--space-4) var(--space-8);
     background: linear-gradient(180deg, #0f141a 0%, var(--bg) 100%);
     border-bottom: 1px solid var(--border-subtle);
   }
   .header-left { display: flex; align-items: center; gap: 10px; }
-  .header-logo { font-size: 18px; font-weight: 700; color: var(--text-bright); letter-spacing: -0.3px; }
+  .header-logo { font-size: var(--text-xl); font-weight: var(--font-weight-bold); color: var(--text-bright); letter-spacing: var(--letter-spacing-tight); }
   .header-logo span { color: var(--accent); }
-  .header-right { display: flex; align-items: center; gap: 16px; font-size: 13px; color: var(--text-muted); }
+  .header-right { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-base); color: var(--text-muted); }
   .release-badge {
     display: inline-flex;
     align-items: center;
@@ -89,13 +154,13 @@ export function getDashboardHTML(): string {
     box-shadow: 0 0 6px rgba(63, 185, 80, 0.4);
   }
   .agent-strip {
-    display: flex; gap: 10px; padding: 16px 28px; overflow-x: auto;
+    display: flex; gap: var(--space-3); padding: var(--space-4) var(--space-8); overflow-x: auto;
     border-bottom: 1px solid var(--border-subtle); background: var(--surface);
   }
   .agent-card {
-    flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
-    padding: 10px 16px; background: var(--surface-raised); border: 1px solid var(--border);
-    border-radius: var(--radius); min-width: 200px; transition: border-color 0.2s;
+    flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-3);
+    padding: var(--space-3) var(--space-4); background: var(--surface-raised); border: 1px solid var(--border);
+    border-radius: var(--radius-md); min-width: 200px; transition: border-color var(--transition-fast) var(--easing-smooth);
   }
   .agent-card.active { border-left: 3px solid var(--green); }
   .agent-card.idle { opacity: 0.6; }
@@ -103,9 +168,9 @@ export function getDashboardHTML(): string {
   .agent-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
   .agent-emoji { font-size: 22px; line-height: 1; }
   .agent-info { flex: 1; min-width: 0; }
-  .agent-name { font-size: 13px; font-weight: 600; color: var(--text-bright); }
-  .agent-role { font-size: 10px; color: var(--purple); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
-  .agent-status-text { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agent-name { font-size: var(--text-base); font-weight: var(--font-weight-semibold); color: var(--text-bright); }
+  .agent-role { font-size: var(--text-xs); color: var(--purple); text-transform: uppercase; letter-spacing: var(--letter-spacing-wide); margin-bottom: var(--space-1); }
+  .agent-status-text { font-size: var(--text-sm); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .agent-pr-link {
     display: inline-flex;
     margin-top: 3px;
@@ -126,13 +191,13 @@ export function getDashboardHTML(): string {
   .agent-badge.idle { background: var(--border); color: var(--text-muted); }
   .agent-badge.offline { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
   .main { padding: 24px 28px; display: flex; flex-direction: column; gap: 24px; }
-  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
   .panel-header {
-    padding: 14px 18px; font-size: 15px; font-weight: 600; color: var(--text-bright);
+    padding: var(--space-4) var(--space-5); font-size: var(--text-lg); font-weight: var(--font-weight-semibold); color: var(--text-bright);
     border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;
   }
-  .panel-header .count { font-size: 12px; color: var(--text-muted); font-weight: 400; }
-  .panel-body { padding: 14px 18px; max-height: 450px; overflow-y: auto; }
+  .panel-header .count { font-size: var(--text-sm); color: var(--text-muted); font-weight: var(--font-weight-normal); }
+  .panel-body { padding: var(--space-4) var(--space-5); max-height: 450px; overflow-y: auto; }
   .truth-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
