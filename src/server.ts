@@ -2971,6 +2971,22 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // API docs page (markdown — token-efficient for agents)
+  // UI Kit reference page — living component/states documentation
+  app.get('/ui-kit', async (_request, reply) => {
+    try {
+      const { promises: fs } = await import('fs')
+      const { join } = await import('path')
+      const { fileURLToPath } = await import('url')
+      const { dirname } = await import('path')
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const html = await fs.readFile(join(__dirname, '..', 'public', 'ui-kit.html'), 'utf-8')
+      reply.type('text/html; charset=utf-8').send(html)
+    } catch (err) {
+      reply.code(500).send({ error: 'Failed to load UI kit page' })
+    }
+  })
+
   app.get('/docs', async (_request, reply) => {
     try {
       const { promises: fs } = await import('fs')

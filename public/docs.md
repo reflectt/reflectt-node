@@ -28,6 +28,21 @@ Base URL: `http://localhost:4445`
 
 ---
 
+## UI Pages
+
+### `GET /ui-kit`
+
+Living design system reference page. Shows all Reflectt design tokens rendered as interactive specimens: color swatches, typography scale, spacing, radii, shadows, buttons, links, badges, inputs, panels, and tables.
+
+Returns `text/html`. No parameters.
+
+```bash
+# Open in browser
+open http://localhost:4445/ui-kit
+```
+
+---
+
 ## Error Envelope (all endpoints)
 
 All API errors normalize to:
@@ -684,6 +699,7 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 |--------|------|-------------|
 | GET | `/dashboard` | HTML dashboard UI |
 | GET | `/docs` | This API reference |
+| GET | `/ui-kit` | Living design system reference page — colors, typography, spacing, buttons, links, badges, inputs, panels, tables with token names. |
 | GET | `/artifacts/view` | In-browser artifact viewer (safe). Query: `path` (repo-relative). Guardrails: repo-root only, extension allowlist (`.md .txt .json .log .yml .yaml`), max 400KB. If `path` contains an embedded `http(s)://...`, redirects to that URL. |
 | GET | `/shared/list` | List files in shared workspace directory. Query: `path` (default `process/`), `limit` (default 200, max 500). Security: prefix allowlist (`process/`), traversal protection, extension filter. |
 | GET | `/shared/read` | Read file from shared workspace. Query: `path` (required), `include=preview` (truncated), `maxChars` (default 2000). Security: same as `/shared/list` + size cap (400KB). |
