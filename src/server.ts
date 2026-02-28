@@ -153,6 +153,7 @@ import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CAT
 import { onTaskShipped, onProcessFileWritten, onDecisionComment, isDecisionComment } from './knowledge-auto-index.js'
 import { upsertHostHeartbeat, getHost, listHosts, removeHost } from './host-registry.js'
 import { startKeepalive, stopKeepalive, getKeepaliveStatus, triggerKeepalivePing } from './host-keepalive.js'
+import { pauseTarget, unpauseTarget, checkPauseStatus, listPauseEntries } from './pause-controls.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -2233,6 +2234,57 @@ export async function createServer(): Promise<FastifyInstance> {
     const hostId = typeof body.hostId === 'string' ? body.hostId.trim() : undefined
     const results = await triggerKeepalivePing(hostId || undefined)
     return { success: true, results }
+  })
+
+  // ── Pause/Sleep Controls ──
+
+  // Pause an agent or team
+  app.post('/pause', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const target = typeof body.target === 'string' ? body.target.trim() : ''
+    if (!target) {
+      return { success: false, error: 'target is required (agent name or "team")' }
+    }
+
+    const pausedBy = typeof body.pausedBy === 'string' ? body.pausedBy.trim() : 'system'
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : 'Manual pause'
+
+    // Parse duration: either pausedUntil (timestamp) or durationMin (minutes from now)
+    let pausedUntil: number | null = null
+    if (typeof body.pausedUntil === 'number') {
+      pausedUntil = body.pausedUntil
+    } else if (typeof body.durationMin === 'number' && body.durationMin > 0) {
+      pausedUntil = Date.now() + (body.durationMin as number) * 60 * 1000
+    }
+
+    const entry = pauseTarget(target, { pausedUntil, pausedBy, reason })
+    return { success: true, entry }
+  })
+
+  // Unpause an agent or team
+  app.delete('/pause', async (request) => {
+    const query = request.query as Record<string, string>
+    const target = typeof query.target === 'string' ? query.target.trim() : ''
+    if (!target) {
+      return { success: false, error: 'target query param required (agent name or "team")' }
+    }
+
+    const result = unpauseTarget(target)
+    return { success: result.success, target }
+  })
+
+  // Check pause status for an agent
+  app.get('/pause/status', async (request) => {
+    const query = request.query as Record<string, string>
+    const agent = typeof query.agent === 'string' ? query.agent.trim() : undefined
+
+    if (agent) {
+      return checkPauseStatus(agent)
+    }
+
+    // List all pause entries
+    const entries = listPauseEntries()
+    return { entries, count: entries.length }
   })
 
   // Team configuration linter health (TEAM.md / TEAM-ROLES.yaml / TEAM-STANDARDS.md)
@@ -8929,6 +8981,21 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     const agent = typeof query.agent === 'string' ? query.agent.trim().toLowerCase() : undefined
     const includeTest = query.include_test === '1' || query.include_test === 'true'
+
+    // Pause check: refuse pulls when agent or team is paused
+    if (agent) {
+      const pauseStatus = checkPauseStatus(agent)
+      if (pauseStatus.paused) {
+        return {
+          task: null,
+          paused: true,
+          message: pauseStatus.message,
+          remainingMs: pauseStatus.remainingMs,
+          resumesAt: pauseStatus.entry?.pausedUntil ?? null,
+        }
+      }
+    }
+
     const task = taskManager.getNextTask(agent, { includeTest })
     if (!task) {
       return { task: null, message: 'No available tasks' }
@@ -9034,12 +9101,17 @@ export async function createServer(): Promise<FastifyInstance> {
     const slim = (t: Task | null | undefined) => t ? { id: t.id, title: t.title, status: t.status, priority: t.priority } : null
     presenceManager.recordActivity(agent, 'heartbeat')
 
+    // Check pause status
+    const pauseStatus = checkPauseStatus(agent)
+
     return {
       agent, ts: Date.now(),
-      active: slim(activeTask), next: slim(nextTask),
+      active: slim(activeTask), next: pauseStatus.paused ? null : slim(nextTask),
       inbox: slimInbox, inboxCount: inbox.length,
       queue: { todo: todoTasks.length, doing: doingTasks.length, validating: validatingTasks.length },
-      action: activeTask ? `Continue ${activeTask.id}`
+      ...(pauseStatus.paused ? { paused: true, pauseMessage: pauseStatus.message, resumesAt: pauseStatus.entry?.pausedUntil ?? null } : {}),
+      action: pauseStatus.paused ? `PAUSED: ${pauseStatus.message}`
+        : activeTask ? `Continue ${activeTask.id}`
         : nextTask ? `Claim ${nextTask.id}`
         : inbox.length > 0 ? `Check inbox (${inbox.length} messages)`
         : 'HEARTBEAT_OK',

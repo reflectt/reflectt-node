@@ -2672,3 +2672,47 @@ checkGettingStarted();
 refresh();
 connectEventStream();
 startAdaptiveRefresh();
+// ── Pause banner ──
+async function checkPauseBanner() {
+  try {
+    const res = await fetch(BASE + '/pause/status');
+    const data = await res.json();
+    const banner = document.getElementById('pause-banner');
+    const msgEl = document.getElementById('pause-message');
+    if (!banner) return;
+
+    const activeEntries = (data.entries || []).filter(e => e.paused);
+    if (activeEntries.length > 0) {
+      const entry = activeEntries[0];
+      const target = entry.target === '__team__' ? 'Team' : entry.target;
+      let msg = `${target} paused by ${entry.pausedBy}: ${entry.reason}`;
+      if (entry.pausedUntil) {
+        const remaining = Math.max(0, Math.ceil((entry.pausedUntil - Date.now()) / 60000));
+        msg += ` (${remaining}m remaining)`;
+      } else {
+        msg += ' (indefinite)';
+      }
+      msgEl.textContent = msg;
+      banner.style.display = 'flex';
+    } else if (data.paused) {
+      msgEl.textContent = data.message || 'Paused';
+      banner.style.display = 'flex';
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch {}
+}
+
+async function resumeFromBanner() {
+  try {
+    // Try to unpause team first, then individual entries
+    await fetch(BASE + '/pause?target=team', { method: 'DELETE' });
+    const banner = document.getElementById('pause-banner');
+    if (banner) banner.style.display = 'none';
+    checkPauseBanner();
+  } catch {}
+}
+
+// Poll pause status every 30s
+setInterval(checkPauseBanner, 30000);
+checkPauseBanner();
