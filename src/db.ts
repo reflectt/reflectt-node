@@ -495,6 +495,13 @@ export function runMigrations(db: Database.Database): void {
         );
       `,
     },
+    {
+      version: 18,
+      sql: `
+        -- Chat message attachments (JSON array of file references)
+        ALTER TABLE chat_messages ADD COLUMN attachments TEXT;
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')

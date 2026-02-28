@@ -55,8 +55,8 @@ function importMessages(db: Database.Database, records: unknown[]): number {
 
   const upsert = db.prepare(`
     INSERT OR REPLACE INTO chat_messages (
-      id, "from", "to", content, timestamp, channel, reactions, thread_id, metadata
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      id, "from", "to", content, timestamp, channel, reactions, thread_id, metadata, attachments
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const insertMany = db.transaction((messages: AgentMessage[]) => {
@@ -71,6 +71,7 @@ function importMessages(db: Database.Database, records: unknown[]): number {
         safeJsonStringify(msg.reactions),
         msg.threadId ?? null,
         safeJsonStringify(msg.metadata),
+        msg.attachments?.length ? safeJsonStringify(msg.attachments) : null,
       )
     }
   })
@@ -91,6 +92,7 @@ interface ChatMessageRow {
   reactions: string | null
   thread_id: string | null
   metadata: string | null
+  attachments: string | null
 }
 
 /** Convert a SQLite row to an AgentMessage */
@@ -105,6 +107,7 @@ function rowToMessage(row: ChatMessageRow): AgentMessage {
     reactions: safeJsonParse<Record<string, string[]>>(row.reactions) || {},
     threadId: row.thread_id ?? undefined,
     metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
+    ...(row.attachments ? { attachments: safeJsonParse<import('./types.js').ChatAttachment[]>(row.attachments) ?? undefined } : {}),
   }
 }
 
@@ -150,8 +153,8 @@ class ChatManager {
     const dedupKey = typeof meta.dedup_key === 'string' ? meta.dedup_key : null
     const upsert = db.prepare(`
       INSERT OR REPLACE INTO chat_messages (
-        id, "from", "to", content, timestamp, channel, reactions, thread_id, metadata, dedup_key
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, "from", "to", content, timestamp, channel, reactions, thread_id, metadata, dedup_key, attachments
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
 
     upsert.run(
@@ -165,6 +168,7 @@ class ChatManager {
       message.threadId ?? null,
       safeJsonStringify(message.metadata),
       dedupKey,
+      message.attachments?.length ? safeJsonStringify(message.attachments) : null,
     )
   }
 
