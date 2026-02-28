@@ -14,3 +14,4 @@ process/*
 # Allow committing specific task artifacts needed for review/proof
 !process/TASK-47sxe374r.md
 !process/TASK-iwphjvsrl.md
+!process/TASK-task-rcuuep9co.md
