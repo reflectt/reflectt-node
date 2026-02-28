@@ -270,6 +270,7 @@ export function getDashboardHTML(): string {
   .agent-strip {
     display: flex; gap: var(--space-3); padding: var(--space-4) var(--space-8); overflow-x: auto;
     border-bottom: 1px solid var(--border-subtle); background: var(--surface);
+    max-width: 100vw; box-sizing: border-box;
   }
   .agent-card {
     flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-3);
