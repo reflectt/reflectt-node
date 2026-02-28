@@ -56,6 +56,7 @@ initRouter();
 let currentChannel = 'all';
 let currentProject = 'all';
 let currentStatusFilter = localStorage.getItem('taskStatusFilter') || 'open'; // 'open' | 'all'
+let hideTestTasks = localStorage.getItem('hideTestTasks') !== 'false'; // default true
 let allMessages = [];
 let allTasks = [];
 let allEvents = [];
@@ -648,10 +649,11 @@ async function loadTasks(forceFull = false) {
   renderKanban();
   renderBacklog();
   renderOutcomeFeed();
-  const openCount = allTasks.filter(t => t.status !== 'done').length;
+  const visibleTasks = getVisibleTasks();
+  const openCount = visibleTasks.filter(t => t.status !== 'done').length;
   document.getElementById('task-count').textContent = currentStatusFilter === 'open'
     ? openCount + ' open tasks'
-    : allTasks.length + ' tasks';
+    : visibleTasks.length + ' tasks';
   // Update sidebar badge
   const navTaskBadge = document.getElementById('nav-task-count');
   if (navTaskBadge) navTaskBadge.textContent = allTasks.length;
@@ -673,6 +675,28 @@ function switchStatusFilter(f) {
   renderStatusFilterTabs();
   renderKanban();
 }
+function toggleTestTasks() {
+  hideTestTasks = !hideTestTasks;
+  localStorage.setItem('hideTestTasks', String(!hideTestTasks));
+  renderStatusFilterTabs();
+  renderKanban();
+  // Update task count
+  const openCount = getVisibleTasks().filter(t => t.status !== 'done').length;
+  document.getElementById('task-count').textContent = currentStatusFilter === 'open'
+    ? openCount + ' open tasks'
+    : getVisibleTasks().length + ' tasks';
+}
+function isTestTask(t) {
+  const title = (t.title || '').trim();
+  if (/^TEST[:\s]/i.test(title)) return true;
+  if (/^tmp\b/i.test(title)) return true;
+  const mtype = (t.metadata?.type || '').toLowerCase();
+  if (mtype === 'test' || mtype === 'synthetic') return true;
+  return false;
+}
+function getVisibleTasks() {
+  return hideTestTasks ? allTasks.filter(t => !isTestTask(t)) : allTasks;
+}
 
 function renderStatusFilterTabs() {
   const container = document.getElementById('status-filter-tabs');
@@ -681,13 +705,18 @@ function renderStatusFilterTabs() {
     { key: 'open', label: '🟢 Open', title: 'Todo, Doing, Blocked, Validating' },
     { key: 'all', label: '📋 All', title: 'All statuses including Done' },
   ];
+  const testCount = allTasks.filter(t => isTestTask(t)).length;
+  const testToggle = testCount > 0
+    ? ` <button class="project-tab ${hideTestTasks ? '' : 'active'}" title="${hideTestTasks ? 'Show' : 'Hide'} ${testCount} test/synthetic tasks" onclick="toggleTestTasks()" style="font-size:10px;opacity:${hideTestTasks ? '0.6' : '1'}">🧪 ${hideTestTasks ? 'Show' : 'Hide'} test (${testCount})</button>`
+    : '';
   container.innerHTML = options.map(o =>
     `<button class="project-tab ${currentStatusFilter === o.key ? 'active' : ''}" title="${o.title}" onclick="switchStatusFilter('${o.key}')">${o.label}</button>`
-  ).join('');
+  ).join('') + testToggle;
 }
 
 function renderKanban() {
-  const filtered = currentProject === 'all' ? allTasks : allTasks.filter(t => classifyProject(t) === currentProject);
+  const visible = getVisibleTasks();
+  const filtered = currentProject === 'all' ? visible : visible.filter(t => classifyProject(t) === currentProject);
   const cols = currentStatusFilter === 'open'
     ? ['todo', 'doing', 'blocked', 'validating']
     : ['todo', 'doing', 'blocked', 'validating', 'done'];
@@ -758,7 +787,7 @@ function renderBacklog() {
   if (!body || !panel) return;
 
   const pOrder = { P0: 0, P1: 1, P2: 2, P3: 3 };
-  const backlog = allTasks
+  const backlog = getVisibleTasks()
     .filter(t => t.status === 'todo' && !t.assignee)
     .sort((a, b) => {
       const pa = pOrder[a.priority] ?? 9;
