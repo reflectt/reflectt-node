@@ -2033,7 +2033,10 @@ export function getDashboardHTML(): string {
 
   <div class="panel">
     <div class="panel-header">📋 Task Board <span class="count" id="task-count"></span></div>
-    <div class="project-tabs" id="project-tabs"></div>
+    <div style="display:flex;align-items:center;gap:8px;padding:10px 18px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+      <div class="project-tabs" id="project-tabs" style="border-bottom:none;padding:0;flex:1;min-width:0"></div>
+      <div class="project-tabs" id="status-filter-tabs" style="border-bottom:none;padding:0"></div>
+    </div>
     <div class="kanban" id="kanban"></div>
   </div>
 
