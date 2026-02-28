@@ -26,7 +26,7 @@ const BUILD_VERSION = (() => {
 
 const BUILD_COMMIT = (() => {
   try {
-    return execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000 }).trim()
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
   } catch { return 'unknown' }
 })()
 

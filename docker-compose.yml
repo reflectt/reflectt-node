@@ -19,12 +19,15 @@ services:
       - HOST=0.0.0.0
       - NODE_ENV=production
       - REFLECTT_HOME=/data
-      # ── OpenClaw gateway connection ──
-      # Set these to connect to an OpenClaw instance running on the host
-      # or another container. This is the only config needed — no CLI or
-      # filesystem sharing required.
+      # ── OpenClaw gateway connection (optional) ──
+      # Uncomment these to connect to OpenClaw for agent messaging.
+      # Without them, reflectt-node runs standalone (dashboard + API work fine).
+      #
+      # Get your token:  openclaw gateway token
+      # Then uncomment and fill in:
       # - OPENCLAW_GATEWAY_URL=ws://host.docker.internal:18789
       # - OPENCLAW_GATEWAY_TOKEN=your_token_here
+      #
       # ── Optional auth tokens ──
       # - REFLECTT_MANAGE_TOKEN=your_manage_token
       # - REFLECTT_HOST_HEARTBEAT_TOKEN=your_heartbeat_token
