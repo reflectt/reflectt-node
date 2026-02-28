@@ -49,3 +49,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
+
+      - name: Ensure GHCR package is public (best effort)
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          PACKAGE: ${{ github.event.repository.name }}
+        run: |
+          echo "Attempting to set GHCR package visibility to public for $OWNER/$PACKAGE"
+          gh api -X PATCH "/orgs/$OWNER/packages/container/$PACKAGE" -f visibility=public || \
+          gh api -X PATCH "/user/packages/container/$PACKAGE" -f visibility=public || true

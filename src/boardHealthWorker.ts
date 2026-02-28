@@ -19,6 +19,7 @@ import { validateTaskTimestamp, verifyTaskExists } from './health.js'
 import { policyManager } from './policy.js'
 import { getEffectiveActivity } from './activity-signal.js'
 import { presenceManager } from './presence.js'
+import { suggestReviewer } from './assignment.js'
 import type { Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
 import { recordSystemLoopTick } from './system-loop-state.js'
@@ -689,35 +690,65 @@ export class BoardHealthWorker {
 
   /**
    * Pick an alternate reviewer for a task.
-   * Prefers active agents who aren't the assignee or current reviewer.
-   * Falls back to escalation target (ryan).
+   *
+   * IMPORTANT: reviewer reassignment must respect routing guardrails.
+   * We should not drift to designers/voice roles for ops/infra tasks just
+   * because they happened to be "most recently active".
    */
   private pickAlternateReviewer(task: Task, currentReviewer: string): string {
     const assignee = (task.assignee || '').toLowerCase()
     const current = currentReviewer.toLowerCase()
 
-    // Get all agents with recent presence
     const allPresence = presenceManager.getAllPresence()
     const now = Date.now()
-    const activeThresholdMs = 60 * 60 * 1000 // Consider active if seen in last hour
+    const activeThresholdMs = 60 * 60 * 1000 // active if seen in last hour
 
-    const candidates = allPresence
-      .filter(p => {
-        const agent = p.agent.toLowerCase()
-        // Exclude current reviewer and assignee
-        if (agent === current || agent === assignee) return false
-        // Exclude the escalation target initially (use as fallback)
-        if (agent === this.config.reviewEscalationTarget.toLowerCase()) return false
-        // Must have recent activity
-        return p.status !== 'offline' && now - p.lastUpdate < activeThresholdMs
-      })
-      .sort((a, b) => b.lastUpdate - a.lastUpdate) // Most recently active first
+    const active = allPresence
+      .filter(p => p.status !== 'offline' && now - p.lastUpdate < activeThresholdMs)
+      .map(p => ({ agent: p.agent, agentLower: p.agent.toLowerCase(), lastUpdate: p.lastUpdate }))
 
-    if (candidates.length > 0) {
-      return candidates[0].agent
+    const activeSet = new Set(active.map(a => a.agentLower))
+
+    // No active agent at all → escalate
+    if (active.length === 0) return this.config.reviewEscalationTarget
+
+    // Rank reviewers via assignment engine (respects opt-in/neverRoute guardrails)
+    let allTasks: any[] = []
+    try { allTasks = taskManager.listTasks({}) as any[] } catch { /* ok */ }
+
+    const suggestion = suggestReviewer({
+      title: task.title,
+      assignee: task.assignee,
+      tags: task.tags,
+      done_criteria: task.done_criteria,
+      metadata: task.metadata,
+    }, allTasks as any)
+
+    const eligibleByScore = (suggestion.scores || []).map(s => s.agent)
+    const eligibleSet = new Set(eligibleByScore.map(a => a.toLowerCase()))
+
+    // Primary: pick the highest-ranked eligible reviewer who is active.
+    for (const candidate of eligibleByScore) {
+      const c = candidate.toLowerCase()
+      if (c === current || c === assignee) continue
+      if (c === this.config.reviewEscalationTarget.toLowerCase()) continue
+      if (!activeSet.has(c)) continue
+      return candidate
     }
 
-    // No active reviewer available — escalate
+    // Secondary: if no ranked candidate is active, fall back to most-recent ACTIVE
+    // among eligible reviewers.
+    const fallback = active
+      .filter(p => {
+        if (p.agentLower === current || p.agentLower === assignee) return false
+        if (p.agentLower === this.config.reviewEscalationTarget.toLowerCase()) return false
+        return eligibleSet.has(p.agentLower)
+      })
+      .sort((a, b) => b.lastUpdate - a.lastUpdate)
+
+    if (fallback.length > 0) return fallback[0].agent
+
+    // No eligible active reviewer available — escalate.
     return this.config.reviewEscalationTarget
   }
 
