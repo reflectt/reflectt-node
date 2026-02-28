@@ -516,7 +516,7 @@ export class BoardHealthWorker {
 
         const msg = isBreach
           ? `⚠️ Ready-queue floor (idle): @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}\n  🕐 snapshot: ${snapshotTime}`
-          : `ℹ️ Ready-queue low (agent active): @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). Not a breach because doing=${doingTasks.length}, validating=${validatingTasks.length}.${breakdown}\n  🕐 snapshot: ${snapshotTime}`
+          : `ℹ️ Ready-queue in-flight: @${agent} is active (doing=${doingTasks.length}, validating=${validatingTasks.length}). Next-task queue below floor (unblocked todo=${readyCount}, floor=${rqf.minReady}, need ${deficit} more).${breakdown}\n  🕐 snapshot: ${snapshotTime}`
 
         if (!dryRun) {
           try {
