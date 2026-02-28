@@ -2005,9 +2005,9 @@ export function getDashboardHTML(): string {
       <div class="gs-step" id="gs-connect">
         <div class="gs-icon">2</div>
         <div class="gs-content">
-          <div class="gs-title">Connect to your team</div>
-          <div class="gs-desc">Bootstrap your host or connect to Reflectt Cloud for team coordination.</div>
-          <a class="gs-link" href="/docs" target="_blank">Setup docs →</a>
+          <div class="gs-title">Connect OpenClaw gateway</div>
+          <div class="gs-desc">Set <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:11px">OPENCLAW_GATEWAY_URL</code> and <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:11px">OPENCLAW_GATEWAY_TOKEN</code> env vars. Get your token: <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:11px">openclaw gateway token</code></div>
+          <a class="gs-link" href="https://reflectt.ai/bootstrap" target="_blank">Bootstrap guide →</a>
         </div>
       </div>
       <div class="gs-step" id="gs-task">

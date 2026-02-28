@@ -14,7 +14,7 @@ import { resolve, sep, join } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
-import { serverConfig, isDev, REFLECTT_HOME } from './config.js'
+import { serverConfig, openclawConfig, isDev, REFLECTT_HOME } from './config.js'
 
 // ── Build info (read once at startup) ──────────────────────────────────────
 const BUILD_VERSION = (() => {
@@ -2137,7 +2137,13 @@ export async function createServer(): Promise<FastifyInstance> {
       commit: BUILD_COMMIT,
       uptime_seconds: uptimeSeconds,
       cold_start: uptimeSeconds < 60, // Flag recent restarts for monitoring
-      openclaw: 'not configured',
+      openclaw: openclawConfig.gatewayToken
+        ? { status: 'configured', gateway: openclawConfig.gatewayUrl }
+        : {
+            status: 'not configured',
+            hint: 'Set OPENCLAW_GATEWAY_URL and OPENCLAW_GATEWAY_TOKEN environment variables, or run: openclaw gateway token',
+            docs: 'https://reflectt.ai/bootstrap',
+          },
       chat: chatManager.getStats(),
       tasks: taskManager.getStats({ includeTest }),
       inbox: inboxManager.getStats(),
@@ -11582,9 +11588,34 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ============ OPENCLAW ENDPOINTS ============
 
-  // OpenClaw status (TODO: wire up when gateway token configured)
+  // OpenClaw status — show real config state + remediation when missing
   app.get('/openclaw/status', async () => {
-    return { connected: false, note: 'OpenClaw integration pending' }
+    const hasToken = !!openclawConfig.gatewayToken
+    const hasUrl = !!openclawConfig.gatewayUrl
+    if (!hasToken) {
+      return {
+        connected: false,
+        status: 'not configured',
+        gateway: hasUrl ? openclawConfig.gatewayUrl : null,
+        fix: [
+          'Set environment variables in your .env file:',
+          '  OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789',
+          '  OPENCLAW_GATEWAY_TOKEN=<your-token>',
+          '',
+          'Find your token: cat ~/.openclaw/openclaw.json | grep gateway_token',
+          'Or generate one: openclaw gateway token',
+          '',
+          'Then restart reflectt-node.',
+        ].join('\n'),
+        docs: 'https://docs.openclaw.ai/gateway',
+      }
+    }
+    return {
+      connected: true,
+      status: 'configured',
+      gateway: openclawConfig.gatewayUrl,
+      agentId: openclawConfig.agentId,
+    }
   })
 
   // ============ MCP ENDPOINTS ============
