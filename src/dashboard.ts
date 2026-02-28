@@ -1374,6 +1374,117 @@ export function getDashboardHTML(): string {
   }
   .getting-started .gs-step .gs-link:hover { text-decoration: underline; }
 
+  /* Polls */
+  .poll-new-btn {
+    float: right; font-size: var(--text-xs, 11px); background: none;
+    border: 1px solid var(--border, #2a2a4a); color: var(--text-muted, #888);
+    padding: 2px 8px; border-radius: var(--radius-sm, 4px); cursor: pointer;
+  }
+  .poll-new-btn:hover { border-color: var(--accent, #60a5fa); color: var(--text-primary, #e0e0e0); }
+  .poll-new-btn:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+  .poll-create-form {
+    border-top: 1px solid var(--border-subtle, #222); padding: 12px;
+  }
+  .poll-form-label {
+    display: block; font-size: var(--text-xs, 11px); color: var(--text-muted, #888);
+    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; margin-top: 8px;
+  }
+  .poll-form-label:first-child { margin-top: 0; }
+  .poll-input {
+    width: 100%; padding: 6px 8px; margin-bottom: 4px;
+    border: 1px solid var(--border, #2a2a4a); border-radius: var(--radius-sm, 4px);
+    background: var(--bg-secondary, #1a1a2e); color: var(--text-primary, #e0e0e0);
+    font-size: var(--text-sm, 13px); box-sizing: border-box;
+  }
+  .poll-input:focus { border-color: var(--accent, #60a5fa); outline: none; }
+  .poll-select {
+    font-size: var(--text-xs, 11px); padding: 4px 8px;
+    border: 1px solid var(--border, #2a2a4a); border-radius: var(--radius-sm, 4px);
+    background: var(--bg-secondary, #1a1a2e); color: var(--text-primary, #e0e0e0);
+  }
+  .poll-anon-label {
+    font-size: var(--text-xs, 11px); color: var(--text-muted, #888);
+    display: flex; align-items: center; gap: 4px;
+  }
+  .poll-form-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+  .poll-btn-primary {
+    font-size: var(--text-xs, 11px); background: var(--accent, #60a5fa); border: none;
+    color: #fff; padding: 4px 12px; border-radius: var(--radius-sm, 4px); cursor: pointer;
+  }
+  .poll-btn-primary:hover { opacity: 0.9; }
+  .poll-btn-primary:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+  .poll-btn-secondary {
+    font-size: var(--text-xs, 11px); background: none;
+    border: 1px solid var(--border, #2a2a4a); color: var(--text-muted, #888);
+    padding: 4px 8px; border-radius: var(--radius-sm, 4px); cursor: pointer;
+  }
+  .poll-btn-secondary:hover { border-color: var(--accent, #60a5fa); color: var(--text-primary, #e0e0e0); }
+  .poll-btn-secondary:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+
+  /* Poll cards */
+  .poll-card {
+    background: var(--surface-raised, var(--surface, #1e1e38)); border: 1px solid var(--border, #2a2a4a);
+    border-radius: var(--radius-sm, 4px); padding: 12px; margin-bottom: 12px;
+  }
+  .poll-meta {
+    display: flex; align-items: center; gap: 6px; font-size: var(--text-xs, 11px);
+    color: var(--text-muted, #888); margin-bottom: 6px;
+  }
+  .poll-badge-open {
+    background: var(--green-dim, rgba(74, 222, 128, 0.12)); color: var(--green, #4ade80);
+    padding: 1px 6px; border-radius: var(--radius-sm, 4px); font-size: 10px; font-weight: 500;
+  }
+  .poll-badge-closed {
+    background: var(--border, #2a2a4a); color: var(--text-muted, #888);
+    padding: 1px 6px; border-radius: var(--radius-sm, 4px); font-size: 10px; font-weight: 500;
+  }
+  .poll-question {
+    font-size: var(--text-md, 14px); font-weight: var(--font-weight-semibold, 600);
+    color: var(--text-bright, #fff); margin-bottom: 8px;
+  }
+  .poll-option {
+    position: relative; margin-bottom: 4px; border: 1px solid var(--border, #2a2a4a);
+    border-radius: var(--radius-sm, 4px); min-height: 40px; overflow: hidden; cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .poll-option:hover { border-color: var(--accent, #60a5fa); }
+  .poll-option:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: -2px; }
+  .poll-option[aria-checked="true"] { border-color: var(--accent, #60a5fa); background: rgba(96,165,250,0.04); }
+  .poll-option-bar {
+    position: absolute; top: 0; left: 0; height: 100%;
+    background: var(--accent-dim, rgba(96,165,250,0.12)); border-radius: var(--radius-sm, 4px);
+    transition: width 0.3s ease;
+  }
+  .poll-option-content {
+    position: relative; display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; font-size: var(--text-sm, 13px); z-index: 1;
+  }
+  .poll-option-label { display: flex; align-items: center; gap: 8px; }
+  .poll-option-check {
+    width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border, #2a2a4a);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .poll-option[aria-checked="true"] .poll-option-check {
+    border-color: var(--accent, #60a5fa); background: var(--accent, #60a5fa);
+  }
+  .poll-option[aria-checked="true"] .poll-option-check::after {
+    content: '✓'; color: #fff; font-size: 10px; line-height: 1;
+  }
+  .poll-option-stats {
+    display: flex; align-items: center; gap: 8px;
+    font-size: var(--text-xs, 11px); color: var(--text-muted, #888);
+  }
+  .poll-voter-dots { display: flex; gap: 2px; }
+  .poll-voter-dot {
+    width: 18px; height: 18px; border-radius: 50%; font-size: 9px; font-weight: 600;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    text-transform: uppercase;
+  }
+  .poll-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: var(--text-xs, 11px); color: var(--text-muted, #888); margin-top: 8px;
+  }
+
   /* Intensity control */
   .intensity-control {
     display: flex; align-items: center; gap: 8px; padding: 8px 16px;
@@ -1591,19 +1702,31 @@ export function getDashboardHTML(): string {
 
   <div class="panel" id="polls-panel">
     <div class="panel-header">🗳️ Team Polls <span class="count" id="polls-count"></span>
-      <button onclick="showCreatePollForm()" style="float:right;font-size:11px;background:none;border:1px solid var(--border);color:var(--text-muted);padding:2px 8px;border-radius:4px;cursor:pointer">+ New Poll</button>
+      <button onclick="showCreatePollForm()" class="poll-new-btn" aria-label="Create new poll">+ New Poll</button>
     </div>
     <div class="panel-body" id="polls-body" style="max-height:400px;overflow-y:auto"></div>
-    <div id="create-poll-form" style="display:none;border-top:1px solid var(--border-subtle);padding:12px">
-      <input type="text" id="poll-question" placeholder="Question…" style="width:100%;padding:6px 8px;margin-bottom:8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px" />
+    <div id="create-poll-form" class="poll-create-form" style="display:none" role="form" aria-label="Create a poll">
+      <label for="poll-question" class="poll-form-label">Question</label>
+      <input type="text" id="poll-question" class="poll-input" placeholder="What should we do?" aria-required="true" />
+      <label class="poll-form-label">Options</label>
       <div id="poll-options-inputs">
-        <input type="text" class="poll-option-input" placeholder="Option 1" style="width:100%;padding:4px 8px;margin-bottom:4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px" />
-        <input type="text" class="poll-option-input" placeholder="Option 2" style="width:100%;padding:4px 8px;margin-bottom:4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px" />
+        <input type="text" class="poll-option-input poll-input" placeholder="Option 1" aria-label="Poll option 1" />
+        <input type="text" class="poll-option-input poll-input" placeholder="Option 2" aria-label="Poll option 2" />
       </div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button onclick="addPollOption()" style="font-size:11px;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 8px;border-radius:4px;cursor:pointer">+ Option</button>
-        <button onclick="submitPoll()" style="font-size:11px;background:var(--accent);border:none;color:#fff;padding:4px 12px;border-radius:4px;cursor:pointer">Create Poll</button>
-        <button onclick="hideCreatePollForm()" style="font-size:11px;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 8px;border-radius:4px;cursor:pointer">Cancel</button>
+      <div class="poll-form-row">
+        <button onclick="addPollOption()" class="poll-btn-secondary" aria-label="Add another option">+ Option</button>
+        <select id="poll-expiry" class="poll-select" aria-label="Poll expiry">
+          <option value="">No expiry</option>
+          <option value="60">1 hour</option>
+          <option value="240">4 hours</option>
+          <option value="1440" selected>24 hours</option>
+          <option value="4320">3 days</option>
+        </select>
+        <label class="poll-anon-label"><input type="checkbox" id="poll-anonymous" /> Anonymous</label>
+      </div>
+      <div class="poll-form-row">
+        <button onclick="submitPoll()" class="poll-btn-primary">Create Poll</button>
+        <button onclick="hideCreatePollForm()" class="poll-btn-secondary">Cancel</button>
       </div>
     </div>
   </div>

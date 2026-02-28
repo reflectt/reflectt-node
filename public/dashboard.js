@@ -1624,104 +1624,6 @@ async function escalateReviewBreaches(breachedTasks) {
 // ---- Feedback ----
 let feedbackData = null;
 
-async function loadPolls() {
-  const container = document.getElementById('polls-body');
-  if (!container) return;
-  try {
-    const res = await fetch('/polls?status=active&limit=10');
-    if (!res.ok) { container.innerHTML = ''; return; }
-    const data = await res.json();
-    const polls = data.polls || [];
-    if (polls.length === 0) { container.innerHTML = '<div class="empty" style="padding:var(--space-3);font-size:var(--text-xs);color:var(--text-muted)">No active polls</div>'; return; }
-
-    container.innerHTML = polls.map(function(p) {
-      var total = p.totalVotes || 0;
-      var optionsHtml = p.results.map(function(r, i) {
-        var pct = total > 0 ? Math.round((r.count / total) * 100) : 0;
-        var voters = r.voters && r.voters.length > 0 ? ' · ' + r.voters.map(function(v) { return agentLabel(v); }).join(', ') : '';
-        return '<div class="poll-option" style="margin-bottom:var(--space-1)">' +
-          '<div style="display:flex;justify-content:space-between;font-size:var(--text-xs);margin-bottom:2px">' +
-            '<span>' + esc(r.option) + voters + '</span>' +
-            '<span style="color:var(--text-muted)">' + r.count + ' (' + pct + '%)</span>' +
-          '</div>' +
-          '<div style="background:var(--border);border-radius:var(--radius-full);height:6px;overflow:hidden">' +
-            '<div style="background:var(--accent);height:100%;width:' + pct + '%;border-radius:var(--radius-full);transition:width 0.3s"></div>' +
-          '</div>' +
-          (!p.closed ? '<button onclick="votePoll(\'' + esc(p.id) + '\',' + i + ')" style="margin-top:2px;font-size:var(--text-xs);background:none;border:none;color:var(--accent);cursor:pointer;padding:0">Vote</button>' : '') +
-        '</div>';
-      }).join('');
-
-      var status = p.closed ? '<span style="color:var(--red)">Closed</span>' : (p.expiresAt ? '<span style="color:var(--text-muted)">Closes ' + new Date(p.expiresAt).toLocaleTimeString() + '</span>' : '<span style="color:var(--green)">Active</span>');
-
-      return '<div style="padding:var(--space-3);border-bottom:1px solid var(--border)">' +
-        '<div style="display:flex;justify-content:space-between;margin-bottom:var(--space-2)">' +
-          '<strong style="font-size:var(--text-sm)">' + esc(p.question) + '</strong>' +
-          '<span style="font-size:var(--text-xs)">' + status + '</span>' +
-        '</div>' +
-        optionsHtml +
-        '<div style="font-size:var(--text-xs);color:var(--text-muted);margin-top:var(--space-1)">by ' + esc(agentLabel(p.createdBy)) + ' · ' + total + ' votes</div>' +
-      '</div>';
-    }).join('');
-  } catch { container.innerHTML = ''; }
-}
-
-async function votePoll(pollId, choice) {
-  var voter = prompt('Your name:');
-  if (!voter) return;
-  try {
-    await fetch('/polls/' + pollId + '/vote', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voter: voter, choice: choice })
-    });
-    await loadPolls();
-  } catch { /* ignore */ }
-}
-
-function showCreatePollForm() {
-  var form = document.getElementById('create-poll-form');
-  if (form) form.style.display = 'block';
-}
-
-function hideCreatePollForm() {
-  var form = document.getElementById('create-poll-form');
-  if (form) form.style.display = 'none';
-}
-
-function addPollOption() {
-  var container = document.getElementById('poll-options-inputs');
-  if (!container) return;
-  var count = container.querySelectorAll('.poll-option-input').length;
-  if (count >= 10) return;
-  var input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'poll-option-input';
-  input.placeholder = 'Option ' + (count + 1);
-  input.style = 'width:100%;padding:4px 8px;margin-bottom:4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px';
-  container.appendChild(input);
-}
-
-async function submitPoll() {
-  var question = document.getElementById('poll-question');
-  if (!question || !question.value.trim()) return;
-  var inputs = document.querySelectorAll('.poll-option-input');
-  var options = [];
-  inputs.forEach(function(inp) { if (inp.value.trim()) options.push(inp.value.trim()); });
-  if (options.length < 2) { alert('At least 2 options required'); return; }
-
-  try {
-    await fetch('/polls', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: question.value.trim(), options: options, createdBy: 'ryan' })
-    });
-    hideCreatePollForm();
-    question.value = '';
-    inputs.forEach(function(inp) { inp.value = ''; });
-    await loadPolls();
-  } catch { /* ignore */ }
-}
-
 async function loadFeedback() {
   try {
     const res = await fetch(BASE + '/feedback?status=all&limit=50');
@@ -2924,6 +2826,17 @@ loadIntensityControl();
 
 // ═══ TEAM POLLS ═══
 
+// Agent color palette for voter dots
+const VOTER_COLORS = ['#60a5fa','#f472b6','#34d399','#fbbf24','#a78bfa','#fb923c','#22d3ee','#e879f9'];
+function voterColor(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  return VOTER_COLORS[Math.abs(h) % VOTER_COLORS.length];
+}
+function voterInitial(name) {
+  return (name || '?')[0].toUpperCase();
+}
+
 async function loadPolls() {
   const body = document.getElementById('polls-body');
   const count = document.getElementById('polls-count');
@@ -2936,49 +2849,82 @@ async function loadPolls() {
     if (count) count.textContent = polls.length ? `(${polls.length})` : '';
 
     if (!polls.length) {
-      body.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0">No polls yet. Create one!</div>';
+      body.innerHTML = '<div class="empty" style="padding:8px 0;font-size:12px;color:var(--text-muted)">No polls yet. Click + New Poll to create one.</div>';
       return;
     }
 
     let html = '';
     for (const poll of polls) {
-      // Fetch results for each poll
       const rr = await fetch(BASE + '/polls/' + poll.id);
       const rd = await rr.json();
       const results = rd.poll || poll;
       const isActive = results.status === 'active';
+      const totalVotes = results.total_votes || 0;
+      const tally = results.tally || [];
+      const maxCount = Math.max(...tally.map(t => t.count), 1);
 
-      html += '<div style="margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border-subtle)">';
-      html += '<div style="font-weight:600;font-size:13px;margin-bottom:6px">' + escapeHtml(results.question);
-      html += ' <span style="font-size:11px;color:var(--text-muted)">(' + results.total_votes + ' vote' + (results.total_votes !== 1 ? 's' : '') + ')</span>';
-      if (!isActive) html += ' <span style="font-size:10px;color:var(--text-muted);background:var(--bg-secondary);padding:1px 6px;border-radius:3px">closed</span>';
+      // Meta row
+      html += '<div class="poll-card">';
+      html += '<div class="poll-meta">';
+      html += '<span>' + esc(agentLabel(results.created_by || 'unknown')) + '</span>';
+      html += '<span>·</span>';
+      html += '<span>' + timeAgo(results.created_at) + '</span>';
+      html += isActive
+        ? '<span class="poll-badge-open">Open</span>'
+        : '<span class="poll-badge-closed">Closed</span>';
       html += '</div>';
 
-      const maxCount = Math.max(...(results.tally || []).map(t => t.count), 1);
-      for (let i = 0; i < (results.tally || []).length; i++) {
-        const t = results.tally[i];
-        const pct = results.total_votes > 0 ? Math.round(t.count / results.total_votes * 100) : 0;
+      // Question
+      html += '<div class="poll-question">' + esc(results.question) + '</div>';
+
+      // Options as radiogroup
+      html += '<div role="radiogroup" aria-label="' + esc(results.question) + '">';
+      for (let i = 0; i < tally.length; i++) {
+        const t = tally[i];
+        const pct = totalVotes > 0 ? Math.round(t.count / totalVotes * 100) : 0;
         const barWidth = maxCount > 0 ? Math.round(t.count / maxCount * 100) : 0;
+        const voters = t.voters || [];
+        const clickable = isActive ? ' onclick="votePoll(\'' + esc(results.id) + '\',' + i + ')"' : '';
+        const tabIdx = isActive ? (i === 0 ? '0' : '-1') : '-1';
 
-        html += '<div style="margin-bottom:4px;position:relative">';
-        html += '<div style="position:absolute;top:0;left:0;height:100%;width:' + barWidth + '%;background:var(--accent);opacity:0.15;border-radius:4px;transition:width 0.3s"></div>';
-        html += '<div style="position:relative;display:flex;align-items:center;justify-content:space-between;padding:4px 8px;font-size:12px">';
-        html += '<span>' + escapeHtml(t.option) + '</span>';
-        html += '<span style="color:var(--text-muted);font-size:11px">' + t.count + ' (' + pct + '%)</span>';
+        html += '<div class="poll-option" role="radio" aria-checked="false" aria-label="' + esc(t.option) + ', ' + pct + '%" tabindex="' + tabIdx + '"' + clickable + '>';
+        html += '<div class="poll-option-bar" style="width:' + barWidth + '%"></div>';
+        html += '<div class="poll-option-content">';
+        html += '<div class="poll-option-label">';
+        html += '<div class="poll-option-check"></div>';
+        html += '<span>' + esc(t.option) + '</span>';
         html += '</div>';
+        html += '<div class="poll-option-stats">';
 
-        if (isActive) {
-          html += '<button onclick="votePoll(\'' + results.id + '\',' + i + ')" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);font-size:10px;background:var(--accent);color:#fff;border:none;padding:2px 8px;border-radius:3px;cursor:pointer;opacity:0.8">Vote</button>';
+        // Voter dots
+        if (voters.length > 0) {
+          html += '<div class="poll-voter-dots">';
+          const shown = voters.slice(0, 5);
+          for (const v of shown) {
+            html += '<div class="poll-voter-dot" style="background:' + voterColor(v) + '" title="' + esc(v) + '">' + voterInitial(v) + '</div>';
+          }
+          if (voters.length > 5) html += '<div class="poll-voter-dot" style="background:var(--border)" title="' + (voters.length - 5) + ' more">+' + (voters.length - 5) + '</div>';
+          html += '</div>';
         }
+
+        html += '<span>' + t.count + ' (' + pct + '%)</span>';
+        html += '</div>';
+        html += '</div>';
         html += '</div>';
       }
+      html += '</div>';
 
-      const allVoters = (results.tally || []).flatMap(t => t.voters || []);
-      if (allVoters.length > 0) {
-        html += '<div style="font-size:10px;color:var(--text-muted);margin-top:4px">Voters: ' + [...new Set(allVoters)].map(escapeHtml).join(', ') + '</div>';
+      // Footer
+      html += '<div class="poll-footer">';
+      html += '<span>' + totalVotes + ' vote' + (totalVotes !== 1 ? 's' : '') + '</span>';
+      if (isActive && results.expires_at) {
+        const remaining = Math.max(0, Math.ceil((results.expires_at - Date.now()) / 60000));
+        html += '<span>' + (remaining > 60 ? Math.ceil(remaining / 60) + 'h' : remaining + 'm') + ' remaining</span>';
+      } else if (!isActive) {
+        const winner = tally.reduce((a, b) => b.count > a.count ? b : a, tally[0]);
+        if (winner && winner.count > 0) html += '<span>Winner: ' + esc(winner.option) + '</span>';
       }
-
-      html += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px">by ' + escapeHtml(results.created_by) + ' · ' + new Date(results.created_at).toLocaleString() + '</div>';
+      html += '</div>';
       html += '</div>';
     }
     body.innerHTML = html;
@@ -2987,29 +2933,44 @@ async function loadPolls() {
   }
 }
 
+function timeAgo(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
 function showCreatePollForm() {
-  document.getElementById('create-poll-form').style.display = 'block';
+  const form = document.getElementById('create-poll-form');
+  if (form) { form.style.display = 'block'; document.getElementById('poll-question')?.focus(); }
 }
 
 function hideCreatePollForm() {
-  document.getElementById('create-poll-form').style.display = 'none';
+  const form = document.getElementById('create-poll-form');
+  if (form) form.style.display = 'none';
 }
 
 function addPollOption() {
   const container = document.getElementById('poll-options-inputs');
-  const count = container.querySelectorAll('.poll-option-input').length + 1;
+  if (!container) return;
+  const count = container.querySelectorAll('.poll-option-input').length;
+  if (count >= 6) return;
   const input = document.createElement('input');
   input.type = 'text';
-  input.className = 'poll-option-input';
-  input.placeholder = 'Option ' + count;
-  input.style = 'width:100%;padding:4px 8px;margin-bottom:4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px';
+  input.className = 'poll-option-input poll-input';
+  input.placeholder = 'Option ' + (count + 1);
+  input.setAttribute('aria-label', 'Poll option ' + (count + 1));
   container.appendChild(input);
 }
 
 async function submitPoll() {
-  const question = document.getElementById('poll-question').value.trim();
+  const question = document.getElementById('poll-question')?.value.trim();
   const optionInputs = document.querySelectorAll('.poll-option-input');
   const options = Array.from(optionInputs).map(i => i.value.trim()).filter(Boolean);
+  const expiryEl = document.getElementById('poll-expiry');
+  const expiryMin = expiryEl ? parseInt(expiryEl.value, 10) : 0;
+  const anonymous = document.getElementById('poll-anonymous')?.checked || false;
 
   if (!question || options.length < 2) {
     alert('Need a question and at least 2 options');
@@ -3017,17 +2978,19 @@ async function submitPoll() {
   }
 
   try {
+    const body = { question, options, createdBy: 'dashboard', anonymous };
+    if (expiryMin > 0) body.expiresInMinutes = expiryMin;
     const res = await fetch(BASE + '/polls', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, options, created_by: 'ryan' }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.success) {
       hideCreatePollForm();
       document.getElementById('poll-question').value = '';
-      document.querySelectorAll('.poll-option-input').forEach(i => i.value = '');
-      loadPolls();
+      document.querySelectorAll('.poll-option-input').forEach(i => { i.value = ''; });
+      await loadPolls();
     } else {
       alert(data.error || 'Failed to create poll');
     }
@@ -3037,24 +3000,43 @@ async function submitPoll() {
 }
 
 async function votePoll(pollId, optionIndex) {
+  const voter = prompt('Your name:');
+  if (!voter) return;
   try {
     const res = await fetch(BASE + '/polls/' + pollId + '/vote', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ voter: 'ryan', choice: optionIndex }),
+      body: JSON.stringify({ voter, choice: optionIndex }),
     });
     const data = await res.json();
     if (data.success) {
-      loadPolls();
-    } else {
-      alert(data.error || 'Failed to vote');
+      await loadPolls();
     }
-  } catch (err) {
-    alert('Failed to vote');
-  }
+  } catch {}
 }
 
-// Load polls on chat page
+// Keyboard nav for poll options (arrow keys within radiogroup)
+document.addEventListener('keydown', (e) => {
+  const opt = document.activeElement;
+  if (!opt || !opt.classList.contains('poll-option')) return;
+  const group = opt.closest('[role="radiogroup"]');
+  if (!group) return;
+  const opts = Array.from(group.querySelectorAll('.poll-option'));
+  const idx = opts.indexOf(opt);
+  if (idx < 0) return;
+  let next = -1;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (idx + 1) % opts.length;
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (idx - 1 + opts.length) % opts.length;
+  else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); opt.click(); return; }
+  if (next >= 0) {
+    e.preventDefault();
+    opts.forEach(o => o.setAttribute('tabindex', '-1'));
+    opts[next].setAttribute('tabindex', '0');
+    opts[next].focus();
+  }
+});
+
+// Load polls on init
 if (document.getElementById('polls-body')) {
   loadPolls();
   setInterval(loadPolls, 30000);
