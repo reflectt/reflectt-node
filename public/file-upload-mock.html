@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>File Upload UI — Reflectt Design Mock</title>
+<style>
+  /* ── Design Tokens (from reflectt-node tokens v1) ── */
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-raised: #1c2129;
+    --surface-hover: #21262d;
+    --border: #30363d;
+    --border-subtle: #21262d;
+    --border-focus: #58a6ff;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --text-dim: #6e7681;
+    --accent: #58a6ff;
+    --accent-hover: #79c0ff;
+    --accent-dim: rgba(56,139,253,0.15);
+    --green: #3fb950;
+    --green-dim: rgba(63,185,80,0.15);
+    --red: #f85149;
+    --red-dim: rgba(248,81,73,0.15);
+    --yellow: #d29922;
+    --yellow-dim: rgba(210,153,34,0.15);
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --text-xs: 11px;
+    --text-sm: 12px;
+    --text-base: 14px;
+    --text-lg: 16px;
+    --text-xl: 20px;
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --transition-fast: 150ms;
+    --transition-normal: 200ms;
+    --easing-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+    --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--border-focus);
+    --shadow-hover: 0 2px 8px rgba(0,0,0,0.3);
+    --shadow-card: 0 1px 3px rgba(0,0,0,0.2);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: var(--text-base);
+    line-height: 1.5;
+    padding: var(--space-6);
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  h1 { font-size: var(--text-xl); font-weight: var(--font-weight-semibold); margin-bottom: var(--space-2); }
+  h2 { font-size: var(--text-lg); font-weight: var(--font-weight-semibold); margin: var(--space-6) 0 var(--space-3); color: var(--text-muted); }
+  .subtitle { color: var(--text-muted); font-size: var(--text-sm); margin-bottom: var(--space-6); }
+
+  /* ── Section panels ── */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: var(--space-5);
+    margin-bottom: var(--space-5);
+  }
+  .section-title {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--space-4);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  /* ── Drop Zone ── */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-6) var(--space-4);
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--transition-normal) var(--easing-smooth);
+    position: relative;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+  }
+  .drop-zone .icon {
+    font-size: 32px;
+    opacity: 0.6;
+    transition: opacity var(--transition-fast) var(--easing-smooth);
+  }
+  .drop-zone .label {
+    font-size: var(--text-base);
+    color: var(--text-muted);
+  }
+  .drop-zone .label strong {
+    color: var(--accent);
+    font-weight: var(--font-weight-medium);
+  }
+  .drop-zone .hint {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+  }
+  .drop-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .drop-zone:hover {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+    }
+    .drop-zone:hover .icon { opacity: 1; }
+  }
+
+  .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    border-style: solid;
+    transform: scale(1.01);
+  }
+  .drop-zone.drag-over .icon { opacity: 1; }
+
+  .drop-zone:focus-within {
+    box-shadow: var(--focus-ring);
+    border-color: var(--border-focus);
+  }
+
+  /* ── Upload Progress ── */
+  .upload-queue {
+    margin-top: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .upload-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-raised);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+  }
+  .upload-item .file-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+    width: 24px;
+    text-align: center;
+  }
+  .upload-item .file-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .upload-item .file-name {
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .upload-item .file-size {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+  }
+  .upload-item .progress-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--border-subtle);
+    border-radius: 2px;
+    overflow: hidden;
+    max-width: 200px;
+  }
+  .upload-item .progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width var(--transition-normal) var(--easing-smooth);
+  }
+  .upload-item .progress-fill.uploading { background: var(--accent); }
+  .upload-item .progress-fill.done { background: var(--green); }
+  .upload-item .progress-fill.error { background: var(--red); }
+
+  .upload-item .status-icon { flex-shrink: 0; font-size: var(--text-sm); }
+  .upload-item .status-icon.done { color: var(--green); }
+  .upload-item .status-icon.error { color: var(--red); }
+
+  .upload-item .cancel-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast);
+    font-family: inherit;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .upload-item .cancel-btn:hover { color: var(--red); }
+  }
+
+  /* ── File List / Browser ── */
+  .file-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+    flex-wrap: wrap;
+  }
+  .file-search {
+    flex: 1;
+    min-width: 180px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    color: var(--text);
+    font-size: var(--text-sm);
+    font-family: inherit;
+    transition: border-color var(--transition-fast);
+  }
+  .file-search:focus {
+    outline: none;
+    border-color: var(--border-focus);
+    box-shadow: var(--focus-ring);
+  }
+  .file-search::placeholder { color: var(--text-dim); }
+
+  .view-toggle {
+    display: flex;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .view-toggle button {
+    background: var(--surface-raised);
+    border: none;
+    color: var(--text-muted);
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+    font-size: var(--text-sm);
+    font-family: inherit;
+    transition: all var(--transition-fast);
+  }
+  .view-toggle button.active {
+    background: var(--accent-dim);
+    color: var(--accent);
+  }
+  .view-toggle button + button { border-left: 1px solid var(--border-subtle); }
+
+  .file-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--space-3);
+  }
+  .file-card {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    cursor: pointer;
+    transition: all var(--transition-normal) var(--easing-smooth);
+    text-align: center;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .file-card:hover {
+      border-color: var(--border);
+      box-shadow: var(--shadow-hover);
+      transform: translateY(-1px);
+    }
+  }
+  .file-card:focus-visible {
+    box-shadow: var(--focus-ring);
+    outline: none;
+  }
+  .file-card .thumb {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .file-card .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+  }
+  .file-card .thumb .type-icon {
+    font-size: 28px;
+    opacity: 0.5;
+  }
+  .file-card .card-name {
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .file-card .card-meta {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* List view */
+  .file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .file-list-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--surface-raised);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .file-list-item:hover { background: var(--surface-hover); }
+  }
+  .file-list-item:focus-visible {
+    box-shadow: var(--focus-ring);
+    outline: none;
+    z-index: 1;
+  }
+  .file-list-item .list-icon { font-size: 16px; flex-shrink: 0; width: 24px; text-align: center; }
+  .file-list-item .list-thumb {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+  .file-list-item .list-name {
+    flex: 1;
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .file-list-item .list-meta {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .file-list-item .list-actions {
+    display: flex;
+    gap: var(--space-1);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .file-list-item:hover .list-actions { opacity: 1; }
+  }
+  .file-list-item:focus-within .list-actions { opacity: 1; }
+  .action-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+    font-family: inherit;
+    transition: color var(--transition-fast);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .action-btn:hover { color: var(--text); }
+    .action-btn.delete:hover { color: var(--red); }
+  }
+
+  /* ── Chat Attachment Bar ── */
+  .chat-input-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+  }
+  .attach-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 18px;
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast);
+    flex-shrink: 0;
+    font-family: inherit;
+    position: relative;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .attach-btn:hover { color: var(--accent); }
+  }
+  .attach-btn:focus-visible {
+    box-shadow: var(--focus-ring);
+    outline: none;
+  }
+  .attach-btn input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .chat-text-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: var(--text-base);
+    font-family: inherit;
+    outline: none;
+  }
+  .chat-text-input::placeholder { color: var(--text-dim); }
+  .chat-send-btn {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-semibold);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background var(--transition-fast);
+    flex-shrink: 0;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .chat-send-btn:hover { background: var(--accent-hover); }
+  }
+
+  /* Attachment preview strip */
+  .attachment-preview {
+    display: flex;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    flex-wrap: wrap;
+  }
+  .attachment-chip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+    max-width: 200px;
+  }
+  .attachment-chip img {
+    width: 24px;
+    height: 24px;
+    border-radius: 3px;
+    object-fit: cover;
+  }
+  .attachment-chip .chip-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+  }
+  .attachment-chip .chip-remove {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: var(--text-xs);
+    padding: 0 2px;
+    font-family: inherit;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .attachment-chip .chip-remove:hover { color: var(--red); }
+  }
+
+  /* ── Chat Message with File ── */
+  .chat-message {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+  }
+  .msg-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent-dim);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--text-xs);
+    font-weight: var(--font-weight-semibold);
+    flex-shrink: 0;
+  }
+  .msg-body { flex: 1; min-width: 0; }
+  .msg-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+  }
+  .msg-sender {
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-semibold);
+  }
+  .msg-time {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+  }
+  .msg-text {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    margin-bottom: var(--space-2);
+  }
+
+  .msg-file-card {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-3);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-decoration: none;
+    color: var(--text);
+    max-width: 100%;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .msg-file-card:hover {
+      border-color: var(--border);
+      background: var(--surface-hover);
+    }
+  }
+  .msg-file-card .file-thumb {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+  .msg-file-card .file-thumb-placeholder {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .msg-file-info { min-width: 0; }
+  .msg-file-info .name {
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .msg-file-info .meta {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+  }
+  .msg-file-card .download-icon {
+    color: var(--text-dim);
+    font-size: var(--text-sm);
+    flex-shrink: 0;
+    margin-left: var(--space-2);
+  }
+
+  /* Inline image preview in chat */
+  .msg-image-preview {
+    max-width: 320px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-subtle);
+    overflow: hidden;
+    margin-top: var(--space-2);
+    cursor: pointer;
+  }
+  .msg-image-preview img {
+    width: 100%;
+    display: block;
+  }
+  .msg-image-preview .img-meta {
+    padding: var(--space-1) var(--space-2);
+    background: var(--surface-raised);
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* ── Task Attachment ── */
+  .task-attachments {
+    margin-top: var(--space-3);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .task-attachments-label {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: var(--space-2);
+    font-weight: var(--font-weight-semibold);
+  }
+  .task-attachment-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .task-attachment-chip {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    background: var(--surface-raised);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
+    font-size: var(--text-xs);
+    cursor: pointer;
+    transition: border-color var(--transition-fast);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .task-attachment-chip:hover { border-color: var(--border); }
+  }
+  .task-attachment-chip img {
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    object-fit: cover;
+  }
+  .add-attachment-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    background: none;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-1) var(--space-2);
+    color: var(--text-dim);
+    font-size: var(--text-xs);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all var(--transition-fast);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .add-attachment-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  }
+
+  /* ── States ── */
+  .empty-state {
+    text-align: center;
+    padding: var(--space-6);
+    color: var(--text-dim);
+    font-size: var(--text-sm);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    body { padding: var(--space-3); }
+    .file-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+    .chat-input-bar { flex-wrap: wrap; }
+    .chat-send-btn { width: 100%; min-height: 44px; }
+  }
+
+  /* ── Demo controls ── */
+  .demo-controls {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+    flex-wrap: wrap;
+  }
+  .demo-btn {
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all var(--transition-fast);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .demo-btn:hover { border-color: var(--accent); color: var(--accent); }
+  }
+  .demo-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+  .hidden { display: none !important; }
+  hr { border: none; border-top: 1px solid var(--border-subtle); margin: var(--space-6) 0; }
+</style>
+</head>
+<body>
+
+<h1>📁 File Upload UI</h1>
+<p class="subtitle">Design mock — reflectt-node dashboard file sharing. All states are interactive.</p>
+
+<div class="demo-controls">
+  <button class="demo-btn active" onclick="showSection('all')">All States</button>
+  <button class="demo-btn" onclick="showSection('upload')">Upload Zone</button>
+  <button class="demo-btn" onclick="showSection('progress')">Upload Progress</button>
+  <button class="demo-btn" onclick="showSection('browser')">File Browser</button>
+  <button class="demo-btn" onclick="showSection('chat')">Chat Attachment</button>
+  <button class="demo-btn" onclick="showSection('task')">Task Attachment</button>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- SECTION 1: DRAG & DROP UPLOAD ZONE        -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section" id="sec-upload">
+  <div class="section-title">📤 Upload Zone</div>
+
+  <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Upload files — drag and drop or click to browse">
+    <div class="icon">📂</div>
+    <div class="label">Drag files here or <strong>browse</strong></div>
+    <div class="hint">PDF, PNG, JPG, CSV, XLSX, TXT, MD — up to 50MB</div>
+    <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.txt,.md" aria-label="Choose files to upload" id="fileInput">
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- SECTION 2: UPLOAD PROGRESS                -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section" id="sec-progress">
+  <div class="section-title">⏳ Upload Progress</div>
+
+  <div class="upload-queue" role="log" aria-label="Upload progress" aria-live="polite">
+    <!-- Uploading -->
+    <div class="upload-item">
+      <span class="file-icon">📄</span>
+      <div class="file-info">
+        <div class="file-name">bank-statement-jan-2026.pdf</div>
+        <div class="file-size">2.4 MB</div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill uploading" style="width: 65%" id="progressDemo"></div></div>
+      <button class="cancel-btn" aria-label="Cancel upload">✕</button>
+    </div>
+
+    <!-- Done -->
+    <div class="upload-item">
+      <span class="file-icon">🖼️</span>
+      <div class="file-info">
+        <div class="file-name">screenshot-dashboard.png</div>
+        <div class="file-size">847 KB</div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill done" style="width: 100%"></div></div>
+      <span class="status-icon done" aria-label="Upload complete">✓</span>
+    </div>
+
+    <!-- Error -->
+    <div class="upload-item">
+      <span class="file-icon">📊</span>
+      <div class="file-info">
+        <div class="file-name">financials-q4.xlsx</div>
+        <div class="file-size">68 MB — exceeds 50MB limit</div>
+      </div>
+      <div class="progress-bar"><div class="progress-fill error" style="width: 100%"></div></div>
+      <span class="status-icon error" aria-label="Upload failed">✕</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- SECTION 3: FILE BROWSER                   -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section" id="sec-browser">
+  <div class="section-title">📁 Files</div>
+
+  <div class="file-toolbar">
+    <input class="file-search" type="search" placeholder="Search files…" aria-label="Search files">
+    <div class="view-toggle" role="radiogroup" aria-label="View mode">
+      <button class="active" role="radio" aria-checked="true" onclick="setView('grid', this)" aria-label="Grid view">▦</button>
+      <button role="radio" aria-checked="false" onclick="setView('list', this)" aria-label="List view">☰</button>
+    </div>
+  </div>
+
+  <!-- Grid View -->
+  <div class="file-grid" id="gridView">
+    <div class="file-card" tabindex="0" role="button" aria-label="bank-statement-jan-2026.pdf, 2.4 MB">
+      <div class="thumb"><span class="type-icon">📄</span></div>
+      <div class="card-name">bank-statement-jan-2026.pdf</div>
+      <div class="card-meta">2.4 MB · 2m ago</div>
+    </div>
+    <div class="file-card" tabindex="0" role="button" aria-label="screenshot-dashboard.png, 847 KB">
+      <div class="thumb">
+        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='120' fill='%231c2129'%3E%3Crect width='160' height='120' rx='6'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2358a6ff' font-size='12' font-family='sans-serif'%3Edashboard.png%3C/text%3E%3C/svg%3E" alt="Screenshot preview">
+      </div>
+      <div class="card-name">screenshot-dashboard.png</div>
+      <div class="card-meta">847 KB · 5m ago</div>
+    </div>
+    <div class="file-card" tabindex="0" role="button" aria-label="team-notes.md, 12 KB">
+      <div class="thumb"><span class="type-icon">📝</span></div>
+      <div class="card-name">team-notes.md</div>
+      <div class="card-meta">12 KB · 1h ago</div>
+    </div>
+    <div class="file-card" tabindex="0" role="button" aria-label="revenue-data.csv, 156 KB">
+      <div class="thumb"><span class="type-icon">📊</span></div>
+      <div class="card-name">revenue-data.csv</div>
+      <div class="card-meta">156 KB · 3h ago</div>
+    </div>
+    <div class="file-card" tabindex="0" role="button" aria-label="logo-v2.png, 340 KB">
+      <div class="thumb">
+        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='120' fill='%231c2129'%3E%3Crect width='160' height='120' rx='6'/%3E%3Ccircle cx='80' cy='55' r='25' fill='%233fb950' opacity='0.4'/%3E%3Ctext x='50%25' y='85%25' dominant-baseline='middle' text-anchor='middle' fill='%233fb950' font-size='10' font-family='sans-serif'%3Elogo-v2.png%3C/text%3E%3C/svg%3E" alt="Logo preview">
+      </div>
+      <div class="card-name">logo-v2.png</div>
+      <div class="card-meta">340 KB · yesterday</div>
+    </div>
+  </div>
+
+  <!-- List View (hidden by default) -->
+  <div class="file-list hidden" id="listView">
+    <div class="file-list-item" tabindex="0" role="button">
+      <span class="list-icon">📄</span>
+      <span class="list-name">bank-statement-jan-2026.pdf</span>
+      <span class="list-meta">2.4 MB</span>
+      <span class="list-meta">2m ago</span>
+      <div class="list-actions">
+        <button class="action-btn" aria-label="Download">⬇</button>
+        <button class="action-btn delete" aria-label="Delete">🗑</button>
+      </div>
+    </div>
+    <div class="file-list-item" tabindex="0" role="button">
+      <span class="list-icon">🖼️</span>
+      <img class="list-thumb" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' fill='%231c2129'%3E%3Crect width='32' height='32' rx='4'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2358a6ff' font-size='6' font-family='sans-serif'%3Epng%3C/text%3E%3C/svg%3E" alt="Thumbnail">
+      <span class="list-name">screenshot-dashboard.png</span>
+      <span class="list-meta">847 KB</span>
+      <span class="list-meta">5m ago</span>
+      <div class="list-actions">
+        <button class="action-btn" aria-label="Download">⬇</button>
+        <button class="action-btn delete" aria-label="Delete">🗑</button>
+      </div>
+    </div>
+    <div class="file-list-item" tabindex="0" role="button">
+      <span class="list-icon">📝</span>
+      <span class="list-name">team-notes.md</span>
+      <span class="list-meta">12 KB</span>
+      <span class="list-meta">1h ago</span>
+      <div class="list-actions">
+        <button class="action-btn" aria-label="Download">⬇</button>
+        <button class="action-btn delete" aria-label="Delete">🗑</button>
+      </div>
+    </div>
+    <div class="file-list-item" tabindex="0" role="button">
+      <span class="list-icon">📊</span>
+      <span class="list-name">revenue-data.csv</span>
+      <span class="list-meta">156 KB</span>
+      <span class="list-meta">3h ago</span>
+      <div class="list-actions">
+        <button class="action-btn" aria-label="Download">⬇</button>
+        <button class="action-btn delete" aria-label="Delete">🗑</button>
+      </div>
+    </div>
+    <div class="file-list-item" tabindex="0" role="button">
+      <span class="list-icon">🖼️</span>
+      <img class="list-thumb" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' fill='%231c2129'%3E%3Crect width='32' height='32' rx='4'/%3E%3Ccircle cx='16' cy='14' r='6' fill='%233fb950' opacity='0.4'/%3E%3Ctext x='50%25' y='85%25' dominant-baseline='middle' text-anchor='middle' fill='%233fb950' font-size='5' font-family='sans-serif'%3Elogo%3C/text%3E%3C/svg%3E" alt="Logo thumbnail">
+      <span class="list-name">logo-v2.png</span>
+      <span class="list-meta">340 KB</span>
+      <span class="list-meta">yesterday</span>
+      <div class="list-actions">
+        <button class="action-btn" aria-label="Download">⬇</button>
+        <button class="action-btn delete" aria-label="Delete">🗑</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- SECTION 4: CHAT ATTACHMENT FLOW           -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section" id="sec-chat">
+  <div class="section-title">💬 Chat — Attachment Flow</div>
+
+  <!-- State: attachment selected, ready to send -->
+  <div class="attachment-preview" aria-label="Attached files">
+    <div class="attachment-chip">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' fill='%231c2129'%3E%3Crect width='24' height='24' rx='3'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2358a6ff' font-size='6' font-family='sans-serif'%3Epdf%3C/text%3E%3C/svg%3E" alt="">
+      <span class="chip-name">bank-statement.pdf</span>
+      <button class="chip-remove" aria-label="Remove attachment">✕</button>
+    </div>
+  </div>
+
+  <div class="chat-input-bar">
+    <button class="attach-btn" aria-label="Attach file" title="Attach file">
+      📎
+      <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.txt,.md" aria-label="Choose file to attach">
+    </button>
+    <input class="chat-text-input" type="text" placeholder="Message as ryan…" value="Here's the January statement for review">
+    <button class="chat-send-btn">Send</button>
+  </div>
+
+  <h2>Message with file attachment (non-image)</h2>
+  <div class="chat-message">
+    <div class="msg-avatar">R</div>
+    <div class="msg-body">
+      <div class="msg-header">
+        <span class="msg-sender">ryan</span>
+        <span class="msg-time">2:34 PM</span>
+      </div>
+      <div class="msg-text">Here's the January statement for review</div>
+      <a class="msg-file-card" href="#" aria-label="Download bank-statement-jan-2026.pdf">
+        <div class="file-thumb-placeholder">📄</div>
+        <div class="msg-file-info">
+          <div class="name">bank-statement-jan-2026.pdf</div>
+          <div class="meta">PDF · 2.4 MB</div>
+        </div>
+        <span class="download-icon">⬇</span>
+      </a>
+    </div>
+  </div>
+
+  <h2>Message with image (inline preview)</h2>
+  <div class="chat-message">
+    <div class="msg-avatar" style="background: var(--green-dim); color: var(--green);">P</div>
+    <div class="msg-body">
+      <div class="msg-header">
+        <span class="msg-sender">pixel</span>
+        <span class="msg-time">2:41 PM</span>
+      </div>
+      <div class="msg-text">Updated dashboard design — check the sidebar nav</div>
+      <div class="msg-image-preview">
+        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='180' fill='%231c2129'%3E%3Crect width='320' height='180' rx='0'/%3E%3Crect x='10' y='10' width='60' height='160' rx='6' fill='%2321262d'/%3E%3Crect x='80' y='10' width='230' height='76' rx='6' fill='%2321262d'/%3E%3Crect x='80' y='94' width='110' height='76' rx='6' fill='%2321262d'/%3E%3Crect x='198' y='94' width='112' height='76' rx='6' fill='%2321262d'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2358a6ff' font-size='11' font-family='sans-serif'%3Edashboard-redesign.png%3C/text%3E%3C/svg%3E" alt="Dashboard redesign screenshot">
+        <div class="img-meta">
+          <span>dashboard-redesign.png</span>
+          <span>847 KB</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════ -->
+<!-- SECTION 5: TASK ATTACHMENTS               -->
+<!-- ═══════════════════════════════════════════ -->
+<div class="section" id="sec-task">
+  <div class="section-title">📋 Task — File Attachments</div>
+
+  <div style="background: var(--surface-raised); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-4);">
+    <div style="display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2);">
+      <span style="background: var(--yellow-dim); color: var(--yellow); font-size: var(--text-xs); padding: 2px 6px; border-radius: 3px; font-weight: var(--font-weight-semibold);">P1</span>
+      <span style="font-weight: var(--font-weight-semibold);">Review bank statements for Q1 reconciliation</span>
+    </div>
+    <div style="font-size: var(--text-sm); color: var(--text-muted); margin-bottom: var(--space-2);">Assigned to: <strong>kai</strong> · Status: doing</div>
+
+    <div class="task-attachments">
+      <div class="task-attachments-label">📎 Attachments (2)</div>
+      <div class="task-attachment-list">
+        <div class="task-attachment-chip" tabindex="0" role="button" aria-label="Open bank-statement-jan-2026.pdf">
+          <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='%231c2129'%3E%3Crect width='20' height='20' rx='3'/%3E%3Ctext x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' fill='%23f85149' font-size='6' font-family='sans-serif'%3EPDF%3C/text%3E%3C/svg%3E" alt="">
+          <span>bank-statement-jan-2026.pdf</span>
+        </div>
+        <div class="task-attachment-chip" tabindex="0" role="button" aria-label="Open revenue-data.csv">
+          <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' fill='%231c2129'%3E%3Crect width='20' height='20' rx='3'/%3E%3Ctext x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' fill='%233fb950' font-size='6' font-family='sans-serif'%3ECSV%3C/text%3E%3C/svg%3E" alt="">
+          <span>revenue-data.csv</span>
+        </div>
+        <button class="add-attachment-btn" aria-label="Attach file to task">+ Add file</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Demo interactivity ──
+
+// Drop zone drag states
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+['dragenter', 'dragover'].forEach(e => {
+  dropZone.addEventListener(e, (ev) => {
+    ev.preventDefault();
+    dropZone.classList.add('drag-over');
+  });
+});
+['dragleave', 'drop'].forEach(e => {
+  dropZone.addEventListener(e, (ev) => {
+    ev.preventDefault();
+    dropZone.classList.remove('drag-over');
+  });
+});
+dropZone.addEventListener('drop', (ev) => {
+  const files = ev.dataTransfer?.files;
+  if (files?.length) {
+    alert('Would upload ' + files.length + ' file(s): ' + Array.from(files).map(f => f.name).join(', '));
+  }
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files?.length) {
+    alert('Would upload ' + fileInput.files.length + ' file(s): ' + Array.from(fileInput.files).map(f => f.name).join(', '));
+  }
+});
+
+// Keyboard activation for drop zone
+dropZone.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    fileInput.click();
+  }
+});
+
+// Animated progress bar demo
+let progress = 0;
+const progressFill = document.getElementById('progressDemo');
+function animateProgress() {
+  progress += Math.random() * 8;
+  if (progress > 100) progress = 0;
+  progressFill.style.width = Math.min(progress, 100) + '%';
+  if (progress >= 100) {
+    progressFill.classList.remove('uploading');
+    progressFill.classList.add('done');
+    setTimeout(() => {
+      progressFill.classList.remove('done');
+      progressFill.classList.add('uploading');
+      progress = 0;
+      animateProgress();
+    }, 2000);
+    return;
+  }
+  setTimeout(animateProgress, 300 + Math.random() * 500);
+}
+animateProgress();
+
+// View toggle (grid/list)
+function setView(view, btn) {
+  document.getElementById('gridView').classList.toggle('hidden', view !== 'grid');
+  document.getElementById('listView').classList.toggle('hidden', view !== 'list');
+  document.querySelectorAll('.view-toggle button').forEach(b => {
+    b.classList.remove('active');
+    b.setAttribute('aria-checked', 'false');
+  });
+  btn.classList.add('active');
+  btn.setAttribute('aria-checked', 'true');
+}
+
+// Section filter
+function showSection(id) {
+  const sections = ['upload', 'progress', 'browser', 'chat', 'task'];
+  document.querySelectorAll('.demo-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  
+  if (id === 'all') {
+    sections.forEach(s => {
+      document.getElementById('sec-' + s).classList.remove('hidden');
+    });
+    document.querySelectorAll('hr').forEach(el => el.classList.remove('hidden'));
+    return;
+  }
+  sections.forEach(s => {
+    document.getElementById('sec-' + s).classList.toggle('hidden', s !== id);
+  });
+  document.querySelectorAll('hr').forEach(el => el.classList.add('hidden'));
+}
+</script>
+
+</body>
+</html>
