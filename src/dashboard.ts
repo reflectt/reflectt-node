@@ -155,6 +155,7 @@ export function getDashboardHTML(): string {
     color: var(--text);
     line-height: var(--line-height-normal);
     font-size: var(--text-md);
+    overflow-x: hidden;
   }
   .header {
     display: flex; align-items: center; justify-content: space-between;
@@ -270,12 +271,15 @@ export function getDashboardHTML(): string {
   .agent-strip {
     display: flex; gap: var(--space-3); padding: var(--space-4) var(--space-8); overflow-x: auto;
     border-bottom: 1px solid var(--border-subtle); background: var(--surface);
-    max-width: 100vw; box-sizing: border-box;
+    max-width: 100vw; box-sizing: border-box; scrollbar-width: thin;
   }
+  .agent-strip::-webkit-scrollbar { height: 4px; }
+  .agent-strip::-webkit-scrollbar-track { background: transparent; }
+  .agent-strip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
   .agent-card {
-    flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-3);
-    padding: var(--space-3) var(--space-4); background: var(--surface-raised); border: 1px solid var(--border);
-    border-radius: var(--radius-md); min-width: 200px; transition: border-color var(--transition-fast) var(--easing-smooth);
+    flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-2);
+    padding: var(--space-2) var(--space-3); background: var(--surface-raised); border: 1px solid var(--border);
+    border-radius: var(--radius-md); min-width: 160px; max-width: 240px; transition: border-color var(--transition-fast) var(--easing-smooth);
   }
   .agent-card:hover { border-color: var(--accent); }
   .agent-card.active { border-left: 3px solid var(--green); }
