@@ -19,7 +19,7 @@ import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
  * Build-freshness check: warn if dist/ is older than src/
  * Prevents silently running stale compiled code after source changes.
  */
-import { statSync, readdirSync } from 'fs'
+import { statSync, readdirSync, existsSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -51,11 +51,57 @@ function checkBuildFreshness(): void {
   }
 }
 
+/**
+ * Docker bootstrap check: detect container environment and print
+ * actionable guidance when required configuration is missing.
+ */
+function checkDockerBootstrap(): void {
+  const isDocker = existsSync('/.dockerenv') || process.env.REFLECTT_HOME === '/data'
+  if (!isDocker) return
+
+  const hasGatewayUrl = !!process.env.OPENCLAW_GATEWAY_URL
+  const hasGatewayToken = !!process.env.OPENCLAW_GATEWAY_TOKEN
+
+  if (!hasGatewayUrl && !hasGatewayToken) {
+    console.log('')
+    console.log('┌──────────────────────────────────────────────────────────┐')
+    console.log('│  📋 Docker Quick Start                                  │')
+    console.log('├──────────────────────────────────────────────────────────┤')
+    console.log('│                                                          │')
+    console.log('│  reflectt-node is running standalone (no OpenClaw).      │')
+    console.log('│  The dashboard, tasks, and API work fine without it.     │')
+    console.log('│                                                          │')
+    console.log('│  To connect to OpenClaw (for agent messaging):           │')
+    console.log('│                                                          │')
+    console.log('│  1. Set env vars in docker-compose.yml:                  │')
+    console.log('│     OPENCLAW_GATEWAY_URL=ws://host.docker.internal:18789 │')
+    console.log('│     OPENCLAW_GATEWAY_TOKEN=your_token_here               │')
+    console.log('│                                                          │')
+    console.log('│  2. Restart: docker-compose up -d                        │')
+    console.log('│                                                          │')
+    console.log('│  Get your token: openclaw gateway token                  │')
+    console.log('│  Full guide: https://reflectt.ai/bootstrap               │')
+    console.log('└──────────────────────────────────────────────────────────┘')
+    console.log('')
+  } else if (hasGatewayUrl && !hasGatewayToken) {
+    console.warn('')
+    console.warn('⚠️  OPENCLAW_GATEWAY_URL is set but OPENCLAW_GATEWAY_TOKEN is missing.')
+    console.warn('   Connection will fail without a valid token.')
+    console.warn('   Get your token: openclaw gateway token')
+    console.warn('   Then add to docker-compose.yml:')
+    console.warn('     OPENCLAW_GATEWAY_TOKEN=your_token_here')
+    console.warn('')
+  }
+}
+
 async function main() {
   console.log('🚀 Starting reflectt-node...')
 
   // Build-freshness check (non-blocking)
   checkBuildFreshness()
+
+  // Docker bootstrap guidance (non-blocking)
+  checkDockerBootstrap()
 
   // Dev-mode port guard: prevent dev servers from hijacking production port
   const PRODUCTION_PORT = 4445

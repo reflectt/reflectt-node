@@ -28,7 +28,7 @@ export interface BuildInfo {
 
 function git(cmd: string): string {
   try {
-    return execSync(`git ${cmd}`, { encoding: 'utf8', timeout: 5000 }).trim()
+    return execSync(`git ${cmd}`, { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
   } catch {
     return 'unknown'
   }
