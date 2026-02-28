@@ -975,14 +975,44 @@ async function sendChat() {
   const channel = document.getElementById('chat-channel').value;
   const btn = document.getElementById('chat-send');
   const content = input.value.trim();
-  if (!content) return;
+  const hasAttachments = typeof _pendingChatAttachments !== 'undefined' && _pendingChatAttachments.length > 0;
+  if (!content && !hasAttachments) return;
 
   btn.disabled = true;
   try {
+    // Upload pending attachments first
+    const attachments = [];
+    if (hasAttachments) {
+      for (const file of _pendingChatAttachments) {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('uploadedBy', 'ryan');
+        try {
+          const res = await fetch('/files', { method: 'POST', body: fd });
+          const data = await res.json();
+          if (data.success && data.file) {
+            attachments.push({
+              id: data.file.id,
+              name: data.file.originalName || data.file.filename,
+              size: data.file.size,
+              mimeType: data.file.mimeType,
+              url: '/files/' + data.file.id,
+            });
+          }
+        } catch (e) { console.error('Attachment upload failed:', e); }
+      }
+      _pendingChatAttachments = [];
+      if (typeof renderChatAttachments === 'function') renderChatAttachments();
+    }
+
+    // Build message with attachments
+    const payload = { from: 'ryan', content: content || '', channel };
+    if (attachments.length) payload.attachments = attachments;
+
     await fetch(BASE + '/chat/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: 'ryan', content, channel }),
+      body: JSON.stringify(payload),
     });
     input.value = '';
     await loadChat(true);
