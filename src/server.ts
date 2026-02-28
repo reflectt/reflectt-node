@@ -152,6 +152,7 @@ import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.
 import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CATEGORIES, type CreateDocInput, type UpdateDocInput, type DocCategory } from './knowledge-docs.js'
 import { onTaskShipped, onProcessFileWritten, onDecisionComment, isDecisionComment } from './knowledge-auto-index.js'
 import { upsertHostHeartbeat, getHost, listHosts, removeHost } from './host-registry.js'
+import { startKeepalive, stopKeepalive, getKeepaliveStatus, triggerKeepalivePing } from './host-keepalive.js'
 
 // Schemas
 const SendMessageSchema = z.object({
@@ -2065,6 +2066,7 @@ export async function createServer(): Promise<FastifyInstance> {
     stopShippedHeartbeat()
     stopTeamPulse()
     stopReminderEngine()
+    stopKeepalive()
     wsHeartbeat.stop()
   })
 
@@ -2189,6 +2191,24 @@ export async function createServer(): Promise<FastifyInstance> {
     const { hostId } = request.params as { hostId: string }
     const removed = removeHost(hostId)
     return { success: removed, hostId }
+  })
+
+  // ── Host Keepalive ──
+
+  // Start keepalive pinger for managed hosts
+  startKeepalive()
+
+  // Status endpoint
+  app.get('/hosts/keepalive', async () => {
+    return getKeepaliveStatus()
+  })
+
+  // Manual trigger: ping all or specific host
+  app.post('/hosts/keepalive/ping', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const hostId = typeof body.hostId === 'string' ? body.hostId.trim() : undefined
+    const results = await triggerKeepalivePing(hostId || undefined)
+    return { success: true, results }
   })
 
   // Team configuration linter health (TEAM.md / TEAM-ROLES.yaml / TEAM-STANDARDS.md)
