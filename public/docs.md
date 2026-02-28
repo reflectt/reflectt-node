@@ -694,6 +694,11 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | POST | `/pause` | Pause an agent or team. Body: `{ target: "team"|"agent-name", durationMinutes?, reason?, pausedBy? }`. Auto-resumes when duration expires. |
 | DELETE | `/pause` | Resume (unpause) an agent or team. Query: `target=team|agent-name`. |
 | GET | `/pause/status` | Current pause status. Query: `agent` (optional). Returns paused flag, remaining time, reason. |
+| POST | `/polls` | Create a poll. Body: `{ question, options[], createdBy, expiresInMinutes?, anonymous? }`. Returns `{ poll }`. |
+| GET | `/polls` | List polls. Query: `status=active|closed|all`, `limit`. Returns `{ polls[], count }`. |
+| GET | `/polls/:id` | Get poll with results. Returns `{ poll }` with vote counts and voter lists. |
+| POST | `/polls/:id/vote` | Cast a vote. Body: `{ voter, choice }` (choice is 0-indexed). Allows changing vote. |
+| POST | `/polls/:id/close` | Close a poll manually. |
 | GET | `/team/roles` | TEAM-ROLES routing matrix — agent skills, affinity scores, WIP caps |
 
 ## Other
