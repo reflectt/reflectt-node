@@ -2566,6 +2566,58 @@ export async function createServer(): Promise<FastifyInstance> {
     return healthMonitor.getIdleNudgeDebug()
   })
 
+  // ── Task-comment reject inspector ──
+  // Surfaces the reject ledger for debugging phantom comment IDs and misattribution.
+  app.get('/admin/task-comment-rejects', async (request, reply) => {
+    // Auth: loopback only
+    const ip = String((request as any).ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      return { success: false, error: 'Forbidden: localhost-only endpoint', hint: 'Access from localhost.' }
+    }
+
+    const query = request.query as Record<string, string>
+    const { listTaskCommentRejects } = await import('./taskCommentIngest.js')
+    const limit = query.limit ? Math.min(parseInt(query.limit, 10) || 50, 200) : 50
+    const reason = query.reason || undefined
+    const author = query.author || undefined
+    const since = query.since ? parseInt(query.since, 10) || undefined : undefined
+
+    const result = listTaskCommentRejects({ limit, reason, author, since })
+
+    // Shape each reject with explicit provenance + invalid_task_refs for debugging
+    const enriched = result.rejects.map(r => {
+      const details = r.details ? (() => { try { return JSON.parse(r.details) } catch { return null } })() : null
+      const provenance = r.provenance ? (() => { try { return JSON.parse(r.provenance) } catch { return null } })() : null
+
+      return {
+        reject_id: r.id,
+        timestamp: r.timestamp,
+        target_task_id: r.attempted_task_param,
+        resolved_task_id: r.resolved_task_id,
+        author: r.author,
+        reason: r.reason,
+        invalid_task_refs: details?.suggestions ?? [],
+        provenance: provenance ? {
+          integration: provenance.integration ?? provenance.source_channel ?? null,
+          original_message_id: provenance.original_message_id ?? null,
+          sender_id: provenance.sender_id ?? null,
+          ...provenance,
+        } : null,
+        content_preview: r.content ? r.content.slice(0, 200) : null,
+        details,
+      }
+    })
+
+    return {
+      success: true,
+      rejects: enriched,
+      total: result.total,
+      filters: { limit, reason, author, since },
+    }
+  })
+
   // One-shot idle-nudge tick (dry-run and real modes)
   app.post('/health/idle-nudge/tick', async (request, reply) => {
     const parsedQuery = HealthTickQuerySchema.safeParse(request.query ?? {})

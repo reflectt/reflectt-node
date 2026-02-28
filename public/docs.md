@@ -99,6 +99,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/mention-ack/:agent` | Pending mention-ack entries for one agent |
 | POST | `/health/mention-ack/check-timeouts` | Run timeout sweep and return timed-out mention entries |
 | GET | `/health/idle-nudge/debug` | Idle-nudge watchdog debug state |
+| GET | `/admin/task-comment-rejects` | Reject ledger for phantom task-comment IDs. Query: `limit` (max 200), `reason` (task_not_found\|invalid_task_refs), `author`, `since` (timestamp). Each row includes provenance (integration, sender_id, original_message_id). |
 | POST | `/health/idle-nudge/tick` | Trigger idle-nudge evaluation |
 | POST | `/health/cadence-watchdog/tick` | Trigger cadence watchdog |
 | POST | `/health/mention-rescue/tick` | Trigger mention-rescue fallback |

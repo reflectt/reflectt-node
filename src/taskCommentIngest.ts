@@ -67,3 +67,52 @@ export function recordTaskCommentReject(input: TaskCommentReject): { id: string 
 
   return { id }
 }
+
+export interface TaskCommentRejectRow {
+  id: string
+  attempted_task_param: string
+  resolved_task_id: string | null
+  author: string | null
+  content: string | null
+  reason: string
+  details: string | null
+  provenance: string | null
+  timestamp: number
+}
+
+/** Query the reject ledger with optional filters. */
+export function listTaskCommentRejects(opts?: {
+  limit?: number
+  reason?: string
+  author?: string
+  since?: number
+}): { rejects: TaskCommentRejectRow[]; total: number } {
+  ensureTaskCommentRejectTable()
+  const db = getDb()
+  const limit = Math.min(opts?.limit ?? 50, 200)
+  const conditions: string[] = []
+  const params: unknown[] = []
+
+  if (opts?.reason) {
+    conditions.push('reason = ?')
+    params.push(opts.reason)
+  }
+  if (opts?.author) {
+    conditions.push('author = ?')
+    params.push(opts.author)
+  }
+  if (opts?.since) {
+    conditions.push('timestamp >= ?')
+    params.push(opts.since)
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const total = (db.prepare(`SELECT COUNT(*) as cnt FROM task_comment_ingest_rejects ${where}`).get(...params) as { cnt: number }).cnt
+
+  const rows = db.prepare(
+    `SELECT * FROM task_comment_ingest_rejects ${where} ORDER BY timestamp DESC LIMIT ?`
+  ).all(...params, limit) as TaskCommentRejectRow[]
+
+  return { rejects: rows, total }
+}
