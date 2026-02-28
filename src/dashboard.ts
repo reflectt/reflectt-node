@@ -110,6 +110,45 @@ export function getDashboardHTML(): string {
     --focus-offset-strong: 4px;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ============================================================
+     CANONICAL BUTTON PRIMITIVES
+     ============================================================ */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 14px; border-radius: var(--radius-sm);
+    font-size: var(--text-base); font-weight: var(--font-weight-semibold);
+    font-family: inherit; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    transition: all var(--transition-fast) var(--easing-smooth);
+    text-decoration: none; line-height: 1.4; min-height: 32px;
+  }
+  .btn:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+  .btn:disabled, .btn[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+  @media (hover: hover) and (pointer: fine) {
+    .btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-primary:hover:not(:disabled) { opacity: 0.85; border-color: var(--accent); color: #fff; }
+  }
+  .btn-danger { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-danger:hover:not(:disabled) { background: var(--red); color: #fff; border-color: var(--red); }
+  }
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); padding: 4px 8px; }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-ghost:hover:not(:disabled) { background: var(--accent-dim); color: var(--accent); border-color: transparent; }
+  }
+  .btn.active, .btn[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+  .link {
+    color: var(--accent); text-decoration: none; font-weight: var(--font-weight-semibold);
+    transition: color var(--transition-fast) var(--easing-smooth);
+  }
+  .link:hover { text-decoration: underline; }
+  .link:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); border-radius: 3px; }
+
   body {
     font-family: var(--font-family);
     background: var(--bg);
@@ -205,7 +244,11 @@ export function getDashboardHTML(): string {
   .agent-badge.idle { background: var(--border); color: var(--text-muted); }
   .agent-badge.offline { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
   .main { padding: 24px 28px; display: flex; flex-direction: column; gap: var(--space-6); }
-  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-md); overflow: hidden;
+    transition: border-color var(--transition-fast) var(--easing-smooth);
+  }
   .panel-header {
     padding: var(--space-4) var(--space-5); font-size: var(--text-lg); font-weight: var(--font-weight-semibold); color: var(--text-bright);
     border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;
@@ -304,17 +347,21 @@ export function getDashboardHTML(): string {
     border: 1px solid var(--border);
     background: transparent;
     color: var(--text);
-    border-radius: var(--radius);
+    border-radius: var(--radius-sm);
     padding: 4px 10px;
     font-size: var(--text-sm);
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold);
     cursor: pointer;
     text-decoration: none;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    font-family: inherit;
+    transition: all var(--transition-fast) var(--easing-smooth);
   }
-  .artifact-btn:hover { border-color: var(--accent); color: var(--accent); }
+  @media (hover: hover) and (pointer: fine) {
+    .artifact-btn:hover { border-color: var(--accent); color: var(--accent); }
+  }
   .artifact-pill {
     display: inline-flex;
     align-items: center;
@@ -337,9 +384,13 @@ export function getDashboardHTML(): string {
   .modal-inline-row { display: flex; align-items: center; gap: 10px; }
   .modal-copy-btn {
     border: 1px solid var(--border-subtle); background: transparent; color: var(--text-muted);
-    border-radius: 6px; font-size: var(--text-sm); padding: 4px 8px; cursor: pointer;
+    border-radius: var(--radius-sm); font-size: var(--text-sm); padding: 4px 8px;
+    cursor: pointer; font-family: inherit;
+    transition: all var(--transition-fast) var(--easing-smooth);
   }
-  .modal-copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  @media (hover: hover) and (pointer: fine) {
+    .modal-copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  }
   .modal-select, .modal-input {
     width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 8px 12px; font-size: var(--text-md); outline: none;
@@ -349,24 +400,34 @@ export function getDashboardHTML(): string {
     display: flex; gap: var(--space-2); flex-wrap: wrap;
   }
   .status-btn {
-    padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: var(--radius-sm);
+    padding: 6px 14px; font-size: var(--text-base); font-weight: var(--font-weight-semibold);
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border); background: var(--bg); color: var(--text);
-    cursor: pointer; transition: all 0.15s;
+    cursor: pointer; font-family: inherit;
+    transition: all var(--transition-fast) var(--easing-smooth);
   }
-  .status-btn:hover { border-color: var(--accent); color: var(--accent); }
+  @media (hover: hover) and (pointer: fine) {
+    .status-btn:hover { border-color: var(--accent); color: var(--accent); }
+  }
   .status-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
   .modal-btn {
-    padding: 8px 16px; font-size: var(--text-base); font-weight: 600; border-radius: var(--radius-sm);
-    border: none; cursor: pointer; transition: opacity 0.15s;
+    padding: 8px 16px; font-size: var(--text-base); font-weight: var(--font-weight-semibold);
+    border-radius: var(--radius-sm);
+    border: none; cursor: pointer; font-family: inherit;
+    transition: all var(--transition-fast) var(--easing-smooth);
   }
   .modal-btn-primary {
     background: var(--accent); color: #fff;
   }
-  .modal-btn-primary:hover { opacity: 0.85; }
+  @media (hover: hover) and (pointer: fine) {
+    .modal-btn-primary:hover { opacity: 0.85; }
+  }
   .modal-btn-secondary {
     background: var(--border); color: var(--text);
   }
-  .modal-btn-secondary:hover { background: var(--text-muted); }
+  @media (hover: hover) and (pointer: fine) {
+    .modal-btn-secondary:hover { background: var(--text-muted); }
+  }
   .task-title { font-size: var(--text-base); font-weight: 500; color: var(--text-bright); margin-bottom: 6px; line-height: 1.4; }
   .task-meta { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
   .priority-badge { display: inline-block; padding: 2px 7px; border-radius: var(--radius-sm); font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.3px; }
@@ -486,9 +547,13 @@ export function getDashboardHTML(): string {
   .chat-input-bar input::placeholder { color: var(--text-muted); }
   .chat-input-bar button {
     background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
-    padding: 8px 18px; font-size: var(--text-base); font-weight: 600; cursor: pointer; transition: opacity 0.15s;
+    padding: 8px 18px; font-size: var(--text-base); font-weight: var(--font-weight-semibold);
+    cursor: pointer; font-family: inherit;
+    transition: all var(--transition-fast) var(--easing-smooth);
   }
-  .chat-input-bar button:hover { opacity: 0.85; }
+  @media (hover: hover) and (pointer: fine) {
+    .chat-input-bar button:hover { opacity: 0.85; }
+  }
   .chat-input-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -572,9 +637,13 @@ export function getDashboardHTML(): string {
   .state-pill.violation, .state-pill.escalated { color: var(--red); background: var(--red-dim); }
   .copy-template-btn {
     background: var(--surface-raised); color: var(--text); border: 1px solid var(--border);
-    border-radius: var(--radius-sm); padding: 5px 8px; font-size: var(--text-sm); cursor: pointer;
+    border-radius: var(--radius-sm); padding: 5px 8px; font-size: var(--text-sm);
+    cursor: pointer; font-family: inherit;
+    transition: all var(--transition-fast) var(--easing-smooth);
   }
-  .copy-template-btn:hover { border-color: var(--accent); color: var(--accent); }
+  @media (hover: hover) and (pointer: fine) {
+    .copy-template-btn:hover { border-color: var(--accent); color: var(--accent); }
+  }
 
   /* Review Queue Panel */
   .review-item {
