@@ -686,6 +686,16 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 |--------|------|-------------|
 | GET | `/shipped-heartbeat/stats` | Shipped-artifact heartbeat stats: messages sent, errors, last heartbeat timestamp. |
 
+## Files
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/files` | Upload a file (multipart/form-data). Fields: `file` (required), `uploadedBy`, `tags` (JSON array). Returns `{ success, file }`. 50MB limit. |
+| GET | `/files/:id` | Download file bytes with correct Content-Type. Images served inline, others as attachment. |
+| GET | `/files/:id/meta` | File metadata only (no bytes). Returns `{ success, file }`. |
+| GET | `/files` | List files. Query: `uploadedBy`, `tag`, `limit` (default 50), `offset`. Returns `{ files[], total }`. |
+| DELETE | `/files/:id` | Delete file (disk + metadata). Returns `{ success }`. |
+
 ## Team
 
 | Method | Path | Description |

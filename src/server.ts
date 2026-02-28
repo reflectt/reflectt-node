@@ -1675,6 +1675,10 @@ export async function createServer(): Promise<FastifyInstance> {
 
   await app.register(fastifyWebsocket)
 
+  // Multipart file uploads (50MB limit)
+  const fastifyMultipart = await import('@fastify/multipart')
+  await app.register(fastifyMultipart.default, { limits: { fileSize: 50 * 1024 * 1024 } })
+
   // Normalize error responses to a consistent envelope
   app.addHook('preSerialization', async (request, reply, payload) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -7229,6 +7233,78 @@ export async function createServer(): Promise<FastifyInstance> {
         format: 'TEAM-ROLES.yaml',
       },
     }
+  })
+
+  // ── File upload/download ──
+  app.post('/files', async (request, reply) => {
+    try {
+      const data = await request.file()
+      if (!data) { reply.code(400); return { success: false, error: 'No file in request' } }
+
+      const chunks: Buffer[] = []
+      for await (const chunk of data.file) chunks.push(chunk)
+      const buffer = Buffer.concat(chunks)
+
+      // Check if stream was truncated (exceeds limit)
+      if (data.file.truncated) {
+        reply.code(413)
+        return { success: false, error: 'File exceeds 50MB limit' }
+      }
+
+      const fields = data.fields as Record<string, { value?: string } | undefined>
+      const uploadedBy = typeof fields?.uploadedBy?.value === 'string' ? fields.uploadedBy.value : 'anonymous'
+      const tagsRaw = typeof fields?.tags?.value === 'string' ? fields.tags.value : '[]'
+      let tags: string[] = []
+      try { tags = JSON.parse(tagsRaw) } catch { tags = [] }
+
+      const { uploadFile } = await import('./files.js')
+      const result = uploadFile({ filename: data.filename, buffer, uploadedBy, tags, mimeType: data.mimetype })
+      if (!result.success) { reply.code(400); return result }
+      reply.code(201)
+      return result
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('Request file too large')) { reply.code(413); return { success: false, error: 'File exceeds 50MB limit' } }
+      reply.code(500); return { success: false, error: 'Upload failed' }
+    }
+  })
+
+  app.get<{ Params: { id: string } }>('/files/:id', async (request, reply) => {
+    const { readFile, isImage } = await import('./files.js')
+    const result = readFile(request.params.id)
+    if (!result) { reply.code(404); return { success: false, error: 'File not found' } }
+
+    const disposition = isImage(result.meta.mimeType) ? 'inline' : `attachment; filename="${result.meta.originalName}"`
+    reply.header('Content-Type', result.meta.mimeType)
+    reply.header('Content-Disposition', disposition)
+    reply.header('Content-Length', result.meta.sizeBytes)
+    reply.header('Cache-Control', 'private, max-age=3600')
+    return reply.send(result.buffer)
+  })
+
+  app.get<{ Params: { id: string } }>('/files/:id/meta', async (request, reply) => {
+    const { getFile } = await import('./files.js')
+    const meta = getFile(request.params.id)
+    if (!meta) { reply.code(404); return { success: false, error: 'File not found' } }
+    return { success: true, file: meta }
+  })
+
+  app.get('/files', async (request) => {
+    const query = request.query as Record<string, string>
+    const { listFiles } = await import('./files.js')
+    return listFiles({
+      uploadedBy: query.uploadedBy || query.uploaded_by,
+      tag: query.tag,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      offset: query.offset ? parseInt(query.offset, 10) : undefined,
+    })
+  })
+
+  app.delete<{ Params: { id: string } }>('/files/:id', async (request, reply) => {
+    const { deleteFile } = await import('./files.js')
+    const result = deleteFile(request.params.id)
+    if (!result.success) { reply.code(404); return result }
+    return result
   })
 
   // ── Team intensity / pacing ──
