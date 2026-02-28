@@ -3094,3 +3094,261 @@ if (document.getElementById('polls-body')) {
   loadPolls();
   setInterval(loadPolls, 30000);
 }
+
+// ── File Upload Integration ──
+let _allFiles = [];
+let _fileViewMode = 'grid';
+let _pendingChatAttachments = [];
+
+function fileIcon(mimeType, name) {
+  if (mimeType && mimeType.startsWith('image/')) return '🖼️';
+  if (name && name.endsWith('.pdf')) return '📄';
+  if (name && (name.endsWith('.csv') || name.endsWith('.xlsx'))) return '📊';
+  if (name && (name.endsWith('.md') || name.endsWith('.txt'))) return '📝';
+  return '📎';
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+function timeAgo(ts) {
+  const d = typeof ts === 'string' ? new Date(ts) : new Date(ts);
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+async function loadFiles() {
+  try {
+    const res = await fetch('/files?limit=100');
+    const data = await res.json();
+    _allFiles = data.files || [];
+    renderFiles(_allFiles);
+  } catch (e) {
+    console.error('Failed to load files:', e);
+  }
+}
+
+function renderFiles(files) {
+  const grid = document.getElementById('files-grid');
+  const list = document.getElementById('files-list');
+  const empty = document.getElementById('files-empty');
+  const count = document.getElementById('files-count');
+  if (!grid || !list) return;
+
+  if (count) count.textContent = files.length || '';
+
+  if (!files.length) {
+    grid.style.display = 'none';
+    list.style.display = 'none';
+    if (empty) empty.style.display = '';
+    return;
+  }
+
+  if (empty) empty.style.display = 'none';
+  grid.style.display = _fileViewMode === 'grid' ? '' : 'none';
+  list.style.display = _fileViewMode === 'list' ? '' : 'none';
+
+  // Grid view
+  grid.innerHTML = files.map(f => {
+    const icon = fileIcon(f.mimeType, f.originalName || f.filename);
+    const isImg = f.mimeType && f.mimeType.startsWith('image/');
+    const thumb = isImg
+      ? '<img src="/files/' + f.id + '" alt="' + (f.originalName || f.filename) + '" style="width:100%;height:100%;object-fit:cover;border-radius:var(--radius-sm)">'
+      : '<span style="font-size:32px">' + icon + '</span>';
+    return '<div class="file-card" tabindex="0" role="button" aria-label="' + (f.originalName || f.filename) + '">' +
+      '<div class="thumb" style="display:flex;align-items:center;justify-content:center;height:80px;background:var(--surface-raised);border-radius:var(--radius-sm);overflow:hidden">' + thumb + '</div>' +
+      '<div class="card-name">' + (f.originalName || f.filename) + '</div>' +
+      '<div class="card-meta">' + formatFileSize(f.size) + ' · ' + timeAgo(f.uploadedAt || f.createdAt) + '</div>' +
+      '<div class="card-actions">' +
+        '<a href="/files/' + f.id + '" download="' + (f.originalName || f.filename) + '" class="action-btn" aria-label="Download" onclick="event.stopPropagation()">⬇</a>' +
+        '<button class="action-btn delete" aria-label="Delete" onclick="event.stopPropagation();deleteFile(\'' + f.id + '\')">🗑</button>' +
+      '</div></div>';
+  }).join('');
+
+  // List view
+  list.innerHTML = files.map(f => {
+    const icon = fileIcon(f.mimeType, f.originalName || f.filename);
+    return '<div class="file-list-item" tabindex="0" role="button">' +
+      '<span class="list-icon">' + icon + '</span>' +
+      '<span class="list-name">' + (f.originalName || f.filename) + '</span>' +
+      '<span class="list-meta">' + formatFileSize(f.size) + '</span>' +
+      '<span class="list-meta">' + timeAgo(f.uploadedAt || f.createdAt) + '</span>' +
+      '<div class="list-actions">' +
+        '<a href="/files/' + f.id + '" download="' + (f.originalName || f.filename) + '" class="action-btn" aria-label="Download" onclick="event.stopPropagation()">⬇</a>' +
+        '<button class="action-btn delete" aria-label="Delete" onclick="event.stopPropagation();deleteFile(\'' + f.id + '\')">🗑</button>' +
+      '</div></div>';
+  }).join('');
+}
+
+function toggleFileView(mode) {
+  _fileViewMode = mode;
+  const gridBtn = document.getElementById('viewGridBtn');
+  const listBtn = document.getElementById('viewListBtn');
+  if (gridBtn) { gridBtn.classList.toggle('active', mode === 'grid'); gridBtn.setAttribute('aria-checked', mode === 'grid'); }
+  if (listBtn) { listBtn.classList.toggle('active', mode === 'list'); listBtn.setAttribute('aria-checked', mode === 'list'); }
+  renderFiles(_allFiles);
+}
+
+function filterFiles(query) {
+  if (!query) return renderFiles(_allFiles);
+  const q = query.toLowerCase();
+  renderFiles(_allFiles.filter(f => ((f.originalName || f.filename) || '').toLowerCase().includes(q)));
+}
+
+async function deleteFile(id) {
+  if (!confirm('Delete this file?')) return;
+  try {
+    await fetch('/files/' + id, { method: 'DELETE' });
+    loadFiles();
+  } catch (e) {
+    console.error('Delete failed:', e);
+  }
+}
+
+function addProgressItem(name, size) {
+  const q = document.getElementById('uploadQueue');
+  if (!q) return;
+  q.style.display = '';
+  const item = document.createElement('div');
+  item.className = 'upload-item';
+  item.id = 'upload-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+  item.innerHTML =
+    '<span class="file-icon">' + fileIcon(null, name) + '</span>' +
+    '<div class="file-info"><div class="file-name">' + name + '</div><div class="file-size">' + formatFileSize(size) + '</div></div>' +
+    '<div class="progress-bar"><div class="progress-fill uploading" style="width:30%"></div></div>' +
+    '<span class="status-icon" aria-label="Uploading">⏳</span>';
+  q.appendChild(item);
+}
+
+function updateProgressItem(name, status, error) {
+  const id = 'upload-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+  const item = document.getElementById(id);
+  if (!item) return;
+  const fill = item.querySelector('.progress-fill');
+  const icon = item.querySelector('.status-icon');
+  if (status === 'done') {
+    if (fill) { fill.style.width = '100%'; fill.className = 'progress-fill done'; }
+    if (icon) { icon.textContent = '✓'; icon.className = 'status-icon done'; icon.setAttribute('aria-label', 'Complete'); }
+    setTimeout(() => { item.style.opacity = '0.5'; }, 2000);
+  } else if (status === 'error') {
+    if (fill) { fill.style.width = '100%'; fill.className = 'progress-fill error'; }
+    if (icon) { icon.textContent = '✕'; icon.className = 'status-icon error'; icon.setAttribute('aria-label', 'Failed: ' + (error || 'unknown')); }
+    const sz = item.querySelector('.file-size');
+    if (sz && error) sz.textContent = error;
+  }
+}
+
+async function uploadFiles(fileList) {
+  for (const file of fileList) {
+    addProgressItem(file.name, file.size);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('uploadedBy', 'ryan');
+    try {
+      const res = await fetch('/files', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.success) {
+        updateProgressItem(file.name, 'done');
+      } else {
+        updateProgressItem(file.name, 'error', data.error || 'Upload failed');
+      }
+    } catch (err) {
+      updateProgressItem(file.name, 'error', err.message);
+    }
+  }
+  loadFiles();
+}
+
+// Init drop zone
+function initDropZone() {
+  const dz = document.getElementById('dropZone');
+  const fi = document.getElementById('fileInput');
+  if (!dz || !fi || dz._initialized) return;
+  dz._initialized = true;
+
+  ['dragenter', 'dragover'].forEach(e => dz.addEventListener(e, ev => {
+    ev.preventDefault(); dz.classList.add('drag-over');
+  }));
+  ['dragleave', 'drop'].forEach(e => dz.addEventListener(e, ev => {
+    ev.preventDefault(); dz.classList.remove('drag-over');
+  }));
+  dz.addEventListener('drop', ev => { if (ev.dataTransfer.files.length) uploadFiles(ev.dataTransfer.files); });
+  fi.addEventListener('change', () => { if (fi.files.length) uploadFiles(fi.files); fi.value = ''; });
+  dz.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fi.click(); } });
+}
+
+// Init chat attachment
+function initChatAttach() {
+  const fi = document.getElementById('chatFileInput');
+  if (!fi || fi._initialized) return;
+  fi._initialized = true;
+  fi.addEventListener('change', () => {
+    for (const file of fi.files) {
+      _pendingChatAttachments.push(file);
+    }
+    renderChatAttachments();
+    fi.value = '';
+  });
+}
+
+function renderChatAttachments() {
+  let strip = document.getElementById('chatAttachmentPreview');
+  const bar = document.querySelector('.chat-input-bar');
+  if (!bar) return;
+
+  if (!strip) {
+    strip = document.createElement('div');
+    strip.id = 'chatAttachmentPreview';
+    strip.className = 'attachment-preview';
+    bar.parentNode.insertBefore(strip, bar);
+  }
+
+  if (!_pendingChatAttachments.length) {
+    strip.style.display = 'none';
+    return;
+  }
+
+  strip.style.display = '';
+  strip.innerHTML = _pendingChatAttachments.map((f, i) =>
+    '<div class="attachment-chip">' +
+      '<span>' + fileIcon(f.type, f.name) + '</span>' +
+      '<span class="chip-name">' + f.name + '</span>' +
+      '<button class="chip-remove" aria-label="Remove ' + f.name + '" onclick="removeChatAttachment(' + i + ')">✕</button>' +
+    '</div>'
+  ).join('');
+}
+
+function removeChatAttachment(idx) {
+  _pendingChatAttachments.splice(idx, 1);
+  renderChatAttachments();
+}
+
+// Hook into page navigation — load files when artifacts page shows
+const _origActivatePage = typeof activatePage === 'function' ? activatePage : null;
+if (_origActivatePage) {
+  activatePage = function(page) {
+    _origActivatePage(page);
+    if (page === 'artifacts') {
+      initDropZone();
+      loadFiles();
+    }
+  };
+}
+
+// Init on load
+document.addEventListener('DOMContentLoaded', () => {
+  initChatAttach();
+  // If starting on artifacts page, init immediately
+  const hash = location.hash.replace('#', '') || 'overview';
+  if (hash === 'artifacts') {
+    initDropZone();
+    loadFiles();
+  }
+});
