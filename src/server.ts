@@ -76,7 +76,7 @@ import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
 import { appendStoredLog, readStoredLogs, getStoredLogPath } from './logStore.js'
-import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases } from './assignment.js'
+import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases, setAgentDisplayName, resolveAgentMention } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
@@ -1500,8 +1500,12 @@ function validateActionRequiredMessage(content: string, channel?: string): Actio
 }
 
 function extractMentions(content: string): string[] {
-  const matches = content.match(/@(\w+)/g) || []
-  return Array.from(new Set(matches.map(token => token.slice(1).toLowerCase()).filter(Boolean)))
+  const matches = content.match(/@([\w][\w-]*[\w]|[\w]+)/g) || []
+  return Array.from(new Set(matches.map(token => {
+    const raw = token.slice(1).toLowerCase()
+    // Resolve display names and aliases to canonical agent name
+    return resolveAgentMention(raw) || raw
+  }).filter(Boolean)))
 }
 
 function buildAutonomyWarnings(content: string): string[] {
@@ -7052,6 +7056,48 @@ export async function createServer(): Promise<FastifyInstance> {
         count: payload.config.count,
         format: 'TEAM-ROLES.yaml',
       },
+    }
+  })
+
+  // ── Agent identity: display name management ──
+  app.post('/config/identity', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agent = typeof body.agent === 'string' ? body.agent.trim() : ''
+    const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : ''
+
+    if (!agent) {
+      reply.code(400)
+      return { success: false, error: 'agent is required (agent ID from TEAM-ROLES.yaml)' }
+    }
+    if (!displayName) {
+      reply.code(400)
+      return { success: false, error: 'displayName is required' }
+    }
+    if (displayName.length > 64) {
+      reply.code(400)
+      return { success: false, error: 'displayName must be <= 64 characters' }
+    }
+
+    const result = setAgentDisplayName(agent, displayName)
+    if (!result.success) {
+      reply.code(404)
+      return { success: false, error: result.error }
+    }
+    return { success: true, agent, displayName }
+  })
+
+  // Resolve a mention string (name, displayName, or alias) to an agent ID
+  app.get<{ Params: { mention: string } }>('/resolve/mention/:mention', async (request) => {
+    const agentName = resolveAgentMention(request.params.mention)
+    if (!agentName) return { success: false, found: false, mention: request.params.mention }
+    const role = getAgentRole(agentName)
+    return {
+      success: true,
+      found: true,
+      mention: request.params.mention,
+      agent: agentName,
+      displayName: role?.displayName || null,
+      role: role?.role || null,
     }
   })
 
