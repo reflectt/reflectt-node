@@ -11600,7 +11600,7 @@ export async function createServer(): Promise<FastifyInstance> {
         fix: [
           'Set environment variables in your .env file:',
           '  OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789',
-          '  OPENCLAW_GATEWAY_TOKEN=<your-token>',
+          '  OPENCLAW_GATEWAY_TOKEN=your_token_here',
           '',
           'Find your token: cat ~/.openclaw/openclaw.json | grep gateway_token',
           'Or generate one: openclaw gateway token',
