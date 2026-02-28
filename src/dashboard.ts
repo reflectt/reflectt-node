@@ -122,25 +122,12 @@ export function getDashboardHTML(): string {
     padding: var(--space-4) var(--space-8);
     background: linear-gradient(180deg, #0f141a 0%, var(--bg) 100%);
     border-bottom: 1px solid var(--border-subtle);
+    min-height: 56px;
   }
   .header-left { display: flex; align-items: center; gap: 10px; }
-  .header-logo { font-size: var(--text-xl); font-weight: var(--font-weight-bold); color: var(--text-bright); letter-spacing: var(--letter-spacing-tight); }
+  .header-logo { font-size: var(--text-xl); font-weight: var(--font-weight-bold); color: var(--text-bright); letter-spacing: var(--letter-spacing-tight); white-space: nowrap; }
   .header-logo span { color: var(--accent); }
-  .header-right { display: flex; align-items: center; gap: var(--space-4); font-size: var(--text-base); color: var(--text-muted); }
-  .pause-banner {
-    display: flex; align-items: center; gap: var(--space-4);
-    padding: var(--space-3) var(--space-8);
-    background: linear-gradient(90deg, #2d1b00 0%, #1a1000 100%);
-    border-bottom: 2px solid #f59e0b;
-    color: #fbbf24; font-size: var(--text-base); font-weight: var(--font-weight-medium);
-  }
-  .pause-icon { font-size: var(--text-lg); }
-  .pause-resume-btn {
-    margin-left: auto; padding: var(--space-1) var(--space-4);
-    background: transparent; border: 1px solid #f59e0b; border-radius: var(--radius-md);
-    color: #fbbf24; cursor: pointer; font-size: var(--text-sm);
-  }
-  .pause-resume-btn:hover { background: rgba(245, 158, 11, 0.15); }
+  .header-right { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-base); color: var(--text-muted); flex-wrap: wrap; }
   .release-badge {
     display: inline-flex;
     align-items: center;
@@ -441,7 +428,12 @@ export function getDashboardHTML(): string {
   .event-agent { color: var(--accent); font-weight: 600; flex-shrink: 0; }
   .event-desc { color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .event-time { color: var(--text-muted); font-size: var(--text-sm); flex-shrink: 0; }
-  .empty { color: var(--text-muted); font-style: italic; font-size: var(--text-base); padding: 24px 0; text-align: center; }
+  .empty {
+    color: var(--text-muted); font-style: normal; font-size: var(--text-base);
+    padding: 28px 16px; text-align: center; line-height: 1.5;
+    background: var(--bg); border: 1px dashed var(--border);
+    border-radius: var(--radius-sm); margin: 4px 0;
+  }
   .ssot-meta {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     margin-bottom: 8px; padding: 8px 10px; border: 1px solid var(--border-subtle);
@@ -1190,12 +1182,18 @@ export function getDashboardHTML(): string {
   }
 
   /* Getting Started panel */
-  .getting-started { background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); overflow: hidden; }
+  .getting-started {
+    background: linear-gradient(135deg, var(--surface) 0%, var(--bg) 100%);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-md); overflow: hidden;
+    box-shadow: 0 0 20px rgba(77, 166, 255, 0.08), 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
   .getting-started.hidden { display: none; }
   .getting-started .panel-header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 14px 18px; font-weight: 600; font-size: 15px; color: var(--text-bright);
+    padding: 16px 20px; font-weight: 700; font-size: 16px; color: var(--text-bright);
     border-bottom: 1px solid var(--border);
+    background: rgba(77, 166, 255, 0.04);
   }
   .getting-started .dismiss-btn {
     background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: var(--text-base);
@@ -1203,11 +1201,15 @@ export function getDashboardHTML(): string {
   }
   .getting-started .dismiss-btn:hover { color: var(--text); background: var(--accent-dim); }
   .getting-started .dismiss-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .getting-started .gs-steps { padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+  .getting-started .gs-steps { padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
   .getting-started .gs-step {
     display: flex; align-items: flex-start; gap: var(--space-3);
-    padding: 10px 14px; border-radius: var(--radius-sm);
-    background: var(--surface-raised); border: 1px solid var(--border-subtle);
+    padding: 14px 16px; border-radius: var(--radius-sm);
+    background: var(--surface-raised); border: 1px solid var(--border);
+    transition: border-color var(--transition-fast) var(--easing-smooth);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .getting-started .gs-step:hover { border-color: var(--accent); }
   }
   .getting-started .gs-step.done { opacity: 0.6; }
   .getting-started .gs-step .gs-icon {
