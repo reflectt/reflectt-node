@@ -1373,6 +1373,24 @@ export function getDashboardHTML(): string {
     color: var(--accent); text-decoration: none;
   }
   .getting-started .gs-step .gs-link:hover { text-decoration: underline; }
+
+  /* Intensity control */
+  .intensity-control {
+    display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+    background: var(--surface, #1a1a2e); border-bottom: 1px solid var(--border, #2a2a4a);
+  }
+  .intensity-label { font-size: var(--text-xs, 11px); color: var(--text-muted, #888); text-transform: uppercase; letter-spacing: 0.05em; margin-right: 4px; }
+  .intensity-btn {
+    font-size: var(--text-sm, 13px); padding: 4px 12px; border-radius: var(--radius-sm, 4px);
+    border: 1px solid var(--border, #2a2a4a); background: transparent; color: var(--text-secondary, #aaa);
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .intensity-btn:hover { border-color: var(--accent, #60a5fa); color: var(--text-primary, #e0e0e0); }
+  .intensity-btn:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+  .intensity-btn.intensity-active {
+    background: var(--accent, #60a5fa); color: #fff; border-color: var(--accent, #60a5fa);
+  }
+  .intensity-info { font-size: var(--text-xs, 11px); color: var(--text-muted, #888); margin-left: 8px; }
 </style>
 <link rel="stylesheet" href="/dashboard-animations.css">
 </head>
@@ -1396,6 +1414,13 @@ export function getDashboardHTML(): string {
   <span class="pause-icon">⏸️</span>
   <span id="pause-message">Team paused</span>
   <button onclick="resumeFromBanner()" class="pause-resume-btn">Resume</button>
+</div>
+<div id="intensity-control" class="intensity-control" role="radiogroup" aria-label="Team intensity">
+  <span class="intensity-label">Intensity</span>
+  <button role="radio" aria-checked="false" class="intensity-btn" data-preset="low" onclick="setIntensity('low')" tabindex="0">🐢 Low</button>
+  <button role="radio" aria-checked="true" class="intensity-btn intensity-active" data-preset="normal" onclick="setIntensity('normal')" tabindex="-1">⚡ Normal</button>
+  <button role="radio" aria-checked="false" class="intensity-btn" data-preset="high" onclick="setIntensity('high')" tabindex="-1">🔥 High</button>
+  <span id="intensity-info" class="intensity-info"></span>
 </div>
 
 <div class="agent-strip" id="agent-strip"></div>

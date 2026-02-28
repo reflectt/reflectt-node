@@ -7231,6 +7231,25 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Team intensity / pacing ──
+  app.get('/policy/intensity', async () => {
+    const { getIntensity } = await import('./intensity.js')
+    return { success: true, ...getIntensity() }
+  })
+
+  app.put('/policy/intensity', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const preset = typeof body.preset === 'string' ? body.preset.trim().toLowerCase() : ''
+    const { isValidPreset, setIntensity } = await import('./intensity.js')
+    if (!isValidPreset(preset)) {
+      reply.code(400)
+      return { success: false, error: 'Invalid preset. Must be: low, normal, or high.', valid: ['low', 'normal', 'high'] }
+    }
+    const updatedBy = typeof body.updatedBy === 'string' ? body.updatedBy.trim() : 'api'
+    const state = setIntensity(preset, updatedBy)
+    return { success: true, ...state }
+  })
+
   // ── Team polls ──
   app.post('/polls', async (request, reply) => {
     const body = request.body as Record<string, unknown>
@@ -9058,6 +9077,23 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Intensity rate-limit: enforce maxPullsPerHour
+    if (agent) {
+      const { recordPull, getIntensity } = await import('./intensity.js')
+      const pull = recordPull(agent)
+      if (!pull.allowed) {
+        const { preset, limits } = getIntensity()
+        const retryMin = Math.ceil(pull.resetsInMs / 60_000)
+        return {
+          task: null,
+          throttled: true,
+          intensity: preset,
+          message: `Pull rate limit reached (${limits.maxPullsPerHour}/hr at "${preset}" intensity). Try again in ~${retryMin}m.`,
+          retryAfterMs: pull.resetsInMs,
+        }
+      }
+    }
+
     const task = taskManager.getNextTask(agent, { includeTest })
     if (!task) {
       return { task: null, message: 'No available tasks' }
@@ -9166,11 +9202,17 @@ export async function createServer(): Promise<FastifyInstance> {
     // Check pause status
     const pauseStatus = checkPauseStatus(agent)
 
+    // Intensity info
+    const { getIntensity, checkPullBudget } = await import('./intensity.js')
+    const intensity = getIntensity()
+    const pullBudget = checkPullBudget(agent)
+
     return {
       agent, ts: Date.now(),
       active: slim(activeTask), next: pauseStatus.paused ? null : slim(nextTask),
       inbox: slimInbox, inboxCount: inbox.length,
       queue: { todo: todoTasks.length, doing: doingTasks.length, validating: validatingTasks.length },
+      intensity: { preset: intensity.preset, pullsRemaining: pullBudget.remaining, wipLimit: intensity.limits.wipLimit },
       ...(pauseStatus.paused ? { paused: true, pauseMessage: pauseStatus.message, resumesAt: pauseStatus.entry?.pausedUntil ?? null } : {}),
       action: pauseStatus.paused ? `PAUSED: ${pauseStatus.message}`
         : activeTask ? `Continue ${activeTask.id}`
