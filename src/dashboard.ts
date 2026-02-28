@@ -172,7 +172,7 @@ export function getDashboardHTML(): string {
      SIDEBAR NAV
      Hash-based client-side routing. Sidebar + page containers.
      ============================================================ */
-  .app-layout { display: flex; min-height: calc(100vh - 56px); }
+  .app-layout { display: flex; min-height: calc(100vh - 56px); max-width: 1400px; margin: 0 auto; }
   .sidebar {
     width: 200px; flex-shrink: 0; background: var(--surface);
     border-right: 1px solid var(--border); padding: var(--space-4) 0;
@@ -270,6 +270,7 @@ export function getDashboardHTML(): string {
   .agent-strip {
     display: flex; gap: var(--space-3); padding: var(--space-4) var(--space-8); overflow-x: auto;
     border-bottom: 1px solid var(--border-subtle); background: var(--surface);
+    max-width: 100vw; box-sizing: border-box;
   }
   .agent-card {
     flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-3);
@@ -878,10 +879,6 @@ export function getDashboardHTML(): string {
       padding-left: 16px;
       padding-right: 16px;
     }
-    .main {
-      max-width: 960px;
-      margin: 0 auto;
-    }
     .header { gap: 10px; flex-wrap: wrap; }
     .header-right { margin-left: auto; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
     .two-col { gap: var(--space-4); }
@@ -890,13 +887,14 @@ export function getDashboardHTML(): string {
   }
 
   @media (min-width: 1024px) {
-    .header, .agent-strip, .main {
-      max-width: 1200px;
+    .header, .agent-strip {
+      max-width: 1400px;
       margin-left: auto;
       margin-right: auto;
       width: 100%;
+      padding-left: 24px;
+      padding-right: 24px;
     }
-    .header, .agent-strip { padding-left: 24px; padding-right: 24px; }
     .main { padding-left: 24px; padding-right: 24px; }
     .header-right { gap: var(--space-3); }
   }
