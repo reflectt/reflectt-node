@@ -4805,6 +4805,7 @@ export async function createServer(): Promise<FastifyInstance> {
   .path { font-size:12px; color:var(--text-muted); }
   a { color: var(--accent); text-decoration:none; }
   a:hover { text-decoration:underline; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
   main { padding:18px; }
   pre { white-space: pre-wrap; word-wrap: break-word; background:#0f141a; border:1px solid var(--border); border-radius:10px; padding:14px; line-height:1.55; font-size:12px; }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
@@ -4897,7 +4898,7 @@ export async function createServer(): Promise<FastifyInstance> {
     reply.type('text/html; charset=utf-8').send(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>${escapeHtml(title)} — shared artifact</title>
-<style>:root{--bg:#0a0e14;--surface:#141920;--border:#252d38;--text:#d4dae3;--muted:#6b7a8d;--accent:#4da6ff}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}header{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:space-between}a{color:var(--accent);text-decoration:none}main{padding:18px}pre{white-space:pre-wrap;background:#0f141a;border:1px solid var(--border);border-radius:10px;padding:14px;line-height:1.55;font-size:12px}code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}</style>
+<style>:root{--bg:#0a0e14;--surface:#141920;--border:#252d38;--text:#d4dae3;--muted:#6b7a8d;--accent:#4da6ff}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}header{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:space-between}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}main{padding:18px}pre{white-space:pre-wrap;background:#0f141a;border:1px solid var(--border);border-radius:10px;padding:14px;line-height:1.55;font-size:12px}code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}</style>
 </head><body>
 <header><div><b>Shared Artifact</b><div style="font-size:12px;color:var(--muted)">${escapeHtml(path)}</div></div><div><a href="/dashboard">← dashboard</a></div></header>
 <main><pre><code>${escapeHtml(result.file.content)}</code></pre></main>
@@ -9194,6 +9195,42 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const task = taskManager.getNextTask(agent, { includeTest })
     if (!task) {
+      // Check if agent is in "validating-only" stall: no todo/doing but has validating work
+      if (agent) {
+        const aliases = getAgentAliases(agent)
+        const doingTasks = taskManager.listTasks({ status: 'doing', assigneeIn: aliases })
+        const validatingTasks = taskManager.listTasks({ status: 'validating', assigneeIn: aliases })
+
+        if (doingTasks.length === 0 && validatingTasks.length > 0) {
+          // Suggest next tasks from unassigned backlog (scored by assignment fitness)
+          const unassignedTodo = taskManager.listTasks({ status: 'todo' })
+            .filter(t => !t.assignee && !isTestHarnessTask(t))
+          const agentRole = getAgentRole(agent)
+          const agentWip = doingTasks.length + validatingTasks.length
+          const suggestions = unassignedTodo
+            .map(t => {
+              if (!agentRole) return { task: t, score: 0 }
+              const s = scoreAssignment(agentRole, { title: t.title || '', tags: (t.metadata as any)?.tags, done_criteria: t.done_criteria, metadata: t.metadata as Record<string, unknown> }, agentWip)
+              return { task: t, score: s.total }
+            })
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5)
+            .map(s => ({
+              id: s.task.id,
+              title: s.task.title,
+              priority: s.task.priority,
+              score: s.score,
+            }))
+
+          return {
+            task: null,
+            validatingOnly: true,
+            validatingCount: validatingTasks.length,
+            message: `No todo/doing tasks — ${validatingTasks.length} in validating. Suggested next tasks below.`,
+            suggestedNextTasks: suggestions,
+          }
+        }
+      }
       return { task: null, message: 'No available tasks' }
     }
     const enriched = enrichTaskWithComments(task)

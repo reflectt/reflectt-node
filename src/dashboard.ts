@@ -1080,6 +1080,43 @@ export function getDashboardHTML(): string {
   .review-item:focus-visible { background: var(--surface-raised); }
   .gs-link:focus-visible { text-decoration: underline; }
 
+  /* ── Focus-visible parity: elements with hover but missing focus ── */
+
+  /* Feedback cards: vote + action buttons */
+  .feedback-card:focus-visible { border-color: var(--accent); }
+  .feedback-card .fb-votes:focus-visible { color: var(--accent); }
+  .feedback-card .fb-actions button:focus-visible { background: var(--surface-raised); color: var(--text-bright); }
+
+  /* Approval cards: approve/reject/edit buttons */
+  .approval-card .btn-approve:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+  .approval-card .btn-reject:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+  .approval-card .btn-edit:focus-visible { border-color: var(--accent) !important; color: var(--accent); }
+  .batch-approve-bar button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+  /* Getting started: steps + dismiss */
+  .getting-started .dismiss-btn:focus-visible { color: var(--text); background: var(--accent-dim); }
+  .getting-started .gs-step:focus-visible { border-color: var(--accent); }
+
+  /* PR review header links */
+  .pr-review-header a:focus-visible { outline: var(--focus-ring); outline-offset: 2px; border-radius: 3px; }
+
+  /* Chat input send button */
+  .chat-input-bar button:focus-visible { opacity: 0.85; outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Pause toggle paused state: accent focus ring in paused mode */
+  .pause-toggle-btn.paused:focus-visible { outline-color: var(--red); }
+
+  /* Panel rows: keyboard navigation highlight (matches hover) */
+  .panel-row:focus-visible { background: var(--surface-raised); }
+  .panel-row:focus-within { background: var(--surface-raised); }
+
+  /* Table rows: keyboard navigation highlight (matches hover) */
+  .table tr:focus-visible td,
+  table tr:focus-visible td { background: var(--surface-raised); }
+
+  /* Review items: keyboard highlight */
+  .review-item:focus-visible { background: var(--surface-raised); }
+
   /* Reduced Motion Preferences */
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
