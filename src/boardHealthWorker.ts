@@ -642,7 +642,14 @@ export class BoardHealthWorker {
       const latest = taskManager.getTask(task.id)
       if (!latest || latest.status !== 'validating') continue
 
-      const staleMinutes = Math.floor((now - lastReviewActivity) / 60_000)
+      const rawStaleMs = now - lastReviewActivity
+      // Clamp to 30 days max — anything larger is a timestamp bug
+      const MAX_REVIEW_STALE_MS = 30 * 24 * 60 * 60_000
+      if (rawStaleMs > MAX_REVIEW_STALE_MS) {
+        console.warn(`[board-health] review-sla: skipping ${task.id} — implausible stale time ${Math.floor(rawStaleMs / 60_000)}m (likely timestamp bug)`)
+        continue
+      }
+      const staleMinutes = Math.floor(rawStaleMs / 60_000)
       const currentReviewer = task.reviewer!
       const newReviewer = this.pickAlternateReviewer(task, currentReviewer)
 

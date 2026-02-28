@@ -1517,6 +1517,14 @@ function formatDuration(ms) {
   return d + 'd ' + (h % 24) + 'h';
 }
 
+// Normalize epoch: detect seconds vs ms, clamp future values
+function normalizeEpochMs(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return 0;
+  // Values below ~2001-09-09 in ms are likely seconds
+  if (v < 100000000000) return v * 1000;
+  return v;
+}
+
 function renderReviewQueue() {
   const panel = document.getElementById('review-queue-panel');
   const body = document.getElementById('review-queue-body');
@@ -1524,11 +1532,13 @@ function renderReviewQueue() {
   if (!body || !panel) return;
 
   const now = Date.now();
+  const MAX_REVIEW_MS = 30 * 24 * 60 * 60 * 1000; // 30 days clamp
   const validating = allTasks
     .filter(t => t.status === 'validating')
     .map(t => {
-      const enteredAt = t.metadata?.entered_validating_at || t.updatedAt || t.createdAt;
-      const timeInReview = now - enteredAt;
+      const rawEntered = t.metadata?.entered_validating_at || t.updatedAt || t.createdAt;
+      const enteredAt = normalizeEpochMs(rawEntered) || now;
+      const timeInReview = Math.min(Math.max(0, now - enteredAt), MAX_REVIEW_MS);
       const slaState = getReviewSlaState(timeInReview);
       return { ...t, timeInReview, slaState, enteredAt };
     })
