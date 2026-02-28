@@ -266,9 +266,11 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
 
   // Reflection-origin invariant: all tasks must trace back to a reflection/insight
   // unless explicitly exempted (system tasks, recurring materialization, etc.)
+  // Auto-exempt when no reflections exist yet (fresh install / new user onboarding)
   const meta = (data.metadata || {}) as Record<string, unknown>
   const hasReflectionSource = Boolean(meta.source_reflection || meta.source_insight || meta.source === 'reflection_pipeline')
-  const isExempt = Boolean(meta.reflection_exempt)
+  const systemHasReflections = countReflections() > 0
+  const isExempt = Boolean(meta.reflection_exempt) || !systemHasReflections
   const hasExemptReason = typeof meta.reflection_exempt_reason === 'string' && meta.reflection_exempt_reason.trim().length > 0
 
   if (!hasReflectionSource && !isExempt) {
@@ -277,7 +279,7 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
       'If this task legitimately does not originate from a reflection, set metadata.reflection_exempt=true with metadata.reflection_exempt_reason.'
     )
   }
-  if (isExempt && !hasExemptReason) {
+  if (isExempt && !hasExemptReason && systemHasReflections) {
     problems.push('reflection_exempt=true requires reflection_exempt_reason explaining why this task is exempt from reflection-origin policy.')
   }
 
