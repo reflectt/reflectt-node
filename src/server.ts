@@ -153,6 +153,7 @@ import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CAT
 import { onTaskShipped, onProcessFileWritten, onDecisionComment, isDecisionComment } from './knowledge-auto-index.js'
 import { upsertHostHeartbeat, getHost, listHosts, removeHost } from './host-registry.js'
 import { startKeepalive, stopKeepalive, getKeepaliveStatus, triggerKeepalivePing } from './host-keepalive.js'
+// polls.ts imported dynamically where needed
 import { pauseTarget, unpauseTarget, checkPauseStatus, listPauseEntries } from './pause-controls.js'
 
 // Schemas
@@ -7228,6 +7229,67 @@ export async function createServer(): Promise<FastifyInstance> {
         format: 'TEAM-ROLES.yaml',
       },
     }
+  })
+
+  // ── Team polls ──
+  app.post('/polls', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const question = typeof body.question === 'string' ? body.question.trim() : ''
+    const options = Array.isArray(body.options) ? body.options.filter((o): o is string => typeof o === 'string' && o.trim().length > 0).map(o => o.trim()) : []
+    const createdBy = typeof body.createdBy === 'string' ? body.createdBy.trim() : (typeof body.created_by === 'string' ? body.created_by.trim() : 'anonymous')
+    const expiresInMinutes = typeof body.expiresInMinutes === 'number' ? body.expiresInMinutes : (typeof body.deadline_minutes === 'number' ? body.deadline_minutes : undefined)
+    const expiresAt = typeof body.expiresAt === 'number' ? body.expiresAt : (typeof body.deadline === 'number' ? body.deadline : undefined)
+    const anonymous = body.anonymous === true
+
+    if (!question) { reply.code(400); return { success: false, error: 'question is required' } }
+    if (options.length < 2) { reply.code(400); return { success: false, error: 'At least 2 options required' } }
+    if (options.length > 10) { reply.code(400); return { success: false, error: 'Maximum 10 options' } }
+
+    const { createPoll } = await import('./polls.js')
+    const poll = createPoll({ question, options, createdBy, expiresInMinutes, expiresAt, anonymous })
+    return { success: true, poll }
+  })
+
+  app.get('/polls', async (request) => {
+    const query = request.query as Record<string, string>
+    const status = (query.status === 'active' || query.status === 'closed' || query.status === 'all') ? query.status : 'all'
+    const limit = query.limit ? parseInt(query.limit, 10) || 20 : 20
+
+    const { listPolls } = await import('./polls.js')
+    const polls = listPolls({ status, limit })
+    return { success: true, polls, count: polls.length }
+  })
+
+  app.get<{ Params: { id: string } }>('/polls/:id', async (request, reply) => {
+    const { getPoll } = await import('./polls.js')
+    const poll = getPoll(request.params.id)
+    if (!poll) { reply.code(404); return { success: false, error: 'Poll not found' } }
+    return { success: true, poll }
+  })
+
+  app.post<{ Params: { id: string } }>('/polls/:id/vote', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const voter = typeof body.voter === 'string' ? body.voter.trim() : ''
+    const choice = typeof body.choice === 'number' ? body.choice : (typeof body.option_index === 'number' ? body.option_index : -1)
+
+    if (!voter) { reply.code(400); return { success: false, error: 'voter is required' } }
+    if (choice < 0) { reply.code(400); return { success: false, error: 'choice is required (0-indexed option number)' } }
+
+    const { vote, getPoll } = await import('./polls.js')
+    const result = vote(request.params.id, voter, choice)
+    if (!result.success) { reply.code(400); return result }
+
+    const poll = getPoll(request.params.id)
+    return { success: true, poll }
+  })
+
+  app.post<{ Params: { id: string } }>('/polls/:id/close', async (request, reply) => {
+    const { closePoll, getPoll } = await import('./polls.js')
+    const result = closePoll(request.params.id)
+    if (!result.success) { reply.code(400); return result }
+
+    const poll = getPoll(request.params.id)
+    return { success: true, poll }
   })
 
   // ── Agent identity: display name management ──
