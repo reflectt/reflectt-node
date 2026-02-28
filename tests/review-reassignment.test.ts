@@ -139,6 +139,33 @@ describe('Review SLA auto-reassignment', () => {
     cleanupTask(taskId)
   })
 
+  it('does not flag done tasks (regression for false-positive alerts)', async () => {
+    const taskId = seedTask({ status: 'done', reviewer: 'sage' })
+    createdIds.push(taskId)
+
+    const result = await worker.tick({ dryRun: false, force: true })
+    const actions = result.actions.filter(a => a.kind === 'review-reassign' && a.taskId === taskId)
+    expect(actions.length).toBe(0)
+    cleanupTask(taskId)
+  })
+
+  it('treats entered_validating_at in seconds as seconds (ms vs s regression)', async () => {
+    // 10 hours ago in seconds (not ms)
+    const enteredSec = Math.floor((Date.now() - 10 * 60 * 60 * 1000) / 1000)
+    const taskId = seedTask({ reviewer: 'sage', assignee: 'link', entered_validating_at: enteredSec })
+    createdIds.push(taskId)
+
+    presenceManager.recordActivity('pixel', 'heartbeat')
+
+    const result = await worker.tick({ dryRun: false, force: true })
+    const actions = result.actions.filter(a => a.kind === 'review-reassign' && a.taskId === taskId)
+    expect(actions.length).toBe(1)
+    // Ensure we didn't compute absurdly huge minutes
+    expect(actions[0].description).not.toMatch(/\b\d{6,}m\b/)
+
+    cleanupTask(taskId)
+  })
+
   it('does not re-reassign within cooldown window', async () => {
     const taskId = seedTask({ reviewer: 'sage', assignee: 'link' })
     createdIds.push(taskId)
