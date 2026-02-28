@@ -100,6 +100,50 @@ If your instance reports to a host registry (`/hosts`), the status thresholds ar
 
 A keepalive ping every 1-2 minutes keeps the host status as "online".
 
+## Self-Keepalive (Built-in)
+
+reflectt-node includes a built-in self-keepalive that pings itself to prevent container eviction. Enable it with:
+
+```bash
+REFLECTT_KEEPALIVE=true
+```
+
+It auto-enables when Cloudflare environment variables are detected (`CF_PAGES`, `CF_WORKER`, etc.).
+
+**How it works:**
+- Pings `localhost:PORT/health/ping` every 4 minutes
+- Detects warm boots (recovering from restart with existing DB data)
+- Reports cold start count and last activity age
+
+**Status endpoint:**
+```
+GET /health/keepalive
+```
+
+Returns:
+```json
+{
+  "enabled": true,
+  "intervalMs": 240000,
+  "lastPingAt": 1772260000000,
+  "lastPingOk": true,
+  "coldStarts": 0,
+  "bootInfo": {
+    "isColdStart": false,
+    "isWarmBoot": true,
+    "lastActivityAge": 5000,
+    "recoveredState": { "tasks": 42, "chatMessages": 1200, "hosts": 2, "reflections": 15 }
+  }
+}
+```
+
+## Cloudflare Deployment Caveats
+
+- **SQLite persists** across warm restarts (same container) but is **lost on cold starts** in Workers (no filesystem). Use Cloudflare Containers or Docker with a volume mount for persistent state.
+- **SSE/WebSocket connections drop** on container eviction — clients reconnect automatically with exponential backoff (1s→30s).
+- **Self-keepalive + external cron** together provide the best coverage: self-keepalive prevents idle eviction, external cron detects if the instance died entirely.
+- In Docker/Containers: mount `REFLECTT_HOME` to a persistent volume (`-v reflectt-data:/data -e REFLECTT_HOME=/data`).
+
 ## Troubleshooting
 
 **Worker still goes cold despite cron trigger:**

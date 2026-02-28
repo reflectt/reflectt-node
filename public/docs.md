@@ -93,8 +93,9 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/health/keepalive` | Self-keepalive status for CF/serverless: warm boot detection, ping state, cold start count, environment info. |
 | GET | `/health/ping` | Ultra-lightweight keepalive — no DB access. Returns `{ status, uptime_seconds, ts }`. Use for cron triggers, load balancers, uptime monitors. |
-| GET | `/health/watchdog` | Richer keepalive with cold_start flag, task/chat stats, and remediation hints. For monitoring dashboards. See `docs/KEEPALIVE.md`. |
+| GET | `/health/watchdog` | Richer keepalive with cold_start flag, task/chat stats, boot_info, and remediation hints. For monitoring dashboards. See `docs/KEEPALIVE.md`. |
 | GET | `/health` | System health — task counts, chat stats, inbox stats. Includes `cold_start` flag (true if uptime < 60s). Query: `include_test=1` to include test-harness tasks in stats (excluded by default). |
 | GET | `/team/health` | Team config linter status for `~/.reflectt/TEAM.md`, `TEAM-ROLES.yaml`, `TEAM-STANDARDS.md` (issues, role coverage, last check timestamp) |
 | GET | `/health/team` | Team health metrics with compliance + `staleDoing` snapshot. Per-agent rows include `activeTaskTitle` and `activeTaskPrLink` when an agent has a doing task with PR evidence. Flagged agents also include `actionable_reason` (last comment age, last transition, last mention age, suggested action). |
