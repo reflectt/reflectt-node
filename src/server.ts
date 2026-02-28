@@ -8877,15 +8877,10 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Bootstrap Team: recommend composition + initial tasks + heartbeat configs ──
   app.post<{ Body: BootstrapTeamRequest }>('/bootstrap/team', async (request) => {
-    const body = request.body as BootstrapTeamRequest
-    if (!body?.useCase || typeof body.useCase !== 'string' || body.useCase.trim().length < 3) {
-      return { error: 'useCase is required (min 3 chars). Describe what this team will do.', status: 400 }
-    }
+    const body = (request.body || {}) as BootstrapTeamRequest
     return bootstrapTeam({
-      useCase: body.useCase.trim(),
-      constraints: body.constraints,
-      models: body.models,
-      channels: body.channels,
+      useCase: typeof body.useCase === 'string' ? body.useCase.trim() : undefined,
+      maxAgents: typeof body.maxAgents === 'number' ? body.maxAgents : undefined,
     })
   })
 
@@ -8903,7 +8898,7 @@ export async function createServer(): Promise<FastifyInstance> {
         endpoints: [
           { method: 'GET', path: '/heartbeat/:agent', hint: 'Single compact payload (~200 tokens). Replaces /tasks/active + /tasks/next + /inbox.' },
           { method: 'GET', path: '/bootstrap/heartbeat/:agent', hint: 'Generate optimal HEARTBEAT.md. Re-fetch when version changes.' },
-          { method: 'POST', path: '/bootstrap/team', hint: 'Recommend team composition, initial tasks, and heartbeat configs. Body: { useCase, constraints?, models?, channels? }' },
+          { method: 'POST', path: '/bootstrap/team', hint: 'Returns TEAM-ROLES.yaml schema, constraints, examples, and save endpoint. The calling agent composes the team. Body: { useCase?, maxAgents? }' },
         ],
       },
       tasks: {

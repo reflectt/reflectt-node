@@ -1,217 +1,160 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) Reflectt AI
 //
-// POST /bootstrap/team — recommend team composition, initial tasks, and heartbeat configs
-// based on a short use-case description.
+// POST /bootstrap/team — returns the TEAM-ROLES.yaml schema, constraints,
+// and well-formed examples so the calling agent can compose the team itself.
+//
+// Design: the agents calling this endpoint are AI — they know what a team
+// needs better than any keyword lookup table. This endpoint is scaffolding,
+// not brains.
 
 export interface BootstrapTeamRequest {
-  useCase: string
-  constraints?: {
-    maxAgents?: number
-    budget?: string
-  }
-  models?: string[]
-  channels?: string[]
+  /** Optional: agent-provided context about the team's purpose. */
+  useCase?: string
+  /** Optional: how many agents the caller wants. */
+  maxAgents?: number
 }
 
-export interface RecommendedAgent {
+export interface FieldSpec {
   name: string
-  role: string
+  type: string
+  required: boolean
   description: string
-  affinityTags: string[]
-  wipCap: number
-  suggestedModel?: string
+  default?: unknown
+  enum?: string[]
 }
 
-export interface InitialTask {
-  title: string
-  assignee: string
-  reviewer: string
-  priority: string
-  eta: string
-  done_criteria: string[]
-}
-
-export interface HeartbeatSnippet {
-  agent: string
-  markdown: string
+export interface TeamExample {
+  label: string
+  description: string
+  yaml: string
 }
 
 export interface BootstrapTeamResponse {
-  useCase: string
-  agents: RecommendedAgent[]
-  initialTasks: InitialTask[]
-  heartbeatSnippets: Record<string, string>
-  teamRolesYaml: string
+  schema: {
+    description: string
+    filePath: string
+    hotReload: boolean
+    fields: FieldSpec[]
+  }
+  constraints: {
+    maxAgents: number
+    wipCapRange: [number, number]
+    routingModes: string[]
+    reservedNames: string[]
+  }
+  examples: TeamExample[]
+  saveEndpoint: {
+    method: string
+    path: string
+    description: string
+  }
   nextSteps: string[]
 }
 
-// ── Use-case pattern matching ──
-// Simple keyword-based templates. Future: LLM-powered composition.
+// ── Schema definition ──
 
-interface TeamTemplate {
-  keywords: string[]
-  agents: RecommendedAgent[]
-  taskTemplates: Array<{
-    title: string
-    assigneeRole: string
-    reviewerRole: string
-    priority: string
-    eta: string
-    done_criteria: string[]
-  }>
-}
+const AGENT_FIELDS: FieldSpec[] = [
+  { name: 'name', type: 'string', required: true, description: 'Unique agent identifier (lowercase, no spaces). Must match the OpenClaw agent ID.' },
+  { name: 'role', type: 'string', required: true, description: 'Human-readable role label (e.g. engineer, designer, ops, content).' },
+  { name: 'description', type: 'string', required: true, description: 'One-line description of what this agent does.' },
+  { name: 'aliases', type: 'string[]', required: false, description: 'Alternative names this agent responds to (e.g. ["dev", "coder"]).' },
+  { name: 'affinityTags', type: 'string[]', required: true, description: 'Keywords that attract tasks to this agent during auto-assignment scoring.' },
+  { name: 'wipCap', type: 'number', required: true, description: 'Maximum concurrent "doing" tasks before the agent is deprioritized.', default: 2 },
+  { name: 'routingMode', type: 'string', required: false, description: 'How the assignment engine treats this agent.', default: 'default', enum: ['default', 'opt-in'] },
+  { name: 'alwaysRoute', type: 'string[]', required: false, description: 'When routingMode=opt-in: keywords that still route to this agent.' },
+  { name: 'neverRoute', type: 'string[]', required: false, description: 'Keywords that exclude this agent from assignment, even if affinity matches.' },
+  { name: 'neverRouteUnlessLane', type: 'string', required: false, description: 'Exception to neverRoute: allow routing when task.metadata.lane matches this value.' },
+  { name: 'protectedDomains', type: 'string[]', required: false, description: 'Hard-enforce: ONLY this agent for tasks matching these keywords (overrides all scoring).' },
+]
 
-const TEMPLATES: TeamTemplate[] = [
+// ── Examples ──
+
+const EXAMPLES: TeamExample[] = [
   {
-    keywords: ['support', 'helpdesk', 'managed', 'node', 'monitoring', 'ops', 'infrastructure'],
-    agents: [
-      { name: 'builder', role: 'engineer', description: 'Builds features, fixes bugs, ships code.', affinityTags: ['backend', 'api', 'bug', 'integration', 'server'], wipCap: 2 },
-      { name: 'ops', role: 'operations', description: 'Monitors systems, manages deployments, reviews work.', affinityTags: ['infra', 'ci', 'monitoring', 'deploy', 'ops'], wipCap: 3 },
-      { name: 'scout', role: 'analyst', description: 'Tracks metrics, triages issues, prioritizes.', affinityTags: ['analytics', 'metrics', 'research', 'triage'], wipCap: 1 },
-    ],
-    taskTemplates: [
-      { title: 'Set up health monitoring for all nodes', assigneeRole: 'operations', reviewerRole: 'engineer', priority: 'P1', eta: '~2h', done_criteria: ['Health endpoint configured', '/health returns ok for all nodes', 'Alert on failure'] },
-      { title: 'Create runbook for common node issues', assigneeRole: 'operations', reviewerRole: 'analyst', priority: 'P2', eta: '~4h', done_criteria: ['Runbook covers top 5 failure modes', 'Each entry has: symptom, cause, fix', 'Posted to team docs'] },
-      { title: 'Set up metrics dashboard', assigneeRole: 'analyst', reviewerRole: 'operations', priority: 'P2', eta: '~3h', done_criteria: ['Dashboard shows: uptime, task throughput, error rate', 'Auto-refreshes', 'Accessible via /dashboard'] },
-    ],
+    label: 'Dev team (3 agents)',
+    description: 'Full-stack development team: engineer builds, designer handles UI, ops manages deployments.',
+    yaml: `agents:
+  - name: builder
+    role: engineer
+    description: Full-stack development — ships features and fixes.
+    affinityTags: [backend, frontend, api, bug, test, database, typescript]
+    wipCap: 2
+
+  - name: pixel
+    role: designer
+    description: UI/UX design, visual polish, accessibility.
+    affinityTags: [design, ui, ux, css, visual, a11y]
+    routingMode: opt-in
+    alwaysRoute: [design, ui, ux, css, visual]
+    neverRoute: [ops, infra, ci, deploy, backend, api, database]
+    wipCap: 1
+
+  - name: ops
+    role: operations
+    description: CI/CD, monitoring, deployments, infrastructure.
+    affinityTags: [ci, deploy, ops, docker, monitoring, infra]
+    protectedDomains: [deploy, ci]
+    wipCap: 2`,
   },
   {
-    keywords: ['content', 'growth', 'marketing', 'launch', 'brand', 'social'],
-    agents: [
-      { name: 'builder', role: 'engineer', description: 'Builds landing pages, integrations, and tools.', affinityTags: ['frontend', 'api', 'integration', 'landing'], wipCap: 2 },
-      { name: 'writer', role: 'content', description: 'Creates copy, docs, blog posts, and social content.', affinityTags: ['content', 'docs', 'copy', 'blog', 'social', 'brand'], wipCap: 2 },
-      { name: 'strategist', role: 'growth', description: 'Plans campaigns, tracks metrics, optimizes funnels.', affinityTags: ['analytics', 'growth', 'funnel', 'campaign', 'metrics'], wipCap: 1 },
-    ],
-    taskTemplates: [
-      { title: 'Create landing page for launch', assigneeRole: 'engineer', reviewerRole: 'content', priority: 'P1', eta: '~4h', done_criteria: ['Landing page deployed', 'Hero + CTA + feature list', 'Mobile responsive', 'UTM tracking works'] },
-      { title: 'Write launch announcement blog post', assigneeRole: 'content', reviewerRole: 'growth', priority: 'P1', eta: '~3h', done_criteria: ['800+ word post', 'SEO meta tags', 'Published to blog', 'Social sharing configured'] },
-      { title: 'Set up analytics and conversion tracking', assigneeRole: 'growth', reviewerRole: 'engineer', priority: 'P2', eta: '~2h', done_criteria: ['Analytics events for: page view, CTA click, signup', 'Funnel dashboard created', 'UTM parameters tracked'] },
-    ],
+    label: 'Content team (2 agents)',
+    description: 'Content creation team: writer creates, strategist plans and measures.',
+    yaml: `agents:
+  - name: writer
+    role: content
+    description: Blog posts, docs, social copy, landing page text.
+    affinityTags: [content, docs, copy, blog, social, seo]
+    wipCap: 2
+
+  - name: strategist
+    role: growth
+    description: Campaign planning, analytics, funnel optimization.
+    affinityTags: [analytics, growth, funnel, campaign, metrics]
+    wipCap: 1`,
   },
   {
-    keywords: ['development', 'coding', 'software', 'app', 'product', 'feature', 'build'],
-    agents: [
-      { name: 'builder', role: 'engineer', description: 'Full-stack development, ships features and fixes.', affinityTags: ['backend', 'frontend', 'api', 'bug', 'test', 'database'], wipCap: 2 },
-      { name: 'reviewer', role: 'qa', description: 'Reviews code, validates quality, manages releases.', affinityTags: ['qa', 'review', 'testing', 'security', 'release'], wipCap: 2 },
-      { name: 'designer', role: 'design', description: 'UI/UX design, user research, visual polish.', affinityTags: ['ui', 'ux', 'design', 'visual', 'css', 'layout'], wipCap: 1 },
-    ],
-    taskTemplates: [
-      { title: 'Set up project structure and CI pipeline', assigneeRole: 'engineer', reviewerRole: 'qa', priority: 'P1', eta: '~3h', done_criteria: ['Repository initialized', 'CI runs lint + test on PRs', 'Deploy pipeline configured'] },
-      { title: 'Create initial UI mockups / component library', assigneeRole: 'design', reviewerRole: 'engineer', priority: 'P2', eta: '~4h', done_criteria: ['Core components styled', 'Design tokens documented', 'Responsive layout works'] },
-      { title: 'Write first integration test suite', assigneeRole: 'qa', reviewerRole: 'engineer', priority: 'P2', eta: '~2h', done_criteria: ['Test framework configured', '5+ smoke tests', 'CI runs tests on each PR'] },
-    ],
+    label: 'Solo agent (1 agent)',
+    description: 'Single generalist agent — handles everything. Good starting point.',
+    yaml: `agents:
+  - name: agent
+    role: generalist
+    description: Handles all tasks — engineering, docs, ops.
+    affinityTags: [backend, frontend, ops, docs, bug]
+    wipCap: 3`,
   },
 ]
 
-// Default fallback template
-const DEFAULT_TEMPLATE: TeamTemplate = {
-  keywords: [],
-  agents: [
-    { name: 'builder', role: 'engineer', description: 'Builds features, fixes bugs, ships code.', affinityTags: ['backend', 'api', 'integration', 'bug'], wipCap: 2 },
-    { name: 'ops', role: 'operations', description: 'Monitors systems, reviews work, manages flow.', affinityTags: ['ops', 'ci', 'monitoring', 'review'], wipCap: 2 },
-  ],
-  taskTemplates: [
-    { title: 'Set up reflectt-node and verify health', assigneeRole: 'engineer', reviewerRole: 'operations', priority: 'P1', eta: '~1h', done_criteria: ['reflectt-node running', '/health returns ok', 'TEAM-ROLES.yaml customized'] },
-    { title: 'Create first team task and verify workflow', assigneeRole: 'operations', reviewerRole: 'engineer', priority: 'P1', eta: '~1h', done_criteria: ['Task created via API', 'Task moves through todo → doing → validating → done', 'Comment added'] },
-  ],
-}
-
-function matchTemplate(useCase: string): TeamTemplate {
-  const lower = useCase.toLowerCase()
-  let bestMatch: TeamTemplate | null = null
-  let bestScore = 0
-
-  for (const template of TEMPLATES) {
-    const score = template.keywords.filter(kw => lower.includes(kw)).length
-    if (score > bestScore) {
-      bestScore = score
-      bestMatch = template
-    }
-  }
-
-  return bestMatch || DEFAULT_TEMPLATE
-}
-
-function generateHeartbeatSnippet(agent: RecommendedAgent, port = 4445): string {
-  return `# HEARTBEAT.md — ${agent.name}
-
-## Priority Order
-1. Single heartbeat call:
-   - \`curl -s "http://127.0.0.1:${port}/heartbeat/${agent.name}"\`
-   - Returns: active task, next task, slim inbox, queue counts, suggested action
-2. If any task exists, **do real work first** (ship code/docs/artifacts).
-3. Respond to direct mentions.
-4. **Never report task status from memory alone** — always query the API first.
-
-## Rules
-- Do not load full chat history.
-- Do not post plan-only updates.
-- If nothing changed and no direct action is required, reply \`HEARTBEAT_OK\`.
-`
-}
-
-function generateTeamRolesYaml(agents: RecommendedAgent[]): string {
-  let yaml = `# TEAM-ROLES.yaml — Generated by /bootstrap/team\n# Customize agent names, roles, and routing tags for your team.\n\nagents:\n`
-  for (const agent of agents) {
-    yaml += `  - name: ${agent.name}\n`
-    yaml += `    role: ${agent.role}\n`
-    yaml += `    description: ${agent.description}\n`
-    yaml += `    affinityTags:\n`
-    for (const tag of agent.affinityTags) {
-      yaml += `      - ${tag}\n`
-    }
-    yaml += `    wipCap: ${agent.wipCap}\n\n`
-  }
-  return yaml
-}
+// ── Endpoint handler ──
 
 export function bootstrapTeam(req: BootstrapTeamRequest): BootstrapTeamResponse {
-  const template = matchTemplate(req.useCase)
-  const maxAgents = req.constraints?.maxAgents || template.agents.length
-
-  // Apply agent limit
-  const agents = template.agents.slice(0, maxAgents).map(a => ({
-    ...a,
-    suggestedModel: req.models?.[0],
-  }))
-
-  // Build agent name→role map for task resolution
-  const roleToAgent = new Map<string, string>()
-  for (const a of agents) {
-    roleToAgent.set(a.role, a.name)
-  }
-
-  // Generate initial tasks
-  const initialTasks: InitialTask[] = template.taskTemplates
-    .filter(tt => roleToAgent.has(tt.assigneeRole))
-    .map(tt => ({
-      title: tt.title,
-      assignee: roleToAgent.get(tt.assigneeRole) || agents[0]!.name,
-      reviewer: roleToAgent.get(tt.reviewerRole) || agents[agents.length > 1 ? 1 : 0]!.name,
-      priority: tt.priority,
-      eta: tt.eta,
-      done_criteria: tt.done_criteria,
-    }))
-
-  // Generate heartbeat snippets
-  const heartbeatSnippets: Record<string, string> = {}
-  for (const a of agents) {
-    heartbeatSnippets[a.name] = generateHeartbeatSnippet(a)
-  }
+  const maxAgents = req.maxAgents || 10
 
   return {
-    useCase: req.useCase,
-    agents,
-    initialTasks,
-    heartbeatSnippets,
-    teamRolesYaml: generateTeamRolesYaml(agents),
+    schema: {
+      description: 'TEAM-ROLES.yaml defines your agent team — names, roles, routing preferences, and WIP limits. reflectt-node hot-reloads changes (no restart needed).',
+      filePath: '~/.reflectt/TEAM-ROLES.yaml',
+      hotReload: true,
+      fields: AGENT_FIELDS,
+    },
+    constraints: {
+      maxAgents,
+      wipCapRange: [1, 10],
+      routingModes: ['default', 'opt-in'],
+      reservedNames: ['system', 'admin', 'reflectt', 'all'],
+    },
+    examples: EXAMPLES,
+    saveEndpoint: {
+      method: 'PUT',
+      path: '/config/team-roles',
+      description: 'Save the composed TEAM-ROLES.yaml. Accepts { yaml: string } body. reflectt-node validates and hot-reloads.',
+    },
     nextSteps: [
-      '1. Save the TEAM-ROLES.yaml to ~/.reflectt/TEAM-ROLES.yaml',
-      '2. Create the initial tasks via POST /tasks',
-      '3. Configure each agent with its HEARTBEAT.md',
-      '4. Start agents and verify with GET /heartbeat/:agent',
-      ...(req.channels?.length ? [`5. Set up channels: ${req.channels.join(', ')}`] : []),
+      '1. Compose a TEAM-ROLES.yaml based on the schema and examples above.',
+      '2. Save it via PUT /config/team-roles or write directly to ~/.reflectt/TEAM-ROLES.yaml.',
+      '3. Verify with GET /health/team — checks role coverage and config validity.',
+      '4. Create initial tasks via POST /tasks for each agent.',
+      '5. Start heartbeat polling: GET /heartbeat/:agent',
     ],
   }
 }
