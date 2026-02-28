@@ -551,6 +551,13 @@ export function getDashboardHTML(): string {
     outline-offset: 2px;
     border-radius: 3px;
   }
+  .msg-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .msg-att-file { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--accent); font-size: 11px; text-decoration: none; transition: background var(--transition-fast); }
+  .msg-att-file:hover { background: var(--accent-dim); }
+  .msg-att-file .att-size { color: var(--text-muted); font-size: 10px; }
+  .msg-att-img { display: inline-block; max-width: 200px; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
+  .msg-att-img img { display: block; max-width: 100%; max-height: 150px; object-fit: cover; }
+  .msg-att-img:hover { border-color: var(--accent); }
   .msg-content.collapsed { max-height: 80px; overflow: hidden; position: relative; cursor: pointer; }
   .msg-content.collapsed::after {
     content: '▼ click to expand'; display: block; position: absolute; bottom: 0; left: 0; right: 0;
