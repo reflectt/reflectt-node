@@ -62,3 +62,23 @@ agents:
       - deploy
       - ci
     wipCap: 2
+
+# Lane definitions for ready-queue engine.
+# Each lane groups agents into a work stream with floor + WIP controls.
+# readyFloor — minimum unblocked todo tasks per agent before sweeper fires
+# wipLimit   — max simultaneous doing tasks per agent (/tasks/next enforces this)
+lanes:
+  - name: engineering
+    agents: [agent-1]
+    readyFloor: 2
+    wipLimit: 2
+
+  - name: design
+    agents: [agent-2]
+    readyFloor: 1
+    wipLimit: 1
+
+  - name: operations
+    agents: [agent-3]
+    readyFloor: 1
+    wipLimit: 2

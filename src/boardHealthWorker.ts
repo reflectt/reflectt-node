@@ -37,6 +37,7 @@ export type PolicyActionKind =
   | 'review-reassign'
   | 'auto-requeue'
   | 'working-contract-warning'
+  | 'ready-queue-replenish'
 
 export interface PolicyAction {
   id: string
@@ -250,7 +251,11 @@ export class BoardHealthWorker {
       } catch { /* working-contract module may not be loaded */ }
     }
 
-    // 3d. Continuity loop: auto-replenish queues from promoted insights
+    // 3d. Ready-queue sweeper: auto-create placeholder tasks for empty lanes
+    const sweeperActions = await this.sweepReadyQueue(now, dryRun)
+    actions.push(...sweeperActions)
+
+    // 3e. Continuity loop: auto-replenish queues from promoted insights
     if (!dryRun) {
       try {
         const { tickContinuityLoop } = await import('./continuity-loop.js')
@@ -594,6 +599,91 @@ export class BoardHealthWorker {
       } else {
         // Reset idle tracker when agent has work
         delete this.idleQueueSince[agent]
+      }
+    }
+
+    return actions
+  }
+
+  // ── Ready-queue sweeper ────────────────────────────────────────────────
+
+  /** Track last replenish time per agent to enforce cooldown between auto-creates */
+  private replenishLastAt: Record<string, number> = {}
+
+  /**
+   * Sweeper tick: for each lane below readyFloor, auto-create placeholder tasks
+   * so agents always have specced work waiting.
+   *
+   * One task per agent-deficit per tick, with a 30-minute per-agent cooldown.
+   */
+  private async sweepReadyQueue(now: number, dryRun: boolean): Promise<PolicyAction[]> {
+    const { getLanesConfig } = await import('./lane-config.js')
+    const lanes = getLanesConfig()
+    const actions: PolicyAction[] = []
+    const cooldownMs = 30 * 60_000
+
+    for (const lane of lanes) {
+      for (const agent of lane.agents) {
+        // Enforce per-agent cooldown to avoid spam
+        const lastReplenish = this.replenishLastAt[agent] ?? 0
+        if (now - lastReplenish < cooldownMs) continue
+
+        // Count unblocked todo tasks for this agent
+        const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
+        const unblockedTodo = todoTasks.filter(t => {
+          const blocked = t.metadata?.blocked_by
+          if (!blocked) return true
+          const blocker = taskManager.getTask(blocked as string)
+          return !blocker || blocker.status === 'done'
+        })
+
+        const deficit = lane.readyFloor - unblockedTodo.length
+        if (deficit <= 0) continue
+
+        // Create placeholder tasks to fill the deficit
+        for (let i = 0; i < deficit; i++) {
+          const action: PolicyAction = {
+            id: `rqs-${agent}-${now}-${i}`,
+            kind: 'ready-queue-replenish',
+            taskId: null,
+            agent,
+            description: `Auto-created ready-queue placeholder for @${agent} in lane "${lane.name}" (${unblockedTodo.length}/${lane.readyFloor} ready)`,
+            previousState: { readyCount: unblockedTodo.length, readyFloor: lane.readyFloor },
+            appliedAt: now,
+            rolledBack: false,
+            rolledBackAt: null,
+            rollbackBy: null,
+          }
+
+          if (!dryRun) {
+            try {
+              const task = await taskManager.createTask({
+                title: `[Auto] Ready queue replenish: ${lane.name}`,
+                status: 'todo',
+                assignee: agent,
+                createdBy: 'system',
+                done_criteria: ['Define and complete the actual work for this placeholder task'],
+                metadata: {
+                  auto_created: true,
+                  auto_created_by: 'ready-queue-sweeper',
+                  lane: lane.name,
+                  sweeper_action_id: action.id,
+                },
+              })
+              action.taskId = task.id
+            } catch (err) {
+              console.warn(`[ready-queue-sweeper] Failed to create task for @${agent}:`, (err as Error).message)
+              continue
+            }
+          }
+
+          this.auditLog.push(action)
+          actions.push(action)
+        }
+
+        if (!dryRun && actions.length > 0) {
+          this.replenishLastAt[agent] = now
+        }
       }
     }
 
