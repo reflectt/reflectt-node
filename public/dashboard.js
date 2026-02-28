@@ -2774,21 +2774,15 @@ async function checkGettingStarted() {
       step1.querySelector('.gs-icon').textContent = '✓';
     }
 
-    // Step 2: connect — check if cloud/host is enrolled
+    // Step 2: connect — check if OpenClaw gateway is configured
     const step2 = document.getElementById('gs-connect');
-    try {
-      const hostRes = await fetch(BASE + '/hosts');
-      if (hostRes.ok) {
-        const hostData = await hostRes.json();
-        const hosts = hostData.hosts || hostData || [];
-        if (Array.isArray(hosts) && hosts.length > 0) {
-          if (step2) {
-            step2.classList.add('done');
-            step2.querySelector('.gs-icon').textContent = '✓';
-          }
-        }
+    if (step2 && health.openclaw) {
+      const ocStatus = typeof health.openclaw === 'string' ? health.openclaw : health.openclaw.status;
+      if (ocStatus === 'configured') {
+        step2.classList.add('done');
+        step2.querySelector('.gs-icon').textContent = '✓';
       }
-    } catch {}
+    }
 
     // Step 3: first task/message — done if any exist
     const step3 = document.getElementById('gs-task');

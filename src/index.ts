@@ -7,7 +7,7 @@
  * Entry point
  */
 import { createServer } from './server.js'
-import { serverConfig, isDev } from './config.js'
+import { serverConfig, isDev, openclawConfig } from './config.js'
 import { acquirePidLock, releasePidLock, getPidPath } from './pidlock.js'
 import { startCloudIntegration, stopCloudIntegration, isCloudConfigured, watchConfigForCloudChanges, stopConfigWatcher } from './cloud.js'
 import { stopConfigWatch } from './assignment.js'
@@ -154,6 +154,16 @@ async function main() {
     console.log(`   - WebSocket: ws://${serverConfig.host}:${serverConfig.port}/chat/ws`)
     console.log(`   - Health: ${baseUrl}/health`)
     console.log(`   - PID: ${process.pid}`)
+
+    // OpenClaw gateway status
+    if (openclawConfig.gatewayToken) {
+      console.log(`🔗 OpenClaw gateway: configured (${openclawConfig.gatewayUrl})`)
+    } else {
+      console.log('⚠️  OpenClaw gateway: not configured')
+      console.log('   To connect agents, set OPENCLAW_GATEWAY_URL and OPENCLAW_GATEWAY_TOKEN')
+      console.log('   Get your token: openclaw gateway token')
+      console.log('   Guide: https://reflectt.ai/bootstrap')
+    }
 
     // Cloud integration (checks env vars + config.json for credentials)
     if (isCloudConfigured()) {
