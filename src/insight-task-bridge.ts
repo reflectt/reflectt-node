@@ -376,11 +376,17 @@ export function resolveAssignment(insight: Insight, teamId?: string): Assignment
   const candidates = config.assignableAgents.length > 0 ? config.assignableAgents : roleNames
 
   // Synthetic task for scoring
+  const metaTags = Array.isArray((insight.metadata as any)?.tags)
+    ? (insight.metadata as any).tags.map(String)
+    : []
+
   const syntheticTask = {
-    // Include pain/impact in the synthetic text so scoring sees the actual work domain.
     title: `[Insight] ${insight.title}`,
-    tags: [insight.cluster_key, insight.failure_family, ...(insight.tags || [])].filter(Boolean) as string[],
-    done_criteria: [insight.pain, insight.impact, insight.proposed_fix].filter(Boolean) as string[],
+    // Insight does not include reflection-level fields like pain/impact/proposed_fix.
+    // Use cluster metadata + optional metadata.tags for routing/affinity.
+    tags: [insight.cluster_key, insight.failure_family, insight.impacted_unit, ...metaTags].filter(Boolean) as string[],
+    // Use evidence refs as additional keywords (best-effort).
+    done_criteria: insight.evidence_refs.slice(0, 10),
     metadata: {
       cluster_key: insight.cluster_key,
       failure_family: insight.failure_family,
@@ -495,12 +501,16 @@ function resolveReviewer(
     allTasks = taskManager.listTasks()
   } catch { /* ok */ }
 
+  const metaTags = Array.isArray((insight.metadata as any)?.tags)
+    ? (insight.metadata as any).tags.map(String)
+    : []
+
   const suggestion = suggestReviewer(
     {
       title: `[Insight] ${insight.title}`,
       assignee,
-      tags: [insight.cluster_key, insight.failure_family, ...(insight.tags || [])].filter(Boolean) as string[],
-      done_criteria: [insight.pain, insight.impact, insight.proposed_fix].filter(Boolean) as string[],
+      tags: [insight.cluster_key, insight.failure_family, insight.impacted_unit, ...metaTags].filter(Boolean) as string[],
+      done_criteria: insight.evidence_refs.slice(0, 10),
       metadata: {
         cluster_key: insight.cluster_key,
         failure_family: insight.failure_family,
