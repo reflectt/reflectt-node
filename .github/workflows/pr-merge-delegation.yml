@@ -1,4 +1,4 @@
-name: pr-merge-delegation
+name: pr-merge-autopilot
 
 on:
   pull_request_target:
@@ -162,12 +162,17 @@ jobs:
               return;
             }
 
-            const failed = checkRuns.filter((run) => !allowed.has(run.conclusion || ''));
+            // Exclude self-check from failure list (it's always "in_progress" from its own perspective)
+            const selfCheck = 'merge-when-green';
+            const failed = checkRuns.filter(
+              (run) => run.name !== selfCheck && !allowed.has(run.conclusion || '')
+            );
             if (failed.length > 0) {
               core.info(`Checks not green for ${headSha}: ${failed.map((r) => `${r.name}:${r.conclusion}`).join(', ')}`);
               return;
             }
 
+            // ── All gates passed: merge ──
             try {
               await github.rest.pulls.merge({
                 owner: context.repo.owner,
@@ -175,7 +180,21 @@ jobs:
                 pull_number,
                 merge_method: 'squash',
               });
-              core.info(`Merged PR #${pull_number} (approved + green).`);
+
+              // Audit log comment
+              const approverList = approvals.map(([login]) => `@${login}`).join(', ');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pull_number,
+                body: `🤖 **Auto-merged** by pr-merge-autopilot.\n\n` +
+                  `- **Approved by:** ${approverList}\n` +
+                  `- **Checks:** all green (${checkRuns.length} passed)\n` +
+                  `- **SHA:** \`${headSha.slice(0, 8)}\`\n` +
+                  `- **Method:** squash merge`,
+              });
+
+              core.info(`Merged PR #${pull_number} (approved by ${approverList} + all checks green).`);
             } catch (error) {
               core.warning(`Merge attempt for PR #${pull_number} failed: ${error.message}`);
             }
