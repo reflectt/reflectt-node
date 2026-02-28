@@ -1105,19 +1105,6 @@ export function getDashboardHTML(): string {
   }
   .focus-toggle .focus-icon { font-size: var(--text-md); }
 
-  .pause-toggle {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 5px 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600;
-    cursor: pointer; border: 1px solid var(--border); background: var(--surface-raised);
-    color: var(--text-muted); transition: all var(--transition-base) var(--easing-smooth);
-    user-select: none;
-  }
-  .pause-toggle:hover { border-color: var(--yellow, #eab308); color: var(--text); }
-  .pause-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .pause-toggle.paused {
-    background: var(--yellow-dim, rgba(234, 179, 8, 0.15)); border-color: var(--yellow, #eab308); color: var(--yellow, #eab308);
-  }
-
   /* Focus mode active: dim non-active kanban columns */
   body.focus-mode .kanban-col:not([data-status="doing"]) {
     opacity: 0.3;
@@ -1541,9 +1528,6 @@ export function getDashboardHTML(): string {
     <span><span class="status-dot"></span>Running</span>
     <button class="focus-toggle" id="focus-toggle" onclick="toggleFocusMode()" title="Focus Mode: highlight active work, collapse noise">
       <span class="focus-icon">🎯</span> Focus
-    </button>
-    <button class="pause-toggle" id="pause-toggle" onclick="togglePause()" title="Pause/Resume team task pulls" aria-label="Pause or resume team">
-      <span id="pause-toggle-icon">⏸️</span> <span id="pause-toggle-label">Pause</span>
     </button>
     <span id="release-badge" class="release-badge" title="Deploy status">deploy: checking…</span>
     <span id="build-badge" class="release-badge" title="Build info">build: loading…</span>
