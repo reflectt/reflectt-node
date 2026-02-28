@@ -595,6 +595,15 @@ export class BoardHealthWorker {
     const cooldownMs = thresholdMs // Don't re-reassign within one SLA window
     const actions: PolicyAction[] = []
 
+    const normalizeEpochMs = (v: unknown): number => {
+      if (typeof v !== 'number' || !Number.isFinite(v)) return 0
+      // Heuristic: values below ~2001-09-09 in ms are likely seconds.
+      if (v > 0 && v < 100_000_000_000) return v * 1000
+      // Clamp future timestamps
+      if (v > now + 60_000) return now
+      return v
+    }
+
     const validatingTasks = taskManager.listTasks({ status: 'validating' })
       .filter(t => !isTestHarnessTask(t) && t.reviewer)
 
@@ -605,16 +614,18 @@ export class BoardHealthWorker {
 
       // Check reviewer activity on this task using the review_last_activity_at metadata field
       const meta = (task.metadata || {}) as Record<string, unknown>
-      const reviewEnteredAt = (meta.entered_validating_at as number | undefined) ?? task.updatedAt ?? task.createdAt
-      const reviewLastActivityAt = (meta.review_last_activity_at as number | undefined) ?? reviewEnteredAt
+      const reviewEnteredAt = normalizeEpochMs((meta as any).entered_validating_at) || (task.updatedAt ?? task.createdAt)
+      const reviewLastActivityAt = normalizeEpochMs((meta as any).review_last_activity_at) || reviewEnteredAt
 
       // Use the more recent of entered_validating and review_last_activity
-      const lastReviewActivity = Math.max(
-        typeof reviewEnteredAt === 'number' ? reviewEnteredAt : 0,
-        typeof reviewLastActivityAt === 'number' ? reviewLastActivityAt : 0,
-      )
+      const lastReviewActivity = Math.max(reviewEnteredAt || 0, reviewLastActivityAt || 0)
 
       if (!lastReviewActivity || now - lastReviewActivity < thresholdMs) continue
+
+      // Race guard: task may have left validating between listTasks() and now.
+      // Never act on done/closed tasks.
+      const latest = taskManager.getTask(task.id)
+      if (!latest || latest.status !== 'validating') continue
 
       const staleMinutes = Math.floor((now - lastReviewActivity) / 60_000)
       const currentReviewer = task.reviewer!
