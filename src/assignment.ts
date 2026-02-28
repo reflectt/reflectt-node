@@ -30,7 +30,13 @@ export interface AgentRole {
 }
 
 // ── YAML config paths (checked in order) ──
+// REFLECTT_HOME takes priority (Docker: REFLECTT_HOME=/data → /data/TEAM-ROLES.yaml)
+const REFLECTT_HOME = process.env['REFLECTT_HOME']
 const CONFIG_PATHS = [
+  ...(REFLECTT_HOME ? [
+    join(REFLECTT_HOME, 'TEAM-ROLES.yaml'),
+    join(REFLECTT_HOME, 'TEAM-ROLES.yml'),
+  ] : []),
   join(homedir(), '.reflectt', 'TEAM-ROLES.yaml'),
   join(homedir(), '.reflectt', 'TEAM-ROLES.yml'),
 ]
@@ -184,23 +190,23 @@ export function startConfigWatch(): void {
   const isTest = Boolean(process.env.VITEST) || process.env.NODE_ENV === 'test'
   if (isTest) return
   
-  // Watch user config paths
+  // Watch user config paths (watchFile works for non-existent files too —
+  // it polls and fires when the file appears, enabling hot-reload of new configs)
   for (const configPath of CONFIG_PATHS) {
-    if (existsSync(configPath)) {
-      try {
-        watchFile(configPath, { interval: 5000 }, () => {
-          try {
-            const stat = statSync(configPath)
-            if (stat.mtimeMs !== lastMtime) {
-              console.log(`[Assignment] TEAM-ROLES.yaml changed, reloading...`)
-              loadAgentRoles()
-            }
-          } catch { /* file removed */ }
-        })
-        watchActive = true
-        console.log(`[Assignment] Watching ${configPath} for changes`)
-      } catch { /* ignore */ }
-    }
+    try {
+      watchFile(configPath, { interval: 5000 }, () => {
+        try {
+          if (!existsSync(configPath)) return // file removed or not yet created
+          const stat = statSync(configPath)
+          if (stat.mtimeMs !== lastMtime) {
+            console.log(`[Assignment] TEAM-ROLES.yaml changed, reloading...`)
+            loadAgentRoles()
+          }
+        } catch { /* file removed */ }
+      })
+      watchActive = true
+      console.log(`[Assignment] Watching ${configPath} for changes`)
+    } catch { /* ignore */ }
   }
 }
 
@@ -248,7 +254,7 @@ export function getAgentAliases(name: string): string[] {
 
 /** Save updated agent roles to YAML config file */
 export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: string; version: number } {
-  const targetPath = CONFIG_PATHS[0] // ~/.reflectt/TEAM-ROLES.yaml
+  const targetPath = CONFIG_PATHS[0] // REFLECTT_HOME/TEAM-ROLES.yaml or ~/.reflectt/TEAM-ROLES.yaml
   const dir = targetPath.substring(0, targetPath.lastIndexOf('/'))
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 
