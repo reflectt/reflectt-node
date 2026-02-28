@@ -700,6 +700,8 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | POST | `/polls/:id/vote` | Cast a vote. Body: `{ voter, choice }` (choice is 0-indexed). Allows changing vote. |
 | POST | `/polls/:id/close` | Close a poll manually. |
 | GET | `/team/roles` | TEAM-ROLES routing matrix — agent skills, affinity scores, WIP caps |
+| GET | `/policy/intensity` | Current intensity preset + limits (wipLimit, maxPullsPerHour, batchIntervalMs). |
+| PUT | `/policy/intensity` | Set intensity preset. Body: `{ preset: "low"|"normal"|"high", updatedBy? }`. Returns new state. |
 
 ## Other
 

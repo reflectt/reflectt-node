@@ -2107,7 +2107,7 @@ async function refresh() {
   if (refreshCount === 1 || forceFull) await refreshAgentRegistry();
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback(), loadPauseStatus(), loadPolls()]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback(), loadPauseStatus(), loadIntensityControl(), loadPolls()]);
   await renderPromotionSSOT();
 }
 
@@ -2865,6 +2865,62 @@ async function resumeFromBanner() {
 // Poll pause status every 30s
 setInterval(checkPauseBanner, 30000);
 checkPauseBanner();
+
+// ═══ TEAM INTENSITY ═══
+
+async function loadIntensityControl() {
+  const control = document.getElementById('intensity-control');
+  if (!control) return;
+  try {
+    const r = await fetch(BASE + '/policy/intensity');
+    if (!r.ok) return;
+    const data = await r.json();
+    const preset = data.preset || 'normal';
+    const btns = control.querySelectorAll('.intensity-btn');
+    btns.forEach(btn => {
+      const isActive = btn.dataset.preset === preset;
+      btn.classList.toggle('intensity-active', isActive);
+      btn.setAttribute('aria-checked', String(isActive));
+      btn.setAttribute('tabindex', isActive ? '0' : '-1');
+    });
+    const info = document.getElementById('intensity-info');
+    if (info) {
+      const l = data.limits || {};
+      info.textContent = `WIP ${l.wipLimit || '?'} · ${l.maxPullsPerHour || '?'} pulls/hr` +
+        (l.batchIntervalMs > 0 ? ` · ${Math.round(l.batchIntervalMs / 60000)}m batch` : '');
+    }
+  } catch {}
+}
+
+async function setIntensity(preset) {
+  try {
+    const r = await fetch(BASE + '/policy/intensity', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset, updatedBy: 'dashboard' }),
+    });
+    if (r.ok) await loadIntensityControl();
+  } catch {}
+}
+
+// Keyboard nav for intensity radiogroup (arrow keys)
+document.addEventListener('keydown', (e) => {
+  const control = document.getElementById('intensity-control');
+  if (!control || !control.contains(document.activeElement)) return;
+  const btns = Array.from(control.querySelectorAll('.intensity-btn'));
+  const idx = btns.indexOf(document.activeElement);
+  if (idx < 0) return;
+  let next = -1;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (idx + 1) % btns.length;
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (idx - 1 + btns.length) % btns.length;
+  if (next >= 0) {
+    e.preventDefault();
+    btns[next].focus();
+    btns[next].click();
+  }
+});
+
+loadIntensityControl();
 
 // ═══ TEAM POLLS ═══
 
