@@ -376,9 +376,17 @@ export function resolveAssignment(insight: Insight, teamId?: string): Assignment
   const candidates = config.assignableAgents.length > 0 ? config.assignableAgents : roleNames
 
   // Synthetic task for scoring
+  const metaTags = Array.isArray((insight.metadata as any)?.tags)
+    ? (insight.metadata as any).tags.map(String)
+    : []
+
   const syntheticTask = {
     title: `[Insight] ${insight.title}`,
-    tags: [insight.cluster_key, insight.failure_family].filter(Boolean) as string[],
+    // Insight does not include reflection-level fields like pain/impact/proposed_fix.
+    // Use cluster metadata + optional metadata.tags for routing/affinity.
+    tags: [insight.cluster_key, insight.failure_family, insight.impacted_unit, ...metaTags].filter(Boolean) as string[],
+    // Use evidence refs as additional keywords (best-effort).
+    done_criteria: insight.evidence_refs.slice(0, 10),
     metadata: {
       cluster_key: insight.cluster_key,
       failure_family: insight.failure_family,
@@ -408,14 +416,14 @@ export function resolveAssignment(insight: Insight, teamId?: string): Assignment
     const bestNonAuthor = nonAuthorScored[0] // Already sorted desc
 
     // Role-fit bypass: author-exclusion must NOT override when author is best/only fit.
-    // Bypass when:
-    //   1. No non-author candidates with positive score
-    //   2. Author significantly outscores best non-author (>1.5x or >=0.2 gap)
-    //   3. Protected domain match on author
-    const authorIsBestFit = authorScore && authorScore.score > 0 && (
+    // Use *affinity* (domain match) rather than final score so WIP penalties don't defeat best-fit detection.
+    const authorAffinity = authorScore?.breakdown?.affinity ?? 0
+    const bestNonAuthorAffinity = bestNonAuthor?.breakdown?.affinity ?? 0
+
+    const authorIsBestFit = authorScore && authorAffinity > 0 && (
       !bestNonAuthor ||
-      (authorScore.score > bestNonAuthor.score * 1.5) ||
-      (authorScore.score - bestNonAuthor.score >= 0.2)
+      (authorAffinity > bestNonAuthorAffinity * 1.5) ||
+      (authorAffinity - bestNonAuthorAffinity >= 0.2)
     )
     const isProtectedMatch = suggestion.protectedMatch &&
       suggestion.suggested === authorName
@@ -425,13 +433,14 @@ export function resolveAssignment(insight: Insight, teamId?: string): Assignment
       assignee = authorName
       reason = `author_exclusion_bypassed: protected domain "${suggestion.protectedMatch}" → author "${authorName}" is correct owner`
       guardrailApplied = false
-    } else if (authorIsBestFit && !authorScore?.overCap) {
+    } else if (authorIsBestFit) {
       // Author is best role-fit → allow self-assignment, require non-author reviewer
       assignee = authorName
       const gap = bestNonAuthor
-        ? `(author ${authorScore!.score.toFixed(2)} vs best non-author ${bestNonAuthor.agent} ${bestNonAuthor.score.toFixed(2)})`
-        : '(no non-author candidates with positive score)'
-      reason = `author_exclusion_bypassed: author "${authorName}" is best role-fit ${gap}. Non-author reviewer required.`
+        ? `(author affinity ${authorAffinity.toFixed(2)} vs best non-author ${bestNonAuthor.agent} affinity ${bestNonAuthorAffinity.toFixed(2)})`
+        : '(no non-author candidates with non-negative score)'
+      const capNote = authorScore?.overCap ? ' (note: author over WIP cap)' : ''
+      reason = `author_exclusion_bypassed: author "${authorName}" is best role-fit ${gap}${capNote}. Non-author reviewer required.`
       guardrailApplied = true
       soleAuthorFallback = true // Triggers non-author reviewer requirement
     } else if (suggestedAgent && !authors.includes(suggestedAgent) && (candidates.length === 0 || candidates.includes(suggestedAgent))) {
@@ -492,11 +501,16 @@ function resolveReviewer(
     allTasks = taskManager.listTasks()
   } catch { /* ok */ }
 
+  const metaTags = Array.isArray((insight.metadata as any)?.tags)
+    ? (insight.metadata as any).tags.map(String)
+    : []
+
   const suggestion = suggestReviewer(
     {
       title: `[Insight] ${insight.title}`,
       assignee,
-      tags: [insight.cluster_key, insight.failure_family].filter(Boolean) as string[],
+      tags: [insight.cluster_key, insight.failure_family, insight.impacted_unit, ...metaTags].filter(Boolean) as string[],
+      done_criteria: insight.evidence_refs.slice(0, 10),
       metadata: {
         cluster_key: insight.cluster_key,
         failure_family: insight.failure_family,

@@ -1067,7 +1067,7 @@ class TaskManager {
     taskId: string,
     author: string,
     content: string,
-    options?: { category?: string | null },
+    options?: { category?: string | null; provenance?: Record<string, unknown> | null },
   ): Promise<TaskComment> {
     const task = queryTask(taskId)
     if (!task) {
@@ -1135,6 +1135,7 @@ class TaskManager {
       suppressed,
       suppressedReason,
       suppressedRule,
+      provenance: options?.provenance ?? null,
     })
 
     return comment

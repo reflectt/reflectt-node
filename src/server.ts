@@ -327,6 +327,8 @@ const CreateTaskCommentSchema = z.object({
   content: z.string().trim().min(1),
   // Optional categorization for comms_policy enforcement
   category: z.string().trim().min(1).optional(),
+  // Optional provenance: used to trace phantom/forged task-comment emitters.
+  provenance: z.record(z.unknown()).optional(),
 })
 
 const TaskOutcomeBodySchema = z.object({
@@ -5011,11 +5013,36 @@ export async function createServer(): Promise<FastifyInstance> {
   app.post<{ Params: { id: string } }>('/tasks/:id/comments', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
     if (!resolved) {
+      // Record provenance for phantom task-comment attempts (do not attribute to a human in chat).
+      let parsed: any = null
+      try {
+        parsed = CreateTaskCommentSchema.safeParse(request.body)
+      } catch { /* ignore */ }
+
       const match = taskManager.resolveTaskId(request.params.id)
+      const { recordTaskCommentReject } = await import('./taskCommentIngest.js')
+      const rej = recordTaskCommentReject({
+        attempted_task_param: request.params.id,
+        resolved_task_id: null,
+        author: parsed?.success ? parsed.data.author : null,
+        content: parsed?.success ? parsed.data.content : null,
+        reason: 'task_not_found',
+        provenance: parsed?.success ? (parsed.data.provenance ?? null) : null,
+        details: {
+          input: request.params.id,
+          matchType: match.matchType,
+          suggestions: match.suggestions ?? [],
+        },
+      })
+
       if (match.matchType === 'ambiguous') {
+        reply.code(409)
         return {
           success: false,
           error: 'Ambiguous task ID prefix',
+          code: 'AMBIGUOUS_TASK_ID',
+          status: 409,
+          reject_id: rej.id,
           details: {
             input: request.params.id,
             suggestions: match.suggestions,
@@ -5023,13 +5050,25 @@ export async function createServer(): Promise<FastifyInstance> {
           hint: 'Use a longer prefix or the full task ID',
         }
       }
-      return { success: false, error: 'Task not found', details: { input: request.params.id, suggestions: match.suggestions } }
+
+      reply.code(404)
+      return {
+        success: false,
+        error: 'Task not found',
+        code: 'TASK_NOT_FOUND',
+        status: 404,
+        reject_id: rej.id,
+        details: { input: request.params.id, suggestions: match.suggestions },
+      }
     }
 
     try {
       const data = CreateTaskCommentSchema.parse(request.body)
 
       // ── Task ID reference validation ──
+      // If the comment references other task IDs, reject the comment when any
+      // referenced task does not exist. This prevents phantom cross-links and
+      // keeps attribution clean.
       const TASK_REF_RE = /\btask-[\w-]{8,}\b/g
       const referencedIds = [...new Set(data.content.match(TASK_REF_RE) || [])]
       const invalidRefs: string[] = []
@@ -5046,11 +5085,39 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      if (invalidRefs.length > 0) {
+        const { recordTaskCommentReject } = await import('./taskCommentIngest.js')
+        const rej = recordTaskCommentReject({
+          attempted_task_param: request.params.id,
+          resolved_task_id: resolved.resolvedId,
+          author: data.author,
+          content: data.content,
+          reason: 'invalid_task_refs',
+          provenance: (data as any).provenance ?? null,
+          details: { invalid_task_refs: invalidRefs, suggestions },
+        })
+
+        reply.code(422)
+        return {
+          success: false,
+          error: `Invalid task reference(s): ${invalidRefs.join(', ')}`,
+          code: 'INVALID_TASK_REFS',
+          status: 422,
+          reject_id: rej.id,
+          invalid_task_refs: invalidRefs,
+          suggestions,
+          hint: 'Fix the referenced task IDs (or remove them) and retry. This guard prevents phantom cross-links.',
+        }
+      }
+
       const comment = await taskManager.addTaskComment(
         resolved.resolvedId,
         data.author,
         data.content,
-        { category: (data as any).category ?? null },
+        {
+          category: (data as any).category ?? null,
+          provenance: (data as any).provenance ?? null,
+        },
       )
 
       // ── Knowledge auto-index: decision comments ──

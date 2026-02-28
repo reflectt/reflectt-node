@@ -1,8 +1,10 @@
 /**
  * Task comment: invalid task ID reference validation.
  *
- * POST /tasks/:id/comments should detect task-XXX references in content
- * and warn if any referenced task doesn't exist.
+ * POST /tasks/:id/comments should detect task-XXX references in content.
+ *
+ * NOTE: This is now a *hard guardrail* — if a comment references nonexistent task IDs,
+ * the request is rejected (422) and the comment is not stored.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createServer } from '../src/server.js'
@@ -72,47 +74,52 @@ describe('POST /tasks/:id/comments — task ID ref validation', () => {
     expect(res.json.warning).toBeUndefined()
   })
 
-  it('comment referencing non-existent task returns warning', async () => {
+  it('comment referencing non-existent task is rejected (no storage)', async () => {
     const fakeId = 'task-9999999999999-xxxxxxxxx'
     const res = await req('POST', `/tasks/${taskId}/comments`, {
       author: 'link',
       content: `See also ${fakeId} for context.`,
     })
-    expect(res.status).toBe(200)
-    expect(res.json.success).toBe(true)
-    expect(res.json.comment).toBeDefined()
-    expect(res.json.warning).toContain('not found')
+    expect(res.status).toBe(422)
+    expect(res.json.success).toBe(false)
+    expect(res.json.code).toBe('INVALID_TASK_REFS')
     expect(res.json.invalid_task_refs).toContain(fakeId)
+    expect(res.json.reject_id).toBeDefined()
+
+    const listRes = await req('GET', `/tasks/${taskId}/comments`)
+    expect(listRes.status).toBe(200)
+    expect(listRes.json.comments.some((c: any) => String(c.content).includes(fakeId))).toBe(false)
   })
 
-  it('comment referencing valid + invalid tasks warns only about invalid', async () => {
+  it('comment referencing valid + invalid tasks is rejected with invalid list', async () => {
     const fakeId = 'task-0000000000000-fakefakefake'
     const res = await req('POST', `/tasks/${taskId}/comments`, {
       author: 'link',
       content: `Depends on ${taskId} and ${fakeId}.`,
     })
-    expect(res.status).toBe(200)
-    expect(res.json.success).toBe(true)
+    expect(res.status).toBe(422)
+    expect(res.json.success).toBe(false)
+    expect(res.json.code).toBe('INVALID_TASK_REFS')
     expect(res.json.invalid_task_refs).toContain(fakeId)
     expect(res.json.invalid_task_refs).not.toContain(taskId)
+    expect(res.json.reject_id).toBeDefined()
   })
 
-  it('comment still stored even with invalid refs', async () => {
+  it('comment is not stored when invalid refs exist (reject ledger)', async () => {
     const fakeId = 'task-1111111111111-ghostghost'
     const res = await req('POST', `/tasks/${taskId}/comments`, {
       author: 'link',
       content: `Referencing ghost ${fakeId} here.`,
     })
-    expect(res.status).toBe(200)
-    expect(res.json.comment.id).toBeDefined()
-    expect(res.json.comment.content).toContain(fakeId)
+    expect(res.status).toBe(422)
+    expect(res.json.success).toBe(false)
+    expect(res.json.code).toBe('INVALID_TASK_REFS')
+    expect(res.json.invalid_task_refs).toContain(fakeId)
+    expect(res.json.reject_id).toBeDefined()
 
-    // Verify comment is retrievable
+    // Verify comment is NOT retrievable
     const listRes = await req('GET', `/tasks/${taskId}/comments`)
     expect(listRes.status).toBe(200)
-    const found = listRes.json.comments.find(
-      (c: { id: string }) => c.id === res.json.comment.id,
-    )
-    expect(found).toBeDefined()
+    expect(listRes.json.comments.some((c: any) => String(c.content).includes(fakeId))).toBe(false)
   })
 })
