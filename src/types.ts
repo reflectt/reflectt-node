@@ -5,6 +5,14 @@
  * Core types for reflectt-node
  */
 
+export interface ChatAttachment {
+  id: string
+  name: string
+  size: number
+  mimeType: string
+  url: string
+}
+
 export interface AgentMessage {
   id: string
   from: string
@@ -16,6 +24,7 @@ export interface AgentMessage {
   threadId?: string // If set, this message is a reply in that thread
   replyCount?: number // Number of replies (calculated on fetch)
   metadata?: Record<string, unknown>
+  attachments?: ChatAttachment[]
 }
 
 export interface Task {

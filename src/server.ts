@@ -158,13 +158,22 @@ import { startSelfKeepalive, stopSelfKeepalive, getSelfKeepaliveStatus, detectWa
 import { pauseTarget, unpauseTarget, checkPauseStatus, listPauseEntries } from './pause-controls.js'
 
 // Schemas
+const ChatAttachmentSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  size: z.number(),
+  mimeType: z.string(),
+  url: z.string(),
+})
+
 const SendMessageSchema = z.object({
   from: z.string().min(1),
   to: z.string().optional(),
-  content: z.string().min(1),
+  content: z.string().default(''),
   channel: z.string().optional(),
   threadId: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
+  attachments: z.array(ChatAttachmentSchema).optional(),
 })
 
 // Task type determines required fields beyond the base schema
@@ -3222,6 +3231,12 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const data = parsedBody.data
+
+    // Require at least content or attachments
+    if (!data.content && (!data.attachments || data.attachments.length === 0)) {
+      reply.code(400)
+      return { success: false, error: 'Message must have content or attachments' }
+    }
 
     // ── Phantom task-comment guard ──────────────────────────────────────
     // Reject messages with [task-comment:task-...] tags if any referenced task
