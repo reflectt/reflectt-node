@@ -8,6 +8,51 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+/* ============================================================
+   SIDEBAR NAV — hash-based client-side routing
+   ============================================================ */
+const VALID_PAGES = ['overview', 'tasks', 'chat', 'reviews', 'health', 'outcomes', 'research', 'artifacts'];
+
+function navigateTo(page) {
+  if (!VALID_PAGES.includes(page)) page = 'overview';
+  location.hash = page === 'overview' ? '' : page;
+  activatePage(page);
+  // Close mobile sidebar
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (sidebar) sidebar.classList.remove('open');
+  if (overlay) overlay.classList.remove('open');
+}
+
+function activatePage(page) {
+  // Hide all pages, show target
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const target = document.getElementById('page-' + page);
+  if (target) target.classList.add('active');
+  // Update sidebar active state
+  document.querySelectorAll('.sidebar-link[data-page]').forEach(link => {
+    link.classList.toggle('active', link.dataset.page === page);
+  });
+}
+
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  if (sidebar) sidebar.classList.toggle('open');
+  if (overlay) overlay.classList.toggle('open');
+}
+
+// Init: read hash on load
+function initRouter() {
+  const hash = location.hash.replace('#', '') || 'overview';
+  activatePage(VALID_PAGES.includes(hash) ? hash : 'overview');
+}
+window.addEventListener('hashchange', () => {
+  const hash = location.hash.replace('#', '') || 'overview';
+  activatePage(VALID_PAGES.includes(hash) ? hash : 'overview');
+});
+initRouter();
+
 let currentChannel = 'all';
 let currentProject = 'all';
 let allMessages = [];
@@ -602,6 +647,9 @@ async function loadTasks(forceFull = false) {
   renderBacklog();
   renderOutcomeFeed();
   document.getElementById('task-count').textContent = allTasks.length + ' tasks';
+  // Update sidebar badge
+  const navTaskBadge = document.getElementById('nav-task-count');
+  if (navTaskBadge) navTaskBadge.textContent = allTasks.length;
 }
 
 function renderProjectTabs() {
@@ -1499,6 +1547,9 @@ function renderReviewQueue() {
 
   panel.style.display = '';
   count.textContent = validating.length + ' awaiting review';
+  // Update sidebar badge
+  const navReviewBadge = document.getElementById('nav-review-count');
+  if (navReviewBadge) navReviewBadge.textContent = validating.length;
 
   const breachCount = validating.filter(t => t.slaState === 'breach').length;
   const headerExtra = breachCount > 0

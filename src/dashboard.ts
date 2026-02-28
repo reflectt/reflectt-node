@@ -167,6 +167,80 @@ export function getDashboardHTML(): string {
   .header-logo { font-size: var(--text-xl); font-weight: var(--font-weight-bold); color: var(--text-bright); letter-spacing: var(--letter-spacing-tight); white-space: nowrap; }
   .header-logo span { color: var(--accent); }
   .header-right { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-base); color: var(--text-muted); flex-wrap: wrap; }
+
+  /* ============================================================
+     SIDEBAR NAV
+     Hash-based client-side routing. Sidebar + page containers.
+     ============================================================ */
+  .app-layout { display: flex; min-height: calc(100vh - 56px); }
+  .sidebar {
+    width: 200px; flex-shrink: 0; background: var(--surface);
+    border-right: 1px solid var(--border); padding: var(--space-4) 0;
+    position: sticky; top: 0; height: calc(100vh - 56px); overflow-y: auto;
+    display: flex; flex-direction: column;
+  }
+  .sidebar-nav { display: flex; flex-direction: column; gap: 2px; padding: 0 var(--space-2); flex: 1; }
+  .sidebar-link {
+    display: flex; align-items: center; gap: var(--space-2);
+    padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+    font-size: var(--text-base); font-weight: var(--font-weight-medium);
+    color: var(--text-muted); text-decoration: none; cursor: pointer;
+    border: none; background: transparent; font-family: inherit; width: 100%;
+    transition: all var(--transition-fast) var(--easing-smooth);
+    min-height: 36px;
+  }
+  .sidebar-link:focus-visible {
+    outline: var(--focus-ring); outline-offset: -2px;
+  }
+  .sidebar-link .nav-icon { font-size: 16px; width: 22px; text-align: center; flex-shrink: 0; }
+  .sidebar-link .nav-label { flex: 1; text-align: left; }
+  .sidebar-link .nav-badge {
+    font-size: 10px; font-weight: 700; min-width: 18px; text-align: center;
+    padding: 1px 5px; border-radius: 999px;
+    background: var(--border); color: var(--text-muted);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .sidebar-link:hover { background: var(--surface-raised); color: var(--text); }
+  }
+  .sidebar-link.active {
+    background: var(--accent-dim); color: var(--accent); font-weight: var(--font-weight-semibold);
+  }
+  .sidebar-link.active .nav-badge {
+    background: var(--accent-dim); color: var(--accent);
+  }
+  .sidebar-divider { height: 1px; background: var(--border); margin: var(--space-2) var(--space-3); }
+  .sidebar-section {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+    color: var(--text-muted); font-weight: var(--font-weight-semibold);
+    padding: var(--space-3) var(--space-3) var(--space-1);
+  }
+
+  /* Page containers: show/hide based on route */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* Mobile: collapse sidebar */
+  .sidebar-toggle {
+    display: none; position: fixed; top: var(--space-2); left: var(--space-2);
+    z-index: 60; width: 36px; height: 36px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+    font-size: 18px; cursor: pointer; align-items: center; justify-content: center;
+  }
+  .sidebar-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5); z-index: 45;
+  }
+  @media (max-width: 767px) {
+    .sidebar-toggle { display: flex; }
+    .sidebar {
+      position: fixed; top: 0; left: 0; z-index: 50; height: 100vh;
+      transform: translateX(-100%); transition: transform var(--transition-normal) var(--easing-smooth);
+    }
+    .sidebar.open { transform: translateX(0); }
+    .sidebar-overlay.open { display: block; }
+    .app-layout { flex-direction: column; }
+  }
+
   .release-badge {
     display: inline-flex;
     align-items: center;
@@ -230,7 +304,7 @@ export function getDashboardHTML(): string {
   .agent-badge.working { background: var(--green-dim); color: var(--green); }
   .agent-badge.idle { background: var(--border); color: var(--text-muted); }
   .agent-badge.offline { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
-  .main { padding: 24px 28px; display: flex; flex-direction: column; gap: var(--space-6); }
+  .main { padding: 24px 28px; display: flex; flex-direction: column; gap: var(--space-6); flex: 1; min-width: 0; }
   .panel {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius-md); overflow: hidden;
@@ -1326,7 +1400,53 @@ export function getDashboardHTML(): string {
 
 <div class="agent-strip" id="agent-strip"></div>
 
+<button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" aria-label="Toggle sidebar">☰</button>
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+<div class="app-layout">
+<nav class="sidebar" id="sidebar" aria-label="Dashboard navigation">
+  <div class="sidebar-nav">
+    <button class="sidebar-link active" data-page="overview" onclick="navigateTo('overview')">
+      <span class="nav-icon">🧭</span><span class="nav-label">Overview</span>
+    </button>
+    <button class="sidebar-link" data-page="tasks" onclick="navigateTo('tasks')">
+      <span class="nav-icon">📋</span><span class="nav-label">Tasks</span><span class="nav-badge" id="nav-task-count">0</span>
+    </button>
+    <button class="sidebar-link" data-page="chat" onclick="navigateTo('chat')">
+      <span class="nav-icon">💬</span><span class="nav-label">Chat</span>
+    </button>
+    <button class="sidebar-link" data-page="reviews" onclick="navigateTo('reviews')">
+      <span class="nav-icon">👀</span><span class="nav-label">Reviews</span><span class="nav-badge" id="nav-review-count">0</span>
+    </button>
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section">Insights</div>
+    <button class="sidebar-link" data-page="health" onclick="navigateTo('health')">
+      <span class="nav-icon">🏥</span><span class="nav-label">Health</span>
+    </button>
+    <button class="sidebar-link" data-page="outcomes" onclick="navigateTo('outcomes')">
+      <span class="nav-icon">🏁</span><span class="nav-label">Outcomes</span>
+    </button>
+    <button class="sidebar-link" data-page="research" onclick="navigateTo('research')">
+      <span class="nav-icon">🔍</span><span class="nav-label">Research</span>
+    </button>
+    <div class="sidebar-divider"></div>
+    <div class="sidebar-section">System</div>
+    <button class="sidebar-link" data-page="artifacts" onclick="navigateTo('artifacts')">
+      <span class="nav-icon">📚</span><span class="nav-label">Artifacts</span>
+    </button>
+    <a class="sidebar-link" href="/ui-kit" target="_blank">
+      <span class="nav-icon">🎨</span><span class="nav-label">UI Kit</span>
+    </a>
+    <a class="sidebar-link" href="/health" target="_blank">
+      <span class="nav-icon">🩺</span><span class="nav-label">Doctor</span>
+    </a>
+  </div>
+</nav>
+
 <div class="main">
+  <!-- ═══ PAGE: Overview ═══ -->
+  <div class="page active" id="page-overview">
+
   <!-- Getting Started panel — hidden when configured -->
   <div class="getting-started" id="getting-started">
     <div class="panel-header">
@@ -1366,10 +1486,10 @@ export function getDashboardHTML(): string {
     <div class="panel-body" id="truth-body"></div>
   </div>
 
-  <div class="panel focus-collapse" id="shared-artifacts-panel">
-    <div class="panel-header">📚 Shared Artifacts <span class="count" id="shared-artifacts-count">loading…</span></div>
-    <div class="panel-body" id="shared-artifacts-body" style="max-height:260px;overflow-y:auto"></div>
-  </div>
+  </div><!-- /page-overview -->
+
+  <!-- ═══ PAGE: Tasks ═══ -->
+  <div class="page" id="page-tasks">
 
   <div class="panel">
     <div class="panel-header">📋 Task Board <span class="count" id="task-count"></span></div>
@@ -1377,7 +1497,7 @@ export function getDashboardHTML(): string {
     <div class="kanban" id="kanban"></div>
   </div>
 
-  <div class="panel focus-collapse">
+  <div class="panel">
     <div class="panel-header">🔎 Task Search <span class="count" id="search-count"></span></div>
     <div class="panel-body" style="max-height:280px;overflow-y:auto">
       <div style="display:flex;gap:8px;margin-bottom:10px">
@@ -1387,6 +1507,16 @@ export function getDashboardHTML(): string {
       <div id="task-search-results"><div class="empty" style="color:var(--text-muted)">Type a query and press Enter…</div></div>
     </div>
   </div>
+
+  <div class="panel" id="backlog-panel">
+    <div class="panel-header">📦 Available Work <span class="count" id="backlog-count"></span></div>
+    <div class="panel-body" id="backlog-body" style="max-height:300px;overflow-y:auto"></div>
+  </div>
+
+  </div><!-- /page-tasks -->
+
+  <!-- ═══ PAGE: Reviews ═══ -->
+  <div class="page" id="page-reviews">
 
   <div class="panel" id="review-queue-panel">
     <div class="panel-header">👀 Review Queue <span class="count" id="review-queue-count"></span></div>
@@ -1401,65 +1531,93 @@ export function getDashboardHTML(): string {
     <div id="routing-policy-panel" style="display:none;border-top:1px solid var(--border-subtle);padding:12px;max-height:400px;overflow-y:auto"></div>
   </div>
 
-  <div class="panel" id="backlog-panel">
-    <div class="panel-header">📦 Available Work <span class="count" id="backlog-count"></span></div>
-    <div class="panel-body" id="backlog-body" style="max-height:300px;overflow-y:auto"></div>
+  </div><!-- /page-reviews -->
+
+  <!-- ═══ PAGE: Chat ═══ -->
+  <div class="page" id="page-chat">
+
+  <div class="panel">
+    <div class="panel-header">💬 Chat <span class="count" id="chat-count"></span></div>
+    <div class="channel-tabs" id="channel-tabs"></div>
+    <div class="panel-body" id="chat-body"></div>
+    <div class="chat-input-bar">
+      <select id="chat-channel">
+        <option value="general">#general</option>
+        <option value="decisions">#decisions</option>
+        <option value="shipping">#shipping</option>
+        <option value="reviews">#reviews</option>
+        <option value="blockers">#blockers</option>
+        <option value="problems">#problems</option>
+      </select>
+      <input type="text" id="chat-input" placeholder="Message as ryan…" autocomplete="off" />
+      <button id="chat-send" onclick="sendChat()">Send</button>
+    </div>
   </div>
 
-  <div class="panel focus-collapse">
+  <div class="panel">
+    <div class="panel-header">⚡ Activity <span class="count" id="activity-count"></span></div>
+    <div class="panel-body" id="activity-body"></div>
+  </div>
+
+  <div class="panel">
     <div class="panel-header">💬 Feedback <span class="count" id="feedback-count"></span></div>
     <div class="panel-body" id="feedback-body" style="max-height:350px;overflow-y:auto"></div>
   </div>
 
-  <div class="panel">
-    <div class="panel-header">🔍 Research Intake <span class="count" id="research-count"></span></div>
-    <div class="panel-body" id="research-body" style="max-height:260px;overflow-y:auto"></div>
-  </div>
+  </div><!-- /page-chat -->
 
-  <div class="panel focus-collapse">
-    <div class="panel-header">🏁 Outcome Feed <span class="count" id="outcome-count"></span></div>
-    <div class="panel-body" id="outcome-body" style="max-height:320px;overflow-y:auto"></div>
-  </div>
+  <!-- ═══ PAGE: Health ═══ -->
+  <div class="page" id="page-health">
 
   <div class="panel">
     <div class="panel-header">🏥 Team Health <span class="count" id="health-count"></span></div>
     <div class="panel-body" id="health-body"></div>
   </div>
 
-  <div class="panel focus-collapse">
+  <div class="panel">
     <div class="panel-header">🛡️ Collaboration Compliance <span class="count" id="compliance-count"></span></div>
     <div class="panel-body" id="compliance-body"></div>
   </div>
 
-  <div class="panel focus-collapse">
+  </div><!-- /page-health -->
+
+  <!-- ═══ PAGE: Outcomes ═══ -->
+  <div class="page" id="page-outcomes">
+
+  <div class="panel">
+    <div class="panel-header">🏁 Outcome Feed <span class="count" id="outcome-count"></span></div>
+    <div class="panel-body" id="outcome-body" style="max-height:none;overflow-y:auto"></div>
+  </div>
+
+  <div class="panel">
     <div class="panel-header">🧭 Promotion SSOT <span class="count" id="ssot-count"></span></div>
     <div class="panel-body" id="ssot-body"></div>
   </div>
 
-  <div class="two-col">
-    <div class="panel">
-      <div class="panel-header">💬 Chat <span class="count" id="chat-count"></span></div>
-      <div class="channel-tabs" id="channel-tabs"></div>
-      <div class="panel-body" id="chat-body"></div>
-      <div class="chat-input-bar">
-        <select id="chat-channel">
-          <option value="general">#general</option>
-          <option value="decisions">#decisions</option>
-          <option value="shipping">#shipping</option>
-          <option value="reviews">#reviews</option>
-          <option value="blockers">#blockers</option>
-          <option value="problems">#problems</option>
-        </select>
-        <input type="text" id="chat-input" placeholder="Message as ryan…" autocomplete="off" />
-        <button id="chat-send" onclick="sendChat()">Send</button>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-header">⚡ Activity <span class="count" id="activity-count"></span></div>
-      <div class="panel-body" id="activity-body"></div>
-    </div>
+  </div><!-- /page-outcomes -->
+
+  <!-- ═══ PAGE: Research ═══ -->
+  <div class="page" id="page-research">
+
+  <div class="panel">
+    <div class="panel-header">🔍 Research Intake <span class="count" id="research-count"></span></div>
+    <div class="panel-body" id="research-body" style="max-height:none;overflow-y:auto"></div>
   </div>
-</div>
+
+  </div><!-- /page-research -->
+
+  <!-- ═══ PAGE: Artifacts ═══ -->
+  <div class="page" id="page-artifacts">
+
+  <div class="panel" id="shared-artifacts-panel">
+    <div class="panel-header">📚 Shared Artifacts <span class="count" id="shared-artifacts-count">loading…</span></div>
+    <div class="panel-body" id="shared-artifacts-body" style="max-height:none;overflow-y:auto"></div>
+  </div>
+
+  </div><!-- /page-artifacts -->
+
+</div><!-- /.main -->
+</div><!-- /.app-layout -->
 
 <script src="/dashboard.js"></script>
 
