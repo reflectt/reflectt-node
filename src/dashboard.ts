@@ -1219,6 +1219,8 @@ export function getDashboardHTML(): string {
 </head>
 <body>
 
+<div id="pause-banner" style="display:none;background:var(--yellow-dim);color:var(--yellow);padding:var(--space-2) var(--space-4);text-align:center;font-size:var(--text-sm);border-bottom:1px solid var(--yellow)"></div>
+
 <div class="header">
   <div class="header-left">
     <div class="header-logo">⚡ <span>reflectt</span>-node</div>

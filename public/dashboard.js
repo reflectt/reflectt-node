@@ -511,6 +511,48 @@ function classifyProject(task) {
 }
 
 // ---- Presence ----
+async function loadPauseStatus() {
+  try {
+    const res = await fetch('/team/pause');
+    if (!res.ok) return;
+    const data = await res.json();
+    const banner = document.getElementById('pause-banner');
+    if (!banner) return;
+
+    const teamPaused = data.team && data.team.paused;
+    const agentsPaused = (data.agents || []).filter(a => a.paused);
+
+    if (!teamPaused && agentsPaused.length === 0) {
+      banner.style.display = 'none';
+      return;
+    }
+
+    let html = '';
+    if (teamPaused) {
+      const remaining = data.team.pausedUntil
+        ? ' — resumes ' + new Date(data.team.pausedUntil).toLocaleTimeString()
+        : ' (indefinite)';
+      html += '<strong>⏸ Team paused</strong>' + (data.team.reason ? ': ' + esc(data.team.reason) : '') + remaining;
+    }
+    for (const a of agentsPaused) {
+      const remaining = a.pausedUntil
+        ? ' — resumes ' + new Date(a.pausedUntil).toLocaleTimeString()
+        : ' (indefinite)';
+      html += (html ? '<br>' : '') + '<strong>⏸ ' + esc(a.scope) + ' paused</strong>' + (a.reason ? ': ' + esc(a.reason) : '') + remaining;
+    }
+    html += ' <button onclick="resumeTeam()" style="margin-left:12px;padding:2px 10px;border-radius:var(--radius-sm);background:var(--green);color:#fff;border:none;cursor:pointer;font-size:var(--text-xs)">Resume</button>';
+    banner.innerHTML = html;
+    banner.style.display = 'block';
+  } catch { /* network error */ }
+}
+
+async function resumeTeam() {
+  try {
+    await fetch('/team/resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: 'team' }) });
+    await loadPauseStatus();
+  } catch { /* ignore */ }
+}
+
 async function loadPresence() {
   let presenceMap = {};
   try {
@@ -1958,7 +2000,7 @@ async function refresh() {
   if (refreshCount === 1 || forceFull) await refreshAgentRegistry();
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback()]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback(), loadPauseStatus()]);
   await renderPromotionSSOT();
 }
 

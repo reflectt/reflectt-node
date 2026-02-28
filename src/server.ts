@@ -7178,6 +7178,49 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Pause/sleep controls ──
+  app.get('/team/pause', async () => {
+    const { getPauseStatus } = await import('./pause.js')
+    return { success: true, ...getPauseStatus() }
+  })
+
+  app.post('/team/pause', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const scope = typeof body.scope === 'string' ? body.scope.trim() : 'team'
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : undefined
+    const pausedBy = typeof body.pausedBy === 'string' ? body.pausedBy.trim() : undefined
+    const durationMinutes = typeof body.durationMinutes === 'number' ? body.durationMinutes : undefined
+    const pausedUntil = typeof body.pausedUntil === 'number' ? body.pausedUntil
+      : durationMinutes ? Date.now() + durationMinutes * 60000
+      : undefined
+
+    if (!scope) {
+      reply.code(400)
+      return { success: false, error: 'scope is required (\"team\" or agent name)' }
+    }
+
+    const { setPaused, formatRemaining } = await import('./pause.js')
+    const entry = setPaused({ scope, paused: true, pausedUntil, reason, pausedBy })
+    return {
+      success: true,
+      entry,
+      message: `${scope === 'team' ? 'Team' : `Agent ${scope}`} paused${entry.pausedUntil ? ` for ${formatRemaining(entry.pausedUntil - Date.now())}` : ' indefinitely'}`,
+    }
+  })
+
+  app.post('/team/resume', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const scope = typeof body.scope === 'string' ? body.scope.trim() : 'team'
+
+    const { setPaused } = await import('./pause.js')
+    const entry = setPaused({ scope, paused: false })
+    return {
+      success: true,
+      entry,
+      message: `${scope === 'team' ? 'Team' : `Agent ${scope}`} resumed`,
+    }
+  })
+
   // ── Agent identity: display name management ──
   app.post('/config/identity', async (request, reply) => {
     const body = request.body as Record<string, unknown>
@@ -8929,6 +8972,21 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = request.query as Record<string, string>
     const agent = typeof query.agent === 'string' ? query.agent.trim().toLowerCase() : undefined
     const includeTest = query.include_test === '1' || query.include_test === 'true'
+
+    // Check pause status before returning tasks
+    const { isPaused, formatRemaining } = await import('./pause.js')
+    const pauseCheck = isPaused(agent)
+    if (pauseCheck.paused) {
+      const remaining = formatRemaining(pauseCheck.remainingMs)
+      return {
+        task: null,
+        paused: true,
+        scope: pauseCheck.scope,
+        remaining,
+        message: `${pauseCheck.scope === 'team' ? 'Team' : `Agent ${agent}`} is paused${pauseCheck.entry?.reason ? `: ${pauseCheck.entry.reason}` : ''}. Remaining: ${remaining}. Use POST /team/resume to resume.`,
+      }
+    }
+
     const task = taskManager.getNextTask(agent, { includeTest })
     if (!task) {
       return { task: null, message: 'No available tasks' }
@@ -9034,12 +9092,24 @@ export async function createServer(): Promise<FastifyInstance> {
     const slim = (t: Task | null | undefined) => t ? { id: t.id, title: t.title, status: t.status, priority: t.priority } : null
     presenceManager.recordActivity(agent, 'heartbeat')
 
+    // Check pause status
+    const { isPaused: checkPaused, formatRemaining: fmtRemaining } = await import('./pause.js')
+    const pauseCheck = checkPaused(agent)
+
     return {
       agent, ts: Date.now(),
-      active: slim(activeTask), next: slim(nextTask),
+      active: slim(activeTask), next: pauseCheck.paused ? null : slim(nextTask),
       inbox: slimInbox, inboxCount: inbox.length,
       queue: { todo: todoTasks.length, doing: doingTasks.length, validating: validatingTasks.length },
-      action: activeTask ? `Continue ${activeTask.id}`
+      ...(pauseCheck.paused ? {
+        paused: true,
+        pauseScope: pauseCheck.scope,
+        pauseRemaining: fmtRemaining(pauseCheck.remainingMs),
+        pauseReason: pauseCheck.entry?.reason || null,
+      } : {}),
+      action: pauseCheck.paused
+        ? `PAUSED${pauseCheck.entry?.reason ? `: ${pauseCheck.entry.reason}` : ''} (${fmtRemaining(pauseCheck.remainingMs)})`
+        : activeTask ? `Continue ${activeTask.id}`
         : nextTask ? `Claim ${nextTask.id}`
         : inbox.length > 0 ? `Check inbox (${inbox.length} messages)`
         : 'HEARTBEAT_OK',
