@@ -50,14 +50,19 @@ docker run -d --name reflectt-node \
 
 ### Troubleshooting: "unauthorized" on docker pull
 
-If `docker pull ghcr.io/reflectt/reflectt-node:latest` returns **unauthorized**:
+Normally the image is **public** — `docker pull ghcr.io/reflectt/reflectt-node:latest` should work without auth.
 
-1. **Check if the image is public** — it should be. If you see this error, the org may not have published a public release yet.
+If you see **unauthorized**:
 
-2. **Authenticate with GHCR** (if the image is private):
+1. **Confirm you’re pulling the official image** (not a fork):
    ```bash
-   # Create a GitHub Personal Access Token (PAT) with read:packages scope
-   # at https://github.com/settings/tokens
+   docker pull ghcr.io/reflectt/reflectt-node:latest
+   ```
+
+2. **If you’re pulling from a fork/private org**, authenticate with GHCR:
+   ```bash
+   # Create a GitHub Personal Access Token (PAT) with read:packages
+   # https://github.com/settings/tokens
    echo YOUR_GITHUB_PAT | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
    docker pull ghcr.io/reflectt/reflectt-node:latest
    ```
