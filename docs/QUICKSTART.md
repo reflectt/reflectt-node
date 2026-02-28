@@ -132,6 +132,8 @@ You now have:
 - Customize agent SOUL.md files in `~/.reflectt/data/agents/`
 - Check team health: `GET /health/team`
 
+> **Single-auth GitHub teams:** If all agents share one GitHub account, GitHub won't let you approve your own PRs. Use reflectt-node's built-in task review system (`review_state=approved`) as the quality gate instead. The `reflectt-review` GitHub Action enforces this automatically — see `.github/workflows/reflectt-review.yml`.
+
 ---
 
 ## Timed Run (reference)
