@@ -6519,10 +6519,17 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // ── Task-close gate: enforce proof + reviewer sign-off before done ──
       if (parsed.status === 'done') {
+        // Duplicate/superseded tasks bypass all close gates — the QA bundle gate
+        // already validated canonical refs + reason (line ~582).
+        const taskCloseReason = typeof mergedMeta.close_reason === 'string'
+          ? mergedMeta.close_reason.toLowerCase().trim()
+          : ''
+        const isDuplicateClose = taskCloseReason === 'duplicate' || taskCloseReason === 'superseded'
+
         const artifacts = mergedMeta.artifacts as string[] | undefined
 
         // Gate 1: require artifacts (links, PR URLs, evidence)
-        if (!artifacts || !Array.isArray(artifacts) || artifacts.length === 0) {
+        if (!isDuplicateClose && (!artifacts || !Array.isArray(artifacts) || artifacts.length === 0)) {
           reply.code(422)
           return {
             success: false,
@@ -6536,10 +6543,10 @@ export async function createServer(): Promise<FastifyInstance> {
         const lane = (mergedMeta.lane as string || '').toLowerCase()
         const isCodeTask = lane === 'product' || lane === 'frontend' || lane === 'backend' || lane === 'infra'
           || (existing.tags || []).some((t: string) => ['code', 'frontend', 'backend', 'infra'].includes(t.toLowerCase()))
-        const hasPrUrl = artifacts.some((a: string) => /github\.com\/.*\/pull\/\d+/.test(a))
+        const hasPrUrl = artifacts?.some((a: string) => /github\.com\/.*\/pull\/\d+/.test(a)) ?? false
         const hasWaiver = mergedMeta.pr_waiver === true && typeof mergedMeta.pr_waiver_reason === 'string'
 
-        if (isCodeTask && !hasPrUrl && !hasWaiver) {
+        if (!isDuplicateClose && isCodeTask && !hasPrUrl && !hasWaiver) {
           reply.code(422)
           return {
             success: false,
@@ -6550,8 +6557,8 @@ export async function createServer(): Promise<FastifyInstance> {
         }
 
         // Gate 1c: verify linked PRs are merged (not just opened)
-        if (isCodeTask && hasPrUrl && !hasWaiver) {
-          const prUrls = artifacts.filter((a: string) => /github\.com\/.*\/pull\/\d+/.test(a))
+        if (!isDuplicateClose && isCodeTask && hasPrUrl && !hasWaiver) {
+          const prUrls = (artifacts ?? []).filter((a: string) => /github\.com\/.*\/pull\/\d+/.test(a))
           const openPrs: string[] = []
           for (const url of prUrls) {
             try {
@@ -6577,7 +6584,7 @@ export async function createServer(): Promise<FastifyInstance> {
         }
 
         // Gate 2: reviewer sign-off (if task has a reviewer assigned)
-        if (existing.reviewer) {
+        if (!isDuplicateClose && existing.reviewer) {
           const signedOff = mergedMeta.reviewer_approved as boolean | undefined
           if (!signedOff) {
             reply.code(422)
@@ -6593,7 +6600,7 @@ export async function createServer(): Promise<FastifyInstance> {
         // Gate 3: spec/design/research closes must link follow-on implementation task,
         // or explicitly explain N/A.
         const followOnPolicy = inferFollowOnPolicy(existing, mergedMeta)
-        if (followOnPolicy.required) {
+        if (!isDuplicateClose && followOnPolicy.required) {
           const followOnTaskId = typeof mergedMeta.follow_on_task_id === 'string' ? mergedMeta.follow_on_task_id.trim() : ''
           const followOnNa = mergedMeta.follow_on_na === true
           const followOnNaReason = typeof mergedMeta.follow_on_na_reason === 'string' ? mergedMeta.follow_on_na_reason.trim() : ''
