@@ -18,6 +18,28 @@ import { chatManager } from './chat.js'
 import type { Task } from './types.js'
 import { execSync } from 'child_process'
 import { processAutoMerge, generateRemediation } from './prAutoMerge.js'
+import { preflightCheck, type PreflightInput } from './alert-preflight.js'
+
+/**
+ * Send an alert message through chatManager with preflight guard.
+ * If preflight suppresses the alert (in enforce mode), the message is not sent.
+ * In canary mode, it logs but still sends.
+ */
+async function sendAlertWithPreflight(
+  msg: { from: string; channel: string; content: string },
+  preflight: Omit<PreflightInput, 'content' | 'channel'>,
+): Promise<void> {
+  const result = preflightCheck({
+    ...preflight,
+    content: msg.content,
+    channel: msg.channel,
+  })
+  if (!result.proceed) {
+    console.log(`[Sweeper] Alert suppressed by preflight: ${result.reason} (key: ${result.idempotentKey})`)
+    return
+  }
+  await chatManager.sendMessage(msg)
+}
 import { msToMinutes, formatDuration } from './format-duration.js'
 import { suggestReviewer } from './assignment.js'
 import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
@@ -746,10 +768,16 @@ async function escalateViolations(violations: SweepViolation[]): Promise<void> {
   }
 
   try {
-    await chatManager.sendMessage({
+    // Use first violation's taskId for preflight; digest is a summary alert
+    const firstTaskId = violations[0]?.taskId || 'unknown'
+    await sendAlertWithPreflight({
       channel: 'general',
       from: 'sweeper',
       content: lines.join('\n'),
+    }, {
+      taskId: firstTaskId,
+      alertType: 'sweeper_digest',
+      agentId: violations[0]?.reviewer || violations[0]?.assignee,
     })
   } catch {
     console.warn(`[Sweeper] Could not post escalation digest`)

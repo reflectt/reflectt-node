@@ -2,6 +2,8 @@
 // Escalation automation for P1/P0 support incidents
 // Tracks ack timers, triggers alerts, and runs escalation chains
 
+import { preflightCheck } from './alert-preflight.js'
+
 import {
   type FeedbackRecord,
   type SupportTier,
@@ -83,9 +85,22 @@ let alertSink: (alert: EscalationAlert, record: EscalationRecord) => void = () =
 /**
  * Set the alert delivery function. Called whenever an alert fires.
  * Default is no-op (logs silently). Wire this to chatManager, webhooks, etc.
+ * Wraps the sink with alert-preflight guard.
  */
 export function setAlertSink(sink: (alert: EscalationAlert, record: EscalationRecord) => void): void {
-  alertSink = sink
+  alertSink = (alert, record) => {
+    const result = preflightCheck({
+      taskId: record.feedbackId,
+      alertType: `escalation_${alert.level}`,
+      agentId: record.owner,
+      content: alert.message,
+    })
+    if (!result.proceed) {
+      console.log(`[Escalation] Alert suppressed by preflight: ${result.reason}`)
+      return
+    }
+    sink(alert, record)
+  }
 }
 
 // ── Core Logic ──
