@@ -149,6 +149,7 @@ function formatProductiveText(agent) {
   return 'Last shipped signal: ' + ago(agent.lastProductiveAt) + ' ago';
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function formatBytes(b) { if (!b || b < 1024) return b + ' B'; if (b < 1048576) return (b/1024).toFixed(1) + ' KB'; return (b/1048576).toFixed(1) + ' MB'; }
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
 function renderTaskTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return '';
@@ -1019,6 +1020,14 @@ function renderChat() {
         ${editedTag}
       </div>
       <div class="msg-content">${renderMessageContentWithTaskLinks(m.content)}</div>
+      ${m.attachments && m.attachments.length ? '<div class="msg-attachments">' + m.attachments.map(a => {
+        const isImage = a.mimeType && a.mimeType.startsWith('image/');
+        const url = a.url || ('/files/' + a.fileId);
+        const name = a.name || a.fileId || 'file';
+        const size = a.size ? ' <span class="att-size">(' + formatBytes(a.size) + ')</span>' : '';
+        if (isImage) return '<a href="' + esc(url) + '" target="_blank" class="msg-att-img"><img src="' + esc(url) + '" alt="' + esc(name) + '" loading="lazy"></a>';
+        return '<a href="' + esc(url) + '" target="_blank" class="msg-att-file">📎 ' + esc(name) + size + '</a>';
+      }).join('') + '</div>' : ''}
     </div>`;
   }).join('');
 }
