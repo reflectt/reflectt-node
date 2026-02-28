@@ -471,19 +471,26 @@ export class BoardHealthWorker {
       })
 
       const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
+      const validatingTasks = taskManager.listTasks({ status: 'validating', assignee: agent })
       const readyCount = unblockedTodo.length
 
+      const activeCount = doingTasks.length + validatingTasks.length
+      const belowFloor = readyCount < rqf.minReady
+      // Breach definition: below-floor AND no active work (doing/validating).
+      // If the agent is active, we may still emit an informational note, but it is not a breach.
+      const isBreach = belowFloor && activeCount === 0
+
       // Check cooldown
-      const lastAlert = this.readyQueueLastAlertAt[agent] || 0
+      let lastAlert = this.readyQueueLastAlertAt[agent] || 0
       const cooldownMs = (rqf.cooldownMin || 30) * 60_000
 
-      // Ready-queue floor warning
-      if (readyCount < rqf.minReady && now - lastAlert > cooldownMs) {
+      // Ready-queue floor check (breach vs info)
+      if (belowFloor && now - lastAlert > cooldownMs) {
         const deficit = rqf.minReady - readyCount
 
         // State fingerprint: suppress if identical to last alert
         const blockedTasks = todoTasks.filter(t => !unblockedTodo.includes(t))
-        const stateFingerprint = `${readyCount}:${todoTasks.length}:${blockedTasks.map(t => t.id).sort().join(',')}`
+        const stateFingerprint = `${readyCount}:${todoTasks.length}:${blockedTasks.map(t => t.id).sort().join(',')}:${doingTasks.length}:${validatingTasks.length}`
         const lastState = this.readyQueueLastState[agent]
         if (lastState === stateFingerprint) {
           // State unchanged since last alert — skip (debounce)
@@ -493,7 +500,7 @@ export class BoardHealthWorker {
         // Build breakdown: show blocked tasks and why
         let breakdown = ''
         if (todoTasks.length > readyCount) {
-          breakdown += `\n  📊 todo=${todoTasks.length}, unblocked=${readyCount}, blocked=${blockedTasks.length}`
+          breakdown += `\n  📊 todo=${todoTasks.length}, unblocked=${readyCount}, blocked=${blockedTasks.length}, doing=${doingTasks.length}, validating=${validatingTasks.length}`
           const capped = blockedTasks.slice(0, 5)
           for (const bt of capped) {
             const blockedBy = bt.metadata?.blocked_by || 'unknown'
@@ -501,12 +508,15 @@ export class BoardHealthWorker {
           }
           if (blockedTasks.length > 5) breakdown += `\n  … and ${blockedTasks.length - 5} more`
         } else {
-          breakdown += `\n  📊 todo=${todoTasks.length} (all unblocked), doing=${doingTasks.length}`
+          breakdown += `\n  📊 todo=${todoTasks.length} (all unblocked), doing=${doingTasks.length}, validating=${validatingTasks.length}`
         }
 
         // Snapshot timestamp for freshness judgment
         const snapshotTime = new Date(now).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
-        const msg = `⚠️ Ready-queue floor: @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}\n  🕐 snapshot: ${snapshotTime}`
+
+        const msg = isBreach
+          ? `⚠️ Ready-queue floor (idle): @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}\n  🕐 snapshot: ${snapshotTime}`
+          : `ℹ️ Ready-queue low (agent active): @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). Not a breach because doing=${doingTasks.length}, validating=${validatingTasks.length}.${breakdown}\n  🕐 snapshot: ${snapshotTime}`
 
         if (!dryRun) {
           try {
@@ -514,28 +524,32 @@ export class BoardHealthWorker {
               from: 'system',
               content: msg,
               category: 'watchdog-alert',
-              severity: 'warning',
+              severity: isBreach ? 'warning' : 'info',
               forceChannel: rqf.channel || 'general',
             })
           } catch { /* chat may not be available in test */ }
+
           this.readyQueueLastAlertAt[agent] = now
           this.readyQueueLastState[agent] = stateFingerprint
+          lastAlert = now // prevent same-tick escalation based on stale local lastAlert
         }
 
-        const action: PolicyAction = {
-          id: `rqf-${agent}-${now}`,
-          kind: 'ready-queue-warning',
-          taskId: null,
-          agent,
-          description: `Ready queue below floor: ${readyCount}/${rqf.minReady} for @${agent}`,
-          previousState: { readyCount, doingCount: doingTasks.length },
-          appliedAt: now,
-          rolledBack: false,
-          rolledBackAt: null,
-          rollbackBy: null,
+        if (isBreach) {
+          const action: PolicyAction = {
+            id: `rqf-${agent}-${now}`,
+            kind: 'ready-queue-warning',
+            taskId: null,
+            agent,
+            description: `Ready queue below floor: ${readyCount}/${rqf.minReady} for @${agent}`,
+            previousState: { readyCount, doingCount: doingTasks.length, validatingCount: validatingTasks.length },
+            appliedAt: now,
+            rolledBack: false,
+            rolledBackAt: null,
+            rollbackBy: null,
+          }
+          this.auditLog.push(action)
+          actions.push(action)
         }
-        this.auditLog.push(action)
-        actions.push(action)
       }
 
       // Clear state fingerprint when floor is met (so next breach alerts fresh)
@@ -543,8 +557,8 @@ export class BoardHealthWorker {
         delete this.readyQueueLastState[agent]
       }
 
-      // Idle escalation: agent has 0 doing + 0 todo for too long
-      const totalActive = doingTasks.length + readyCount
+      // Idle escalation: agent has 0 doing + 0 validating + 0 (unblocked) todo for too long
+      const totalActive = doingTasks.length + validatingTasks.length + readyCount
       if (totalActive === 0) {
         if (!this.idleQueueSince[agent]) {
           this.idleQueueSince[agent] = now
@@ -553,7 +567,7 @@ export class BoardHealthWorker {
 
         if (idleMinutes >= (rqf.escalateAfterMin || 60) && now - lastAlert > cooldownMs) {
           const idleSnapshotTime = new Date(now).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
-          const msg = `🚨 Idle escalation: @${agent} has had 0 tasks (doing + todo) for ${idleMinutes}m. Immediate assignment needed. @sage\n  🕐 snapshot: ${idleSnapshotTime}`
+          const msg = `🚨 Idle escalation: @${agent} has had 0 tasks (doing + validating + todo) for ${idleMinutes}m. Immediate assignment needed. @sage\n  🕐 snapshot: ${idleSnapshotTime}`
 
           if (!dryRun) {
             try {
