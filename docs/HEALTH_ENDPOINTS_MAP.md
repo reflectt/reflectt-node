@@ -16,6 +16,7 @@ Base URL: `http://127.0.0.1:4445`
 | Per-agent compact status for dashboards | `GET /health/agents` |
 | Compliance/SLA summary | `GET /health/compliance` |
 | Idle-nudge suppression/debug reasons | `GET /health/idle-nudge/debug` |
+| OpenClaw gateway connection + fix | `GET /openclaw/status` |
 
 ---
 
@@ -105,6 +106,53 @@ curl -s -X POST 'http://127.0.0.1:4445/health/mention-rescue/tick?dryRun=true'
 ```
 
 Use these before concluding a signal is a true breach vs suppressed/cooldown case.
+
+---
+
+## `/openclaw/status` (gateway connection check)
+
+Use when:
+- diagnosing "openclaw: not configured" in `/health`
+- verifying gateway token and URL are set
+- getting step-by-step remediation for fresh installs
+
+Response when **not configured**:
+```json
+{
+  "connected": false,
+  "status": "not configured",
+  "fix": "Set OPENCLAW_GATEWAY_TOKEN in .env ...",
+  "docs": "https://docs.openclaw.ai/gateway"
+}
+```
+
+Response when **configured**:
+```json
+{
+  "connected": true,
+  "status": "configured",
+  "gateway": "ws://127.0.0.1:18789",
+  "agentId": "reflectt-node"
+}
+```
+
+**How to fix "not configured":**
+
+1. Get your gateway token:
+   ```bash
+   cat ~/.openclaw/openclaw.json | grep gateway_token
+   # or generate: openclaw gateway token
+   ```
+
+2. Set env vars in `.env` or `docker-compose.yml`:
+   ```
+   OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
+   OPENCLAW_GATEWAY_TOKEN=<your-token>
+   ```
+
+3. Restart reflectt-node.
+
+See also: [Bootstrap first 5 minutes](./bootstrap-first-5-minutes.md)
 
 ---
 
