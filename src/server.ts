@@ -2473,14 +2473,12 @@ export async function createServer(): Promise<FastifyInstance> {
     const now = Date.now()
     const allTasks = taskManager.listTasks({ includeTest })
 
-    // Define lanes and their agents
-    const lanes: Record<string, { agents: string[]; readyFloor: number }> = {
-      engineering: { agents: ['link', 'pixel'], readyFloor: 2 },
-      content: { agents: ['echo'], readyFloor: 2 },
-      operations: { agents: ['kai', 'sage'], readyFloor: 1 },
-      research: { agents: ['scout'], readyFloor: 1 },
-      rhythm: { agents: ['rhythm'], readyFloor: 1 },
-    }
+    // Load lanes from config (falls back to hardcoded defaults if no TEAM-ROLES.yaml lanes section)
+    const { getLanesConfig } = await import('./lane-config.js')
+    const lanesArr = getLanesConfig()
+    const lanes: Record<string, { agents: string[]; readyFloor: number }> = Object.fromEntries(
+      lanesArr.map(l => [l.name, { agents: l.agents, readyFloor: l.readyFloor }]),
+    )
 
     // Helper: check if a task is blocked
     const isBlocked = (task: typeof allTasks[number]): boolean => {
@@ -9209,6 +9207,21 @@ export async function createServer(): Promise<FastifyInstance> {
           intensity: preset,
           message: `Pull rate limit reached (${limits.maxPullsPerHour}/hr at "${preset}" intensity). Try again in ~${retryMin}m.`,
           retryAfterMs: pull.resetsInMs,
+        }
+      }
+    }
+
+    // WIP enforcement: block pull if agent is at their lane WIP limit
+    if (agent) {
+      const { checkWipLimit } = await import('./lane-config.js')
+      const doingTasks = taskManager.listTasks({ status: 'doing', assigneeIn: getAgentAliases(agent) })
+      const wip = checkWipLimit(agent, doingTasks.length)
+      if (wip?.blocked) {
+        return {
+          task: null,
+          message: wip.message,
+          wipLimit: wip.wipLimit,
+          doing: wip.doing,
         }
       }
     }
