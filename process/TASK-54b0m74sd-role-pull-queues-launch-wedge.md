@@ -57,6 +57,13 @@ When your task queue is empty, pull from your default queue **in order**. Don't 
 3. **User feedback** — aggregate and summarize external user reports
 4. **Propose** — research questions that would unblock team decisions
 
+### Harmony (Team Health / Coordination)
+1. **Coordination gaps** — check for agents idle, duplicating work, or talking past each other
+2. **Review unblocking** — any task stuck in validating without reviewer activity
+3. **Activity monitoring** — flag silence (agent offline 12h+) or overlap (two agents on same file)
+4. **Retrospectives** — summarize what shipped, what stalled, and why
+5. **Propose** — actionable observation with evidence + resolution path (mention or task)
+
 ### Rhythm (Ops/Automation)
 1. **Board health tasks** — automation gaps in task lifecycle
 2. **CI/CD improvements** — test coverage, build speed, deployment reliability
