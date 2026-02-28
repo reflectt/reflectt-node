@@ -60,8 +60,9 @@ describe('Review SLA auto-reassignment', () => {
     expect(before?.status).toBe('validating')
     expect(before?.reviewer).toBe('sage')
 
-    // Make pixel active as an alternate reviewer
-    presenceManager.recordActivity('pixel', 'heartbeat')
+    // Make agent-3 (ops) active as an alternate reviewer
+    // (review reassignment now respects routing guardrails + reviewer scoring)
+    presenceManager.updatePresence('agent-3', 'idle')
 
     const result = await worker.tick({ dryRun: false, force: true })
     const reviewActions = result.actions.filter(a => a.kind === 'review-reassign' && a.taskId === taskId)
@@ -155,7 +156,7 @@ describe('Review SLA auto-reassignment', () => {
     const taskId = seedTask({ reviewer: 'sage', assignee: 'link', entered_validating_at: enteredSec })
     createdIds.push(taskId)
 
-    presenceManager.recordActivity('pixel', 'heartbeat')
+    presenceManager.updatePresence('agent-3', 'idle')
 
     const result = await worker.tick({ dryRun: false, force: true })
     const actions = result.actions.filter(a => a.kind === 'review-reassign' && a.taskId === taskId)
@@ -170,7 +171,7 @@ describe('Review SLA auto-reassignment', () => {
     const taskId = seedTask({ reviewer: 'sage', assignee: 'link' })
     createdIds.push(taskId)
 
-    presenceManager.recordActivity('pixel', 'heartbeat')
+    presenceManager.updatePresence('agent-3', 'idle')
 
     // First tick — should reassign
     const r1 = await worker.tick({ dryRun: false, force: true })
@@ -185,19 +186,19 @@ describe('Review SLA auto-reassignment', () => {
   })
 
   it('does not assign reviewer who is the task assignee', async () => {
-    const taskId = seedTask({ reviewer: 'sage', assignee: 'pixel' })
+    const taskId = seedTask({ reviewer: 'sage', assignee: 'agent-3' })
     createdIds.push(taskId)
 
-    // pixel is active but is the assignee — should not be picked
-    presenceManager.recordActivity('pixel', 'heartbeat')
-    presenceManager.recordActivity('echo', 'heartbeat')
+    // agent-3 is active but is the assignee — should not be picked
+    presenceManager.updatePresence('agent-3', 'idle')
+    presenceManager.updatePresence('agent-1', 'idle')
 
     const result = await worker.tick({ dryRun: false, force: true })
     const actions = result.actions.filter(a => a.kind === 'review-reassign' && a.taskId === taskId)
 
     if (actions.length > 0) {
       const after = taskManager.getTask(taskId)
-      expect(after?.reviewer).not.toBe('pixel')
+      expect(after?.reviewer).not.toBe('agent-3')
     }
     cleanupTask(taskId)
   })
