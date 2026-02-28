@@ -55,6 +55,7 @@ initRouter();
 
 let currentChannel = 'all';
 let currentProject = 'all';
+let currentStatusFilter = localStorage.getItem('taskStatusFilter') || 'open'; // 'open' | 'all'
 let allMessages = [];
 let allTasks = [];
 let allEvents = [];
@@ -643,10 +644,14 @@ async function loadTasks(forceFull = false) {
   });
 
   renderProjectTabs();
+  renderStatusFilterTabs();
   renderKanban();
   renderBacklog();
   renderOutcomeFeed();
-  document.getElementById('task-count').textContent = allTasks.length + ' tasks';
+  const openCount = allTasks.filter(t => t.status !== 'done').length;
+  document.getElementById('task-count').textContent = currentStatusFilter === 'open'
+    ? openCount + ' open tasks'
+    : allTasks.length + ' tasks';
   // Update sidebar badge
   const navTaskBadge = document.getElementById('nav-task-count');
   if (navTaskBadge) navTaskBadge.textContent = allTasks.length;
@@ -662,10 +667,30 @@ function renderProjectTabs() {
   }).join('');
 }
 function switchProject(p) { currentProject = p; renderProjectTabs(); renderKanban(); }
+function switchStatusFilter(f) {
+  currentStatusFilter = f;
+  localStorage.setItem('taskStatusFilter', f);
+  renderStatusFilterTabs();
+  renderKanban();
+}
+
+function renderStatusFilterTabs() {
+  const container = document.getElementById('status-filter-tabs');
+  if (!container) return;
+  const options = [
+    { key: 'open', label: '🟢 Open', title: 'Todo, Doing, Blocked, Validating' },
+    { key: 'all', label: '📋 All', title: 'All statuses including Done' },
+  ];
+  container.innerHTML = options.map(o =>
+    `<button class="project-tab ${currentStatusFilter === o.key ? 'active' : ''}" title="${o.title}" onclick="switchStatusFilter('${o.key}')">${o.label}</button>`
+  ).join('');
+}
 
 function renderKanban() {
   const filtered = currentProject === 'all' ? allTasks : allTasks.filter(t => classifyProject(t) === currentProject);
-  const cols = ['todo', 'doing', 'blocked', 'validating', 'done'];
+  const cols = currentStatusFilter === 'open'
+    ? ['todo', 'doing', 'blocked', 'validating']
+    : ['todo', 'doing', 'blocked', 'validating', 'done'];
   const grouped = {}; cols.forEach(c => grouped[c] = []);
   filtered.forEach(t => { const s = t.status || 'todo'; if (grouped[s]) grouped[s].push(t); else grouped['todo'].push(t); });
   const pOrder = { P0: 0, P1: 1, P2: 2, P3: 3 };
