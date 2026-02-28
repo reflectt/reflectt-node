@@ -2764,6 +2764,52 @@ async function resumeFromBanner() {
   } catch {}
 }
 
+// ── Pause toggle button ──
+let _teamPaused = false;
+
+function updatePauseToggle(paused) {
+  _teamPaused = paused;
+  const btn = document.getElementById('pause-toggle');
+  const icon = document.getElementById('pause-toggle-icon');
+  const label = document.getElementById('pause-toggle-label');
+  if (!btn) return;
+  if (paused) {
+    btn.classList.add('paused');
+    icon.textContent = '▶️';
+    label.textContent = 'Resume';
+    btn.title = 'Resume team task pulls';
+  } else {
+    btn.classList.remove('paused');
+    icon.textContent = '⏸️';
+    label.textContent = 'Pause';
+    btn.title = 'Pause team task pulls';
+  }
+}
+
+async function togglePause() {
+  try {
+    if (_teamPaused) {
+      await fetch(BASE + '/pause?target=team', { method: 'DELETE' });
+    } else {
+      await fetch(BASE + '/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: 'team', pausedBy: 'dashboard', reason: 'Paused from dashboard' }),
+      });
+    }
+    checkPauseBanner();
+  } catch {}
+}
+
+// Enhance checkPauseBanner to also update the toggle button
+const _origCheckPause = checkPauseBanner;
+checkPauseBanner = async function() {
+  await _origCheckPause();
+  // Sync toggle state from banner visibility
+  const banner = document.getElementById('pause-banner');
+  updatePauseToggle(banner && banner.style.display !== 'none');
+};
+
 // Poll pause status every 30s
 setInterval(checkPauseBanner, 30000);
 checkPauseBanner();
@@ -2823,6 +2869,48 @@ document.addEventListener('keydown', (e) => {
 });
 
 loadIntensityControl();
+
+// ═══ PAUSE TOGGLE ═══
+
+async function toggleTeamPause() {
+  const btn = document.getElementById('pause-toggle-btn');
+  if (!btn) return;
+
+  const isPaused = btn.classList.contains('paused');
+  if (isPaused) {
+    // Resume
+    await fetch(BASE + '/pause?target=team', { method: 'DELETE' });
+  } else {
+    // Pause — prompt for duration
+    const durStr = prompt('Pause duration in minutes (leave empty for indefinite):');
+    const body = { target: 'team', reason: 'Dashboard pause', pausedBy: 'dashboard' };
+    if (durStr && parseInt(durStr, 10) > 0) body.durationMin = parseInt(durStr, 10);
+    await fetch(BASE + '/pause', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+  await syncPauseToggle();
+  await checkPauseBanner();
+}
+
+async function syncPauseToggle() {
+  const btn = document.getElementById('pause-toggle-btn');
+  if (!btn) return;
+  try {
+    const r = await fetch(BASE + '/pause/status');
+    const data = await r.json();
+    const entries = data.entries || [];
+    const teamPaused = entries.some(e => e.target === '__team__' && e.paused);
+    btn.classList.toggle('paused', teamPaused);
+    btn.textContent = teamPaused ? '▶️ Resume' : '⏸️ Pause';
+    btn.setAttribute('aria-label', teamPaused ? 'Resume team' : 'Pause team');
+  } catch {}
+}
+
+syncPauseToggle();
+setInterval(syncPauseToggle, 30000);
 
 // ═══ TEAM POLLS ═══
 

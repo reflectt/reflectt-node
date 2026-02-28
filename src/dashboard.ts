@@ -1105,6 +1105,19 @@ export function getDashboardHTML(): string {
   }
   .focus-toggle .focus-icon { font-size: var(--text-md); }
 
+  .pause-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600;
+    cursor: pointer; border: 1px solid var(--border); background: var(--surface-raised);
+    color: var(--text-muted); transition: all var(--transition-base) var(--easing-smooth);
+    user-select: none;
+  }
+  .pause-toggle:hover { border-color: var(--yellow, #eab308); color: var(--text); }
+  .pause-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .pause-toggle.paused {
+    background: var(--yellow-dim, rgba(234, 179, 8, 0.15)); border-color: var(--yellow, #eab308); color: var(--yellow, #eab308);
+  }
+
   /* Focus mode active: dim non-active kanban columns */
   body.focus-mode .kanban-col:not([data-status="doing"]) {
     opacity: 0.3;
@@ -1502,6 +1515,19 @@ export function getDashboardHTML(): string {
     background: var(--accent, #60a5fa); color: #fff; border-color: var(--accent, #60a5fa);
   }
   .intensity-info { font-size: var(--text-xs, 11px); color: var(--text-muted, #888); margin-left: 8px; }
+  .intensity-sep { color: var(--border, #2a2a4a); margin: 0 4px; }
+  .pause-toggle-btn {
+    font-size: var(--text-sm, 13px); padding: 4px 12px; border-radius: var(--radius-sm, 4px);
+    border: 1px solid var(--border, #2a2a4a); background: transparent; color: var(--text-secondary, #aaa);
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .pause-toggle-btn:hover { border-color: var(--red, #f87171); color: var(--red, #f87171); }
+  .pause-toggle-btn:focus-visible { outline: 2px solid var(--accent, #60a5fa); outline-offset: 2px; }
+  .pause-toggle-btn.paused {
+    background: var(--red-dim, rgba(248,113,113,0.12)); color: var(--red, #f87171);
+    border-color: var(--red, #f87171);
+  }
+  .pause-toggle-btn.paused:hover { background: var(--green-dim, rgba(74,222,128,0.12)); color: var(--green, #4ade80); border-color: var(--green, #4ade80); }
 </style>
 <link rel="stylesheet" href="/dashboard-animations.css">
 </head>
@@ -1515,6 +1541,9 @@ export function getDashboardHTML(): string {
     <span><span class="status-dot"></span>Running</span>
     <button class="focus-toggle" id="focus-toggle" onclick="toggleFocusMode()" title="Focus Mode: highlight active work, collapse noise">
       <span class="focus-icon">🎯</span> Focus
+    </button>
+    <button class="pause-toggle" id="pause-toggle" onclick="togglePause()" title="Pause/Resume team task pulls" aria-label="Pause or resume team">
+      <span id="pause-toggle-icon">⏸️</span> <span id="pause-toggle-label">Pause</span>
     </button>
     <span id="release-badge" class="release-badge" title="Deploy status">deploy: checking…</span>
     <span id="build-badge" class="release-badge" title="Build info">build: loading…</span>
@@ -1532,6 +1561,8 @@ export function getDashboardHTML(): string {
   <button role="radio" aria-checked="true" class="intensity-btn intensity-active" data-preset="normal" onclick="setIntensity('normal')" tabindex="-1">⚡ Normal</button>
   <button role="radio" aria-checked="false" class="intensity-btn" data-preset="high" onclick="setIntensity('high')" tabindex="-1">🔥 High</button>
   <span id="intensity-info" class="intensity-info"></span>
+  <span class="intensity-sep">|</span>
+  <button id="pause-toggle-btn" class="pause-toggle-btn" onclick="toggleTeamPause()" aria-label="Pause team" tabindex="0">⏸️ Pause</button>
 </div>
 
 <div class="agent-strip" id="agent-strip"></div>
