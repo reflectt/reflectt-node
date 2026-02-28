@@ -165,6 +165,7 @@ describe('Ready-queue engine v1', () => {
         reviewer: 'sage',
         createdBy: 'test',
         done_criteria: ['done'],
+        metadata: { eta: '~1h', lane: TEST_LANE.name, reflection_exempt: true, reflection_exempt_reason: 'test fixture' },
       })
       createdTaskIds.push(t.id)
     }
