@@ -1564,6 +1564,25 @@ export function getDashboardHTML(): string {
     <div class="panel-body" id="feedback-body" style="max-height:350px;overflow-y:auto"></div>
   </div>
 
+  <div class="panel" id="polls-panel">
+    <div class="panel-header">🗳️ Team Polls <span class="count" id="polls-count"></span>
+      <button onclick="showCreatePollForm()" style="float:right;font-size:11px;background:none;border:1px solid var(--border);color:var(--text-muted);padding:2px 8px;border-radius:4px;cursor:pointer">+ New Poll</button>
+    </div>
+    <div class="panel-body" id="polls-body" style="max-height:400px;overflow-y:auto"></div>
+    <div id="create-poll-form" style="display:none;border-top:1px solid var(--border-subtle);padding:12px">
+      <input type="text" id="poll-question" placeholder="Question…" style="width:100%;padding:6px 8px;margin-bottom:8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px" />
+      <div id="poll-options-inputs">
+        <input type="text" class="poll-option-input" placeholder="Option 1" style="width:100%;padding:4px 8px;margin-bottom:4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px" />
+        <input type="text" class="poll-option-input" placeholder="Option 2" style="width:100%;padding:4px 8px;margin-bottom:4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px" />
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button onclick="addPollOption()" style="font-size:11px;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 8px;border-radius:4px;cursor:pointer">+ Option</button>
+        <button onclick="submitPoll()" style="font-size:11px;background:var(--accent);border:none;color:#fff;padding:4px 12px;border-radius:4px;cursor:pointer">Create Poll</button>
+        <button onclick="hideCreatePollForm()" style="font-size:11px;background:none;border:1px solid var(--border);color:var(--text-muted);padding:4px 8px;border-radius:4px;cursor:pointer">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   </div><!-- /page-chat -->
 
   <!-- ═══ PAGE: Health ═══ -->
