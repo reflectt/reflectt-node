@@ -134,7 +134,7 @@ export function bootstrapTeam(req: BootstrapTeamRequest): BootstrapTeamResponse 
   return {
     schema: {
       description: 'TEAM-ROLES.yaml defines your agent team — names, roles, routing preferences, and WIP limits. reflectt-node hot-reloads changes (no restart needed).',
-      filePath: '~/.reflectt/TEAM-ROLES.yaml',
+      filePath: '$REFLECTT_HOME/TEAM-ROLES.yaml (default: ~/.reflectt/TEAM-ROLES.yaml)',
       hotReload: true,
       fields: AGENT_FIELDS,
     },
@@ -152,7 +152,7 @@ export function bootstrapTeam(req: BootstrapTeamRequest): BootstrapTeamResponse 
     },
     nextSteps: [
       '1. Compose a TEAM-ROLES.yaml based on the schema and examples above.',
-      '2. Save it via PUT /config/team-roles or write directly to ~/.reflectt/TEAM-ROLES.yaml.',
+      '2. Save it via PUT /config/team-roles or write directly to $REFLECTT_HOME/TEAM-ROLES.yaml.',
       '3. Verify with GET /health/team — checks role coverage and config validity.',
       '4. Create initial tasks via POST /tasks for each agent.',
       '5. Start heartbeat polling: GET /heartbeat/:agent',

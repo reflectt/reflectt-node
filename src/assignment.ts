@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync, existsSync, watchFile, unwatchFile, statSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
-import { homedir } from 'os'
+import { REFLECTT_HOME } from './config.js'
 
 export interface AgentRole {
   name: string
@@ -30,15 +30,10 @@ export interface AgentRole {
 }
 
 // ── YAML config paths (checked in order) ──
-// REFLECTT_HOME takes priority (Docker: REFLECTT_HOME=/data → /data/TEAM-ROLES.yaml)
-const REFLECTT_HOME = process.env['REFLECTT_HOME']
+// Uses REFLECTT_HOME from config.ts (respects env override, defaults to ~/.reflectt)
 const CONFIG_PATHS = [
-  ...(REFLECTT_HOME ? [
-    join(REFLECTT_HOME, 'TEAM-ROLES.yaml'),
-    join(REFLECTT_HOME, 'TEAM-ROLES.yml'),
-  ] : []),
-  join(homedir(), '.reflectt', 'TEAM-ROLES.yaml'),
-  join(homedir(), '.reflectt', 'TEAM-ROLES.yml'),
+  join(REFLECTT_HOME, 'TEAM-ROLES.yaml'),
+  join(REFLECTT_HOME, 'TEAM-ROLES.yml'),
 ]
 
 // ── Built-in fallback (matches defaults/TEAM-ROLES.yaml) ──
@@ -168,7 +163,7 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
       loadedFromPath = 'defaults/TEAM-ROLES.yaml'
       console.log(`[Assignment] Loaded ${roles.length} agent roles from defaults/TEAM-ROLES.yaml`)
       console.log(`[Assignment] ⚠️  Using default placeholder agents. Customize your team:`)
-      console.log(`[Assignment]    cp defaults/TEAM-ROLES.yaml ~/.reflectt/TEAM-ROLES.yaml`)
+      console.log(`[Assignment]    cp defaults/TEAM-ROLES.yaml ${REFLECTT_HOME}/TEAM-ROLES.yaml`)
       console.log(`[Assignment]    # Then edit with your agent names and roles`)
       return { roles, source: 'defaults/TEAM-ROLES.yaml' }
     }
@@ -254,7 +249,7 @@ export function getAgentAliases(name: string): string[] {
 
 /** Save updated agent roles to YAML config file */
 export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: string; version: number } {
-  const targetPath = CONFIG_PATHS[0] // REFLECTT_HOME/TEAM-ROLES.yaml or ~/.reflectt/TEAM-ROLES.yaml
+  const targetPath = CONFIG_PATHS[0] // REFLECTT_HOME/TEAM-ROLES.yaml
   const dir = targetPath.substring(0, targetPath.lastIndexOf('/'))
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
 

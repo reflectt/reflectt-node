@@ -15,8 +15,9 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
+import { REFLECTT_HOME } from './config.js'
 
 // ── Schema ─────────────────────────────────────────────────────────────────
 
@@ -248,7 +249,7 @@ class PolicyManager {
 
   constructor() {
     this.filePath = resolve(
-      process.env.REFLECTT_POLICY_PATH || `${homedir()}/.reflectt/policy.json`,
+      process.env.REFLECTT_POLICY_PATH || join(REFLECTT_HOME, 'policy.json'),
     )
     this.config = structuredClone(DEFAULT_POLICY)
   }

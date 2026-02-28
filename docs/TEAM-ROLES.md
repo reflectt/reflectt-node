@@ -14,11 +14,22 @@ nano ~/.reflectt/TEAM-ROLES.yaml
 
 reflectt-node hot-reloads the config — changes take effect within 5 seconds, no restart needed.
 
+### Custom config directory
+
+Set `REFLECTT_HOME` to change where reflectt-node looks for config files:
+
+```bash
+export REFLECTT_HOME=/data/reflectt   # Docker, managed hosts, etc.
+# Config loaded from: /data/reflectt/TEAM-ROLES.yaml
+```
+
+Default: `~/.reflectt`
+
 ## Config Location
 
-Checked in order:
-1. `~/.reflectt/TEAM-ROLES.yaml` (or `REFLECTT_HOME/TEAM-ROLES.yaml`)
-2. `~/.reflectt/TEAM-ROLES.yml`
+Checked in order (all under `REFLECTT_HOME`):
+1. `$REFLECTT_HOME/TEAM-ROLES.yaml`
+2. `$REFLECTT_HOME/TEAM-ROLES.yml`
 3. `defaults/TEAM-ROLES.yaml` (shipped with repo)
 4. Built-in fallback (3 generic placeholder agents)
 
