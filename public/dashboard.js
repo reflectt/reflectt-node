@@ -2765,51 +2765,6 @@ async function resumeFromBanner() {
 }
 
 // ── Pause toggle button ──
-let _teamPaused = false;
-
-function updatePauseToggle(paused) {
-  _teamPaused = paused;
-  const btn = document.getElementById('pause-toggle');
-  const icon = document.getElementById('pause-toggle-icon');
-  const label = document.getElementById('pause-toggle-label');
-  if (!btn) return;
-  if (paused) {
-    btn.classList.add('paused');
-    icon.textContent = '▶️';
-    label.textContent = 'Resume';
-    btn.title = 'Resume team task pulls';
-  } else {
-    btn.classList.remove('paused');
-    icon.textContent = '⏸️';
-    label.textContent = 'Pause';
-    btn.title = 'Pause team task pulls';
-  }
-}
-
-async function togglePause() {
-  try {
-    if (_teamPaused) {
-      await fetch(BASE + '/pause?target=team', { method: 'DELETE' });
-    } else {
-      await fetch(BASE + '/pause', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: 'team', pausedBy: 'dashboard', reason: 'Paused from dashboard' }),
-      });
-    }
-    checkPauseBanner();
-  } catch {}
-}
-
-// Enhance checkPauseBanner to also update the toggle button
-const _origCheckPause = checkPauseBanner;
-checkPauseBanner = async function() {
-  await _origCheckPause();
-  // Sync toggle state from banner visibility
-  const banner = document.getElementById('pause-banner');
-  updatePauseToggle(banner && banner.style.display !== 'none');
-};
-
 // Poll pause status every 30s
 setInterval(checkPauseBanner, 30000);
 checkPauseBanner();
