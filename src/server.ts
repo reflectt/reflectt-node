@@ -2235,42 +2235,6 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, results }
   })
 
-  // ── Admin: Task-comment reject inspector ──
-  // Exposes the reject ledger for debugging phantom task-comment emitters.
-  // Auth-gated: loopback only (no token needed from localhost).
-  app.get('/admin/task-comment-rejects', async (request, reply) => {
-    const ip = String((request as any).ip || '')
-    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
-    if (!isLoopback) {
-      reply.code(403)
-      return { success: false, error: 'Forbidden: localhost-only endpoint' }
-    }
-
-    const query = request.query as Record<string, string>
-    const limit = Math.min(parseInt(query.limit || '50', 10) || 50, 200)
-    const reason = query.reason || undefined
-    const author = query.author || undefined
-    const since = query.since ? parseInt(query.since, 10) : undefined
-
-    const { listTaskCommentRejects } = await import('./taskCommentIngest.js')
-    const { rejects, total } = listTaskCommentRejects({ limit, reason, author, since })
-
-    // Parse JSON fields for readability
-    const parsed = rejects.map(r => ({
-      reject_id: r.id,
-      timestamp: r.timestamp,
-      target_task_id: r.attempted_task_param,
-      resolved_task_id: r.resolved_task_id,
-      author: r.author,
-      reason: r.reason,
-      invalid_task_refs: r.details ? (() => { try { const d = JSON.parse(r.details); return d.suggestions || []; } catch { return []; } })() : [],
-      provenance: r.provenance ? (() => { try { return JSON.parse(r.provenance); } catch { return null; } })() : null,
-      content_preview: r.content ? r.content.slice(0, 200) : null,
-    }))
-
-    return { success: true, rejects: parsed, total, limit }
-  })
-
   // Team configuration linter health (TEAM.md / TEAM-ROLES.yaml / TEAM-STANDARDS.md)
   app.get('/team/health', async () => {
     const health = getTeamConfigHealth()
@@ -2604,7 +2568,15 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Task-comment reject inspector ──
   // Surfaces the reject ledger for debugging phantom comment IDs and misattribution.
-  app.get('/admin/task-comment-rejects', async (request) => {
+  app.get('/admin/task-comment-rejects', async (request, reply) => {
+    // Auth: loopback only
+    const ip = String((request as any).ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      return { success: false, error: 'Forbidden: localhost-only endpoint', hint: 'Access from localhost.' }
+    }
+
     const query = request.query as Record<string, string>
     const { listTaskCommentRejects } = await import('./taskCommentIngest.js')
     const limit = query.limit ? Math.min(parseInt(query.limit, 10) || 50, 200) : 50
@@ -2614,12 +2586,29 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const result = listTaskCommentRejects({ limit, reason, author, since })
 
-    // Parse JSON strings back to objects for the response
-    const enriched = result.rejects.map(r => ({
-      ...r,
-      details: r.details ? JSON.parse(r.details) : null,
-      provenance: r.provenance ? JSON.parse(r.provenance) : null,
-    }))
+    // Shape each reject with explicit provenance + invalid_task_refs for debugging
+    const enriched = result.rejects.map(r => {
+      const details = r.details ? (() => { try { return JSON.parse(r.details) } catch { return null } })() : null
+      const provenance = r.provenance ? (() => { try { return JSON.parse(r.provenance) } catch { return null } })() : null
+
+      return {
+        reject_id: r.id,
+        timestamp: r.timestamp,
+        target_task_id: r.attempted_task_param,
+        resolved_task_id: r.resolved_task_id,
+        author: r.author,
+        reason: r.reason,
+        invalid_task_refs: details?.suggestions ?? [],
+        provenance: provenance ? {
+          integration: provenance.integration ?? provenance.source_channel ?? null,
+          original_message_id: provenance.original_message_id ?? null,
+          sender_id: provenance.sender_id ?? null,
+          ...provenance,
+        } : null,
+        content_preview: r.content ? r.content.slice(0, 200) : null,
+        details,
+      }
+    })
 
     return {
       success: true,
