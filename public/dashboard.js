@@ -30,7 +30,8 @@ let lastHealthDetailSync = 0;
 let refreshCount = 0;
 let lastReleaseStatusSync = 0;
 
-const AGENTS = [
+// Agent registry — populated from /team/roles API, with static fallback
+let AGENTS = [
   { name: 'ryan', emoji: '👤', role: 'Founder' },
   { name: 'kai', emoji: '🤖', role: 'Lead' },
   { name: 'link', emoji: '🔗', role: 'Builder' },
@@ -42,7 +43,37 @@ const AGENTS = [
   { name: 'harmony', emoji: '🫶', role: 'Health' },
   { name: 'spark', emoji: '🚀', role: 'Growth' },
 ];
-const AGENT_INDEX = new Map(AGENTS.map(a => [a.name, a]));
+let AGENT_INDEX = new Map(AGENTS.map(a => [a.name, a]));
+
+/** Fetch live agent roles (including display names) and merge into AGENT_INDEX. */
+async function refreshAgentRegistry() {
+  try {
+    const res = await fetch('/team/roles');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.agents || !Array.isArray(data.agents)) return;
+    for (const agent of data.agents) {
+      const existing = AGENT_INDEX.get(agent.name);
+      if (existing) {
+        if (agent.displayName) existing.displayName = agent.displayName;
+        existing.role = agent.role || existing.role;
+      } else {
+        AGENT_INDEX.set(agent.name, {
+          name: agent.name,
+          displayName: agent.displayName || undefined,
+          emoji: '',
+          role: agent.role || '',
+        });
+      }
+    }
+  } catch { /* network error — use static fallback */ }
+}
+
+/** Get the display label for an agent (displayName if set, else name). */
+function agentLabel(nameOrFrom) {
+  const agent = AGENT_INDEX.get(nameOrFrom);
+  return (agent && agent.displayName) ? agent.displayName : nameOrFrom;
+}
 
 const SSOT_LINKS = [
   { label: 'Promotion Evidence Index', url: 'https://github.com/reflectt/reflectt-node/blob/main/docs/TASK_LINKIFY_PROMOTION_EVIDENCE_INDEX.md' },
@@ -879,7 +910,7 @@ function renderChat() {
     return `
     <div class="msg ${mentioned ? 'mentioned' : ''}">
       <div class="msg-header">
-        <span class="msg-from">${esc(m.from)}</span>
+        <span class="msg-from">${esc(agentLabel(m.from))}</span>
         ${roleTag}
         ${channelTag}
         <span class="msg-time">${ago(m.timestamp)}</span>
@@ -1924,6 +1955,7 @@ async function runTaskSearch() {
 async function refresh() {
   refreshCount += 1;
   const forceFull = refreshCount % 12 === 0; // full sync less often with adaptive polling
+  if (refreshCount === 1 || forceFull) await refreshAgentRegistry();
   await loadTasks(forceFull);
   renderReviewQueue();
   await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback()]);

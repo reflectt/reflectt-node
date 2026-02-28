@@ -10,6 +10,8 @@ export interface AgentRole {
   name: string
   role: string
   description?: string
+  /** Optional: human-friendly display name (e.g. "Juniper" vs agent ID "agent-1"). Used in dashboard, chat, and mention resolution. */
+  displayName?: string
   /** Optional: additional names that should be treated as this agent for task lookup (e.g. OpenClaw agent "main" can act as "finance-agent"). */
   aliases?: string[]
   affinityTags: string[]
@@ -96,6 +98,7 @@ function parseRolesYaml(content: string): AgentRole[] {
       name: a.name,
       role: a.role,
       description: typeof a.description === 'string' ? a.description : undefined,
+      displayName: typeof a.displayName === 'string' ? a.displayName.trim() : undefined,
       aliases: Array.isArray(a.aliases) ? a.aliases.map(String) : undefined,
       affinityTags: Array.isArray(a.affinityTags) ? a.affinityTags.map(String) : [],
       alwaysRoute: Array.isArray(a.alwaysRoute) ? a.alwaysRoute.map(String) : undefined,
@@ -254,6 +257,7 @@ export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: stri
       name: r.name,
       role: r.role,
       ...(r.description ? { description: r.description } : {}),
+      ...(r.displayName ? { displayName: r.displayName } : {}),
       ...(r.aliases?.length ? { aliases: r.aliases } : {}),
       affinityTags: r.affinityTags,
       ...(r.routingMode ? { routingMode: r.routingMode } : {}),
@@ -271,6 +275,27 @@ export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: stri
   lastMtime = statSync(targetPath).mtimeMs
 
   return { saved: true, path: targetPath, version: Date.now() }
+}
+
+/** Update a single agent's display name (persisted to TEAM-ROLES.yaml). */
+export function setAgentDisplayName(agentName: string, displayName: string): { success: boolean; error?: string } {
+  const roles = getAgentRoles()
+  const idx = roles.findIndex(r => r.name.toLowerCase() === agentName.toLowerCase())
+  if (idx === -1) return { success: false, error: `Agent "${agentName}" not found in TEAM-ROLES.yaml` }
+  roles[idx] = { ...roles[idx], displayName: displayName.trim() || undefined }
+  saveAgentRoles(roles)
+  return { success: true }
+}
+
+/** Resolve a mention string to an agent name. Checks name, displayName, and aliases. */
+export function resolveAgentMention(mention: string): string | undefined {
+  const lower = mention.toLowerCase()
+  for (const role of getAgentRoles()) {
+    if (role.name.toLowerCase() === lower) return role.name
+    if (role.displayName?.toLowerCase() === lower) return role.name
+    if (role.aliases?.some(a => a.toLowerCase() === lower)) return role.name
+  }
+  return undefined
 }
 
 interface TaskForScoring {

@@ -56,6 +56,7 @@ export interface BootstrapTeamResponse {
 
 const AGENT_FIELDS: FieldSpec[] = [
   { name: 'name', type: 'string', required: true, description: 'Unique agent identifier (lowercase, no spaces). Must match the OpenClaw agent ID.' },
+  { name: 'displayName', type: 'string', required: false, description: 'Human-friendly name shown in dashboard and chat (e.g. "Juniper"). If unset, falls back to name.' },
   { name: 'role', type: 'string', required: true, description: 'Human-readable role label (e.g. engineer, designer, ops, content).' },
   { name: 'description', type: 'string', required: true, description: 'One-line description of what this agent does.' },
   { name: 'aliases', type: 'string[]', required: false, description: 'Alternative names this agent responds to (e.g. ["dev", "coder"]).' },
