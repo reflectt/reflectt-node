@@ -2239,7 +2239,7 @@ export function getDashboardHTML(): string {
   <!-- File Browser -->
   <div class="panel" style="margin-bottom:var(--space-4)">
     <div class="panel-header">📁 Files <span class="count" id="files-count"></span></div>
-    <div class="panel-body" style="max-height:none">
+    <div class="panel-body" style="max-height:50vh;overflow-y:auto">
       <div class="file-toolbar">
         <input class="file-search" type="search" id="fileSearch" placeholder="Search files…"
                aria-label="Search files" oninput="filterFiles(this.value)">
@@ -2259,7 +2259,7 @@ export function getDashboardHTML(): string {
   <!-- Shared Artifacts (existing) -->
   <div class="panel" id="shared-artifacts-panel">
     <div class="panel-header">📚 Shared Artifacts <span class="count" id="shared-artifacts-count">loading…</span></div>
-    <div class="panel-body" id="shared-artifacts-body" style="max-height:none;overflow-y:auto"></div>
+    <div class="panel-body" id="shared-artifacts-body" style="max-height:60vh;overflow-y:auto"></div>
   </div>
 
   </div><!-- /page-artifacts -->
