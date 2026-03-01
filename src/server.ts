@@ -280,7 +280,7 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
   const isExempt = Boolean(meta.reflection_exempt) || !systemHasReflections
   const hasExemptReason = typeof meta.reflection_exempt_reason === 'string' && meta.reflection_exempt_reason.trim().length > 0
 
-  if (data.status !== 'todo' && !hasReflectionSource && !isExempt) {
+  if ((data.status as string) !== 'todo' && !hasReflectionSource && !isExempt) {
     problems.push(
       'Reflection-origin required: tasks must include metadata.source_reflection or metadata.source_insight. ' +
       'If this task legitimately does not originate from a reflection, set metadata.reflection_exempt=true with metadata.reflection_exempt_reason.'
