@@ -22,6 +22,8 @@ import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
 import { statSync, readdirSync, existsSync, readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { hostname as osHostname } from 'os'
+import { randomBytes } from 'crypto'
 
 function checkBuildFreshness(): void {
   try {
@@ -117,9 +119,9 @@ function checkDockerIdentity(): void {
 
   // Generate a fresh agent identity if none is explicitly set
   if (!process.env.OPENCLAW_AGENT_ID) {
-    const hostname = require('os').hostname()
-    const shortId = require('crypto').randomBytes(3).toString('hex')
-    const defaultId = `docker-${hostname}-${shortId}`
+    const hn = osHostname()
+    const shortId = randomBytes(3).toString('hex')
+    const defaultId = `docker-${hn}-${shortId}`
     process.env.OPENCLAW_AGENT_ID = defaultId
     console.log(`🆔 Docker identity: ${defaultId} (set OPENCLAW_AGENT_ID to override)`)
   }
