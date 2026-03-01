@@ -1356,6 +1356,7 @@ async function resolveArtifactEvidence(paths: string[]): Promise<Array<{ path: s
 // (github identity imports moved to top)
 
 let githubIdentityProvider: GitHubIdentityProvider | null = null
+let sharedVault: SecretVault | null = null
 
 async function githubHeaders(): Promise<Record<string, string>> {
   const h: Record<string, string> = {
@@ -1951,6 +1952,7 @@ export async function createServer(): Promise<FastifyInstance> {
   const vault = new SecretVault(REFLECTT_HOME, hostId)
   try {
     vault.init()
+    sharedVault = vault
     console.log(`[Vault] Initialized (${vault.getStats().secretCount} secrets)`)
     initGitHubActorAuth(vault)
   } catch (err) {
@@ -6457,6 +6459,7 @@ export async function createServer(): Promise<FastifyInstance> {
       cloudUrl: query.cloudUrl || undefined,
       port: query.port ? Number(query.port) : undefined,
       skipNetwork: query.skipNetwork === 'true',
+      vault: sharedVault ?? undefined,
     })
     return { success: true, ...report }
   })
@@ -6471,6 +6474,7 @@ export async function createServer(): Promise<FastifyInstance> {
       joinToken: body.joinToken as string | undefined,
       apiKey: body.apiKey as string | undefined,
       userId: body.userId as string | undefined,
+      vault: sharedVault ?? undefined,
     })
     return { success: true, ...report }
   })
@@ -6482,6 +6486,7 @@ export async function createServer(): Promise<FastifyInstance> {
       cloudUrl: query.cloudUrl || undefined,
       port: query.port ? Number(query.port) : undefined,
       skipNetwork: query.skipNetwork === 'true',
+      vault: sharedVault ?? undefined,
     })
     return formatPreflightReport(report)
   })
