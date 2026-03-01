@@ -14,16 +14,73 @@ import path from "node:path";
 
 const DEFAULT_URL = "http://127.0.0.1:4445";
 
-// Agent roster — loaded dynamically from reflectt-node /team/roles on connect and refreshed
-// every 5 minutes. No static fallback: if discovery fails the roster stays empty and a warning
-// is logged so the operator can investigate rather than silently routing to stale agent names.
-const FALLBACK_AGENTS: string[] = [];
-let WATCHED_AGENTS: readonly string[] = FALLBACK_AGENTS;
-let WATCHED_SET = new Set<string>(WATCHED_AGENTS);
+const FALLBACK_AGENTS = ["kai", "link", "pixel", "echo", "harmony", "rhythm", "sage", "scout", "spark"] as const;
 const IDLE_NUDGE_WINDOW_MS = 15 * 60 * 1000; // 15m
 const WATCHDOG_INTERVAL_MS = 60 * 1000; // 1m
-const ROSTER_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5m
 const ESCALATION_COOLDOWN_MS = 20 * 60 * 1000;
+const AGENT_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // refresh team roles every 5m
+
+// Dynamic agent roster — populated from /team/roles, falls back to FALLBACK_AGENTS
+const discoveredAgents = new Set<string>(FALLBACK_AGENTS);
+const agentAliases = new Map<string, string>(); // alias → canonical agent name
+let lastAgentRefreshAt = 0;
+let agentRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+async function refreshAgentRoster(url: string, log?: any): Promise<void> {
+  try {
+    const response = await fetch(`${url}/team/roles`, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok) {
+      log?.warn?.(`[reflectt][roster] /team/roles returned ${response.status}`);
+      return;
+    }
+    const data = await response.json() as any;
+    const agents: Array<{ name?: string; agent?: string; aliases?: string[] }> =
+      data?.agents ?? data?.roles ?? (Array.isArray(data) ? data : []);
+
+    if (agents.length === 0) return;
+
+    const newNames = new Set<string>();
+    const newAliases = new Map<string, string>();
+
+    for (const a of agents) {
+      const name = (a.name || a.agent || "").toLowerCase().trim();
+      if (!name) continue;
+      newNames.add(name);
+      // Register aliases
+      if (Array.isArray(a.aliases)) {
+        for (const alias of a.aliases) {
+          const normalized = String(alias).toLowerCase().trim();
+          if (normalized && normalized !== name) {
+            newAliases.set(normalized, name);
+          }
+        }
+      }
+    }
+
+    // Merge — never remove agents mid-session, only add
+    for (const name of newNames) discoveredAgents.add(name);
+    for (const [alias, canonical] of newAliases) agentAliases.set(alias, canonical);
+
+    lastAgentRefreshAt = Date.now();
+    log?.info?.(`[reflectt][roster] refreshed: ${newNames.size} agents from /team/roles (total tracked: ${discoveredAgents.size})`);
+  } catch (err) {
+    log?.warn?.(`[reflectt][roster] refresh failed: ${err}`);
+  }
+}
+
+function startAgentRefresh(url: string, log?: any) {
+  if (agentRefreshTimer) return;
+  agentRefreshTimer = setInterval(() => {
+    refreshAgentRoster(url, log).catch(() => {});
+  }, AGENT_REFRESH_INTERVAL_MS);
+}
+
+function stopAgentRefresh() {
+  if (agentRefreshTimer) {
+    clearInterval(agentRefreshTimer);
+    agentRefreshTimer = null;
+  }
+}
 
 // SSE reconnect config
 const SSE_INITIAL_RETRY_MS = 1000;      // start at 1s
@@ -70,43 +127,13 @@ function purgeSessionIndexEntry(agentId: string, sessionKey: string, ctx: any): 
   }
 }
 
-function resolveAccount(cfg: OpenClawConfig, accountId?: string | null, log?: any): ReflecttAccount {
-  // Support both config paths:
-  //   1. channels.reflectt.url (canonical — per OpenClaw channel plugin convention)
-  //   2. plugins.entries.reflectt-channel.config.url (fallback — general plugin convention)
-  // channels.reflectt takes precedence.
+function resolveAccount(cfg: OpenClawConfig, accountId?: string | null): ReflecttAccount {
   const ch = (cfg as any)?.channels?.reflectt ?? {};
-  const pluginCfg = (cfg as any)?.plugins?.entries?.["reflectt-channel"]?.config ?? {};
-
-  const hasChannelConfig = !!ch.url;
-  const hasPluginConfig = !!pluginCfg.url;
-  const url = ch.url || pluginCfg.url || DEFAULT_URL;
-  const enabled = ch.enabled !== undefined ? ch.enabled !== false
-    : pluginCfg.enabled !== undefined ? pluginCfg.enabled !== false
-    : true;
-  const configured = hasChannelConfig || hasPluginConfig;
-
-  if (!configured) {
-    log?.warn(
-      `[reflectt] No explicit URL configured — using default ${DEFAULT_URL}. ` +
-      `To configure, set one of:\n` +
-      `  1. channels.reflectt.url in ~/.openclaw/openclaw.json (recommended)\n` +
-      `  2. plugins.entries.reflectt-channel.config.url in ~/.openclaw/openclaw.json\n` +
-      `  Or run: openclaw config set channels.reflectt.url "http://your-node:4445"`
-    );
-  } else if (hasChannelConfig && hasPluginConfig && ch.url !== pluginCfg.url) {
-    log?.warn(
-      `[reflectt] Config found in both channels.reflectt.url (${ch.url}) and ` +
-      `plugins.entries.reflectt-channel.config.url (${pluginCfg.url}). ` +
-      `Using channels.reflectt.url (takes precedence).`
-    );
-  }
-
   return {
     accountId: accountId || DEFAULT_ACCOUNT_ID,
-    url,
-    enabled,
-    configured,
+    url: ch.url || DEFAULT_URL,
+    enabled: ch.enabled !== false,
+    configured: true,
   };
 }
 
@@ -137,7 +164,7 @@ function normalizeSenderId(value: unknown): string | null {
 function markAgentActivity(from: unknown, channel: unknown, timestamp: unknown) {
   if (channel !== "general") return;
   const id = normalizeSenderId(from);
-  if (!id || !WATCHED_SET.has(id)) return;
+  if (!id || !discoveredAgents.has(id)) return;
   const ts =
     typeof timestamp === "number" && Number.isFinite(timestamp)
       ? timestamp
@@ -153,38 +180,6 @@ function shouldEscalate(key: string, now: number): boolean {
   if (now - last < ESCALATION_COOLDOWN_MS) return false;
   lastEscalationAt.set(key, now);
   return true;
-}
-
-async function refreshAgentRoster(url: string, log?: any): Promise<void> {
-  // /team/roles is the canonical source: { agents: [{ name: "kai", role: "builder", ... }] }
-  // Fall back to legacy endpoints if /team/roles is unavailable.
-  const endpoints = [
-    { path: '/team/roles',   extract: (d: any) => (d?.agents || []).map((a: any) => a?.name).filter(Boolean) },
-    { path: '/health/agents', extract: (d: any) => (d?.agents || []).map((a: any) => a?.agent || a?.name).filter(Boolean) },
-    { path: '/capabilities', extract: (d: any) => (d?.assignment?.agents || []).map((a: any) => a?.name).filter(Boolean) },
-  ];
-
-  for (const ep of endpoints) {
-    try {
-      const res = await fetch(`${url}${ep.path}`, { signal: AbortSignal.timeout(5000) });
-      if (res.ok) {
-        const data = await res.json() as any;
-        const names: string[] = ep.extract(data);
-        if (names.length > 0) {
-          WATCHED_AGENTS = Object.freeze(names);
-          WATCHED_SET = new Set<string>(names);
-          log?.info(`[reflectt] Loaded ${names.length} agents from ${ep.path}: ${names.join(', ')}`);
-          return;
-        }
-      }
-    } catch { /* try next endpoint */ }
-  }
-  log?.warn(
-    `[reflectt] Could not load agent roster from ${url} — ` +
-    (FALLBACK_AGENTS.length > 0
-      ? `using fallback list (${FALLBACK_AGENTS.join(', ')})`
-      : "roster will be empty until next successful refresh")
-  );
 }
 
 async function fetchRecentMessages(url: string): Promise<Array<Record<string, unknown>>> {
@@ -208,8 +203,11 @@ async function fetchRecentMessages(url: string): Promise<Array<Record<string, un
 }
 
 async function seedAgentActivity(url: string, log?: any) {
+  // Refresh roster before seeding so we track all known agents
+  await refreshAgentRoster(url, log).catch(() => {});
+
   const now = Date.now();
-  for (const agent of WATCHED_AGENTS) {
+  for (const agent of discoveredAgents) {
     lastUpdateByAgent.set(agent, now);
   }
 
@@ -272,7 +270,6 @@ let sseRequest: http.ClientRequest | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let healthCheckTimer: ReturnType<typeof setInterval> | null = null;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
-let rosterRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopped = false;
 let pluginRuntime: any = null;
 let currentRetryMs = SSE_INITIAL_RETRY_MS;
@@ -439,7 +436,7 @@ function startWatchdog(url: string, ctx: any) {
 
   watchdogTimer = setInterval(async () => {
     const now = Date.now();
-    for (const agent of WATCHED_AGENTS) {
+    for (const agent of discoveredAgents) {
       const lastUpdateAt = lastUpdateByAgent.get(agent) ?? now;
       if (now - lastUpdateAt <= IDLE_NUDGE_WINDOW_MS) continue;
 
@@ -470,22 +467,6 @@ function stopWatchdog() {
   }
 }
 
-function startRosterRefresh(url: string, log?: any) {
-  if (rosterRefreshTimer) return;
-  rosterRefreshTimer = setInterval(() => {
-    refreshAgentRoster(url, log).catch((err) => {
-      log?.warn(`[reflectt] Periodic roster refresh failed: ${err}`);
-    });
-  }, ROSTER_REFRESH_INTERVAL_MS);
-}
-
-function stopRosterRefresh() {
-  if (rosterRefreshTimer) {
-    clearInterval(rosterRefreshTimer);
-    rosterRefreshTimer = null;
-  }
-}
-
 function handleInbound(data: string, url: string, account: ReflecttAccount, ctx: any) {
   try {
     const msg = JSON.parse(data);
@@ -506,7 +487,7 @@ function handleInbound(data: string, url: string, account: ReflecttAccount, ctx:
 
     // Extract @mentions
     const mentions: string[] = [];
-    const regex = /@(\w+)/g;
+    const regex = /@([\w-]+)/g;
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) mentions.push(match[1].toLowerCase());
     if (mentions.length === 0) return;
@@ -544,6 +525,10 @@ function handleInbound(data: string, url: string, account: ReflecttAccount, ctx:
         if (a.identity?.name?.toLowerCase() === mention) { agentId = a.id; break; }
       }
       if (!agentId && mention === "kai") agentId = "main";
+      // Check discovered agents from /team/roles if not in openclaw config
+      if (!agentId && discoveredAgents.has(mention)) agentId = mention;
+      // Check aliases
+      if (!agentId && agentAliases.has(mention)) agentId = agentAliases.get(mention)!;
       if (!agentId) {
         unmatchedMentions += 1;
         ctx.log?.debug(`[reflectt] Mention @${mention} did not match any agent`);
@@ -690,7 +675,7 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
 
   config: {
     listAccountIds: () => [DEFAULT_ACCOUNT_ID],
-    resolveAccount: (cfg, accountId) => resolveAccount(cfg, accountId, pluginRuntime?.logger),
+    resolveAccount: (cfg, accountId) => resolveAccount(cfg, accountId),
     defaultAccountId: () => DEFAULT_ACCOUNT_ID,
     isConfigured: (account) => account.configured,
     describeAccount: (account) => ({
@@ -706,7 +691,7 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
     textChunkLimit: 4000,
     sendText: async ({ to, text, accountId }) => {
       const cfg = pluginRuntime?.config?.loadConfig?.() ?? {};
-      const account = resolveAccount(cfg, accountId, pluginRuntime?.logger);
+      const account = resolveAccount(cfg, accountId);
       // Determine agent name for "from" field
       const agentName = "kai"; // TODO: resolve from session context
       await postMessage(account.url, agentName, "general", text ?? "");
@@ -720,25 +705,6 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
       if (!account.enabled) return;
 
       stopped = false;
-
-      // Validate connectivity and show actionable error if server unreachable
-      try {
-        const healthRes = await fetch(`${account.url}/health`, { signal: AbortSignal.timeout(5000) });
-        if (!healthRes.ok) {
-          ctx.log?.warn(`[reflectt] Server at ${account.url} returned ${healthRes.status}. Will retry via SSE reconnect.`);
-        } else {
-          ctx.log?.info(`[reflectt] Server at ${account.url} is healthy ✓`);
-        }
-      } catch {
-        ctx.log?.error(
-          `[reflectt] Cannot reach reflectt-node at ${account.url}. ` +
-          `Make sure reflectt-node is running, then set the URL in your OpenClaw config:\n` +
-          `  Option 1 (recommended): channels.reflectt.url = "${account.url}"\n` +
-          `  Option 2: plugins.entries.reflectt-channel.config.url = "${account.url}"\n` +
-          `Will keep retrying via SSE reconnect.`
-        );
-      }
-
       ctx.setStatus({
         accountId: account.accountId,
         name: "Reflectt",
@@ -746,13 +712,10 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
         configured: true,
       });
 
-      // Load agent roster from reflectt-node before starting SSE, then refresh every 5 minutes.
-      await refreshAgentRoster(account.url, ctx.log);
-      startRosterRefresh(account.url, ctx.log);
-
       seedAgentActivity(account.url, ctx.log).catch((err) => {
         ctx.log?.warn?.(`[reflectt][watchdog] seed failed: ${err}`);
       });
+      startAgentRefresh(account.url, ctx.log);
       startWatchdog(account.url, ctx);
       startHealthCheck(account.url, account, ctx);
       connectSSE(account.url, account, ctx);
@@ -760,7 +723,7 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
       return {
         stop: () => {
           stopped = true;
-          stopRosterRefresh();
+          stopAgentRefresh();
           stopWatchdog();
           stopHealthCheck();
           if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
