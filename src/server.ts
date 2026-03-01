@@ -511,6 +511,7 @@ const ReviewHandoffSchema = z.object({
 
 const ChatMessagesQuerySchema = z.object({
   from: z.string().optional(),
+  exclude_from: z.string().optional(),
   to: z.string().optional(),
   channel: z.string().optional(),
   limit: z.string().optional(),
@@ -3414,6 +3415,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const query = parsedQuery.data
     const messages = chatManager.getMessages({
       from: query.from,
+      excludeFrom: query.exclude_from,
       to: query.to,
       channel: query.channel,
       limit: boundedLimit(query.limit, DEFAULT_LIMITS.chatMessages, MAX_LIMITS.chatMessages),

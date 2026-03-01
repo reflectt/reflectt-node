@@ -545,6 +545,7 @@ class ChatManager {
 
   getMessages(options?: {
     from?: string
+    excludeFrom?: string
     to?: string
     channel?: string
     limit?: number
@@ -559,6 +560,10 @@ class ChatManager {
     if (options?.from) {
       conditions.push('"from" = ?')
       params.push(options.from)
+    }
+    if (options?.excludeFrom) {
+      conditions.push('"from" != ?')
+      params.push(options.excludeFrom)
     }
     if (options?.to) {
       conditions.push('"to" = ?')
