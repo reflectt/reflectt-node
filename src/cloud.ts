@@ -23,6 +23,33 @@ import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 
+/**
+ * Docker identity guard: detect when a container has inherited cloud
+ * credentials from a host volume mount. Without explicit opt-in, skip
+ * cloud integration to prevent the container from silently appearing
+ * as the host team.
+ */
+function isDockerIdentityInherited(fileConfig: ReturnType<typeof loadCloudConfigFromFile>): boolean {
+  // Only applies inside Docker
+  const isDocker = existsSync('/.dockerenv') || process.env.REFLECTT_HOME === '/data'
+  if (!isDocker) return false
+
+  // If credentials come from env vars (not config.json), the user explicitly set them — allow
+  if (process.env.REFLECTT_HOST_TOKEN || process.env.REFLECTT_HOST_ID) return false
+
+  // If config.json has cloud credentials and user didn't opt in, flag it
+  if (fileConfig?.hostId && fileConfig?.credential) {
+    if (process.env.REFLECTT_INHERIT_IDENTITY === '1' || process.env.REFLECTT_INHERIT_IDENTITY === 'true') {
+      console.log(`☁️  Docker identity guard: inheriting identity from config.json (REFLECTT_INHERIT_IDENTITY=1)`)
+      console.log(`   Host: ${fileConfig.hostName || 'unnamed'} (hostId: ${fileConfig.hostId})`)
+      return false
+    }
+    return true
+  }
+
+  return false
+}
+
 // ---- Types matching @reflectt/host-agent ----
 // We inline the types to avoid a build-time dependency on the monorepo package.
 // The cloud API contract is the source of truth.
@@ -192,6 +219,22 @@ export async function startCloudIntegration(): Promise<void> {
 
   // Load from env vars first, then fall back to config.json
   const fileConfig = loadCloudConfigFromFile()
+
+  // Docker identity guard: refuse to connect with inherited credentials
+  if (isDockerIdentityInherited(fileConfig)) {
+    console.warn('')
+    console.warn('⚠️  Docker identity guard: found cloud credentials in config.json')
+    console.warn(`   This container would connect as "${fileConfig?.hostName || 'unknown'}" (hostId: ${fileConfig?.hostId})`)
+    console.warn('   This likely means you mounted a host directory containing existing team data.')
+    console.warn('')
+    console.warn('   To fix:')
+    console.warn('     • Use a named volume (docker-compose default) for a clean identity')
+    console.warn('     • Or set REFLECTT_INHERIT_IDENTITY=1 to intentionally reuse this identity')
+    console.warn('')
+    console.warn('   Cloud integration skipped to prevent identity collision.')
+    console.warn('')
+    return
+  }
 
   config = {
     cloudUrl: (process.env.REFLECTT_CLOUD_URL || fileConfig?.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, ''),
