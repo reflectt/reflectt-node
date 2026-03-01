@@ -99,19 +99,18 @@ async function refreshAgentRegistry() {
     if (!res.ok) return;
     const data = await res.json();
     if (!data.agents || !Array.isArray(data.agents)) return;
+    // Replace the registry entirely with what the server reports
+    AGENT_INDEX.clear();
+    AGENTS = [];
     for (const agent of data.agents) {
-      const existing = AGENT_INDEX.get(agent.name);
-      if (existing) {
-        if (agent.displayName) existing.displayName = agent.displayName;
-        existing.role = agent.role || existing.role;
-      } else {
-        AGENT_INDEX.set(agent.name, {
-          name: agent.name,
-          displayName: agent.displayName || undefined,
-          emoji: '',
-          role: agent.role || '',
-        });
-      }
+      const entry = {
+        name: agent.name,
+        displayName: agent.displayName || undefined,
+        emoji: agent.emoji || '',
+        role: agent.role || '',
+      };
+      AGENT_INDEX.set(agent.name, entry);
+      AGENTS.push(entry);
     }
   } catch { /* network error — use static fallback */ }
 }
