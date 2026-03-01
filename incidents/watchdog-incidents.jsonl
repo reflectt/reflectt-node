@@ -102,3 +102,4 @@
 {"type":"stale_working","at":1771700486971,"agent":"link","taskId":"task-1771520453161-8wtd2kym7","thresholdMs":2700000,"lastUpdateAt":null,"workingSinceAt":1771699848718}
 {"type":"stale_working","at":1771700486971,"agent":"kai","taskId":"task-1771695803638-4habgloi3","thresholdMs":2700000,"lastUpdateAt":null,"workingSinceAt":1771698968542}
 {"type":"stale_working","at":1772389640982,"agent":"pixel","taskId":"task-1772383147598-2xofiqz13","thresholdMs":2700000,"lastUpdateAt":1772386415894,"workingSinceAt":1772386537876}
+{"type":"stale_working","at":1772397203011,"agent":"link","taskId":"task-1771849175579-apuqqi0fd","thresholdMs":2700000,"lastUpdateAt":1772394472185,"workingSinceAt":1772394368602}
