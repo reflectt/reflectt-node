@@ -522,9 +522,11 @@ describe('Mention Rescue', () => {
 
 describe('Validation Error Shape', () => {
   it('returns structured fields for malformed POST /tasks payload', async () => {
+    // With relaxed onboarding schema, missing fields on todo tasks no longer
+    // triggers validation errors. Use an invalid field value instead.
     const { status, body } = await req('POST', '/tasks', {
-      title: 'bad task',
-      description: 'missing required fields',
+      title: 'bad',  // too short (<10 chars), triggers definition-of-ready
+      priority: 'INVALID_PRIORITY',
     })
     expect(status).toBe(400)
     expect(body.success).toBe(false)
