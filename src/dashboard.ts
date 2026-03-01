@@ -240,6 +240,7 @@ export function getDashboardHTML(): string {
     .sidebar.open { transform: translateX(0); }
     .sidebar-overlay.open { display: block; }
     .app-layout { flex-direction: column; }
+    .header-left { padding-left: 40px; }
   }
 
   .release-badge {
@@ -268,10 +269,19 @@ export function getDashboardHTML(): string {
     background: var(--green); margin-right: 5px; vertical-align: middle;
     box-shadow: 0 0 6px rgba(63, 185, 80, 0.4);
   }
+  .agent-strip-wrapper {
+    position: relative; overflow: hidden; border-bottom: 1px solid var(--border-subtle); background: var(--surface);
+  }
+  .agent-strip-wrapper::after {
+    content: ''; position: absolute; top: 0; right: 0; bottom: 0; width: 48px; pointer-events: none;
+    background: linear-gradient(to right, transparent, var(--surface));
+    opacity: 0; transition: opacity var(--transition-fast);
+  }
+  .agent-strip-wrapper.has-overflow::after { opacity: 1; }
   .agent-strip {
     display: flex; gap: var(--space-3); padding: var(--space-4) var(--space-8); overflow-x: auto;
-    border-bottom: 1px solid var(--border-subtle); background: var(--surface);
     max-width: 100vw; box-sizing: border-box; scrollbar-width: thin;
+    scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
   }
   .agent-strip::-webkit-scrollbar { height: 4px; }
   .agent-strip::-webkit-scrollbar-track { background: transparent; }
@@ -280,6 +290,7 @@ export function getDashboardHTML(): string {
     flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-2);
     padding: var(--space-2) var(--space-3); background: var(--surface-raised); border: 1px solid var(--border);
     border-radius: var(--radius-md); min-width: 160px; max-width: 240px; transition: border-color var(--transition-fast) var(--easing-smooth);
+    scroll-snap-align: start;
   }
   .agent-card:hover { border-color: var(--accent); }
   .agent-card.active { border-left: 3px solid var(--green); }
@@ -872,6 +883,7 @@ export function getDashboardHTML(): string {
 
   @media (max-width: 420px) {
     .header, .agent-strip, .main { padding-left: 12px; padding-right: 12px; }
+    .agent-card { min-width: 150px; }
     .panel-header { padding: 10px 12px; }
     .panel-body { padding: 10px 12px; max-height: 320px; }
     .kanban { padding: 10px 12px; }
@@ -1945,7 +1957,7 @@ export function getDashboardHTML(): string {
   <button id="pause-toggle-btn" class="pause-toggle-btn" onclick="toggleTeamPause()" aria-label="Pause team" tabindex="0">⏸️ Pause</button>
 </div>
 
-<div class="agent-strip" id="agent-strip"></div>
+<div class="agent-strip-wrapper" id="agent-strip-wrapper"><div class="agent-strip" id="agent-strip"></div></div>
 
 <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" aria-label="Toggle sidebar">☰</button>
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>

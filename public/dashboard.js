@@ -608,6 +608,21 @@ async function loadPresence() {
       <span class="agent-badge ${badgeClass}">${badgeText}</span>
     </div>`;
   }).join('');
+
+  // Toggle scroll-fade indicator on agent strip wrapper
+  const wrapper = document.getElementById('agent-strip-wrapper');
+  if (wrapper && strip) {
+    const hasOverflow = strip.scrollWidth > strip.clientWidth;
+    wrapper.classList.toggle('has-overflow', hasOverflow);
+    // Update on scroll (hide fade when scrolled to end)
+    if (!strip._overflowListener) {
+      strip._overflowListener = true;
+      strip.addEventListener('scroll', () => {
+        const atEnd = strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 8;
+        wrapper.classList.toggle('has-overflow', !atEnd && strip.scrollWidth > strip.clientWidth);
+      }, { passive: true });
+    }
+  }
 }
 
 // ---- Tasks ----
