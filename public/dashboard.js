@@ -151,6 +151,14 @@ function formatProductiveText(agent) {
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function formatBytes(b) { if (!b || b < 1024) return b + ' B'; if (b < 1048576) return (b/1024).toFixed(1) + ' KB'; return (b/1048576).toFixed(1) + ' MB'; }
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || ''); }
+function humanizeMinutes(m) {
+  if (m == null || m === '') return '—';
+  const n = Number(m);
+  if (!Number.isFinite(n) || n >= 9999) return '—';
+  if (n < 60) return n + 'm';
+  if (n < 1440) return Math.round(n / 60) + 'h';
+  return Math.round(n / 1440) + 'd';
+}
 function renderTaskTags(tags) {
   if (!Array.isArray(tags) || tags.length === 0) return '';
   const shown = tags.filter(Boolean).slice(0, 3);
@@ -474,7 +482,7 @@ function renderCompliance(compliance) {
 
   const chipsHtml = chips.map(c => {
     const state = complianceState(c.value, c.threshold);
-    return '<div class="sla-chip ' + state + '"><span>' + esc(c.label) + '</span><strong>' + c.value + 'm</strong></div>';
+    return '<div class="sla-chip ' + state + '"><span>' + esc(c.label) + '</span><strong>' + humanizeMinutes(c.value) + '</strong></div>';
   }).join('');
 
   const rows = agents.map(a => {
@@ -483,7 +491,7 @@ function renderCompliance(compliance) {
     return '<tr>' +
       '<td>' + esc(a.agent) + '</td>' +
       '<td>' + taskCell + '</td>' +
-      '<td>' + a.lastValidStatusAgeMin + 'm</td>' +
+      '<td>' + humanizeMinutes(a.lastValidStatusAgeMin) + '</td>' +
       '<td>' + a.expectedCadenceMin + 'm</td>' +
       '<td><span class="state-pill ' + a.state + ' compliance-state-' + a.state + '">' + esc(a.state) + '</span></td>' +
       '<td><button class="copy-template-btn" data-agent="' + esc(a.agent) + '" data-task="' + esc(taskValue) + '" onclick="copyStatusTemplate(this.dataset.agent, this.dataset.task)">Copy template</button></td>' +
@@ -730,10 +738,12 @@ function renderKanban() {
   kanban.innerHTML = cols.map(col => {
     const items = grouped[col];
     const isDone = col === 'done';
-    const shown = isDone ? items.slice(0, 3) : items;
-    const cards = shown.length === 0
+    const isTodo = col === 'todo';
+    const colLimit = isDone ? 3 : isTodo ? 10 : items.length;
+    const cards = items.length === 0
       ? '<div class="empty">—</div>'
-      : shown.map(t => {
+      : items.map((t, idx) => {
+        const isHidden = idx >= colLimit;
         const assigneeAgent = t.assignee ? AGENTS.find(a => a.name === t.assignee) : null;
         const assigneeDisplay = t.assignee 
           ? `<span class="assignee-tag">👤 ${esc(t.assignee)}${assigneeAgent ? ' <span class="role-small">' + esc(assigneeAgent.role) + '</span>' : ''}</span>`
@@ -742,7 +752,7 @@ function renderKanban() {
           ? `<div style="margin-top:4px"><span class="assignee-tag" style="font-family:monospace;font-size:10px;color:var(--accent)">🌿 ${esc(t.metadata.branch)}</span></div>`
           : '';
         return `
-        <div class="task-card" data-task-id="${t.id}">
+        <div class="task-card${isHidden ? ' hidden' : ''}" data-task-id="${t.id}">
           <div class="task-title">${esc(truncate(t.title, 60))}</div>
           <div class="task-meta">
             ${t.priority ? '<span class="priority-badge ' + t.priority + '">' + t.priority + '</span>' : ''}
@@ -757,8 +767,9 @@ function renderKanban() {
           ${renderQaContract(t)}
         </div>`;
       }).join('');
-    const extra = isDone && items.length > 3
-      ? `<button class="done-toggle" onclick="this.parentElement.querySelectorAll('.task-card.hidden').forEach(c=>c.classList.remove('hidden'));this.remove()">+ ${items.length - 3} more</button>` : '';
+    const hasMore = items.length > colLimit;
+    const extra = hasMore
+      ? `<button class="done-toggle" onclick="this.parentElement.querySelectorAll('.task-card.hidden').forEach(c=>c.classList.remove('hidden'));this.remove()">+ ${items.length - colLimit} more</button>` : '';
     return `<div class="kanban-col" data-status="${col}">
       <div class="kanban-col-header">${col} <span class="cnt">${items.length}</span></div>
       ${cards}${extra}

@@ -371,6 +371,7 @@ export function getDashboardHTML(): string {
     padding: 10px 12px; margin-bottom: 8px; transition: border-color 0.15s;
     cursor: pointer;
   }
+  .task-card.hidden { display: none; }
   .task-card:hover { border-color: var(--accent); }
   
   /* Task Modal */
