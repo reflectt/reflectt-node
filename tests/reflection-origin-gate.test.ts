@@ -58,7 +58,8 @@ async function postTask(body: Record<string, any>): Promise<any> {
 describe('Reflection-origin gate', () => {
   it('rejects task without source_reflection or source_insight', async (ctx) => {
     if (!serverUp) return ctx.skip()
-    const data = await postTask(taskBody({ metadata: { is_test: true } }))
+    // Use status=doing to bypass the todo early-return that skips quality checks
+    const data = await postTask(taskBody({ status: 'doing', metadata: { is_test: true, eta: '~1h' } }))
     expect(data.success).toBe(false)
     expect(data.code).toBe('DEFINITION_OF_READY')
     expect(data.problems?.some((p: string) => p.includes('Reflection-origin required'))).toBe(true)
@@ -105,8 +106,10 @@ describe('Reflection-origin gate', () => {
 
   it('rejects exempt task without reason', async (ctx) => {
     if (!serverUp) return ctx.skip()
+    // Use status=doing to bypass the todo early-return that skips quality checks
     const data = await postTask(taskBody({
-      metadata: { reflection_exempt: true, is_test: true },
+      status: 'doing',
+      metadata: { reflection_exempt: true, is_test: true, eta: '~1h' },
     }))
     expect(data.success).toBe(false)
     expect(data.problems?.some((p: string) => p.includes('reflection_exempt_reason'))).toBe(true)

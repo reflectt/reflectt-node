@@ -187,7 +187,7 @@ const CreateTaskSchema = z.object({
   status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).default('todo'),
   assignee: z.string().trim().min(1).optional().default('unassigned'),
   reviewer: z.string().trim().min(1).or(z.literal('auto')).default('auto'), // 'auto' triggers load-balanced assignment
-  done_criteria: z.array(z.string().trim().min(1)).min(1).optional().default([]),
+  done_criteria: z.array(z.string().trim().min(1)).optional().default([]),
   eta: z.string().trim().min(1).optional(),
   createdBy: z.string().min(1).optional().default('user'),
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).default('P3'),
