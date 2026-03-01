@@ -365,8 +365,11 @@ export function getDashboardHTML(): string {
   }
   .project-tab:hover { color: var(--text); }
   .project-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .kanban { display: flex; gap: var(--space-3); padding: 16px 18px; overflow-x: auto; min-height: 180px; }
-  .kanban-col { flex: 1; min-width: 160px; }
+  .kanban { display: flex; gap: var(--space-3); padding: 16px 18px; overflow-x: auto; min-height: 180px; align-items: flex-start; }
+  .kanban-col { flex: 1; min-width: 160px; max-height: 75vh; overflow-y: auto; scrollbar-width: thin; }
+  .kanban-col::-webkit-scrollbar { width: 4px; }
+  .kanban-col::-webkit-scrollbar-track { background: transparent; }
+  .kanban-col::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
   .kanban-col-header {
     font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.8px; font-weight: 600;
     color: var(--text-muted); margin-bottom: 10px; padding-bottom: 8px;
@@ -686,6 +689,18 @@ export function getDashboardHTML(): string {
     border-color: rgba(248, 81, 73, 0.55);
     background: linear-gradient(90deg, rgba(248, 81, 73, 0.14), transparent 75%);
   }
+  .health-card.stale-ghost {
+    opacity: 0.35;
+    order: 99;
+  }
+  .health-grid { display: grid; }
+  .health-grid-collapse-toggle {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: var(--text-sm); color: var(--text-muted); cursor: pointer;
+    background: none; border: none; padding: 4px 8px; margin-top: 4px;
+    transition: color var(--transition-fast);
+  }
+  .health-grid-collapse-toggle:hover { color: var(--text-bright); }
   .health-info { flex: 1; min-width: 0; }
   .health-name { font-size: var(--text-base); font-weight: 600; color: var(--text-bright); }
   .health-status { font-size: var(--text-sm); color: var(--text-muted); }
@@ -862,7 +877,7 @@ export function getDashboardHTML(): string {
       overflow-x: visible;
       min-height: 0;
     }
-    .kanban-col { min-width: 0; margin-bottom: 14px; }
+    .kanban-col { min-width: 0; margin-bottom: 14px; max-height: none; overflow-y: visible; }
     .kanban-col:last-child { margin-bottom: 0; }
     .task-card { margin-bottom: 12px; border-radius: var(--radius); }
     .project-tab, .channel-tab, .done-toggle {
