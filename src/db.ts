@@ -517,6 +517,52 @@ export function runMigrations(db: Database.Database): void {
       console.log(`[DB] Applied migration v${migration.version}`)
     }
   }
+
+  // ── Migration integrity check ──────────────────────────────────────────
+  // Verify tables that should exist actually do. If a migration was recorded
+  // as applied but the table is missing (e.g. transaction anomaly), re-run
+  // the SQL to recreate it. Only covers SQL-based migrations with CREATE TABLE.
+
+  const expectedTables: Array<{ version: number; tables: string[] }> = [
+    { version: 1, tables: ['tasks', 'task_comments', 'task_history', 'recurring_tasks', 'chat_messages', 'inbox'] },
+    { version: 2, tables: ['sync_ledger'] },
+    { version: 3, tables: ['inbox_states', 'inbox_acks'] },
+    { version: 5, tables: ['focus_states'] },
+    { version: 7, tables: ['reflections'] },
+    { version: 8, tables: ['insights'] },
+    { version: 10, tables: ['mention_rescue_state'] },
+    { version: 14, tables: ['suppression_ledger'] },
+    { version: 15, tables: ['context_memos'] },
+    { version: 16, tables: ['hosts'] },
+    { version: 17, tables: ['system_loop_ticks'] },
+  ]
+
+  const existingTables = new Set(
+    (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>)
+      .map(r => r.name),
+  )
+
+  const appliedVersions = new Set(
+    (db.prepare('SELECT version FROM _migrations').all() as Array<{ version: number }>)
+      .map(r => r.version),
+  )
+
+  for (const entry of expectedTables) {
+    if (!appliedVersions.has(entry.version)) continue // not yet applied — skip
+
+    const missing = entry.tables.filter(t => !existingTables.has(t))
+    if (missing.length === 0) continue
+
+    // Find the migration SQL and re-run it
+    const migration = migrations.find(m => m.version === entry.version)
+    if (migration && 'sql' in migration && migration.sql) {
+      console.warn(`[DB] Migration v${entry.version} recorded but tables missing: ${missing.join(', ')}. Re-running SQL.`)
+      db.exec(migration.sql)
+    } else if (migration && 'runFn' in migration && typeof migration.runFn === 'function') {
+      console.warn(`[DB] Migration v${entry.version} recorded but tables missing: ${missing.join(', ')}. Re-running function.`)
+      migration.runFn(db)
+    }
+  }
 }
 
 // ---- JSONL import helpers ----
