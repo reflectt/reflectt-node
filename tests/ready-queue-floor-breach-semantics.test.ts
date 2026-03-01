@@ -3,9 +3,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { taskManager } from '../src/tasks.js'
 import { policyManager } from '../src/policy.js'
 import { BoardHealthWorker } from '../src/boardHealthWorker.js'
+import { presenceManager } from '../src/presence.js'
 
 const TEST_AGENT = 'rqf-tester'
 const TITLE_PREFIX = 'TEST: rqf-breach-semantics'
+
+// Register test agent presence so sweeper doesn't skip it as a ghost
+presenceManager.updatePresence(TEST_AGENT, 'online')
 
 describe('Ready-Queue Floor (breach semantics)', () => {
   let originalReadyQueueFloor: any

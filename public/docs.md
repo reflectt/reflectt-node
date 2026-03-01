@@ -72,6 +72,7 @@ Operationally:
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/` | Redirects to `/dashboard`. |
 | GET | `/preflight` | Run BYOH preflight checks (auth, network, runtime). Returns JSON with per-check pass/fail, remediation guidance, and overall readiness status. Query: `cloudUrl`, `port`, `skipNetwork` |
 | GET | `/preflight/text` | Run preflight checks and return a plain-text formatted report for CLI/terminal display. Same query params as GET. |
 | POST | `/preflight` | Run preflight checks with custom config. Body: `{ cloudUrl?, port?, skipNetwork?, joinToken?, apiKey?, userId? }`. When `userId` is provided, emits `host_preflight_passed` or `host_preflight_failed` activation funnel events for onboarding drop-off tracking. |
@@ -100,10 +101,12 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/team/health` | Team config linter status for `~/.reflectt/TEAM.md`, `TEAM-ROLES.yaml`, `TEAM-STANDARDS.md` (issues, role coverage, last check timestamp) |
 | GET | `/health/team` | Team health metrics with compliance + `staleDoing` snapshot. Per-agent rows include `activeTaskTitle` and `activeTaskPrLink` when an agent has a doing task with PR evidence. Flagged agents also include `actionable_reason` (last comment age, last transition, last mention age, suggested action). |
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
+| GET | `/health/errors` | Error metrics — total errors, total requests, error rate, recent error list (last 20). |
 | GET | `/health/compliance` | Compliance check results |
 | GET | `/health/backlog` | Backlog readiness health by lane (ready counts, floor compliance, breach status, blocked/todo/doing/validating rollups). Query: `include_test=1` to include test-harness tasks. |
 | GET | `/health/system` | System + loop/timer health (quiet-hours suppression, sweeper status, watchdog tick timestamps, uptime/memory) |
 | GET | `/health/build` | Build/runtime identity (version, git SHA, branch, build timestamp, PID, uptime) |
+| GET | `/health/errors` | Recent request errors for debugging: total errors, error rate, last 20 error details. |
 | GET | `/health/deploy` | Deploy attestation payload for dashboards (`version`, `gitSha`, `branch`, `buildTimestamp`, `startedAt`, `pid`) |
 | GET | `/health/team/summary` | Compact team health summary |
 | GET | `/health/team/history` | Historical team health data |

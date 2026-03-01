@@ -17,6 +17,7 @@ import { generateRecurringCandidates } from './insight-promotion.js'
 import { tickReflectionNudges } from './reflection-automation.js'
 import { routeMessage } from './messageRouter.js'
 import { getDb, safeJsonStringify, safeJsonParse } from './db.js'
+import { presenceManager } from './presence.js'
 
 // ── Types ──
 
@@ -149,6 +150,10 @@ export async function tickContinuityLoop(): Promise<{
   stats.lastRunAt = now
 
   for (const agent of config.agents) {
+    // Skip ghost agents that have never checked in
+    const presence = presenceManager.getPresence(agent)
+    if (!presence) continue
+
     // Cooldown check
     if (lastReplenishAt[agent] && now - lastReplenishAt[agent] < cooldownMs) continue
 

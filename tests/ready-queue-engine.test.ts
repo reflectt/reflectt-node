@@ -6,10 +6,14 @@ import { describe, it, expect, beforeAll, afterEach } from 'vitest'
 import { taskManager } from '../src/tasks.js'
 import { BoardHealthWorker } from '../src/boardHealthWorker.js'
 import { DEFAULT_LANES, checkWipLimit, getLanesConfig } from '../src/lane-config.js'
+import { presenceManager } from '../src/presence.js'
 
 // Use a test agent from DEFAULT_LANES so lane config is deterministic in tests
 const TEST_AGENT = 'link'
 const TEST_LANE = DEFAULT_LANES.find(l => l.agents.includes(TEST_AGENT))!
+
+// Register test agent presence so sweeper doesn't skip it as a ghost
+presenceManager.updatePresence(TEST_AGENT, 'online')
 
 describe('Ready-queue engine v1', () => {
   // Track tasks created during each test for cleanup
