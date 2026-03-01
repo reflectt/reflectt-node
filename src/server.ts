@@ -474,33 +474,33 @@ const CreateResearchHandoffSchema = z.object({
 
 const ReviewPacketSchema = z.object({
   task_id: z.string().trim().regex(/^task-[a-z0-9-]+$/i, 'must be a task-* id'),
-  pr_url: z.string().trim().url().regex(/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:$|[/?#])/i, 'must be a GitHub PR URL'),
-  commit: z.string().trim().min(7),
-  changed_files: z.array(z.string().trim().min(1)).min(1),
-  artifact_path: z.string().trim().regex(/^process\/.+/, 'must be repo-relative under process/'),
+  pr_url: z.string().trim().url().regex(/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+(?:$|[/?#])/i, 'must be a GitHub PR URL').optional(),
+  commit: z.string().trim().min(7).optional(),
+  changed_files: z.array(z.string().trim().min(1)).min(1).optional(),
+  artifact_path: z.string().trim().min(1),  // required but no longer forced under process/
   caveats: z.string().trim().min(1),
 })
 
 const QaBundleSchema = z.object({
   lane: z.string().trim().min(1),
   summary: z.string().trim().min(1),
-  pr_link: z.string().trim().min(1).optional(),        // optional for config_only tasks
-  commit_shas: z.array(z.string().trim().min(1)).optional(),  // optional for config_only tasks
-  changed_files: z.array(z.string().trim().min(1)).min(1),
-  artifact_links: z.array(z.string().trim().min(1)).min(1),
-  checks: z.array(z.string().trim().min(1)).min(1),
-  screenshot_proof: z.array(z.string().trim().min(1)).min(1),
+  pr_link: z.string().trim().min(1).optional(),
+  commit_shas: z.array(z.string().trim().min(1)).optional(),
+  changed_files: z.array(z.string().trim().min(1)).min(1).optional(),  // optional for non-code tasks
+  artifact_links: z.array(z.string().trim().min(1)).min(1).optional(), // optional for non-code tasks
+  checks: z.array(z.string().trim().min(1)).min(1).optional(),         // optional for non-code tasks
+  screenshot_proof: z.array(z.string().trim().min(1)).min(1).optional(), // optional for non-code tasks
   reviewer_notes: z.string().trim().min(1).optional(),
-  config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
+  config_only: z.boolean().optional(),
   non_code: z.boolean().optional(),
-  review_packet: ReviewPacketSchema,
+  review_packet: ReviewPacketSchema.optional(),  // optional for non-code tasks
 })
 
 const ReviewHandoffSchema = z.object({
   task_id: z.string().trim().regex(/^task-[a-zA-Z0-9-]+$/),
   repo: z.string().trim().min(1).optional(),  // optional for config_only tasks
   artifact_path: z.string().trim().min(1),    // relaxed: accepts any path (process/, ~/.reflectt/, etc.)
-  test_proof: z.string().trim().min(1),
+  test_proof: z.string().trim().min(1).optional(),  // optional for non-code tasks
   known_caveats: z.string().trim().min(1),
   doc_only: z.boolean().optional(),
   config_only: z.boolean().optional(),  // true for ~/.reflectt/ config artifacts
@@ -652,7 +652,7 @@ function enforceQaBundleGateForValidating(
     return {
       ok: false,
       error: `Review packet required before validating.${detail}`,
-      hint: 'Include metadata.qa_bundle.review_packet with: task_id, pr_url, commit, changed_files[], artifact_path, caveats (plus summary/artifact_links/checks).',
+      hint: 'Include metadata.qa_bundle with: lane, summary. For code tasks also include: review_packet { task_id, pr_url, commit, changed_files[], artifact_path, caveats }. For non-code tasks: set qa_bundle.non_code=true (or use a non-code lane like ops/finance/legal).',
     }
   }
 
@@ -660,7 +660,33 @@ function enforceQaBundleGateForValidating(
   const nonCodeLane = parsed.data.qa_bundle.non_code === true || isDesignOrDocsLane(metadataObj)
   const reviewPacket = parsed.data.qa_bundle.review_packet
 
-  if (!nonCodeLane && expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
+  // Non-code tasks with no review_packet pass the gate with just lane + summary
+  if (nonCodeLane && !reviewPacket) return { ok: true }
+
+  if (!nonCodeLane && !reviewPacket) {
+    return {
+      ok: false,
+      error: 'Review packet required for code tasks. Set qa_bundle.review_packet or qa_bundle.non_code=true for non-code tasks.',
+      hint: 'Include review_packet: { task_id, pr_url, commit, changed_files[], artifact_path, caveats }.',
+    }
+  }
+
+  // For code tasks, enforce required review_packet fields that are optional in schema
+  if (reviewPacket && !nonCodeLane) {
+    const missingFields: string[] = []
+    if (!reviewPacket.pr_url) missingFields.push('metadata.qa_bundle.review_packet.pr_url')
+    if (!reviewPacket.commit) missingFields.push('metadata.qa_bundle.review_packet.commit')
+    if (!reviewPacket.changed_files || reviewPacket.changed_files.length === 0) missingFields.push('metadata.qa_bundle.review_packet.changed_files')
+    if (missingFields.length > 0) {
+      return {
+        ok: false,
+        error: `Review packet required before validating. Missing/invalid: ${missingFields.join(', ')}.`,
+        hint: 'Include review_packet: { task_id, pr_url, commit, changed_files[], artifact_path, caveats }. For non-code tasks: set qa_bundle.non_code=true.',
+      }
+    }
+  }
+
+  if (reviewPacket && !nonCodeLane && expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
     return {
       ok: false,
       error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
@@ -669,7 +695,7 @@ function enforceQaBundleGateForValidating(
   }
 
   const artifactPath = typeof metadataObj.artifact_path === 'string' ? metadataObj.artifact_path.trim() : ''
-  if (!nonCodeLane && artifactPath && artifactPath !== reviewPacket.artifact_path) {
+  if (reviewPacket && !nonCodeLane && artifactPath && artifactPath !== reviewPacket.artifact_path) {
     return {
       ok: false,
       error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
@@ -678,13 +704,13 @@ function enforceQaBundleGateForValidating(
   }
 
   // PR integrity: validate commit SHA + changed_files against live PR head
-  if (!nonCodeLane && reviewPacket.pr_url) {
+  if (!nonCodeLane && reviewPacket?.pr_url) {
     const overrideFlag = metadataObj.pr_integrity_override === true
     if (!overrideFlag) {
       const integrity = validatePrIntegrity({
-        pr_url: reviewPacket.pr_url,
-        packet_commit: reviewPacket.commit,
-        packet_changed_files: reviewPacket.changed_files,
+        pr_url: reviewPacket!.pr_url!,
+        packet_commit: reviewPacket!.commit ?? '',
+        packet_changed_files: reviewPacket!.changed_files ?? [],
       })
 
       // Store integrity result in metadata for audit trail
@@ -871,15 +897,27 @@ function normalizeLaneValue(value: unknown): string {
 }
 
 function isDesignOrDocsLane(metadata: Record<string, unknown>): boolean {
+  return isNonCodeLane(metadata)
+}
+
+/** Lanes that don't produce code artifacts (PRs, commits, changed_files) */
+const NON_CODE_LANE_KEYWORDS = [
+  'design', 'docs', 'documentation', 'content',
+  'ops', 'operations', 'finance', 'legal', 'admin',
+  'strategy', 'assessment', 'support', 'marketing',
+  'back-office', 'backoffice', 'research', 'planning',
+]
+
+function isNonCodeLane(metadata: Record<string, unknown>): boolean {
   const lane = normalizeLaneValue(metadata.lane)
-  if (lane.includes('design') || lane.includes('docs') || lane.includes('documentation')) return true
+  if (NON_CODE_LANE_KEYWORDS.some(k => lane.includes(k))) return true
 
   const supports = normalizeLaneValue(metadata.supports)
-  if (supports.includes('design') || supports.includes('docs') || supports.includes('documentation')) return true
+  if (NON_CODE_LANE_KEYWORDS.some(k => supports.includes(k))) return true
 
   const qaBundle = (metadata.qa_bundle as Record<string, unknown> | undefined) || {}
   const qaLane = normalizeLaneValue(qaBundle.lane)
-  if (qaLane.includes('design') || qaLane.includes('docs') || qaLane.includes('documentation')) return true
+  if (NON_CODE_LANE_KEYWORDS.some(k => qaLane.includes(k))) return true
 
   return false
 }
@@ -960,8 +998,8 @@ function enforceReviewHandoffGateForValidating(
   if (!parsed.success) {
     return {
       ok: false,
-      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, test_proof, known_caveats (and pr_url + commit_sha unless doc_only=true or config_only=true).',
-      hint: 'Example: { "review_handoff": { "task_id":"task-...", "repo":"reflectt/reflectt-node", "pr_url":"https://github.com/.../pull/123", "commit_sha":"abc1234", "artifact_path":"process/TASK-...md", "test_proof":"npm test -- ... (pass)", "known_caveats":"none" } }. For config tasks: set config_only=true.',
+      error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, known_caveats (and pr_url + commit_sha unless doc_only=true, config_only=true, or non_code=true).',
+      hint: 'Example: { "review_handoff": { "task_id":"task-...", "artifact_path":"process/TASK-...md", "known_caveats":"none" } }. For non-code tasks (finance, legal, ops): set non_code=true. For config tasks: set config_only=true.',
     }
   }
 
