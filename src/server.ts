@@ -3085,6 +3085,11 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ============ DASHBOARD ============
 
+  // Root redirects to dashboard — first thing a user sees
+  app.get('/', async (_request, reply) => {
+    reply.redirect('/dashboard')
+  })
+
   app.get('/dashboard', async (_request, reply) => {
     reply.type('text/html').send(getDashboardHTML())
   })
