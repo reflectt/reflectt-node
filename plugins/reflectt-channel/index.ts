@@ -14,13 +14,15 @@ import path from "node:path";
 
 const DEFAULT_URL = "http://127.0.0.1:4445";
 
-// Agent roster — loaded dynamically from reflectt-node /agents endpoint on connect.
-// Falls back to this static list only if the API call fails.
-const FALLBACK_AGENTS = ["agent-1", "agent-2", "agent-3"] as const;
+// Agent roster — loaded dynamically from reflectt-node /team/roles on connect and refreshed
+// every 5 minutes. No static fallback: if discovery fails the roster stays empty and a warning
+// is logged so the operator can investigate rather than silently routing to stale agent names.
+const FALLBACK_AGENTS: string[] = [];
 let WATCHED_AGENTS: readonly string[] = FALLBACK_AGENTS;
 let WATCHED_SET = new Set<string>(WATCHED_AGENTS);
 const IDLE_NUDGE_WINDOW_MS = 15 * 60 * 1000; // 15m
 const WATCHDOG_INTERVAL_MS = 60 * 1000; // 1m
+const ROSTER_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5m
 const ESCALATION_COOLDOWN_MS = 20 * 60 * 1000;
 
 // SSE reconnect config
@@ -154,9 +156,10 @@ function shouldEscalate(key: string, now: number): boolean {
 }
 
 async function refreshAgentRoster(url: string, log?: any): Promise<void> {
-  // Try /health/agents first (returns { agents: [{ agent: "name", ... }] })
-  // Then /health (returns { inbox: { agents: N } } — less useful but indicates activity)
+  // /team/roles is the canonical source: { agents: [{ name: "kai", role: "builder", ... }] }
+  // Fall back to legacy endpoints if /team/roles is unavailable.
   const endpoints = [
+    { path: '/team/roles',   extract: (d: any) => (d?.agents || []).map((a: any) => a?.name).filter(Boolean) },
     { path: '/health/agents', extract: (d: any) => (d?.agents || []).map((a: any) => a?.agent || a?.name).filter(Boolean) },
     { path: '/capabilities', extract: (d: any) => (d?.assignment?.agents || []).map((a: any) => a?.name).filter(Boolean) },
   ];
@@ -176,7 +179,12 @@ async function refreshAgentRoster(url: string, log?: any): Promise<void> {
       }
     } catch { /* try next endpoint */ }
   }
-  log?.warn(`[reflectt] Could not load agent roster from ${url} — using fallback list (${FALLBACK_AGENTS.join(', ')})`);
+  log?.warn(
+    `[reflectt] Could not load agent roster from ${url} — ` +
+    (FALLBACK_AGENTS.length > 0
+      ? `using fallback list (${FALLBACK_AGENTS.join(', ')})`
+      : "roster will be empty until next successful refresh")
+  );
 }
 
 async function fetchRecentMessages(url: string): Promise<Array<Record<string, unknown>>> {
@@ -264,6 +272,7 @@ let sseRequest: http.ClientRequest | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let healthCheckTimer: ReturnType<typeof setInterval> | null = null;
 let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+let rosterRefreshTimer: ReturnType<typeof setInterval> | null = null;
 let stopped = false;
 let pluginRuntime: any = null;
 let currentRetryMs = SSE_INITIAL_RETRY_MS;
@@ -458,6 +467,22 @@ function stopWatchdog() {
   if (watchdogTimer) {
     clearInterval(watchdogTimer);
     watchdogTimer = null;
+  }
+}
+
+function startRosterRefresh(url: string, log?: any) {
+  if (rosterRefreshTimer) return;
+  rosterRefreshTimer = setInterval(() => {
+    refreshAgentRoster(url, log).catch((err) => {
+      log?.warn(`[reflectt] Periodic roster refresh failed: ${err}`);
+    });
+  }, ROSTER_REFRESH_INTERVAL_MS);
+}
+
+function stopRosterRefresh() {
+  if (rosterRefreshTimer) {
+    clearInterval(rosterRefreshTimer);
+    rosterRefreshTimer = null;
   }
 }
 
@@ -721,8 +746,9 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
         configured: true,
       });
 
-      // Load agent roster from reflectt-node before starting SSE
+      // Load agent roster from reflectt-node before starting SSE, then refresh every 5 minutes.
       await refreshAgentRoster(account.url, ctx.log);
+      startRosterRefresh(account.url, ctx.log);
 
       seedAgentActivity(account.url, ctx.log).catch((err) => {
         ctx.log?.warn?.(`[reflectt][watchdog] seed failed: ${err}`);
@@ -734,6 +760,7 @@ const reflecttPlugin: ChannelPlugin<ReflecttAccount> = {
       return {
         stop: () => {
           stopped = true;
+          stopRosterRefresh();
           stopWatchdog();
           stopHealthCheck();
           if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
