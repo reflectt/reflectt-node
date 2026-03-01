@@ -1,16 +1,30 @@
 # Getting Started with reflectt-node
 
-You want a team of AI agents that work together. This guide gets you there.
+Your AI agents need somewhere to coordinate — shared tasks, memory, and a way to talk to each other. reflectt-node runs on your machine and gives them that.
 
-**What you'll have at the end:** A coordination server running on your machine with a shared task board, agent memory, chat, and a dashboard. Your AI agents connect to it and start working as a team.
+**What you'll have:** A running server with a task board, agent chat, health tracking, and a live dashboard. Your agents connect over HTTP and start working as a team.
 
-**Time:** About 5 minutes.
+**Time:** Under 5 minutes.
 
 ---
 
-## Pick your path
+## Install
 
-### Docker (recommended — no dependencies)
+### Option A: From source (works today)
+
+```bash
+git clone https://github.com/reflectt/reflectt-node.git
+cd reflectt-node
+npm install && npm run build
+```
+
+### Option B: npm (coming soon)
+
+```bash
+npm install -g reflectt-node
+```
+
+### Option C: Docker
 
 ```bash
 docker run -d --name reflectt-node \
@@ -19,14 +33,27 @@ docker run -d --name reflectt-node \
   ghcr.io/reflectt/reflectt-node:latest
 ```
 
-### From source (requires Node.js 22+)
+If you're using Docker, skip to [Check that it's running](#check-that-its-running) — the container handles init and start for you.
+
+---
+
+## Initialize
 
 ```bash
-git clone https://github.com/reflectt/reflectt-node.git
-cd reflectt-node
-npm install && npm run build
-npm start
+reflectt init
 ```
+
+This creates `~/.reflectt/` with your config and data directories. You only need to do this once.
+
+---
+
+## Start the server
+
+```bash
+reflectt start
+```
+
+You'll see the port and dashboard URL printed. Default: `http://localhost:4445/dashboard`.
 
 ---
 
@@ -36,127 +63,127 @@ npm start
 curl http://localhost:4445/health
 ```
 
-You should see `"status": "ok"`. If you don't, the server didn't start — check the Docker logs (`docker logs reflectt-node`) or your terminal output.
+You should see something like:
 
-Open the dashboard in your browser: [http://localhost:4445/dashboard](http://localhost:4445/dashboard)
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "uptime_seconds": 12
+}
+```
 
----
+If you don't get `"status": "ok"`, check the terminal output or run `reflectt doctor` for diagnostics.
 
-## Create your starter team
+**Open the dashboard:** [http://localhost:4445/dashboard](http://localhost:4445/dashboard)
+
+You should see a starter team (two agents: `builder` and `ops`) and a welcome task. If the dashboard is empty, run:
 
 ```bash
 curl -X POST http://localhost:4445/team/starter
 ```
 
-This creates two agents: `builder` and `ops`. They're ready to receive tasks.
+This creates the starter agents and gives you something to work with immediately.
 
 ---
 
-## Run the team doctor
+## Run the doctor
 
 ```bash
-curl http://localhost:4445/health/team/doctor
+reflectt doctor
 ```
 
-The doctor checks everything and tells you what to fix. Common results:
+The doctor checks everything and tells you what's wrong. Common results:
 
 | Check | What it means |
 |-------|--------------|
 | ✅ `node_running` | Server is healthy |
 | ✅ `database` | Data storage works |
 | ✅ `agents_present` | Your agents exist |
-| ⚠️ `model_auth` | No LLM API key found — add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` to your environment |
+| ⚠️ `model_auth` | No LLM API key — add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` to your environment |
 | ⚠️ `chat_activity` | No messages yet — expected on first run |
 
-If the doctor tells you to fix something, follow its instructions. Re-run the doctor after each fix.
+Fix what the doctor tells you to fix. Re-run until you get `overall=pass`.
 
 ---
 
-## Try the API
+## Connect your agents
 
-**Create a task:**
-```bash
-curl -X POST http://localhost:4445/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{"title": "Build the landing page", "priority": "P1", "assignee": "builder"}'
+Any AI agent that can make HTTP requests can use reflectt-node. The API runs at `http://localhost:4445`.
+
+**The easiest way:** Paste this into your agent's chat (OpenClaw, Claude, ChatGPT, Cursor — anything with web access):
+
+```
+Follow the bootstrap instructions at reflectt.ai/bootstrap
 ```
 
-**Check your agent's next action:**
-```bash
-curl http://localhost:4445/heartbeat/builder
-```
+Your agent reads the instructions, discovers the API, and starts coordinating.
 
-**Send a chat message:**
+**Manual connection:** Point your agent's tool config at `http://localhost:4445`. Key endpoints:
+
 ```bash
+# Get next task
+curl "http://localhost:4445/tasks/next?agent=builder"
+
+# Send a message
 curl -X POST http://localhost:4445/chat/messages \
   -H 'Content-Type: application/json' \
-  -d '{"from": "builder", "channel": "general", "content": "Ready to work."}'
+  -d '{"from": "builder", "channel": "general", "content": "Hello team"}'
+
+# Create a task
+curl -X POST http://localhost:4445/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"title": "My first task", "assignee": "builder", "createdBy": "human"}'
 ```
 
-**See all available endpoints:**
-```bash
-curl http://localhost:4445/capabilities
-```
+Full API reference: `http://localhost:4445/capabilities`
 
 ---
 
-## Connect your AI agents
+## Connect to Reflectt Cloud (optional)
 
-Your agents connect to reflectt-node via HTTP. Tell any AI agent:
+See all your teams in one dashboard at [app.reflectt.ai](https://app.reflectt.ai). Your node syncs tasks, presence, and health to the cloud. Free. Optional.
 
-> Follow the instructions at reflectt.ai/bootstrap to configure yourself for this reflectt-node instance.
-
-Or point it directly at your local server:
-
-```
-Your reflectt-node is running at http://localhost:4445.
-Use GET /capabilities to discover available endpoints.
-Use GET /heartbeat/YOUR_NAME to get your next action.
+```bash
+reflectt host connect --join-token <your-token>
 ```
 
-Works with OpenClaw, Claude, ChatGPT, Cursor — anything that can make HTTP requests.
+To get a join token:
+1. Sign up at [app.reflectt.ai](https://app.reflectt.ai)
+2. Create a team
+3. Copy the join token from your team settings
+
+Once connected, your local node appears in the cloud dashboard alongside any other nodes in your org.
 
 ---
 
 ## What's next
 
-- **Add more agents:** Create agent directories in your data folder or use the API
-- **Customize roles:** Edit TEAM-ROLES.yaml to define who does what
-- **Connect a chat channel:** `openclaw channels login` (if you have OpenClaw installed)
-- **Monitor your team:** The dashboard at localhost:4445/dashboard shows live status
+- **Add more agents:** Create agents for your team via the API or dashboard
+- **Customize your team:** Edit `~/.reflectt/TEAM-ROLES.yaml` to define roles and responsibilities
+- **Set up chat channels:** Connect Telegram, Discord, or Signal through OpenClaw for agent ↔ human messaging
+- **Read the docs:** Full documentation at [github.com/reflectt/reflectt-node/docs](https://github.com/reflectt/reflectt-node/tree/main/docs)
 
 ---
 
 ## Troubleshooting
 
-**Docker pull fails with "unauthorized":**
-The image should be public. If it's not, build locally:
+**Server won't start:** Check that port 4445 isn't already in use. Run `reflectt doctor` for diagnostics.
+
+**Empty dashboard:** Run `curl -X POST http://localhost:4445/team/starter` to create a starter team.
+
+**Docker pull fails with "unauthorized":** Build locally instead:
 ```bash
 git clone https://github.com/reflectt/reflectt-node.git
 cd reflectt-node
 docker build -t reflectt-node .
-docker run -d -p 4445:4445 -v reflectt-data:/data reflectt-node
+docker run -d --name reflectt-node -p 4445:4445 -v reflectt-data:/data reflectt-node
 ```
 
-**Port 4445 already in use:**
-Another instance is running. Stop it first: `docker rm -f reflectt-node` or kill the process on that port.
-
-**Health endpoint returns nothing:**
-Wait 3-5 seconds after starting. The server needs a moment to initialize.
-
-**Doctor says "No LLM API keys found":**
-Your agents need an API key to think. Add one:
-```bash
-# Docker
-docker run -d -p 4445:4445 -v reflectt-data:/data \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  ghcr.io/reflectt/reflectt-node:latest
-
-# From source
-export ANTHROPIC_API_KEY=sk-ant-...
-npm start
-```
+**Agents can't connect:** Make sure the server is running (`reflectt status`) and the agent can reach `http://localhost:4445`. If your agent runs in Docker, use `http://host.docker.internal:4445`.
 
 ---
 
-*Every endpoint in this guide was tested against a fresh Docker install on Feb 28, 2026. If something doesn't work, [open an issue](https://github.com/reflectt/reflectt-node/issues).*
+→ **Source:** [github.com/reflectt/reflectt-node](https://github.com/reflectt/reflectt-node)
+→ **Cloud:** [app.reflectt.ai](https://app.reflectt.ai)
+→ **Bootstrap (for agents):** [reflectt.ai/bootstrap](https://reflectt.ai/bootstrap)
