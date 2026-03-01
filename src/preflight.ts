@@ -20,6 +20,7 @@ import { hostname, homedir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { REFLECTT_HOME } from './config.js'
 import { emitActivationEvent } from './activationEvents.js'
+import type { SecretVault } from './secrets.js'
 
 // ── Types ──
 
@@ -109,6 +110,12 @@ const CHECKS: PreflightCheck[] = [
     name: 'OpenClaw Gateway',
     description: 'Gateway must be running and reachable for tool execution',
     category: 'system',
+  },
+  {
+    id: 'github-identity',
+    name: 'GitHub Identity',
+    description: 'GitHub PAT or App installation token configured for PR operations',
+    category: 'auth',
   },
 ]
 
@@ -672,6 +679,195 @@ async function checkAuthValid(opts: {
   }
 }
 
+async function checkGitHubIdentity(vault?: SecretVault): Promise<PreflightResult> {
+  const start = Date.now()
+  const check = CHECKS.find(c => c.id === 'github-identity')!
+
+  const BLOCKED_CAPABILITIES = [
+    'Approving pull requests',
+    'Posting review comments',
+    'Reporting CI status checks',
+  ]
+
+  const mode = (process.env.REFLECTT_GITHUB_IDENTITY_MODE || 'pat') as string
+
+  if (mode === 'app_installation') {
+    const privateKeySecretName = process.env.REFLECTT_GITHUB_APP_PRIVATE_KEY_SECRET || 'github.app.private_key_pem'
+    const appIdSecretName = process.env.REFLECTT_GITHUB_APP_ID_SECRET || 'github.app.app_id'
+    const installationIdSecretName = process.env.REFLECTT_GITHUB_APP_INSTALLATION_ID_SECRET || 'github.app.installation_id'
+    const requiredSecrets = [privateKeySecretName, appIdSecretName, installationIdSecretName]
+
+    if (!vault) {
+      return {
+        check,
+        passed: false,
+        level: 'warn',
+        message: 'app_installation mode configured but vault not available for preflight check',
+        recovery: [
+          'Vault was not passed to preflight runner. This is a server configuration issue.',
+          'Required vault secrets:',
+          ...requiredSecrets.map(s => `  reflectt-node vault write ${s}`),
+        ],
+        details: { mode, requiredSecrets },
+        durationMs: Date.now() - start,
+      }
+    }
+
+    let presentSecrets: string[]
+    try {
+      const listed = vault.list().map(s => s.name)
+      presentSecrets = listed
+    } catch {
+      presentSecrets = []
+    }
+
+    const missingSecrets = requiredSecrets.filter(s => !presentSecrets.includes(s))
+
+    if (missingSecrets.length > 0) {
+      return {
+        check,
+        passed: false,
+        level: 'fail',
+        message: `GitHub App secrets missing: ${missingSecrets.join(', ')}`,
+        recovery: [
+          'Set the missing vault secrets:',
+          ...missingSecrets.map(s => `  reflectt-node vault write ${s}`),
+          '',
+          'Without GitHub identity, the following are blocked:',
+          ...BLOCKED_CAPABILITIES.map(c => `  - ${c}`),
+        ],
+        details: { mode, requiredSecrets, missingSecrets, presentCount: presentSecrets.length },
+        durationMs: Date.now() - start,
+      }
+    }
+
+    return {
+      check,
+      passed: true,
+      level: 'pass',
+      message: `GitHub App secrets configured (${requiredSecrets.join(', ')}) ✓`,
+      details: { mode, configuredSecrets: requiredSecrets },
+      durationMs: Date.now() - start,
+    }
+  }
+
+  // PAT mode (default)
+  const patEnvKeys = ['GITHUB_TOKEN', 'GH_TOKEN']
+  let tokenSource: string | null = null
+  let tokenValue: string | null = null
+
+  for (const key of patEnvKeys) {
+    const val = process.env[key]
+    if (val && val.trim()) {
+      tokenSource = key
+      tokenValue = val.trim()
+      break
+    }
+  }
+
+  if (!tokenValue || !tokenSource) {
+    return {
+      check,
+      passed: false,
+      level: 'fail',
+      message: 'No GitHub token found (GITHUB_TOKEN / GH_TOKEN not set)',
+      recovery: [
+        'Set a GitHub Personal Access Token:',
+        '  export GITHUB_TOKEN=ghp_your_token_here',
+        '  # or: export GH_TOKEN=ghp_your_token_here',
+        '',
+        'Create a token at: https://github.com/settings/tokens',
+        'Required scopes: repo (for PR reviews and CI status)',
+        '',
+        'Without GitHub identity, the following are blocked:',
+        ...BLOCKED_CAPABILITIES.map(c => `  - ${c}`),
+      ],
+      details: { mode, checkedEnvVars: patEnvKeys },
+      durationMs: Date.now() - start,
+    }
+  }
+
+  const redacted = `${tokenValue.slice(0, 4)}***`
+
+  // Best-effort API validation
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 8_000)
+
+    const response = await fetch('https://api.github.com/user', {
+      headers: {
+        Authorization: `Bearer ${tokenValue}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+
+    if (response.ok) {
+      const scopes = response.headers.get('X-OAuth-Scopes') || ''
+      const hasRepoScope = scopes.split(',').map(s => s.trim()).includes('repo')
+      const json = await response.json().catch(() => ({})) as Record<string, unknown>
+      const login = typeof json.login === 'string' ? json.login : 'unknown'
+
+      return {
+        check,
+        passed: true,
+        level: 'pass',
+        message: `GitHub token valid (${tokenSource}=${redacted}, user=${login}) ✓`,
+        details: {
+          mode,
+          tokenSource,
+          redactedToken: redacted,
+          login,
+          scopes: scopes || '(none reported)',
+          hasRepoScope,
+        },
+        durationMs: Date.now() - start,
+      }
+    }
+
+    if (response.status === 401) {
+      return {
+        check,
+        passed: false,
+        level: 'fail',
+        message: `GitHub token invalid or expired (${tokenSource}=${redacted}, HTTP 401)`,
+        recovery: [
+          `Token in ${tokenSource} was rejected by GitHub.`,
+          'Generate a new token at: https://github.com/settings/tokens',
+          `Then: export ${tokenSource}=ghp_your_new_token`,
+          '',
+          'Without GitHub identity, the following are blocked:',
+          ...BLOCKED_CAPABILITIES.map(c => `  - ${c}`),
+        ],
+        details: { mode, tokenSource, redactedToken: redacted, status: 401 },
+        durationMs: Date.now() - start,
+      }
+    }
+
+    // Non-401 unexpected status — treat as warn (token present, validation unclear)
+    return {
+      check,
+      passed: true,
+      level: 'warn',
+      message: `GitHub token present (${tokenSource}=${redacted}) but validation returned HTTP ${response.status}`,
+      details: { mode, tokenSource, redactedToken: redacted, status: response.status },
+      durationMs: Date.now() - start,
+    }
+  } catch (err: any) {
+    // Network error — token is present, just couldn't validate
+    return {
+      check,
+      passed: true,
+      level: 'warn',
+      message: `GitHub token present (${tokenSource}=${redacted}) — validation skipped: ${err.message}`,
+      details: { mode, tokenSource, redactedToken: redacted, validationError: err.message },
+      durationMs: Date.now() - start,
+    }
+  }
+}
+
 // ── Main Preflight Runner ──
 
 export interface PreflightOptions {
@@ -683,6 +879,8 @@ export interface PreflightOptions {
   skipNetwork?: boolean
   /** User/host ID for onboarding drop-off tracking */
   userId?: string
+  /** Vault instance for app_installation mode secret checks */
+  vault?: SecretVault
 }
 
 /**
@@ -733,6 +931,9 @@ export async function runPreflight(opts: PreflightOptions = {}): Promise<Preflig
       }))
     }
   }
+
+  // Phase 4: GitHub identity (env/vault check is local; API validation is best-effort)
+  results.push(await checkGitHubIdentity(opts.vault))
 
   const allPassed = results.every(r => r.passed)
   const failures = results.filter(r => !r.passed)
@@ -818,4 +1019,5 @@ export {
   checkPortAvailable as _checkPortAvailable,
   checkCloudReachable as _checkCloudReachable,
   checkAuthValid as _checkAuthValid,
+  checkGitHubIdentity as _checkGitHubIdentity,
 }
