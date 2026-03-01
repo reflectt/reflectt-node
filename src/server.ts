@@ -15,6 +15,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME } from './config.js'
+import { trackRequest, getRequestMetrics } from './request-tracker.js'
 
 // ── Build info (read once at startup) ──────────────────────────────────────
 const BUILD_VERSION = (() => {
@@ -1777,6 +1778,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const duration = Date.now() - ((request as any).startTime || Date.now())
     healthMonitor.trackRequest(duration)
     trackTelemetryRequest(request.method, request.url, reply.statusCode, duration)
+    trackRequest(request.method, request.url, reply.statusCode, request.headers['user-agent'])
     
     if (reply.statusCode >= 400) {
       healthMonitor.trackError()
@@ -2156,6 +2158,22 @@ export async function createServer(): Promise<FastifyInstance> {
       chat: chatManager.getStats(),
       tasks: taskManager.getStats({ includeTest }),
       inbox: inboxManager.getStats(),
+      request_counts: (() => {
+        const m = getRequestMetrics()
+        return { total: m.total, errors: m.errors, rps: m.rps, byGroup: m.byGroup }
+      })(),
+      timestamp: Date.now(),
+    }
+  })
+
+  // ─── Request errors — last N errors for launch-day debugging ───
+  app.get('/health/errors', async () => {
+    const m = getRequestMetrics()
+    return {
+      total_errors: m.errors,
+      total_requests: m.total,
+      error_rate: m.total > 0 ? Math.round((m.errors / m.total) * 10000) / 100 : 0,
+      recent: m.recentErrors.slice(0, 20),
       timestamp: Date.now(),
     }
   })
