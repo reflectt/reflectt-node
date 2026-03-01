@@ -419,6 +419,14 @@ function complianceState(value, threshold) {
   return 'ok';
 }
 
+/** Format minutes into human-readable duration, capping extreme values */
+function formatDurationMin(min) {
+  if (min == null || min < 0) return '—';
+  if (min >= 1440) return Math.floor(min / 1440) + 'd';
+  if (min >= 120) return Math.floor(min / 60) + 'h';
+  return min + 'm';
+}
+
 function statusTemplateFor(agent, taskId) {
   const mentions = agent === 'pixel'
     ? '@kai @link'
@@ -474,7 +482,7 @@ function renderCompliance(compliance) {
 
   const chipsHtml = chips.map(c => {
     const state = complianceState(c.value, c.threshold);
-    return '<div class="sla-chip ' + state + '"><span>' + esc(c.label) + '</span><strong>' + c.value + 'm</strong></div>';
+    return '<div class="sla-chip ' + state + '"><span>' + esc(c.label) + '</span><strong>' + formatDurationMin(c.value) + '</strong></div>';
   }).join('');
 
   const rows = agents.map(a => {
@@ -483,7 +491,7 @@ function renderCompliance(compliance) {
     return '<tr>' +
       '<td>' + esc(a.agent) + '</td>' +
       '<td>' + taskCell + '</td>' +
-      '<td>' + a.lastValidStatusAgeMin + 'm</td>' +
+      '<td>' + formatDurationMin(a.lastValidStatusAgeMin) + '</td>' +
       '<td>' + a.expectedCadenceMin + 'm</td>' +
       '<td><span class="state-pill ' + a.state + ' compliance-state-' + a.state + '">' + esc(a.state) + '</span></td>' +
       '<td><button class="copy-template-btn" data-agent="' + esc(a.agent) + '" data-task="' + esc(taskValue) + '" onclick="copyStatusTemplate(this.dataset.agent, this.dataset.task)">Copy template</button></td>' +
@@ -1413,11 +1421,13 @@ async function loadHealth() {
         const stuckLabel = a.idleWithActiveTask ? ' • ⛔ active-task idle>60m' : '';
         const staleReasonLabel = a.staleReason ? ' • ' + a.staleReason : '';
         const hierarchyClass = healthPriorityRank(a) === 0 ? 'health-critical' : (healthPriorityRank(a) === 1 ? 'health-warning' : 'health-info');
+        const isStaleGhost = a.minutesSinceLastSeen > 43200; // >30 days
         const cardClasses = [
           'health-card',
           hierarchyClass,
           a.lowConfidence ? 'needs-review' : '',
           a.idleWithActiveTask ? 'stuck-active-task' : '',
+          isStaleGhost ? 'stale-ghost' : '',
         ].filter(Boolean).join(' ');
         return `
         <div class="${cardClasses}">
