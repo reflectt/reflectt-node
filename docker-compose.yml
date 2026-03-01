@@ -13,6 +13,9 @@ services:
     ports:
       - "4445:4445"
     volumes:
+      # Use a named volume for a clean, independent instance.
+      # ⚠️ Do NOT mount ~/.reflectt:/data — this inherits the host team identity.
+      # To intentionally share identity, set REFLECTT_INHERIT_IDENTITY=1
       - reflectt-data:/data
     environment:
       - PORT=4445
