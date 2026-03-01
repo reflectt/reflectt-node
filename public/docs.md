@@ -93,6 +93,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/health/errors` | Request error metrics: total errors, total requests, error rate, and last 20 errors for debugging. Returns `{ total_errors, total_requests, error_rate, recent[], timestamp }`. |
 | GET | `/health/keepalive` | Self-keepalive status for CF/serverless: warm boot detection, ping state, cold start count, environment info. |
 | GET | `/health/ping` | Ultra-lightweight keepalive — no DB access. Returns `{ status, uptime_seconds, ts }`. Use for cron triggers, load balancers, uptime monitors. |
 | GET | `/health/watchdog` | Richer keepalive with cold_start flag, task/chat stats, boot_info, and remediation hints. For monitoring dashboards. See `docs/KEEPALIVE.md`. |
@@ -110,6 +111,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/workflow` | Unified per-agent workflow state: doing-task age, last shipped timestamp, blocker flag, artifact path, and linked PR state. Query: `include_test=1` to include test-harness tasks. |
 | GET | `/health/reflection-pipeline` | Reflection→Insight→Promotion health signal. Returns recent reflection/insight/promotion counts, status (`healthy`\|`at_risk`\|`broken`), and alert timestamps. Triggers alert when reflections flow but insights remain zero past threshold. |
 | GET | `/health/backlog` | Backlog readiness snapshot by lane/agent with ready-floor breach detection and stale-validating summary. Query: `include_test=1` to include test-harness tasks. |
+| GET | `/health/alert-preflight` | Alert-preflight guard metrics: total checked, canary-flagged, suppressed, false-positive rate, mode (canary/enforce/off). |
 | GET | `/health/mention-ack` | Mention-ack lifecycle metrics (pending, timeout, latency counters) |
 | GET | `/health/mention-ack/recent` | Recent mention-ack entries for debugging. Query: `limit` (max 100) |
 | GET | `/health/mention-ack/:agent` | Pending mention-ack entries for one agent |
@@ -718,6 +720,7 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/` | Root redirect — redirects to `/dashboard`. |
 | GET | `/dashboard` | HTML dashboard UI |
 | GET | `/docs` | This API reference |
 | GET | `/ui-kit` | Living design system reference page — colors, typography, spacing, buttons, links, badges, inputs, panels, tables with token names. |
