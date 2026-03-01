@@ -611,10 +611,13 @@ export class BoardHealthWorker {
   private replenishLastAt: Record<string, number> = {}
 
   /**
-   * Sweeper tick: for each lane below readyFloor, auto-create placeholder tasks
-   * so agents always have specced work waiting.
+   * Sweeper tick: for each lane below readyFloor, emit a digest warning.
    *
-   * One task per agent-deficit per tick, with a 30-minute per-agent cooldown.
+   * Does NOT create placeholder tasks — the continuity loop (3e) handles
+   * real replenishment from promoted insights. Creating empty placeholders
+   * clutters the board with scopeless tasks that no one can work on.
+   *
+   * One warning per agent-deficit per tick, with a 30-minute per-agent cooldown.
    */
   private async sweepReadyQueue(now: number, dryRun: boolean): Promise<PolicyAction[]> {
     const { getLanesConfig } = await import('./lane-config.js')
@@ -624,6 +627,14 @@ export class BoardHealthWorker {
 
     for (const lane of lanes) {
       for (const agent of lane.agents) {
+        // Skip ghost agents that have never checked in
+        if (!presenceManager.getPresence(agent)) continue
+
+        // Skip inactive agents (no activity in 24h)
+        const presence = presenceManager.getPresence(agent)
+        const lastActive = presence?.lastUpdate ?? 0
+        if (lastActive > 0 && (now - lastActive) > 24 * 60 * 60_000) continue
+
         // Enforce per-agent cooldown to avoid spam
         const lastReplenish = this.replenishLastAt[agent] ?? 0
         if (now - lastReplenish < cooldownMs) continue
@@ -640,50 +651,24 @@ export class BoardHealthWorker {
         const deficit = lane.readyFloor - unblockedTodo.length
         if (deficit <= 0) continue
 
-        // Create placeholder tasks to fill the deficit
-        for (let i = 0; i < deficit; i++) {
-          const action: PolicyAction = {
-            id: `rqs-${agent}-${now}-${i}`,
-            kind: 'ready-queue-replenish',
-            taskId: null,
-            agent,
-            description: `Auto-created ready-queue placeholder for @${agent} in lane "${lane.name}" (${unblockedTodo.length}/${lane.readyFloor} ready)`,
-            previousState: { readyCount: unblockedTodo.length, readyFloor: lane.readyFloor },
-            appliedAt: now,
-            rolledBack: false,
-            rolledBackAt: null,
-            rollbackBy: null,
-          }
-
-          if (!dryRun) {
-            try {
-              const task = await taskManager.createTask({
-                title: `[Auto] Ready queue replenish: ${lane.name}`,
-                status: 'todo',
-                assignee: agent,
-                createdBy: 'system',
-                done_criteria: ['Define and complete the actual work for this placeholder task'],
-                metadata: {
-                  auto_created: true,
-                  auto_created_by: 'ready-queue-sweeper',
-                  lane: lane.name,
-                  sweeper_action_id: action.id,
-                },
-              })
-              action.taskId = task.id
-            } catch (err) {
-              console.warn(`[ready-queue-sweeper] Failed to create task for @${agent}:`, (err as Error).message)
-              continue
-            }
-          }
-
-          this.auditLog.push(action)
-          actions.push(action)
+        // Emit a warning action — do NOT create placeholder tasks.
+        // The continuity loop will attempt real replenishment from insights.
+        const action: PolicyAction = {
+          id: `rqs-${agent}-${now}-0`,
+          kind: 'ready-queue-replenish',
+          taskId: null,
+          agent,
+          description: `Ready queue below floor for @${agent} in lane "${lane.name}" (${unblockedTodo.length}/${lane.readyFloor} ready). Deferring to continuity loop for scoped replenishment.`,
+          previousState: { readyCount: unblockedTodo.length, readyFloor: lane.readyFloor },
+          appliedAt: now,
+          rolledBack: false,
+          rolledBackAt: null,
+          rollbackBy: null,
         }
 
-        if (!dryRun && actions.length > 0) {
-          this.replenishLastAt[agent] = now
-        }
+        this.auditLog.push(action)
+        actions.push(action)
+        this.replenishLastAt[agent] = now
       }
     }
 
