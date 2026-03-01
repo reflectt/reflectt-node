@@ -4,8 +4,12 @@ import type { ResolvedReflecttAccount, ReflecttConfig } from "./types.js";
 
 const DEFAULT_REFLECTT_URL = "http://localhost:4445";
 
-const WATCHED_AGENTS = ["kai", "link", "pixel", "echo", "harmony", "rhythm", "sage", "scout", "spark"] as const;
-const WATCHED_SET = new Set<string>(WATCHED_AGENTS);
+// NOTE: This file is a legacy standalone implementation and is NOT imported by ../index.ts.
+// Agent discovery is handled dynamically in index.ts via refreshAgentRoster() which queries
+// /team/roles on connect and refreshes every 5 minutes. The hardcoded roster has been removed;
+// if this file is ever wired up it should import the shared roster from index.ts instead.
+let WATCHED_AGENTS: string[] = [];
+let WATCHED_SET = new Set<string>();
 
 const IDLE_NUDGE_WINDOW_MS = 15 * 60 * 1000; // 15m
 const WATCHDOG_INTERVAL_MS = 60 * 1000; // 1m poll
