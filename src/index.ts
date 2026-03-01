@@ -19,7 +19,7 @@ import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
  * Build-freshness check: warn if dist/ is older than src/
  * Prevents silently running stale compiled code after source changes.
  */
-import { statSync, readdirSync, existsSync } from 'fs'
+import { statSync, readdirSync, existsSync, readFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -48,6 +48,80 @@ function checkBuildFreshness(): void {
     }
   } catch {
     // Non-fatal — skip check if anything goes wrong
+  }
+}
+
+/**
+ * Docker identity isolation: detect if mounted volumes contain another team's
+ * config and warn/block to prevent identity inheritance.
+ */
+function checkDockerIdentity(): void {
+  const isDocker = existsSync('/.dockerenv') || process.env.REFLECTT_HOME === '/data'
+  if (!isDocker) return
+
+  const reflecttHome = process.env.REFLECTT_HOME || '/data'
+
+  // Check for inherited OpenClaw config
+  const openclawConfigPath = join(reflecttHome, '.openclaw', 'openclaw.json')
+  if (existsSync(openclawConfigPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(openclawConfigPath, 'utf-8'))
+      const gatewayToken = raw?.gateway?.auth?.token
+      const agentId = raw?.agentId
+
+      // If there's an inherited identity with a gateway token, warn
+      if (gatewayToken && agentId) {
+        console.warn('')
+        console.warn('⚠️  Inherited identity detected in mounted volume!')
+        console.warn(`   Agent ID: ${agentId}`)
+        console.warn('   This Docker instance may appear as another team\'s agent.')
+        console.warn('')
+        console.warn('   To use a fresh identity:')
+        console.warn('     1. Remove the mounted .openclaw directory, or')
+        console.warn('     2. Set OPENCLAW_AGENT_ID=my-docker-agent in docker-compose.yml')
+        console.warn('')
+      }
+    } catch {
+      // Config exists but can't be parsed — not a problem
+    }
+  }
+
+  // Check for inherited cloud credentials
+  const cloudConfigPath = join(reflecttHome, 'config.json')
+  if (existsSync(cloudConfigPath)) {
+    try {
+      const raw = JSON.parse(readFileSync(cloudConfigPath, 'utf-8'))
+      const hostName = raw?.cloud?.hostName
+      const hostId = raw?.cloud?.hostId
+      const credential = raw?.cloud?.credential
+
+      if (hostId && credential) {
+        const explicitName = process.env.REFLECTT_HOST_NAME
+        if (!explicitName) {
+          console.warn('')
+          console.warn('⚠️  Inherited cloud registration detected!')
+          console.warn(`   Host: ${hostName || 'unknown'} (${hostId})`)
+          console.warn('   This Docker instance will appear as an existing host in the cloud dashboard.')
+          console.warn('')
+          console.warn('   To register as a new host:')
+          console.warn('     1. Set REFLECTT_HOST_NAME=my-docker-host in docker-compose.yml')
+          console.warn('     2. Generate a new join token in the cloud dashboard')
+          console.warn('     3. Set REFLECTT_HOST_TOKEN=<new-token> in docker-compose.yml')
+          console.warn('')
+        }
+      }
+    } catch {
+      // Config exists but can't be parsed
+    }
+  }
+
+  // Generate a fresh agent identity if none is explicitly set
+  if (!process.env.OPENCLAW_AGENT_ID) {
+    const hostname = require('os').hostname()
+    const shortId = require('crypto').randomBytes(3).toString('hex')
+    const defaultId = `docker-${hostname}-${shortId}`
+    process.env.OPENCLAW_AGENT_ID = defaultId
+    console.log(`🆔 Docker identity: ${defaultId} (set OPENCLAW_AGENT_ID to override)`)
   }
 }
 
@@ -99,6 +173,9 @@ async function main() {
 
   // Build-freshness check (non-blocking)
   checkBuildFreshness()
+
+  // Docker identity isolation (must run before bootstrap)
+  checkDockerIdentity()
 
   // Docker bootstrap guidance (non-blocking)
   checkDockerBootstrap()
