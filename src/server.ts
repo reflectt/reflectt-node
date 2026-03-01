@@ -185,11 +185,11 @@ const CreateTaskSchema = z.object({
   type: z.enum(TASK_TYPES).optional(), // optional for backward compat, validated when present
   description: z.string().optional(),
   status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).default('todo'),
-  assignee: z.string().trim().min(1),
+  assignee: z.string().trim().min(1).optional().default('unassigned'),
   reviewer: z.string().trim().min(1).or(z.literal('auto')).default('auto'), // 'auto' triggers load-balanced assignment
-  done_criteria: z.array(z.string().trim().min(1)).min(1),
-  eta: z.string().trim().min(1),
-  createdBy: z.string().min(1),
+  done_criteria: z.array(z.string().trim().min(1)).min(1).optional().default([]),
+  eta: z.string().trim().min(1).optional(),
+  createdBy: z.string().min(1).optional().default('user'),
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).default('P3'),
   blocked_by: z.array(z.string()).optional(),
   epic_id: z.string().optional(),
@@ -232,7 +232,13 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
     }
   }
 
-  // Type-specific checks
+  // For todo tasks, skip type-specific and done_criteria quality checks.
+  // These are backlog items — full readiness is enforced when moving to doing.
+  if (data.status === 'todo') {
+    return problems // Return early with only title-level checks
+  }
+
+  // Type-specific checks (non-todo tasks)
   if (data.type === 'bug') {
     // Bugs should reference what's broken
     const hasImpactWord = /break|broken|fail|error|crash|stuck|wrong|missing|block/i.test(data.title + ' ' + (data.description || ''))
@@ -267,13 +273,14 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
   // Reflection-origin invariant: all tasks must trace back to a reflection/insight
   // unless explicitly exempted (system tasks, recurring materialization, etc.)
   // Auto-exempt when no reflections exist yet (fresh install / new user onboarding)
+  // Also skip for todo tasks — backlog items don't need reflection provenance.
   const meta = (data.metadata || {}) as Record<string, unknown>
   const hasReflectionSource = Boolean(meta.source_reflection || meta.source_insight || meta.source === 'reflection_pipeline')
   const systemHasReflections = countReflections() > 0
   const isExempt = Boolean(meta.reflection_exempt) || !systemHasReflections
   const hasExemptReason = typeof meta.reflection_exempt_reason === 'string' && meta.reflection_exempt_reason.trim().length > 0
 
-  if (!hasReflectionSource && !isExempt) {
+  if (data.status !== 'todo' && !hasReflectionSource && !isExempt) {
     problems.push(
       'Reflection-origin required: tasks must include metadata.source_reflection or metadata.source_insight. ' +
       'If this task legitimately does not originate from a reflection, set metadata.reflection_exempt=true with metadata.reflection_exempt_reason.'
