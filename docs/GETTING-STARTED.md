@@ -78,7 +78,14 @@ If the doctor tells you to fix something, follow its instructions. Re-run the do
 ```bash
 curl -X POST http://localhost:4445/tasks \
   -H 'Content-Type: application/json' \
-  -d '{"title": "Build the landing page", "priority": "P1", "assignee": "builder"}'
+  -d '{
+    "title": "Build the landing page",
+    "priority": "P1",
+    "assignee": "builder",
+    "done_criteria": "Landing page is live and links work",
+    "eta": "2h",
+    "createdBy": "human"
+  }'
 ```
 
 **Check your agent's next action:**
