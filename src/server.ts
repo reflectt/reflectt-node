@@ -31,6 +31,24 @@ const BUILD_COMMIT = (() => {
 })()
 
 const BUILD_STARTED_AT = Date.now()
+
+// Lightweight request metrics + error ring buffer (launch observability)
+const requestMetrics = {
+  counts: new Map<string, number>(),
+  errors: [] as Array<{ ts: number; method: string; url: string; status: number }>,
+  maxErrors: 20,
+  hit(bucket: string) { this.counts.set(bucket, (this.counts.get(bucket) || 0) + 1) },
+  recordError(method: string, url: string, status: number) {
+    this.errors.push({ ts: Date.now(), method, url, status })
+    if (this.errors.length > this.maxErrors) this.errors.shift()
+  },
+  snapshot() {
+    const c: Record<string, number> = {}
+    for (const [k, v] of this.counts) c[k] = v
+    return { request_counts: c, recent_errors: this.errors.slice(-5) }
+  },
+}
+
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { detectApproval, applyApproval } from './chat-approval-detector.js'
@@ -1698,6 +1716,20 @@ export async function createServer(): Promise<FastifyInstance> {
   const fastifyMultipart = await import('@fastify/multipart')
   await app.register(fastifyMultipart.default, { limits: { fileSize: 50 * 1024 * 1024 } })
 
+  // Request metrics hook
+  app.addHook('onResponse', async (request, reply) => {
+    const url = request.url.split('?')[0]
+    if (url.startsWith('/bootstrap')) requestMetrics.hit('bootstrap')
+    else if (url === '/health') requestMetrics.hit('health')
+    else if (url === '/capabilities') requestMetrics.hit('capabilities')
+    else if (url.startsWith('/tasks/next')) requestMetrics.hit('tasks_next')
+    else if (url.startsWith('/tasks') && request.method === 'POST') requestMetrics.hit('tasks_create')
+    else if (url.startsWith('/heartbeat')) requestMetrics.hit('heartbeat')
+    else if (url === '/dashboard' || url.startsWith('/dashboard')) requestMetrics.hit('dashboard')
+    requestMetrics.hit('_total')
+    if (reply.statusCode >= 400) requestMetrics.recordError(request.method, url, reply.statusCode)
+  })
+
   // Normalize error responses to a consistent envelope
   app.addHook('preSerialization', async (request, reply, payload) => {
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -2156,8 +2188,17 @@ export async function createServer(): Promise<FastifyInstance> {
       chat: chatManager.getStats(),
       tasks: taskManager.getStats({ includeTest }),
       inbox: inboxManager.getStats(),
+      metrics: requestMetrics.snapshot(),
       timestamp: Date.now(),
     }
+  })
+
+  app.get('/health/errors', async () => {
+    return { errors: requestMetrics.errors, count: requestMetrics.errors.length }
+  })
+
+  app.get('/health/metrics', async () => {
+    return requestMetrics.snapshot()
   })
 
   app.get('/health/reflection-pipeline', async () => {
