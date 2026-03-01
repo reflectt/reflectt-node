@@ -163,6 +163,16 @@ export function getCloudStatus() {
   else if (!connected) phase = 'configured'
   else phase = 'connected'
 
+  // Sync health: count dirty/pending records
+  let dirtyTaskCount = 0
+  try {
+    const db = getDb()
+    const row = db.prepare(
+      "SELECT COUNT(*) as cnt FROM sync_ledger WHERE record_type='task' AND (cloud_synced_at IS NULL OR cloud_synced_at < local_updated_at OR sync_status != 'synced')",
+    ).get() as { cnt: number }
+    dirtyTaskCount = row.cnt
+  } catch { /* DB may not be ready */ }
+
   return {
     configured,
     registered,
@@ -177,6 +187,10 @@ export function getCloudStatus() {
     lastCanvasSync: state.lastCanvasSync,
     errors: state.errors,
     uptimeMs: state.running ? Date.now() - state.startedAt : 0,
+    syncHealth: {
+      dirtyTaskCount,
+      healthy: dirtyTaskCount < 50,
+    },
   }
 }
 
@@ -638,6 +652,12 @@ async function syncTasks(): Promise<void> {
   if (dirtyRows.length === 0) {
     state.lastTaskSync = Date.now()
     return
+  }
+
+  // Alert when dirty count is high (potential sync backlog)
+  const DIRTY_ALERT_THRESHOLD = 50
+  if (dirtyRows.length >= DIRTY_ALERT_THRESHOLD) {
+    console.warn(`[cloud-sync] High dirty task count: ${dirtyRows.length} records pending sync (threshold: ${DIRTY_ALERT_THRESHOLD})`)
   }
 
   const tasksPayload = dirtyRows.map((row) => ({
