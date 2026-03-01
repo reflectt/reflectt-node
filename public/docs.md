@@ -93,6 +93,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/health/errors` | Request error metrics: total errors, total requests, error rate, and last 20 errors for debugging. Returns `{ total_errors, total_requests, error_rate, recent[], timestamp }`. |
 | GET | `/health/keepalive` | Self-keepalive status for CF/serverless: warm boot detection, ping state, cold start count, environment info. |
 | GET | `/health/ping` | Ultra-lightweight keepalive — no DB access. Returns `{ status, uptime_seconds, ts }`. Use for cron triggers, load balancers, uptime monitors. |
 | GET | `/health/watchdog` | Richer keepalive with cold_start flag, task/chat stats, boot_info, and remediation hints. For monitoring dashboards. See `docs/KEEPALIVE.md`. |
@@ -719,6 +720,7 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/` | Root redirect — redirects to `/dashboard`. |
 | GET | `/dashboard` | HTML dashboard UI |
 | GET | `/docs` | This API reference |
 | GET | `/ui-kit` | Living design system reference page — colors, typography, spacing, buttons, links, badges, inputs, panels, tables with token names. |
