@@ -128,19 +128,23 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
   // ── validating ──────────────────────────────────────────────────────
 
   if (targetStatus === 'validating') {
+    // Detect non-code task (explicit flag or lane-based)
+    const handoff = meta.review_handoff as Record<string, unknown> | undefined
+    const isNonCode = handoff?.non_code === true || handoff?.doc_only === true || handoff?.config_only === true
+
     // Artifact path
     const artifactPath = meta.artifact_path as string | undefined
     if (!artifactPath?.trim()) {
       const suggestedPath = `process/TASK-${taskId.split('-').pop()}.md`
       items.push({
         field: 'metadata.artifact_path',
-        severity: 'error',
-        message: 'artifact_path required under process/',
+        severity: isNonCode ? 'warning' : 'error',
+        message: isNonCode ? 'artifact_path recommended' : 'artifact_path required under process/',
         hint: `Suggested: "${suggestedPath}"`,
         autoDefault: suggestedPath,
       })
       autoDefaults['metadata.artifact_path'] = suggestedPath
-    } else if (!artifactPath.startsWith('process/')) {
+    } else if (!isNonCode && !artifactPath.startsWith('process/')) {
       items.push({
         field: 'metadata.artifact_path',
         severity: 'error',
@@ -148,14 +152,13 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
       })
     }
 
-    // Review handoff
-    const handoff = meta.review_handoff as Record<string, unknown> | undefined
+    // Review handoff (reuse handoff from above)
     if (!handoff) {
       items.push({
         field: 'metadata.review_handoff',
         severity: 'error',
         message: 'review_handoff object required for validating transition',
-        hint: 'Must include: task_id, artifact_path, test_proof, known_caveats. Also pr_url + commit_sha unless doc_only or config_only.',
+        hint: 'Must include: task_id, known_caveats. For code tasks: also artifact_path, test_proof, pr_url, commit_sha. For non-code tasks: set non_code=true.',
       })
     } else {
       if (!handoff.task_id) {
@@ -163,11 +166,11 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
       } else if (handoff.task_id !== taskId) {
         items.push({ field: 'metadata.review_handoff.task_id', severity: 'error', message: `task_id must match: expected "${taskId}"` })
       }
-      if (!handoff.artifact_path) {
-        items.push({ field: 'metadata.review_handoff.artifact_path', severity: 'error', message: 'artifact_path required in review_handoff' })
+      if (!isNonCode && !handoff.artifact_path) {
+        items.push({ field: 'metadata.review_handoff.artifact_path', severity: 'error', message: 'artifact_path required in review_handoff (or set non_code=true)' })
       }
-      if (!handoff.test_proof) {
-        items.push({ field: 'metadata.review_handoff.test_proof', severity: 'error', message: 'test_proof required (e.g. "vitest run: 206 pass")' })
+      if (!isNonCode && !handoff.test_proof) {
+        items.push({ field: 'metadata.review_handoff.test_proof', severity: 'error', message: 'test_proof required (e.g. "vitest run: 206 pass") — or set non_code=true' })
       }
       if (handoff.known_caveats === undefined) {
         items.push({ field: 'metadata.review_handoff.known_caveats', severity: 'error', message: 'known_caveats required (use "none" if none)' })
@@ -175,12 +178,12 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
 
       const isDocOnly = handoff.doc_only === true
       const isConfigOnly = handoff.config_only === true
-      if (!isDocOnly && !isConfigOnly) {
+      if (!isNonCode && !isDocOnly && !isConfigOnly) {
         if (!handoff.pr_url) {
-          items.push({ field: 'metadata.review_handoff.pr_url', severity: 'error', message: 'PR URL required (or set doc_only/config_only=true)' })
+          items.push({ field: 'metadata.review_handoff.pr_url', severity: 'error', message: 'PR URL required (or set doc_only/config_only/non_code=true)' })
         }
         if (!handoff.commit_sha) {
-          items.push({ field: 'metadata.review_handoff.commit_sha', severity: 'error', message: 'commit SHA required (or set doc_only/config_only=true)' })
+          items.push({ field: 'metadata.review_handoff.commit_sha', severity: 'error', message: 'commit SHA required (or set doc_only/config_only/non_code=true)' })
         }
       }
     }
