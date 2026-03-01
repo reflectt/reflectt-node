@@ -583,7 +583,21 @@ async function loadPresence() {
   });
 
   const strip = document.getElementById('agent-strip');
-  strip.innerHTML = AGENTS.map(a => {
+  // Build dynamic agent list from registry + presence (not hardcoded AGENTS)
+  const registeredAgents = Array.from(AGENT_INDEX.values());
+  // Add any agents from presence not already in registry
+  Object.keys(presenceMap).forEach(name => {
+    if (!AGENT_INDEX.has(name)) {
+      registeredAgents.push({ name, emoji: '🤖', role: '' });
+    }
+  });
+  // Add any agents with active tasks not already listed
+  Object.keys(agentTasks).forEach(name => {
+    if (!AGENT_INDEX.has(name) && !presenceMap[name]) {
+      registeredAgents.push({ name, emoji: '🤖', role: '' });
+    }
+  });
+  strip.innerHTML = registeredAgents.map(a => {
     const p = presenceMap[a.name];
     const taskTitle = agentTasks[a.name];
     const healthRow = healthAgentMap.get(a.name);
