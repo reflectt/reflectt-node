@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Ready-queue engine v1 tests
-// Proves: (a) lane below floor triggers task creation, (b) WIP limit blocks pulls.
+// Proves: (a) lane below floor emits warning (no placeholder task creation), (b) WIP limit blocks pulls.
 
 import { describe, it, expect, beforeAll, afterEach } from 'vitest'
 import { taskManager } from '../src/tasks.js'
 import { BoardHealthWorker } from '../src/boardHealthWorker.js'
 import { DEFAULT_LANES, checkWipLimit, getLanesConfig } from '../src/lane-config.js'
+import { presenceManager } from '../src/presence.js'
 
 // Use a test agent from DEFAULT_LANES so lane config is deterministic in tests
 const TEST_AGENT = 'link'
@@ -14,6 +15,15 @@ const TEST_LANE = DEFAULT_LANES.find(l => l.agents.includes(TEST_AGENT))!
 describe('Ready-queue engine v1', () => {
   // Track tasks created during each test for cleanup
   const createdTaskIds: string[] = []
+
+  beforeAll(() => {
+    // Register presence for test agents so the ghost-agent guard doesn't skip them
+    for (const lane of DEFAULT_LANES) {
+      for (const agent of lane.agents) {
+        presenceManager.updatePresence(agent, 'idle')
+      }
+    }
+  })
 
   afterEach(() => {
     for (const id of createdTaskIds) {
@@ -41,12 +51,12 @@ describe('Ready-queue engine v1', () => {
     }
   })
 
-  // ── (a) Sweeper: lane below floor triggers task creation ─────────────────
+  // ── (a) Sweeper: lane below floor emits warning (no task creation) ────────
 
-  it('sweeper creates placeholder tasks when agent is below readyFloor', async () => {
+  it('sweeper emits warning (not task) when agent is below readyFloor', async () => {
     // Ensure no pre-existing todo tasks for test agent interfere
     const existingTodo = taskManager.listTasks({ status: 'todo', assignee: TEST_AGENT })
-    // Delete only tasks we created in prior test runs (TEST: prefix)
+    // Delete only tasks we created in prior test runs
     const prior = existingTodo.filter(t => t.title?.startsWith('[Auto] Ready queue replenish:'))
     for (const t of prior) {
       taskManager.deleteTask(t.id)
@@ -56,8 +66,6 @@ describe('Ready-queue engine v1', () => {
     const beforeTodo = taskManager.listTasks({ status: 'todo', assignee: TEST_AGENT })
       .filter(t => !(t.metadata?.auto_created))
 
-    // Only run the sweeper test when the agent is below floor.
-    // If the agent already has >= readyFloor todo tasks, skip.
     const unblockedBefore = beforeTodo.filter(t => {
       const blocked = t.metadata?.blocked_by
       if (!blocked) return true
@@ -82,18 +90,10 @@ describe('Ready-queue engine v1', () => {
     // Check that at least one was for our test agent
     const agentAction = replenishActions.find(a => a.agent === TEST_AGENT)
     expect(agentAction).toBeDefined()
-    expect(agentAction?.taskId).toBeDefined()
 
-    // Verify the task exists in taskManager
-    if (agentAction?.taskId) {
-      const created = taskManager.getTask(agentAction.taskId)
-      expect(created).toBeDefined()
-      expect(created?.title).toBe(`[Auto] Ready queue replenish: ${TEST_LANE.name}`)
-      expect(created?.status).toBe('todo')
-      expect(created?.assignee).toBe(TEST_AGENT)
-      expect(created?.metadata?.auto_created).toBe(true)
-      createdTaskIds.push(agentAction.taskId)
-    }
+    // The sweeper should NOT create tasks — only emit warnings
+    expect(agentAction?.taskId).toBeNull()
+    expect(agentAction?.description).toContain('Deferring to continuity loop')
   })
 
   it('sweeper does NOT create tasks when agent is at or above readyFloor', async () => {
