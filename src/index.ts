@@ -7,7 +7,7 @@
  * Entry point
  */
 import { createServer } from './server.js'
-import { serverConfig, isDev, openclawConfig } from './config.js'
+import { serverConfig, isDev, openclawConfig, DATA_DIR } from './config.js'
 import { acquirePidLock, releasePidLock, getPidPath } from './pidlock.js'
 import { startCloudIntegration, stopCloudIntegration, isCloudConfigured, watchConfigForCloudChanges, stopConfigWatcher } from './cloud.js'
 import { stopConfigWatch } from './assignment.js'
@@ -256,6 +256,51 @@ async function main() {
       watchConfigForCloudChanges()
     }
     
+    // First-boot seeding: if no agents and no tasks, create starter team + welcome task
+    try {
+      const { taskManager } = await import('./tasks.js')
+      const { createStarterTeam } = await import('./starter-team.js')
+      const allTasks = taskManager.listTasks({})
+      const agentsDir = join(DATA_DIR, 'agents')
+      const hasAgents = existsSync(agentsDir) && readdirSync(agentsDir).filter(f => !f.startsWith('.')).length > 0
+      if (allTasks.length === 0 && !hasAgents) {
+        console.log('🌱 First boot detected — seeding starter team…')
+        const result = await createStarterTeam()
+        console.log(`   Created agents: ${result.created.join(', ') || 'none (already exist)'}`)
+
+        // Create a welcome task so the dashboard isn't empty
+        taskManager.createTask({
+          status: 'todo',
+          createdBy: 'system',
+          title: 'Welcome to reflectt-node — explore the dashboard and connect your agents',
+          description: [
+            '## Getting Started',
+            '',
+            'Your reflectt-node is running! Here\'s what to do next:',
+            '',
+            '1. **Connect OpenClaw agents** — set `OPENCLAW_GATEWAY_URL` and `OPENCLAW_GATEWAY_TOKEN`',
+            '2. **Explore the dashboard** — visit `/dashboard` to see tasks, agents, and chat',
+            '3. **Try the API** — `GET /capabilities` lists every endpoint',
+            '4. **Connect to the cloud** — `reflectt host connect --join-token <token>`',
+            '',
+            'When done, move this task to `done`. Your first task cycle is complete!',
+          ].join('\n'),
+          priority: 'P2',
+          assignee: 'builder',
+          reviewer: 'ops',
+          done_criteria: [
+            'Dashboard loads and shows this task',
+            'At least one agent connected via OpenClaw',
+          ],
+          metadata: { source: 'first-boot', reflection_exempt: true, reflection_exempt_reason: 'Auto-created welcome task' },
+        })
+        console.log('   Created welcome task')
+      }
+    } catch (err) {
+      // Non-blocking — don't prevent server from starting
+      console.warn(`⚠️  First-boot seeding: ${(err as Error)?.message || err}`)
+    }
+
     // Graceful shutdown
     const shutdown = async (signal: string) => {
       console.log(`\n${signal} received, shutting down...`)
