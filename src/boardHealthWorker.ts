@@ -84,6 +84,8 @@ export interface BoardHealthWorkerConfig {
   dryRun: boolean
   /** Max actions per tick to prevent runaway automation (default: 5) */
   maxActionsPerTick: number
+  /** Minutes without agent activity before skipping in auto-replenish (default: 1440 = 24h) */
+  inactiveAgentThresholdMin: number
   /** Minutes without reviewer activity before auto-reassigning reviewer (default: 480 = 8h) */
   reviewSlaThresholdMin: number
   /** Fallback reviewer when no active agent is available (default: 'ryan') */
@@ -102,6 +104,7 @@ const DEFAULT_CONFIG: BoardHealthWorkerConfig = {
   quietHoursEnd: 6,
   dryRun: false,
   maxActionsPerTick: 5,
+  inactiveAgentThresholdMin: 1440,   // 24 hours
   reviewSlaThresholdMin: 480,        // 8 hours
   reviewEscalationTarget: 'ryan',
 }
@@ -630,10 +633,11 @@ export class BoardHealthWorker {
         // Skip ghost agents that have never checked in
         if (!presenceManager.getPresence(agent)) continue
 
-        // Skip inactive agents (no activity in 24h)
+        // Skip inactive agents (configurable threshold, default 24h)
         const presence = presenceManager.getPresence(agent)
         const lastActive = presence?.lastUpdate ?? 0
-        if (lastActive > 0 && (now - lastActive) > 24 * 60 * 60_000) continue
+        const inactiveThresholdMs = this.config.inactiveAgentThresholdMin * 60_000
+        if (lastActive > 0 && (now - lastActive) > inactiveThresholdMs) continue
 
         // Enforce per-agent cooldown to avoid spam
         const lastReplenish = this.replenishLastAt[agent] ?? 0
