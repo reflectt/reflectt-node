@@ -33,9 +33,12 @@
   "keywords": [
     "reflectt",
     "openclaw",
-    "agent",
-    "ai",
-    "communication"
+    "ai-agents",
+    "agent-coordination",
+    "task-management",
+    "self-hosted",
+    "team-health",
+    "task-board"
   ],
   "author": "Team Reflectt",
   "license": "Apache-2.0",
@@ -63,5 +66,24 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reflectt/reflectt-node.git"
+  },
+  "homepage": "https://reflectt.ai",
+  "bugs": {
+    "url": "https://github.com/reflectt/reflectt-node/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/",
+    "public/",
+    "templates/",
+    "defaults/",
+    "LICENSE",
+    "README.md"
+  ]
 }
