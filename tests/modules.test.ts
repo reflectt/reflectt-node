@@ -1025,17 +1025,16 @@ describe('Task Intake Schema Enforcement', () => {
   })
 
   it('POST /tasks accepts minimal fields for todo tasks (relaxed onboarding schema)', async () => {
-    const res = await req('POST', '/tasks', {
+    const { status, body } = await req('POST', '/tasks', {
       title: 'TEST: Minimal todo task for onboarding validation smoke test',
     })
     // Relaxed schema: todo tasks only require title
-    expect(res.status).toBe(200)
-    const data = await res.json() as any
-    if (data.task?.id) await req('DELETE', `/tasks/${data.task.id}`)
+    expect(status).toBe(200)
+    if (body.task?.id) await req('DELETE', `/tasks/${body.task.id}`)
   })
 
   it('POST /tasks accepts empty done_criteria for todo tasks', async () => {
-    const res = await req('POST', '/tasks', {
+    const { status, body } = await req('POST', '/tasks', {
       title: 'TEST: task with empty done criteria for onboarding flow validation',
       assignee: 'link',
       reviewer: 'kai',
@@ -1045,9 +1044,8 @@ describe('Task Intake Schema Enforcement', () => {
       priority: 'P2',
     })
     // done_criteria defaults to [] and is no longer required for todo tasks
-    expect(res.status).toBe(200)
-    const data = await res.json() as any
-    if (data.task?.id) await req('DELETE', `/tasks/${data.task.id}`)
+    expect(status).toBe(200)
+    if (body.task?.id) await req('DELETE', `/tasks/${body.task.id}`)
   })
 
   it('POST /tasks accepts well-formed task with TEST: prefix', async () => {
