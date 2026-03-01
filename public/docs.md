@@ -72,6 +72,7 @@ Operationally:
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/` | Redirects to `/dashboard`. |
 | GET | `/preflight` | Run BYOH preflight checks (auth, network, runtime). Returns JSON with per-check pass/fail, remediation guidance, and overall readiness status. Query: `cloudUrl`, `port`, `skipNetwork` |
 | GET | `/preflight/text` | Run preflight checks and return a plain-text formatted report for CLI/terminal display. Same query params as GET. |
 | POST | `/preflight` | Run preflight checks with custom config. Body: `{ cloudUrl?, port?, skipNetwork?, joinToken?, apiKey?, userId? }`. When `userId` is provided, emits `host_preflight_passed` or `host_preflight_failed` activation funnel events for onboarding drop-off tracking. |
