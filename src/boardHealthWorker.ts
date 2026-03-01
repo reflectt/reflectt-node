@@ -465,6 +465,9 @@ export class BoardHealthWorker {
     const actions: PolicyAction[] = []
 
     for (const agent of rqf.agents) {
+      // Skip ghost agents that have never checked in
+      if (!presenceManager.getPresence(agent)) continue
+
       // Count unblocked todo tasks for this agent
       const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
       const unblockedTodo = todoTasks.filter(t => {
@@ -624,6 +627,9 @@ export class BoardHealthWorker {
 
     for (const lane of lanes) {
       for (const agent of lane.agents) {
+        // Skip ghost agents that have never checked in
+        if (!presenceManager.getPresence(agent)) continue
+
         // Enforce per-agent cooldown to avoid spam
         const lastReplenish = this.replenishLastAt[agent] ?? 0
         if (now - lastReplenish < cooldownMs) continue
