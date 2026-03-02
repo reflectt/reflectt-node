@@ -17,6 +17,7 @@ export type DoctorReport = {
   timestamp: number
   overall: 'pass' | 'warn' | 'fail'
   ok: boolean
+  freshInstall?: boolean
   sections: {
     health: DoctorSectionResult
     system: DoctorSectionResult
@@ -93,18 +94,30 @@ export async function collectDoctorReport(input: {
   const overall: DoctorReport['overall'] = hardFail ? 'fail' : hasWarn ? 'warn' : 'pass'
   const ok = overall !== 'fail'
 
+  // Detect fresh-install mode: server not running at all
+  const allDown = Object.values(sections).every(s => !s.ok)
+  const freshInstall = allDown && health.error && /ECONNREFUSED|ENOTFOUND|timeout/i.test(health.error)
+
   const hints: string[] = []
-  if (!health.ok) hints.push('Server not reachable: ensure reflectt-node is running (try `reflectt start`), and check host/port in ~/.reflectt/config.json')
-  if (teamDoctor.ok && teamOverall === 'fail') hints.push('Team doctor reports failures — fix the first failing check and re-run `reflectt doctor`')
-  if (teamDoctor.ok && teamOverall === 'warn') hints.push('Team doctor reports warnings — fix warnings to improve reliability and re-run `reflectt doctor`')
-  if (execution.ok && execution.data?.sweeper?.running === false) hints.push('Execution sweeper is not running — validating queue may not be enforced')
-  if (preflight.ok && preflight.data?.allPassed === false) hints.push('Preflight checks failing — run `curl -s /preflight | jq` and fix failing checks before onboarding users')
+  if (freshInstall) {
+    hints.push('Server is not running. Start it with: reflectt start')
+    hints.push('First time? Run: reflectt init && reflectt start')
+    hints.push('Connect to cloud: https://app.reflectt.ai')
+    hints.push('Dashboard: http://127.0.0.1:4445/dashboard (after starting)')
+  } else {
+    if (!health.ok) hints.push('Server not reachable: ensure reflectt-node is running (try `reflectt start`), and check host/port in ~/.reflectt/config.json')
+    if (teamDoctor.ok && teamOverall === 'fail') hints.push('Team doctor reports failures — fix the first failing check and re-run `reflectt doctor`')
+    if (teamDoctor.ok && teamOverall === 'warn') hints.push('Team doctor reports warnings — fix warnings to improve reliability and re-run `reflectt doctor`')
+    if (execution.ok && execution.data?.sweeper?.running === false) hints.push('Execution sweeper is not running — validating queue may not be enforced')
+    if (preflight.ok && preflight.data?.allPassed === false) hints.push('Preflight checks failing — run `curl -s /preflight | jq` and fix failing checks before onboarding users')
+  }
 
   return {
     baseUrl,
     timestamp: Date.now(),
     overall,
     ok,
+    freshInstall: freshInstall || false,
     sections,
     hints,
   }
@@ -112,6 +125,25 @@ export async function collectDoctorReport(input: {
 
 export function formatDoctorHuman(report: DoctorReport): string {
   const lines: string[] = []
+
+  if (report.freshInstall) {
+    lines.push('reflectt doctor — SERVER NOT RUNNING')
+    lines.push('')
+    lines.push('Looks like this is a fresh install or the server isn\'t started yet.')
+    lines.push('')
+    lines.push('Quick start:')
+    lines.push('  reflectt init          # Set up config and data directory')
+    lines.push('  reflectt start         # Start the server')
+    lines.push('  reflectt doctor        # Re-run diagnostics')
+    lines.push('')
+    lines.push('Connect to cloud:')
+    lines.push('  https://app.reflectt.ai')
+    lines.push('')
+    lines.push('Once running, your dashboard will be at:')
+    lines.push(`  ${report.baseUrl}/dashboard`)
+    return lines.join('\n')
+  }
+
   const label = report.overall === 'pass' ? 'PASS' : report.overall === 'warn' ? 'WARN' : 'FAIL'
   lines.push(`reflectt doctor — ${label}`)
   lines.push(`baseUrl: ${report.baseUrl}`)
