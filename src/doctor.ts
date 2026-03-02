@@ -18,6 +18,8 @@ export type DoctorReport = {
   overall: 'pass' | 'warn' | 'fail'
   ok: boolean
   freshInstall?: boolean
+  /** Server running but unconfigured (no model key) */
+  setupMode?: boolean
   sections: {
     health: DoctorSectionResult
     system: DoctorSectionResult
@@ -88,8 +90,24 @@ export async function collectDoctorReport(input: {
   const sections = { health, system, execution, policy, teamDoctor, preflight }
 
   const teamOverall = teamDoctor.ok ? (teamDoctor.data?.overall as 'pass' | 'warn' | 'fail' | undefined) : undefined
-  const hardFail = Object.values(sections).some(s => !s.ok) || teamOverall === 'fail'
-  const hasWarn = !hardFail && teamOverall === 'warn'
+
+  // Extract team doctor check details for setup-aware logic
+  const teamChecks: Array<{ name: string; status: string; message?: string; fix?: string }> =
+    (teamDoctor.ok && Array.isArray(teamDoctor.data?.checks)) ? teamDoctor.data.checks : []
+  const modelAuthCheck = teamChecks.find(c => c.name === 'model_auth')
+  const modelAuthFail = modelAuthCheck?.status === 'fail'
+
+  // Checks that are optional — their failure should not cause overall FAIL
+  const OPTIONAL_CHECKS = new Set(['github-identity', 'openclaw_bootstrap'])
+
+  // For overall status: ignore optional-only failures in team doctor
+  const teamFailChecks = teamChecks.filter(c => c.status === 'fail')
+  const teamHasRequiredFail = teamFailChecks.some(c => !OPTIONAL_CHECKS.has(c.name))
+  const teamHasOnlyOptionalFail = teamFailChecks.length > 0 && !teamHasRequiredFail
+
+  const hardFail = Object.values(sections).some(s => !s.ok) ||
+    (teamOverall === 'fail' && teamHasRequiredFail)
+  const hasWarn = !hardFail && (teamOverall === 'warn' || teamHasOnlyOptionalFail)
 
   const overall: DoctorReport['overall'] = hardFail ? 'fail' : hasWarn ? 'warn' : 'pass'
   const ok = overall !== 'fail'
@@ -98,16 +116,31 @@ export async function collectDoctorReport(input: {
   const allDown = Object.values(sections).every(s => !s.ok)
   const freshInstall = allDown && health.error && /ECONNREFUSED|ENOTFOUND|timeout/i.test(health.error)
 
+  // Detect setup mode: server running but no model key (fresh config)
+  const setupMode = !freshInstall && health.ok && modelAuthFail
+
   const hints: string[] = []
   if (freshInstall) {
     hints.push('Server is not running. Start it with: reflectt start')
     hints.push('First time? Run: reflectt init && reflectt start')
     hints.push('Connect to cloud: https://app.reflectt.ai')
     hints.push('Dashboard: http://127.0.0.1:4445/dashboard (after starting)')
+  } else if (setupMode) {
+    hints.push('Your node is running! Next: add a model key to start using AI features.')
+    hints.push('')
+    hints.push('Required:')
+    hints.push('  export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY=sk-...')
+    hints.push('  Then restart: reflectt restart')
+    hints.push('')
+    hints.push('Optional (not required to get started):')
+    hints.push('  GITHUB_TOKEN — enables PR review features (https://github.com/settings/tokens)')
+    hints.push('  reflectt host connect — enables agent chat via Reflectt Cloud')
+    hints.push('')
+    hints.push('Dashboard: http://127.0.0.1:4445/dashboard')
   } else {
     if (!health.ok) hints.push('Server not reachable: ensure reflectt-node is running (try `reflectt start`), and check host/port in ~/.reflectt/config.json')
-    if (teamDoctor.ok && teamOverall === 'fail') hints.push('Team doctor reports failures — fix the first failing check and re-run `reflectt doctor`')
-    if (teamDoctor.ok && teamOverall === 'warn') hints.push('Team doctor reports warnings — fix warnings to improve reliability and re-run `reflectt doctor`')
+    if (teamDoctor.ok && teamHasRequiredFail) hints.push('Team doctor reports failures — fix the first failing check and re-run `reflectt doctor`')
+    if (teamDoctor.ok && (teamOverall === 'warn' || teamHasOnlyOptionalFail)) hints.push('Team doctor reports warnings — these are optional checks that won\'t block core functionality')
     if (execution.ok && execution.data?.sweeper?.running === false) hints.push('Execution sweeper is not running — validating queue may not be enforced')
     if (preflight.ok && preflight.data?.allPassed === false) hints.push('Preflight checks failing — run `curl -s /preflight | jq` and fix failing checks before onboarding users')
   }
@@ -118,6 +151,7 @@ export async function collectDoctorReport(input: {
     overall,
     ok,
     freshInstall: freshInstall || false,
+    setupMode: setupMode || false,
     sections,
     hints,
   }
@@ -141,6 +175,30 @@ export function formatDoctorHuman(report: DoctorReport): string {
     lines.push('')
     lines.push('Once running, your dashboard will be at:')
     lines.push(`  ${report.baseUrl}/dashboard`)
+    return lines.join('\n')
+  }
+
+  if (report.setupMode) {
+    lines.push('reflectt doctor — SETUP')
+    lines.push('')
+    lines.push('✅ Your node is running! Here\'s what to do next:')
+    lines.push('')
+    lines.push('1. Add a model API key (required for AI features):')
+    lines.push('   export ANTHROPIC_API_KEY=sk-ant-...   # Anthropic Claude')
+    lines.push('   # or: export OPENAI_API_KEY=sk-...    # OpenAI')
+    lines.push('   # or: export GOOGLE_API_KEY=...       # Google Gemini')
+    lines.push('')
+    lines.push('2. Restart to pick up the key:')
+    lines.push('   reflectt restart')
+    lines.push('')
+    lines.push('3. Optional (not needed to get started):')
+    lines.push('   GITHUB_TOKEN  — PR review features (https://github.com/settings/tokens)')
+    lines.push('   reflectt host connect — agent chat via Reflectt Cloud')
+    lines.push('')
+    lines.push(`Dashboard: ${report.baseUrl}/dashboard`)
+    lines.push('')
+    lines.push('Re-run after adding your key:')
+    lines.push('  reflectt doctor')
     return lines.join('\n')
   }
 
@@ -187,10 +245,15 @@ export function formatDoctorHuman(report: DoctorReport): string {
   })
   section('teamDoctor', '/health/team/doctor', (d) => {
     const overall = d?.overall
-    const fails = Array.isArray(d?.checks) ? d.checks.filter((c: any) => c?.status === 'fail').map((c: any) => c?.name).filter(Boolean) : []
-    const warns = Array.isArray(d?.checks) ? d.checks.filter((c: any) => c?.status === 'warn').map((c: any) => c?.name).filter(Boolean) : []
+    const OPTIONAL = new Set(['github-identity', 'openclaw_bootstrap'])
+    const checks: any[] = Array.isArray(d?.checks) ? d.checks : []
+    const fails = checks.filter((c: any) => c?.status === 'fail').map((c: any) => c?.name).filter(Boolean)
+    const warns = checks.filter((c: any) => c?.status === 'warn').map((c: any) => c?.name).filter(Boolean)
+    const requiredFails = fails.filter(n => !OPTIONAL.has(n))
+    const optionalFails = fails.filter(n => OPTIONAL.has(n))
     const parts = [`overall=${overall ?? 'n/a'}`]
-    if (fails.length) parts.push(`fails=${fails.join(',')}`)
+    if (requiredFails.length) parts.push(`fails=${requiredFails.join(',')}`)
+    if (optionalFails.length) parts.push(`optional=${optionalFails.join(',')}`)
     if (warns.length) parts.push(`warns=${warns.join(',')}`)
     return parts.join(' ')
   })

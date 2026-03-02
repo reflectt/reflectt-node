@@ -64,7 +64,23 @@ describe('doctor report', () => {
     expect(report.sections.health.ok).toBe(false)
   })
 
-  it('treats team doctor overall=fail as FAIL even when endpoints are reachable', async () => {
+  it('treats team doctor overall=fail with required check as FAIL', async () => {
+    const baseUrl = 'http://example.local:4445'
+    const fetchFn = mkFetch({
+      [`${baseUrl}/health`]: { status: 200, json: { status: 'ok' } },
+      [`${baseUrl}/health/system`]: { status: 200, json: {} },
+      [`${baseUrl}/execution-health`]: { status: 200, json: { sweeper: { running: true } } },
+      [`${baseUrl}/policy`]: { status: 200, json: { success: true, policy: {} } },
+      [`${baseUrl}/health/team/doctor`]: { status: 200, json: { overall: 'fail', checks: [{ name: 'database', status: 'fail' }] } },
+      [`${baseUrl}/preflight`]: { status: 200, json: {} },
+    })
+
+    const report = await collectDoctorReport({ baseUrl, fetchFn, timeoutMs: 500 })
+    expect(report.overall).toBe('fail')
+    expect(report.ok).toBe(false)
+  })
+
+  it('detects setup mode when server is running but model_auth fails', async () => {
     const baseUrl = 'http://example.local:4445'
     const fetchFn = mkFetch({
       [`${baseUrl}/health`]: { status: 200, json: { status: 'ok' } },
@@ -76,7 +92,31 @@ describe('doctor report', () => {
     })
 
     const report = await collectDoctorReport({ baseUrl, fetchFn, timeoutMs: 500 })
+    expect(report.setupMode).toBe(true)
+    // model_auth is a required check so overall should be fail
     expect(report.overall).toBe('fail')
-    expect(report.ok).toBe(false)
+    expect(report.hints[0]).toContain('running')
+
+    const out = formatDoctorHuman(report)
+    expect(out).toContain('SETUP')
+    expect(out).toContain('ANTHROPIC_API_KEY')
+    expect(out).toContain('Optional')
+  })
+
+  it('treats optional-only failures as WARN not FAIL', async () => {
+    const baseUrl = 'http://example.local:4445'
+    const fetchFn = mkFetch({
+      [`${baseUrl}/health`]: { status: 200, json: { status: 'ok' } },
+      [`${baseUrl}/health/system`]: { status: 200, json: {} },
+      [`${baseUrl}/execution-health`]: { status: 200, json: { sweeper: { running: true } } },
+      [`${baseUrl}/policy`]: { status: 200, json: { success: true, policy: {} } },
+      [`${baseUrl}/health/team/doctor`]: { status: 200, json: { overall: 'fail', checks: [{ name: 'github-identity', status: 'fail' }, { name: 'openclaw_bootstrap', status: 'fail' }] } },
+      [`${baseUrl}/preflight`]: { status: 200, json: {} },
+    })
+
+    const report = await collectDoctorReport({ baseUrl, fetchFn, timeoutMs: 500 })
+    // Optional-only failures should not cause overall FAIL
+    expect(report.overall).toBe('warn')
+    expect(report.ok).toBe(true)
   })
 })
