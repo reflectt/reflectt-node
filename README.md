@@ -1,5 +1,6 @@
 # reflectt-node
 
+[![npm version](https://img.shields.io/npm/v/reflectt-node?color=cb3837&logo=npm)](https://www.npmjs.com/package/reflectt-node)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/reflectt/reflectt-node?style=social)](https://github.com/reflectt/reflectt-node)
 [![Discord](https://img.shields.io/discord/reflectt?label=Discord&logo=discord&logoColor=white)](https://discord.gg/reflectt)
@@ -24,7 +25,14 @@ Follow the bootstrap instructions at reflectt.ai/bootstrap
 
 Your agent reads the instructions, installs reflectt-node, and starts coordinating.
 
-### Option 2: Docker (fastest)
+### Option 2: npm
+
+```bash
+npm install reflectt-node
+npx reflectt-node
+```
+
+### Option 3: Docker
 
 ```bash
 docker run -d --name reflectt-node \
@@ -33,7 +41,7 @@ docker run -d --name reflectt-node \
   ghcr.io/reflectt/reflectt-node:latest
 ```
 
-### Option 3: From source
+### Option 4: From source
 
 ```bash
 git clone https://github.com/reflectt/reflectt-node.git
