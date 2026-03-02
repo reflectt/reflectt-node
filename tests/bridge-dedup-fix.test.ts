@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isFeatureRequest } from '../src/insight-task-bridge.js'
+import { isFeatureRequest, reflectionOverlap } from '../src/insight-task-bridge.js'
 import type { Insight } from '../src/insights.js'
 
 function makeInsight(overrides: Partial<Insight> = {}): Insight {
@@ -29,6 +29,42 @@ function makeInsight(overrides: Partial<Insight> = {}): Insight {
 }
 
 describe('Insight Bridge: Dedup + Feature Detection Fix', () => {
+  describe('reflectionOverlap', () => {
+    it('returns 0 for empty arrays', () => {
+      expect(reflectionOverlap([], [])).toBe(0)
+      expect(reflectionOverlap(['ref-1'], [])).toBe(0)
+      expect(reflectionOverlap([], ['ref-1'])).toBe(0)
+    })
+
+    it('returns 1.0 for identical sets', () => {
+      expect(reflectionOverlap(['ref-1', 'ref-2'], ['ref-1', 'ref-2'])).toBe(1.0)
+    })
+
+    it('returns 1.0 when smaller set is fully contained in larger', () => {
+      expect(reflectionOverlap(['ref-1', 'ref-2'], ['ref-1', 'ref-2', 'ref-3', 'ref-4'])).toBe(1.0)
+    })
+
+    it('returns correct fraction for partial overlap', () => {
+      // 1 shared out of min(2,2) = 0.5
+      expect(reflectionOverlap(['ref-1', 'ref-2'], ['ref-1', 'ref-3'])).toBe(0.5)
+    })
+
+    it('returns 0 for no overlap', () => {
+      expect(reflectionOverlap(['ref-1', 'ref-2'], ['ref-3', 'ref-4'])).toBe(0)
+    })
+
+    it('uses smaller set as denominator', () => {
+      // 1 shared out of min(1,5) = 1.0
+      expect(reflectionOverlap(['ref-1'], ['ref-1', 'ref-2', 'ref-3', 'ref-4', 'ref-5'])).toBe(1.0)
+    })
+
+    it('below threshold: 1 shared out of 3 = 0.33 (< 0.5)', () => {
+      const overlap = reflectionOverlap(['ref-1', 'ref-2', 'ref-3'], ['ref-1', 'ref-4', 'ref-5'])
+      expect(overlap).toBeCloseTo(0.333, 2)
+      expect(overlap).toBeLessThan(0.5)
+    })
+  })
+
   describe('isFeatureRequest', () => {
     it('detects feature request by title', () => {
       expect(isFeatureRequest(makeInsight({ title: 'Feature request: add calendar export' }))).toBe(true)

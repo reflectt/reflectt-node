@@ -128,6 +128,19 @@ async function handlePromotedInsight(event: Event): Promise<void> {
 }
 
 /**
+ * Compute the fraction of overlapping reflection_ids between two insights.
+ * Uses the smaller set as denominator so a 2-reflection insight that shares
+ * both with a 10-reflection insight returns 1.0 (fully covered).
+ * Returns 0 if either list is empty.
+ */
+export function reflectionOverlap(a: string[], b: string[]): number {
+  if (a.length === 0 || b.length === 0) return 0
+  const setB = new Set(b)
+  const shared = a.filter(id => setB.has(id)).length
+  return shared / Math.min(a.length, b.length)
+}
+
+/**
  * Check if a task already covers this insight's cluster/topic.
  * Checks ALL tasks including done/validating — already-addressed problems
  * should not spawn new P0 tasks.
@@ -136,6 +149,7 @@ async function handlePromotedInsight(event: Event): Promise<void> {
  * 1. Direct insight_id match (exact)
  * 2. Exact title match (case-insensitive)
  * 3. Same cluster_key via insight-bridge source (same stage::family::unit)
+ * 4. Reflection overlap: source insight shares ≥50% of reflection_ids (same evidence, different cluster)
  *
  * Returns match with status so callers can decide (done = already addressed,
  * active = in progress, null = no coverage).
@@ -219,15 +233,30 @@ function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch | null 
     }
 
     // 3. Same full cluster_key (stage::family::unit) via insight-bridge source
+    // 4. Reflection overlap: source insight shares ≥50% of reflection_ids
     if (meta.source === 'insight-task-bridge' && typeof meta.insight_id === 'string') {
       try {
         const sourceInsight = getInsight(meta.insight_id as string)
-        if (sourceInsight && sourceInsight.cluster_key === insight.cluster_key) {
-          return {
-            id: task.id,
-            title: task.title,
-            status: task.status,
-            alreadyAddressed: task.status === 'done' || task.status === 'validating',
+        if (sourceInsight) {
+          // Check 3: cluster_key match
+          if (sourceInsight.cluster_key === insight.cluster_key) {
+            return {
+              id: task.id,
+              title: task.title,
+              status: task.status,
+              alreadyAddressed: task.status === 'done' || task.status === 'validating',
+            }
+          }
+
+          // Check 4: reflection_ids overlap (catches same evidence, different cluster)
+          const overlap = reflectionOverlap(insight.reflection_ids, sourceInsight.reflection_ids)
+          if (overlap >= 0.5) {
+            return {
+              id: task.id,
+              title: task.title,
+              status: task.status,
+              alreadyAddressed: task.status === 'done' || task.status === 'validating',
+            }
           }
         }
       } catch { /* ignore lookup failures */ }
