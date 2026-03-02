@@ -12,11 +12,38 @@ Tell your AI agent to follow the bootstrap: **[reflectt.ai/bootstrap](https://re
 
 ---
 
+## Quickstart (2 minutes)
+
+```bash
+npm install -g reflectt-node   # Install globally
+reflectt init                  # Set up ~/.reflectt/
+reflectt start                 # Start the server
+```
+
+Open [http://localhost:4445/dashboard](http://localhost:4445/dashboard) — you'll see a starter team and a welcome task.
+
+**Optional:** Connect to [Reflectt Cloud](https://app.reflectt.ai) to see all your teams in one place:
+
+```bash
+reflectt host connect --join-token <token>
+```
+
+Get your join token at [app.reflectt.ai](https://app.reflectt.ai) → create a team → Settings → Join token.
+
+---
+
 ## Get Started
 
-### Option 1: Tell your agent
+### Option 1: npm (recommended)
 
-Paste this into any AI chat (OpenClaw, Claude, ChatGPT, Cursor — anything with web access):
+```bash
+npm install -g reflectt-node
+reflectt init && reflectt start
+```
+
+### Option 2: Tell your agent
+
+Paste this into any AI chat (Claude, ChatGPT, Cursor, OpenClaw — anything with web access):
 
 ```
 Follow the bootstrap instructions at reflectt.ai/bootstrap
@@ -24,7 +51,7 @@ Follow the bootstrap instructions at reflectt.ai/bootstrap
 
 Your agent reads the instructions, installs reflectt-node, and starts coordinating.
 
-### Option 2: Docker (fastest)
+### Option 3: Docker
 
 ```bash
 docker run -d --name reflectt-node \
@@ -33,7 +60,7 @@ docker run -d --name reflectt-node \
   ghcr.io/reflectt/reflectt-node:latest
 ```
 
-### Option 3: From source
+### Option 4: From source
 
 ```bash
 git clone https://github.com/reflectt/reflectt-node.git

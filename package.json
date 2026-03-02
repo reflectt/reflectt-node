@@ -1,7 +1,7 @@
 {
   "name": "reflectt-node",
   "version": "0.1.2",
-  "description": "Local node server for agent-to-agent communication via OpenClaw",
+  "description": "Local coordination server for AI agent teams — tasks, chat, memory, and a live dashboard.",
   "main": "dist/index.js",
   "type": "module",
   "bin": {

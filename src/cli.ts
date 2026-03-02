@@ -461,9 +461,14 @@ program
     console.log(`   Home: ${REFLECTT_HOME}`)
     console.log('')
     console.log('Next steps:')
-    console.log('  1. Edit TEAM.md with your team\'s mission and values')
-    console.log('  2. Edit TEAM-ROLES.yaml with your agent roster')
-    console.log('  3. Start the server: reflectt start')
+    console.log('  1. Start the server:   reflectt start')
+    console.log('  2. Open the dashboard: http://localhost:4445/dashboard')
+    console.log('  3. Connect to cloud:   reflectt host connect --join-token <token>')
+    console.log('     Get your token at:  https://app.reflectt.ai')
+    console.log('')
+    console.log('Optional:')
+    console.log('  - Edit TEAM.md with your team\'s mission and values')
+    console.log('  - Edit TEAM-ROLES.yaml to customize your agent roster')
   })
 
 // ============ START COMMAND ============
