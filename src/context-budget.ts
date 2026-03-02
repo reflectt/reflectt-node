@@ -73,10 +73,10 @@ export interface ContextInjectionResult {
 }
 
 const DEFAULT_BUDGETS: ContextBudgets = {
-  totalTokens: 10_000,
+  totalTokens: 12_000,
   layers: {
     session_local: 6_000,
-    agent_persistent: 2_000,
+    agent_persistent: 4_000, // Increased from 2k: workspace files (SOUL/TOOLS/AGENTS/HEARTBEAT/MEMORY) typically exceed 2k
     team_shared: 2_000,
   },
 }
@@ -105,7 +105,10 @@ export function getContextBudgets(): ContextBudgets {
 
 export function isAutoSummaryEnabled(): boolean {
   const v = String(process.env.REFLECTT_CONTEXT_AUTOSUMMARY || '').trim().toLowerCase()
-  return v === '1' || v === 'true' || v === 'yes'
+  // Autosummary uses a local heuristic summarizer (no LLM), so it is safe to enable by default.
+  // Opt-out explicitly with REFLECTT_CONTEXT_AUTOSUMMARY=false (or 0/no).
+  if (v === '0' || v === 'false' || v === 'no') return false
+  return true // enabled by default
 }
 
 /**
