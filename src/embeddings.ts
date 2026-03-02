@@ -1,21 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) Reflectt AI
 
-import { pipeline } from '@xenova/transformers'
-
 const DEFAULT_MODEL = process.env.REFLECTT_EMBED_MODEL || 'Xenova/all-MiniLM-L6-v2'
 
 type FeatureExtractor = (input: string | string[], options?: Record<string, unknown>) => Promise<unknown>
 
 let extractorPromise: Promise<FeatureExtractor> | null = null
+let transformersUnavailable = false
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
 async function getExtractor(): Promise<FeatureExtractor> {
+  if (transformersUnavailable) {
+    throw new Error('Embeddings unavailable: @xenova/transformers not installed (optional dependency)')
+  }
   if (!extractorPromise) {
-    extractorPromise = pipeline('feature-extraction', DEFAULT_MODEL) as Promise<FeatureExtractor>
+    extractorPromise = (async () => {
+      try {
+        const { pipeline } = await import('@xenova/transformers')
+        return pipeline('feature-extraction', DEFAULT_MODEL) as Promise<FeatureExtractor>
+      } catch {
+        transformersUnavailable = true
+        throw new Error('Embeddings unavailable: @xenova/transformers not installed (optional dependency)')
+      }
+    })()
   }
   return extractorPromise
 }
