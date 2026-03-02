@@ -138,6 +138,19 @@ curl -X POST http://localhost:4445/tasks \
 
 Full API reference: `http://localhost:4445/capabilities`
 
+### Connecting through OpenClaw gateway
+
+If your agents run through OpenClaw (recommended for multi-agent coordination), set these in your `.env` or environment:
+
+```bash
+OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
+OPENCLAW_GATEWAY_TOKEN=your_gateway_token_here
+```
+
+Get your token: `openclaw config get gateway.auth.token`
+
+> **Note:** If connecting to a **remote** gateway (not on localhost), the first connection requires manual device pairing approval on the gateway host. Run `openclaw nodes pending` and `openclaw nodes approve <id>` on the gateway machine. See [Troubleshooting](#troubleshooting) for details.
+
 ---
 
 ## Connect to Reflectt Cloud (optional)
@@ -181,6 +194,19 @@ docker run -d --name reflectt-node -p 4445:4445 -v reflectt-data:/data reflectt-
 ```
 
 **Agents can't connect:** Make sure the server is running (`reflectt status`) and the agent can reach `http://localhost:4445`. If your agent runs in Docker, use `http://host.docker.internal:4445`.
+
+**Remote agent stuck waiting (pairing required):** If your agent connects to a remote OpenClaw gateway with a valid token but doesn't get a response, the gateway is waiting for device pairing approval. This is a security feature — new devices need manual approval even with a valid token. Fix:
+
+```bash
+# On the machine running the OpenClaw gateway:
+openclaw nodes pending     # See the pending pairing request
+openclaw nodes approve <requestId>   # Approve it
+```
+
+To avoid this friction:
+- **Run on the same machine** as the gateway (local connections auto-approve)
+- **Use Tailscale** so the connection appears local
+- **Pre-approve once** — after initial approval, the device token is remembered
 
 ---
 
