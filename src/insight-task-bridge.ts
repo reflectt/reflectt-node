@@ -149,7 +149,7 @@ export function reflectionOverlap(a: string[], b: string[]): number {
  * 1. Direct insight_id match (exact)
  * 2. Exact title match (case-insensitive)
  * 3. Same cluster_key via insight-bridge source (same stage::family::unit)
- * 4. Reflection overlap: source insight shares ≥50% of reflection_ids (same evidence, different cluster)
+ * 4. Same source reflection (two insights from one reflection = duplicate)
  *
  * Returns match with status so callers can decide (done = already addressed,
  * active = in progress, null = no coverage).
@@ -161,7 +161,7 @@ interface ExistingTaskMatch {
   alreadyAddressed: boolean  // true if done or validating
 }
 
-function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch | null {
+export function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch | null {
   const allTasks = taskManager.listTasks({})
   const targetTitle = `[Insight] ${insight.title}`.toLowerCase()
 
@@ -260,6 +260,19 @@ function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch | null 
           }
         }
       } catch { /* ignore lookup failures */ }
+    }
+
+    // 4. Same source reflection — two insights from the same reflection are duplicates
+    if (meta.source === 'insight-task-bridge' && typeof meta.source_reflection === 'string') {
+      const insightReflectionIds = insight.reflection_ids || []
+      if (insightReflectionIds.includes(meta.source_reflection as string)) {
+        return {
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          alreadyAddressed: task.status === 'done' || task.status === 'validating',
+        }
+      }
     }
   }
 
