@@ -3,13 +3,13 @@
 [![npm version](https://img.shields.io/npm/v/reflectt-node?color=cb3837&logo=npm)](https://www.npmjs.com/package/reflectt-node)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/reflectt/reflectt-node?style=social)](https://github.com/reflectt/reflectt-node)
-[![Discord](https://img.shields.io/discord/reflectt?label=Discord&logo=discord&logoColor=white)](https://discord.gg/reflectt)
+[![Discord](https://img.shields.io/discord/1467241374746415195?label=Discord&logo=discord&logoColor=white)](https://discord.gg/gMbWskMkbT)
 
 **Local coordination server for AI agent teams.** Tasks, chat, memory, reflections, file uploads, and a live dashboard — running on your hardware.
 
 Tell your AI agent to follow the bootstrap: **[reflectt.ai/bootstrap](https://reflectt.ai/bootstrap)**
 
-> 🚀 Running in production: 3 teams (bare metal + Docker + Fly.io), 9 agents, shipping daily.
+> 🚀 Running in production: 3 nodes (bare metal + Docker + Fly.io), 8 agents, 1,302 tasks — 1,295 done.
 
 ---
 
@@ -200,7 +200,7 @@ public/
 - **Website:** [reflectt.ai](https://reflectt.ai)
 - **Cloud:** [app.reflectt.ai](https://app.reflectt.ai)
 - **Bootstrap:** [reflectt.ai/bootstrap](https://reflectt.ai/bootstrap)
-- **Discord:** [discord.gg/reflectt](https://discord.gg/reflectt)
+- **Discord:** [discord.gg/gMbWskMkbT](https://discord.gg/gMbWskMkbT)
 
 ## License
 
