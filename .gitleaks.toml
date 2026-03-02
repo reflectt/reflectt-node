@@ -37,6 +37,7 @@ regexes = [
   '''xxxxx''',
   '''YOUR_\w+''',
   '''REPLACE_WITH_''',
+  '''<your-\w+>''',
 ]
 
 # Block common env dump patterns even if not caught by default rules
