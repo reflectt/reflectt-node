@@ -769,20 +769,19 @@ async function checkGitHubIdentity(vault?: SecretVault): Promise<PreflightResult
     return {
       check,
       passed: false,
-      level: 'fail',
-      message: 'No GitHub token found (GITHUB_TOKEN / GH_TOKEN not set)',
+      level: 'warn',
+      message: 'Optional — No GitHub token found (GITHUB_TOKEN / GH_TOKEN not set)',
       recovery: [
-        'Set a GitHub Personal Access Token:',
+        'This is optional — your node works without it.',
+        'GitHub identity enables PR review features.',
+        '',
+        'To set up (when ready):',
         '  export GITHUB_TOKEN=ghp_your_token_here',
-        '  # or: export GH_TOKEN=ghp_your_token_here',
         '',
         'Create a token at: https://github.com/settings/tokens',
         'Required scopes: repo (for PR reviews and CI status)',
-        '',
-        'Without GitHub identity, the following are blocked:',
-        ...BLOCKED_CAPABILITIES.map(c => `  - ${c}`),
       ],
-      details: { mode, checkedEnvVars: patEnvKeys },
+      details: { mode, checkedEnvVars: patEnvKeys, optional: true },
       durationMs: Date.now() - start,
     }
   }
