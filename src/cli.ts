@@ -919,9 +919,9 @@ dogfood
 // ============ BOOTSTRAP (one-shot install + connect + start) ============
 program
   .command('bootstrap')
-  .description('One-shot setup: init + connect to cloud + start server (for npx/agent use)')
-  .option('--join-token <token>', 'Cloud host join token')
-  .option('--api-key <key>', 'Team API key (agent flow)')
+  .description('One-shot setup: init + connect to cloud + start server. Fastest way to get running.')
+  .option('--join-token <token>', 'Cloud host join token (get one at app.reflectt.ai)')
+  .option('--api-key <key>', 'Team API key')
   .option('--cloud-url <url>', 'Cloud API base URL', 'https://api.reflectt.ai')
   .option('--name <hostName>', 'Host display name', hostname())
   .option('--type <hostType>', 'Host type', 'openclaw')
@@ -930,9 +930,11 @@ program
       if (!options.joinToken && !options.apiKey) {
         console.error('❌ Either --join-token or --api-key is required')
         console.error('')
+        console.error('Get a join token at: https://app.reflectt.ai')
+        console.error('')
         console.error('Usage:')
-        console.error('  npx reflectt-node bootstrap --join-token <token>')
-        console.error('  npx reflectt-node bootstrap --api-key <key>')
+        console.error('  npx reflectt bootstrap --join-token <token>')
+        console.error('  npx reflectt bootstrap --api-key <key>')
         process.exit(1)
       }
 
