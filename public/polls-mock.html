@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Polls — Design Mock</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --surface: #141920;
+    --surface-raised: #1a2028;
+    --border: #252d38;
+    --border-subtle: #1e2530;
+    --text: #d4dae3;
+    --text-bright: #eef1f5;
+    --text-muted: #6b7a8d;
+    --accent: #4da6ff;
+    --accent-dim: rgba(77, 166, 255, 0.12);
+    --green: #3fb950;
+    --green-dim: rgba(63, 185, 80, 0.12);
+    --yellow: #d4a017;
+    --yellow-dim: rgba(212, 160, 23, 0.12);
+    --purple: #b48eff;
+    --purple-dim: rgba(180, 142, 255, 0.12);
+    --red: #f85149;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 14px;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --text-xs: 10px;
+    --text-sm: 11px;
+    --text-base: 13px;
+    --text-md: 14px;
+    --text-lg: 16px;
+    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --font-weight-bold: 700;
+    --focus-ring: 0 0 0 2px rgba(77, 166, 255, 0.5);
+    --transition-fast: 150ms;
+    --easing-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font-family);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1 { font-size: 18px; font-weight: 700; color: var(--text-bright); margin-bottom: 6px; }
+  .subtitle { font-size: var(--text-base); color: var(--text-muted); margin-bottom: 32px; }
+
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    max-width: 800px;
+    width: 100%;
+  }
+  @media (max-width: 640px) { .demo-grid { grid-template-columns: 1fr; } }
+
+  .demo-label {
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    font-weight: var(--font-weight-semibold);
+    margin-bottom: var(--space-2);
+    margin-top: var(--space-4);
+  }
+
+  /* === Panel (reuse dashboard pattern) === */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--text-md);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-bright);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-body { padding: var(--space-4); }
+
+  /* === Poll Card === */
+  .poll-card {
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-4);
+    margin-bottom: var(--space-3);
+  }
+  .poll-card:last-child { margin-bottom: 0; }
+  .poll-question {
+    font-size: var(--text-md);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-bright);
+    margin-bottom: var(--space-3);
+    line-height: 1.4;
+  }
+  .poll-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    margin-bottom: var(--space-3);
+  }
+  .poll-author {
+    color: var(--accent);
+    font-weight: var(--font-weight-semibold);
+  }
+  .poll-status {
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .poll-status.open { background: var(--green-dim); color: var(--green); }
+  .poll-status.closed { background: var(--border); color: var(--text-muted); }
+
+  /* === Vote Options === */
+  .poll-options { display: flex; flex-direction: column; gap: 6px; }
+  .poll-option {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast) var(--easing-smooth);
+    min-height: 40px;
+    overflow: hidden;
+  }
+  .poll-option:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .poll-option .bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    border-radius: var(--radius-sm);
+    transition: width 400ms var(--easing-smooth);
+    z-index: 0;
+  }
+  .poll-option .bar.accent { background: var(--accent-dim); }
+  .poll-option .bar.green { background: var(--green-dim); }
+  .poll-option .bar.purple { background: var(--purple-dim); }
+  .poll-option .bar.yellow { background: var(--yellow-dim); }
+
+  .poll-option .option-content {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: var(--space-2);
+  }
+  .poll-option .option-label {
+    font-size: var(--text-base);
+    color: var(--text);
+    font-weight: var(--font-weight-medium);
+  }
+  .poll-option .option-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+  }
+  .poll-option .vote-count {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    font-weight: var(--font-weight-semibold);
+    min-width: 20px;
+    text-align: right;
+  }
+  .poll-option .vote-pct {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    min-width: 28px;
+    text-align: right;
+  }
+  .poll-option .voters {
+    display: flex;
+    gap: 2px;
+  }
+  .poll-option .voter-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--border);
+    color: var(--text-muted);
+    font-weight: 700;
+    border: 1px solid var(--surface-raised);
+  }
+  .poll-option.voted {
+    border-color: var(--accent);
+    background: rgba(77, 166, 255, 0.04);
+  }
+  .poll-option .check {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    flex-shrink: 0;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+  }
+  .poll-option.voted .check {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .poll-option:hover:not(.voted) {
+      border-color: var(--accent);
+      background: rgba(77, 166, 255, 0.03);
+    }
+  }
+
+  /* === Poll Footer === */
+  .poll-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+  }
+  .poll-total { font-weight: var(--font-weight-semibold); }
+
+  /* === Create Poll Form === */
+  .create-poll { padding: var(--space-4); }
+  .create-poll .form-group { margin-bottom: var(--space-3); }
+  .create-poll label {
+    display: block;
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--text-muted);
+    margin-bottom: var(--space-1);
+  }
+  .create-poll input, .create-poll textarea {
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: inherit;
+    font-size: var(--text-base);
+  }
+  .create-poll input:focus, .create-poll textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
+  }
+  .create-poll input::placeholder { color: var(--text-muted); }
+  .option-inputs { display: flex; flex-direction: column; gap: var(--space-2); }
+  .option-row {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .option-row input { flex: 1; }
+  .remove-option {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .remove-option:hover { border-color: var(--red); color: var(--red); }
+  }
+  .add-option-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-3);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    font-family: inherit;
+    width: 100%;
+    justify-content: center;
+    transition: all var(--transition-fast);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .add-option-btn:hover { border-color: var(--accent); color: var(--accent); }
+  }
+  .form-actions {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-semibold);
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    transition: all var(--transition-fast) var(--easing-smooth);
+  }
+  .btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  @media (hover: hover) and (pointer: fine) {
+    .btn-primary:hover { opacity: 0.85; }
+    .btn:hover:not(.btn-primary) { border-color: var(--accent); color: var(--accent); }
+  }
+
+  /* === Settings Row === */
+  .settings-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+  }
+  .settings-row select {
+    padding: 4px 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: inherit;
+    font-size: var(--text-sm);
+  }
+
+  /* === Mock Footer === */
+  .mock-footer {
+    margin-top: 40px;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  /* Full-width section */
+  .full-width {
+    grid-column: 1 / -1;
+  }
+</style>
+</head>
+<body>
+
+  <h1>🗳️ Team Polls</h1>
+  <p class="subtitle">Design mock — agents + humans create, vote, and see results</p>
+
+  <div class="demo-grid">
+    <!-- Left: Active polls -->
+    <div>
+      <div class="demo-label">Active Poll (with results)</div>
+      <div class="panel">
+        <div class="panel-header">
+          🗳️ Polls
+          <button class="btn" onclick="document.getElementById('create-form').style.display = document.getElementById('create-form').style.display === 'none' ? 'block' : 'none'" style="font-size:11px;padding:4px 10px">+ New Poll</button>
+        </div>
+        <div class="panel-body" style="padding:0">
+
+          <!-- Poll 1: Active, partially voted -->
+          <div class="poll-card" id="poll1">
+            <div class="poll-meta">
+              <span class="poll-author">@kai</span>
+              <span>·</span>
+              <span>2h ago</span>
+              <span class="poll-status open">Open</span>
+            </div>
+            <div class="poll-question">Should we prioritize the bootstrap page or the cloud dashboard this sprint?</div>
+            <div class="poll-options" id="poll1-options">
+              <button class="poll-option voted" data-option="0" onclick="vote('poll1', 0)" role="radio" aria-checked="true">
+                <div class="bar accent" style="width: 60%"></div>
+                <div class="check">✓</div>
+                <div class="option-content">
+                  <span class="option-label">Bootstrap page — it's the funnel</span>
+                  <div class="option-right">
+                    <div class="voters">
+                      <span class="voter-dot" title="ryan" style="background:var(--green-dim);color:var(--green)">R</span>
+                      <span class="voter-dot" title="pixel" style="background:var(--accent-dim);color:var(--accent)">P</span>
+                      <span class="voter-dot" title="link" style="background:var(--purple-dim);color:var(--purple)">L</span>
+                    </div>
+                    <span class="vote-count">3</span>
+                    <span class="vote-pct">60%</span>
+                  </div>
+                </div>
+              </button>
+              <button class="poll-option" data-option="1" onclick="vote('poll1', 1)" role="radio" aria-checked="false">
+                <div class="bar purple" style="width: 40%"></div>
+                <div class="check"></div>
+                <div class="option-content">
+                  <span class="option-label">Cloud dashboard — existing users need it</span>
+                  <div class="option-right">
+                    <div class="voters">
+                      <span class="voter-dot" title="sage" style="background:var(--yellow-dim);color:var(--yellow)">S</span>
+                      <span class="voter-dot" title="spark" style="background:var(--border);color:var(--text-muted)">Sp</span>
+                    </div>
+                    <span class="vote-count">2</span>
+                    <span class="vote-pct">40%</span>
+                  </div>
+                </div>
+              </button>
+            </div>
+            <div class="poll-footer">
+              <span class="poll-total">5 votes</span>
+              <span>Closes in 22h</span>
+            </div>
+          </div>
+
+          <!-- Poll 2: Closed -->
+          <div class="poll-card">
+            <div class="poll-meta">
+              <span class="poll-author">@spark</span>
+              <span>·</span>
+              <span>yesterday</span>
+              <span class="poll-status closed">Closed</span>
+            </div>
+            <div class="poll-question">Agent intensity: what should the default be for new installs?</div>
+            <div class="poll-options">
+              <div class="poll-option" style="cursor:default">
+                <div class="bar green" style="width: 71%"></div>
+                <div class="option-content">
+                  <span class="option-label">⚡ Normal</span>
+                  <div class="option-right">
+                    <span class="vote-count">5</span>
+                    <span class="vote-pct">71%</span>
+                  </div>
+                </div>
+              </div>
+              <div class="poll-option" style="cursor:default">
+                <div class="bar yellow" style="width: 29%"></div>
+                <div class="option-content">
+                  <span class="option-label">🐢 Low</span>
+                  <div class="option-right">
+                    <span class="vote-count">2</span>
+                    <span class="vote-pct">29%</span>
+                  </div>
+                </div>
+              </div>
+              <div class="poll-option" style="cursor:default">
+                <div class="bar" style="width: 0%"></div>
+                <div class="option-content">
+                  <span class="option-label">🔥 High</span>
+                  <div class="option-right">
+                    <span class="vote-count">0</span>
+                    <span class="vote-pct">0%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="poll-footer">
+              <span class="poll-total">7 votes · decided</span>
+              <span>Winner: ⚡ Normal</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Create poll form -->
+    <div>
+      <div class="demo-label">Create New Poll</div>
+      <div class="panel">
+        <div class="panel-header">📝 New Poll</div>
+        <div class="create-poll" id="create-form">
+          <div class="form-group">
+            <label>Question</label>
+            <input type="text" placeholder="What should we decide?" />
+          </div>
+          <div class="form-group">
+            <label>Options</label>
+            <div class="option-inputs" id="option-inputs">
+              <div class="option-row">
+                <input type="text" placeholder="Option 1" />
+                <button class="remove-option" title="Remove">×</button>
+              </div>
+              <div class="option-row">
+                <input type="text" placeholder="Option 2" />
+                <button class="remove-option" title="Remove">×</button>
+              </div>
+              <div class="option-row">
+                <input type="text" placeholder="Option 3 (optional)" />
+                <button class="remove-option" title="Remove">×</button>
+              </div>
+            </div>
+            <button class="add-option-btn" onclick="addOption()">+ Add option</button>
+          </div>
+          <div class="settings-row">
+            <span>Expires in:</span>
+            <select>
+              <option>1 hour</option>
+              <option>4 hours</option>
+              <option selected>24 hours</option>
+              <option>3 days</option>
+              <option>Never</option>
+            </select>
+            <span>|</span>
+            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" /> Anonymous
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary">Create Poll</button>
+            <button class="btn">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="demo-label" style="margin-top:24px">API: Create via CLI / agents</div>
+      <div class="panel">
+        <div class="panel-body" style="font-family:monospace;font-size:11px;color:var(--accent);white-space:pre;overflow-x:auto;line-height:1.6">POST /polls
+{
+  "question": "Should we ship X?",
+  "options": ["Yes", "No", "Defer"],
+  "author": "kai",
+  "expires_in": "24h",
+  "anonymous": false
+}
+
+POST /polls/:id/vote
+{ "voter": "pixel", "option": 0 }
+
+GET /polls?status=open</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mock-footer">
+    Design mock by pixel 🎨 · task-1772249879438-u7edc3c9y · reflectt-node<br>
+    <strong>Placement:</strong> Sidebar nav → "Polls" page (#polls) or embedded in Overview page
+  </div>
+
+<script>
+let optionCount = 3;
+
+function addOption() {
+  optionCount++;
+  const row = document.createElement('div');
+  row.className = 'option-row';
+  row.innerHTML = `<input type="text" placeholder="Option ${optionCount}" /><button class="remove-option" title="Remove" onclick="this.parentElement.remove()">×</button>`;
+  document.getElementById('option-inputs').appendChild(row);
+}
+
+function vote(pollId, optionIdx) {
+  const options = document.querySelectorAll(`#${pollId}-options .poll-option`);
+  options.forEach((opt, i) => {
+    if (i === optionIdx) {
+      opt.classList.add('voted');
+      opt.setAttribute('aria-checked', 'true');
+      opt.querySelector('.check').textContent = '✓';
+    } else {
+      opt.classList.remove('voted');
+      opt.setAttribute('aria-checked', 'false');
+      opt.querySelector('.check').textContent = '';
+    }
+  });
+}
+</script>
+</body>
+</html>
