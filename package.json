@@ -1,7 +1,7 @@
 {
   "name": "reflectt-node",
   "version": "0.1.2",
-  "description": "Local node server for agent-to-agent communication via OpenClaw",
+  "description": "Coordinate your AI agent team. Shared tasks, memory, reflections, and presence. Self-host for free.",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
@@ -32,14 +32,13 @@
     "prepack": "chmod +x dist/cli.js"
   },
   "keywords": [
-    "reflectt",
-    "openclaw",
     "ai-agents",
     "agent-coordination",
     "task-management",
     "self-hosted",
-    "team-health",
-    "task-board"
+    "ai",
+    "developer-tools",
+    "reflectt"
   ],
   "author": "Team Reflectt",
   "license": "Apache-2.0",
