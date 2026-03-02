@@ -4,6 +4,7 @@
 /**
  * Lightweight request tracking for launch-day visibility.
  * Tracks request counts per endpoint group and last N errors.
+ * Includes rolling-window metrics to distinguish historical from ongoing errors.
  * No external dependencies — pure in-memory counters.
  */
 
@@ -23,9 +24,21 @@ interface EndpointGroup {
   name: string
 }
 
+interface RollingBucket {
+  requests: number
+  errors: number
+  /** Start of this bucket (ms since epoch) */
+  startedAt: number
+}
+
 // ── Configuration ──────────────────────────────────────────────────────────
 
 const MAX_ERRORS = 20
+
+/** Rolling window: 5-minute buckets, keep last 1 hour */
+const BUCKET_DURATION_MS = 5 * 60 * 1000
+const MAX_BUCKETS = 12 // 12 × 5 min = 1 hour
+
 const TRACKED_GROUPS: EndpointGroup[] = [
   { pattern: /^\/health/, name: 'health' },
   { pattern: /^\/bootstrap/, name: 'bootstrap' },
@@ -34,6 +47,19 @@ const TRACKED_GROUPS: EndpointGroup[] = [
   { pattern: /^\/openclaw/, name: 'openclaw' },
   { pattern: /^\/chat/, name: 'chat' },
   { pattern: /^\/mcp/, name: 'mcp' },
+  // Additional groups to reduce "other" noise
+  { pattern: /^\/heartbeat/, name: 'heartbeat' },
+  { pattern: /^\/inbox/, name: 'inbox' },
+  { pattern: /^\/reflections/, name: 'reflections' },
+  { pattern: /^\/insights/, name: 'insights' },
+  { pattern: /^\/hosts/, name: 'hosts' },
+  { pattern: /^\/presence/, name: 'presence' },
+  { pattern: /^\/shared/, name: 'shared' },
+  { pattern: /^\/avatars/, name: 'avatars' },
+  { pattern: /^\/dashboard/, name: 'dashboard' },
+  { pattern: /^\/memory/, name: 'memory' },
+  { pattern: /^\/preflight/, name: 'preflight' },
+  { pattern: /^\/policy/, name: 'policy' },
 ]
 
 // ── State ──────────────────────────────────────────────────────────────────
@@ -45,6 +71,10 @@ let totalRequests = 0
 let totalErrors = 0
 const startedAt = Date.now()
 
+// Rolling window state
+const rollingBuckets: RollingBucket[] = []
+let currentBucket: RollingBucket = { requests: 0, errors: 0, startedAt: Date.now() }
+
 // ── Core ───────────────────────────────────────────────────────────────────
 
 function classifyUrl(url: string): string {
@@ -54,22 +84,39 @@ function classifyUrl(url: string): string {
   return 'other'
 }
 
+/** Rotate rolling buckets if the current one has expired */
+function rotateBuckets(now: number): void {
+  if (now - currentBucket.startedAt >= BUCKET_DURATION_MS) {
+    rollingBuckets.push(currentBucket)
+    if (rollingBuckets.length > MAX_BUCKETS) {
+      rollingBuckets.shift()
+    }
+    currentBucket = { requests: 0, errors: 0, startedAt: now }
+  }
+}
+
 /**
  * Record a request. Call from Fastify onResponse hook.
  */
 export function trackRequest(method: string, url: string, statusCode: number, userAgent?: string): void {
+  const now = Date.now()
   totalRequests++
   const group = classifyUrl(url)
   requestCounts[group] = (requestCounts[group] || 0) + 1
 
+  // Rolling window
+  rotateBuckets(now)
+  currentBucket.requests++
+
   if (statusCode >= 400) {
     totalErrors++
     errorCounts[group] = (errorCounts[group] || 0) + 1
+    currentBucket.errors++
   }
 
   if (statusCode >= 500) {
     recentErrors.push({
-      ts: Date.now(),
+      ts: now,
       method,
       url: url.length > 200 ? url.slice(0, 200) + '…' : url,
       status: statusCode,
@@ -102,6 +149,31 @@ export function trackError(context: string, error: unknown): void {
 
 // ── Metrics ────────────────────────────────────────────────────────────────
 
+/** Compute rolling-window stats from recent buckets */
+function getRollingMetrics(): { requests: number; errors: number; errorRate: number; windowMinutes: number } {
+  const now = Date.now()
+  rotateBuckets(now)
+
+  let requests = currentBucket.requests
+  let errors = currentBucket.errors
+  const windowStart = now - (MAX_BUCKETS * BUCKET_DURATION_MS)
+
+  for (const bucket of rollingBuckets) {
+    if (bucket.startedAt >= windowStart) {
+      requests += bucket.requests
+      errors += bucket.errors
+    }
+  }
+
+  const errorRate = requests > 0 ? Math.round((errors / requests) * 10000) / 100 : 0
+  return {
+    requests,
+    errors,
+    errorRate,
+    windowMinutes: MAX_BUCKETS * (BUCKET_DURATION_MS / 60000),
+  }
+}
+
 export function getRequestMetrics(): {
   total: number
   errors: number
@@ -109,6 +181,7 @@ export function getRequestMetrics(): {
   byGroup: Record<string, { requests: number; errors: number }>
   recentErrors: ErrorEntry[]
   rps: number
+  rolling: { requests: number; errors: number; errorRate: number; windowMinutes: number }
 } {
   const uptimeMs = Date.now() - startedAt
   const uptimeSec = uptimeMs / 1000
@@ -117,9 +190,11 @@ export function getRequestMetrics(): {
   const byGroup: Record<string, { requests: number; errors: number }> = {}
   for (const group of TRACKED_GROUPS) {
     const name = group.name
-    byGroup[name] = {
-      requests: requestCounts[name] || 0,
-      errors: errorCounts[name] || 0,
+    const reqs = requestCounts[name] || 0
+    const errs = errorCounts[name] || 0
+    // Only include groups that have traffic
+    if (reqs > 0 || errs > 0) {
+      byGroup[name] = { requests: reqs, errors: errs }
     }
   }
   if (requestCounts['other']) {
@@ -136,6 +211,7 @@ export function getRequestMetrics(): {
     byGroup,
     recentErrors: [...recentErrors].reverse(), // Most recent first
     rps,
+    rolling: getRollingMetrics(),
   }
 }
 
@@ -146,4 +222,6 @@ export function resetRequestMetrics(): void {
   for (const key of Object.keys(requestCounts)) delete requestCounts[key]
   for (const key of Object.keys(errorCounts)) delete errorCounts[key]
   recentErrors.length = 0
+  rollingBuckets.length = 0
+  currentBucket = { requests: 0, errors: 0, startedAt: Date.now() }
 }
