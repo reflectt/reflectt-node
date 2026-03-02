@@ -91,6 +91,7 @@ interface CloudState {
   canvasSyncTimer: ReturnType<typeof setInterval> | null
   usageSyncTimer: ReturnType<typeof setInterval> | null
   reflectionSyncTimer: ReturnType<typeof setInterval> | null
+  contextSyncTimer: ReturnType<typeof setInterval> | null
   heartbeatCount: number
   lastHeartbeat: number | null
   lastTaskSync: number | null
@@ -112,6 +113,8 @@ const IDLE_THRESHOLD_MS = 2 * 60_000 // 2 min without activity → idle mode
 const IDLE_SYNC_MS = 60_000           // Slow sync when idle (60s)
 const ACTIVE_CANVAS_SYNC_MS = 5_000   // Fast canvas sync when active
 const ACTIVE_USAGE_SYNC_MS = 15_000   // Fast usage sync when active
+const ACTIVE_CONTEXT_SYNC_MS = 30 * 60_000  // 30 min proactive context sync when active
+const IDLE_CONTEXT_SYNC_MS = 60 * 60_000    // 60 min proactive context sync when idle
 let lastActivityAt = Date.now()
 
 /** Mark recent activity (call from event handlers) */
@@ -134,6 +137,7 @@ let state: CloudState = {
   canvasSyncTimer: null,
   usageSyncTimer: null,
   reflectionSyncTimer: null,
+  contextSyncTimer: null,
   heartbeatCount: 0,
   lastHeartbeat: null,
   lastTaskSync: null,
@@ -390,6 +394,19 @@ export async function startCloudIntegration(): Promise<void> {
     syncInsightsToCloud().catch(() => {})
   }, REFLECTION_SYNC_INTERVAL_MS)
 
+  // Proactive context sync — push context for all agents periodically.
+  // Prevents stale context page when cloud stops issuing context_sync commands.
+  // 30 min when active, 60 min when idle.
+  let lastContextSyncAt = 0
+  proactiveContextSync().catch(() => {})
+  state.contextSyncTimer = setInterval(() => {
+    const now = Date.now()
+    const interval = isIdle() ? IDLE_CONTEXT_SYNC_MS : ACTIVE_CONTEXT_SYNC_MS
+    if (now - lastContextSyncAt < interval) return
+    lastContextSyncAt = now
+    proactiveContextSync().catch(() => {})
+  }, ACTIVE_CONTEXT_SYNC_MS)
+
   // Command polling — adaptive: 10s active, 60s idle
   // Uses the same tick as canvas (5s) with interval gate
   pollAndProcessCommands().catch(() => {})
@@ -446,6 +463,51 @@ export function stopConfigWatcher(): void {
   }
 }
 
+/**
+ * Proactively push context snapshots for all known agents to the cloud.
+ * Runs on a timer so the context page stays fresh even if the cloud never
+ * issues a context_sync command (e.g., new agents, post-restart, cloud lag).
+ */
+async function proactiveContextSync(): Promise<void> {
+  if (!state.hostId || !config || !state.running) return
+
+  const agents = getAgents()
+  if (agents.length === 0) return
+
+  const port = process.env.REFLECTT_NODE_PORT || '4445'
+
+  for (const agentInfo of agents) {
+    const agent = agentInfo.name
+    try {
+      const localRes = await fetch(`http://127.0.0.1:${port}/context/inject/${encodeURIComponent(agent)}`)
+      if (!localRes.ok) {
+        console.warn(`☁️  [ContextSync] Local context fetch failed for ${agent}: ${localRes.status}`)
+        continue
+      }
+      const contextData = await localRes.json() as Record<string, unknown>
+      const computedAt = (typeof contextData.computed_at === 'number' && contextData.computed_at > 0)
+        ? contextData.computed_at
+        : Date.now()
+
+      const result = await cloudPost(`/api/hosts/${state.hostId}/context/sync`, {
+        agent,
+        computed_at: computedAt,
+        budgets: contextData.budgets || { totalTokens: 0, layers: {} },
+        autosummary_enabled: Boolean(contextData.autosummary_enabled),
+        layers: contextData.layers || {},
+      })
+
+      if (result.success) {
+        console.log(`☁️  [ContextSync] Proactive sync OK for ${agent}`)
+      } else {
+        console.warn(`☁️  [ContextSync] Proactive sync failed for ${agent}: ${result.error}`)
+      }
+    } catch (err: any) {
+      console.warn(`☁️  [ContextSync] Proactive sync error for ${agent}: ${err?.message}`)
+    }
+  }
+}
+
 export function stopCloudIntegration(): void {
   state.running = false
   if (state.heartbeatTimer) {
@@ -471,6 +533,10 @@ export function stopCloudIntegration(): void {
   if (state.reflectionSyncTimer) {
     clearInterval(state.reflectionSyncTimer)
     state.reflectionSyncTimer = null
+  }
+  if (state.contextSyncTimer) {
+    clearInterval(state.contextSyncTimer)
+    state.contextSyncTimer = null
   }
   console.log('☁️  Cloud integration: stopped')
 }
