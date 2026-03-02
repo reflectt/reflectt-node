@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) Reflectt AI
 
-import { pipeline } from '@xenova/transformers'
+// @xenova/transformers is an optional dependency — may not be installed
+// if sharp fails to build (e.g. Node 25+). Embeddings gracefully degrade.
+let pipeline: any
+try {
+  pipeline = (await import('@xenova/transformers')).pipeline
+} catch {
+  pipeline = null
+}
 
 const DEFAULT_MODEL = process.env.REFLECTT_EMBED_MODEL || 'Xenova/all-MiniLM-L6-v2'
 
@@ -14,6 +21,9 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 async function getExtractor(): Promise<FeatureExtractor> {
+  if (!pipeline) {
+    throw new Error('Embeddings unavailable: @xenova/transformers is not installed. Install it with: npm install @xenova/transformers')
+  }
   if (!extractorPromise) {
     extractorPromise = pipeline('feature-extraction', DEFAULT_MODEL) as Promise<FeatureExtractor>
   }
