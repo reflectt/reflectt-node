@@ -19,6 +19,8 @@ import { chatManager } from './chat.js'
 import { slotManager } from './canvas-slots.js'
 import { getDb } from './db.js'
 import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions } from './usage-tracking.js'
+import { listReflections } from './reflections.js'
+import { listInsights } from './insights.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
@@ -88,6 +90,7 @@ interface CloudState {
   chatSyncTimer: ReturnType<typeof setInterval> | null
   canvasSyncTimer: ReturnType<typeof setInterval> | null
   usageSyncTimer: ReturnType<typeof setInterval> | null
+  reflectionSyncTimer: ReturnType<typeof setInterval> | null
   heartbeatCount: number
   lastHeartbeat: number | null
   lastTaskSync: number | null
@@ -130,6 +133,7 @@ let state: CloudState = {
   chatSyncTimer: null,
   canvasSyncTimer: null,
   usageSyncTimer: null,
+  reflectionSyncTimer: null,
   heartbeatCount: 0,
   lastHeartbeat: null,
   lastTaskSync: null,
@@ -374,6 +378,18 @@ export async function startCloudIntegration(): Promise<void> {
     syncUsage().catch(() => {})
   }, ACTIVE_USAGE_SYNC_MS)
 
+  // Reflection + Insight sync — 60s interval (less frequent than tasks)
+  let lastReflectionSyncAt = 0
+  syncReflectionsToCloud().catch(() => {})
+  syncInsightsToCloud().catch(() => {})
+  state.reflectionSyncTimer = setInterval(() => {
+    const now = Date.now()
+    if (now - lastReflectionSyncAt < REFLECTION_SYNC_INTERVAL_MS) return
+    lastReflectionSyncAt = now
+    syncReflectionsToCloud().catch(() => {})
+    syncInsightsToCloud().catch(() => {})
+  }, REFLECTION_SYNC_INTERVAL_MS)
+
   // Command polling — adaptive: 10s active, 60s idle
   // Uses the same tick as canvas (5s) with interval gate
   pollAndProcessCommands().catch(() => {})
@@ -451,6 +467,10 @@ export function stopCloudIntegration(): void {
   if (state.usageSyncTimer) {
     clearInterval(state.usageSyncTimer)
     state.usageSyncTimer = null
+  }
+  if (state.reflectionSyncTimer) {
+    clearInterval(state.reflectionSyncTimer)
+    state.reflectionSyncTimer = null
   }
   console.log('☁️  Cloud integration: stopped')
 }
@@ -930,6 +950,131 @@ async function syncUsage(): Promise<void> {
     usageSyncErrors++
     if (usageSyncErrors <= 3) {
       console.warn(`☁️  [Usage] Sync error: ${(err as Error).message}`)
+    }
+  }
+}
+
+// ---- Reflection + Insight sync ----
+
+const REFLECTION_SYNC_INTERVAL_MS = 60_000  // 60s — reflections change less frequently
+let reflectionSyncCursor = 0
+let reflectionSyncErrors = 0
+
+async function syncReflectionsToCloud(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  try {
+    // Fetch reflections updated since last sync
+    const allRefs = listReflections({ limit: 200 })
+    const newRefs = reflectionSyncCursor > 0
+      ? allRefs.filter(r => (r.updated_at || r.created_at) > reflectionSyncCursor)
+      : allRefs
+
+    if (newRefs.length === 0) return
+
+    // Map to cloud shape (strip metadata, keep core fields)
+    const payload = newRefs.map(r => ({
+      id: r.id,
+      pain: r.pain,
+      impact: r.impact,
+      evidence: r.evidence || [],
+      went_well: r.went_well || '',
+      suspected_why: r.suspected_why || '',
+      proposed_fix: r.proposed_fix || '',
+      confidence: r.confidence ?? 5,
+      role_type: r.role_type || 'agent',
+      severity: r.severity,
+      author: r.author || 'unknown',
+      task_id: r.task_id,
+      tags: r.tags || [],
+      created_at: r.created_at,
+      updated_at: r.updated_at || r.created_at,
+    }))
+
+    const result = await cloudPost(
+      `/api/hosts/${state.hostId}/reflections/sync`,
+      { reflections: payload },
+    )
+
+    if (result.success) {
+      const maxTs = newRefs.reduce((max, r) => Math.max(max, r.updated_at || r.created_at || 0), 0)
+      if (maxTs > 0) reflectionSyncCursor = maxTs
+      if (reflectionSyncErrors > 0) {
+        console.log(`☁️  [Reflections] Sync recovered after ${reflectionSyncErrors} errors`)
+        reflectionSyncErrors = 0
+      }
+    } else {
+      reflectionSyncErrors++
+      if (reflectionSyncErrors <= 3 || reflectionSyncErrors % 20 === 0) {
+        console.warn(`☁️  [Reflections] Sync failed (${reflectionSyncErrors}): ${result.error}`)
+      }
+    }
+  } catch (err) {
+    reflectionSyncErrors++
+    if (reflectionSyncErrors <= 3) {
+      console.warn(`☁️  [Reflections] Sync error: ${(err as Error).message}`)
+    }
+  }
+}
+
+let insightSyncCursor = 0
+let insightSyncErrors = 0
+
+async function syncInsightsToCloud(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  try {
+    const { insights: allInsights } = listInsights({ limit: 200 })
+    const newInsights = insightSyncCursor > 0
+      ? allInsights.filter(i => (i.updated_at || i.created_at) > insightSyncCursor)
+      : allInsights
+
+    if (newInsights.length === 0) return
+
+    const payload = newInsights.map(i => ({
+      id: i.id,
+      cluster_key: i.cluster_key,
+      workflow_stage: i.workflow_stage,
+      failure_family: i.failure_family,
+      impacted_unit: i.impacted_unit,
+      title: i.title,
+      status: i.status,
+      score: i.score,
+      priority: i.priority,
+      reflection_ids: i.reflection_ids || [],
+      independent_count: i.independent_count ?? 1,
+      evidence_refs: i.evidence_refs || [],
+      authors: i.authors || [],
+      promotion_readiness: i.promotion_readiness || 'pending',
+      recurring_candidate: i.recurring_candidate ?? false,
+      severity_max: i.severity_max ?? null,
+      task_id: i.task_id ?? null,
+      created_at: i.created_at,
+      updated_at: i.updated_at || i.created_at,
+    }))
+
+    const result = await cloudPost(
+      `/api/hosts/${state.hostId}/insights/sync`,
+      { insights: payload },
+    )
+
+    if (result.success) {
+      const maxTs = newInsights.reduce((max, i) => Math.max(max, i.updated_at || i.created_at || 0), 0)
+      if (maxTs > 0) insightSyncCursor = maxTs
+      if (insightSyncErrors > 0) {
+        console.log(`☁️  [Insights] Sync recovered after ${insightSyncErrors} errors`)
+        insightSyncErrors = 0
+      }
+    } else {
+      insightSyncErrors++
+      if (insightSyncErrors <= 3 || insightSyncErrors % 20 === 0) {
+        console.warn(`☁️  [Insights] Sync failed (${insightSyncErrors}): ${result.error}`)
+      }
+    }
+  } catch (err) {
+    insightSyncErrors++
+    if (insightSyncErrors <= 3) {
+      console.warn(`☁️  [Insights] Sync error: ${(err as Error).message}`)
     }
   }
 }
