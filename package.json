@@ -1,7 +1,7 @@
 {
   "name": "reflectt-node",
   "version": "0.1.2",
-  "description": "Local node server for agent-to-agent communication via OpenClaw",
+  "description": "Self-hosted coordination layer for AI agent teams. Task board, heartbeats, reviews, and team health dashboard. Open source.",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
