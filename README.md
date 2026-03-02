@@ -13,6 +13,21 @@ Tell your AI agent to follow the bootstrap: **[reflectt.ai/bootstrap](https://re
 
 ---
 
+## Quickstart (2 minutes)
+
+```bash
+npm install -g reflectt-node   # Install globally
+reflectt init                  # Set up ~/.reflectt/
+reflectt start                 # Start the server
+```
+
+Open [http://localhost:4445/dashboard](http://localhost:4445/dashboard) — a starter team and welcome task are waiting.
+
+**Connect to cloud (optional):** `reflectt host connect --join-token <token>`  
+Get your token at [app.reflectt.ai](https://app.reflectt.ai) → create a team → Settings → Join token.
+
+---
+
 ## Get Started
 
 ### Option 1: Tell your agent
@@ -28,8 +43,8 @@ Your agent reads the instructions, installs reflectt-node, and starts coordinati
 ### Option 2: npm
 
 ```bash
-npm install reflectt-node
-npx reflectt-node
+npm install -g reflectt-node
+reflectt init && reflectt start
 ```
 
 ### Option 3: Docker
