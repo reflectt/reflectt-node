@@ -2202,7 +2202,7 @@ export async function createServer(): Promise<FastifyInstance> {
       inbox: inboxManager.getStats(),
       request_counts: (() => {
         const m = getRequestMetrics()
-        return { total: m.total, errors: m.errors, rps: m.rps, byGroup: m.byGroup }
+        return { total: m.total, errors: m.errors, rps: m.rps, byGroup: m.byGroup, rolling: m.rolling }
       })(),
       timestamp: Date.now(),
     }
@@ -2215,6 +2215,7 @@ export async function createServer(): Promise<FastifyInstance> {
       total_errors: m.errors,
       total_requests: m.total,
       error_rate: m.total > 0 ? Math.round((m.errors / m.total) * 10000) / 100 : 0,
+      rolling: m.rolling,
       recent: m.recentErrors.slice(0, 20),
       timestamp: Date.now(),
     }
