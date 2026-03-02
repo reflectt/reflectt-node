@@ -82,6 +82,7 @@ function getRuntimePaths() {
 function buildServerEnv(config: Config): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    NODE_ENV: process.env.NODE_ENV || 'production',
     REFLECTT_HOME,
     PORT: String(config.port),
     HOST: config.host,
