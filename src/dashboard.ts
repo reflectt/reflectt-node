@@ -269,6 +269,83 @@ export function getDashboardHTML(): string {
     background: var(--green); margin-right: 5px; vertical-align: middle;
     box-shadow: 0 0 6px rgba(63, 185, 80, 0.4);
   }
+  /* First-boot banner */
+  .first-boot-banner {
+    position: relative;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4) var(--space-10) var(--space-4) var(--space-5);
+    margin: var(--space-4) var(--space-8) 0;
+    animation: banner-in 300ms ease;
+  }
+  .first-boot-banner[hidden] { display: none; }
+  @keyframes banner-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .banner-status {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: var(--text-sm); font-weight: var(--font-weight-semibold);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--green); margin-bottom: 6px;
+  }
+  .banner-status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--green); animation: banner-pulse 2s ease-in-out infinite;
+  }
+  @keyframes banner-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .banner-heading {
+    font-size: var(--text-lg); font-weight: var(--font-weight-bold);
+    color: var(--text-bright); margin-bottom: 2px; line-height: var(--line-height-tight);
+  }
+  .banner-subtext {
+    font-size: var(--text-base); color: var(--text-muted); margin-bottom: var(--space-3);
+  }
+  .banner-pills {
+    display: flex; gap: var(--space-2); flex-wrap: wrap;
+  }
+  .banner-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: var(--radius-full);
+    border: 1px solid var(--border); background: var(--surface);
+    font-size: var(--text-base); font-weight: var(--font-weight-medium);
+    color: var(--text); text-decoration: none; cursor: pointer;
+    transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+    white-space: nowrap;
+  }
+  .banner-pill:hover {
+    border-color: var(--accent); color: var(--text-bright);
+    background: var(--accent-dim);
+  }
+  .banner-pill:focus-visible {
+    outline: none; box-shadow: 0 0 0 3px rgba(77, 166, 255, 0.4);
+  }
+  .banner-pill-optional {
+    font-size: var(--text-sm); color: var(--text-muted); font-weight: var(--font-weight-normal); margin-left: 2px;
+  }
+  .banner-dismiss {
+    position: absolute; top: var(--space-3); right: var(--space-3);
+    width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+    border: none; background: none; color: var(--text-muted); font-size: var(--text-md);
+    cursor: pointer; border-radius: var(--radius); transition: color var(--transition-fast), background var(--transition-fast);
+  }
+  .banner-dismiss:hover { color: var(--text-bright); background: rgba(255, 255, 255, 0.06); }
+  .banner-dismiss:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(77, 166, 255, 0.4); }
+  @media (max-width: 480px) {
+    .first-boot-banner { margin: var(--space-3) var(--space-3) 0; }
+    .banner-pills { flex-direction: column; }
+    .banner-pill { justify-content: center; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .first-boot-banner { animation: none; }
+    .banner-status-dot { animation: none; }
+  }
+
   .agent-strip-wrapper {
     position: relative; overflow: hidden; border-bottom: 1px solid var(--border-subtle); background: var(--surface);
   }
@@ -1970,6 +2047,18 @@ export function getDashboardHTML(): string {
   <span id="intensity-info" class="intensity-info"></span>
   <span class="intensity-sep">|</span>
   <button id="pause-toggle-btn" class="pause-toggle-btn" onclick="toggleTeamPause()" aria-label="Pause team" tabindex="0">⏸️ Pause</button>
+</div>
+
+<div class="first-boot-banner" id="first-boot-banner" role="region" aria-label="Welcome banner" hidden>
+  <button class="banner-dismiss" aria-label="Dismiss welcome banner" onclick="dismissFirstBootBanner()">✕</button>
+  <div class="banner-status"><span class="banner-status-dot"></span> Running</div>
+  <h2 class="banner-heading">Your node is running.</h2>
+  <p class="banner-subtext">Here's what to do next.</p>
+  <div class="banner-pills">
+    <a href="/docs/getting-started" class="banner-pill"><span>🤖</span> Connect agents</a>
+    <a href="/docs/getting-started#try-the-api" class="banner-pill"><span>✅</span> Create a task</a>
+    <a href="https://app.reflectt.ai" class="banner-pill" target="_blank" rel="noopener"><span>☁️</span> Connect to cloud <span class="banner-pill-optional">(optional)</span></a>
+  </div>
 </div>
 
 <div class="agent-strip-wrapper" id="agent-strip-wrapper"><div class="agent-strip" id="agent-strip"></div></div>

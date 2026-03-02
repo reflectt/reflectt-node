@@ -66,6 +66,20 @@ let focusModeActive = false;
 
 const TASK_ID_PATTERN = /\b(task-[a-z0-9-]+)\b/gi;
 
+// First-boot banner: show on empty installs, hide once tasks exist or user dismisses
+function updateFirstBootBanner() {
+  const el = document.getElementById('first-boot-banner');
+  if (!el) return;
+  const dismissed = localStorage.getItem('reflectt-first-boot-dismissed');
+  const hasTasks = allTasks.length > 0;
+  el.hidden = dismissed === '1' || hasTasks;
+}
+function dismissFirstBootBanner() {
+  localStorage.setItem('reflectt-first-boot-dismissed', '1');
+  const el = document.getElementById('first-boot-banner');
+  if (el) el.hidden = true;
+}
+
 // Delta cursors for lower payload refreshes
 let lastTaskSync = 0;
 let lastChatSync = 0;
@@ -694,6 +708,7 @@ async function loadTasks(forceFull = false) {
   // Update sidebar badge
   const navTaskBadge = document.getElementById('nav-task-count');
   if (navTaskBadge) navTaskBadge.textContent = allTasks.length;
+  updateFirstBootBanner();
 }
 
 function renderProjectTabs() {
