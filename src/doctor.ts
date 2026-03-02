@@ -247,14 +247,26 @@ export function formatDoctorHuman(report: DoctorReport): string {
     const overall = d?.overall
     const OPTIONAL = new Set(['github-identity', 'openclaw_bootstrap'])
     const checks: any[] = Array.isArray(d?.checks) ? d.checks : []
-    const fails = checks.filter((c: any) => c?.status === 'fail').map((c: any) => c?.name).filter(Boolean)
-    const warns = checks.filter((c: any) => c?.status === 'warn').map((c: any) => c?.name).filter(Boolean)
-    const requiredFails = fails.filter(n => !OPTIONAL.has(n))
-    const optionalFails = fails.filter(n => OPTIONAL.has(n))
+    const fails = checks.filter((c: any) => c?.status === 'fail')
+    const warns = checks.filter((c: any) => c?.status === 'warn')
+    const failNames = fails.map((c: any) => c?.name).filter(Boolean)
+    const warnNames = warns.map((c: any) => c?.name).filter(Boolean)
+    const requiredFails = failNames.filter(n => !OPTIONAL.has(n))
+    const optionalFails = failNames.filter(n => OPTIONAL.has(n))
     const parts = [`overall=${overall ?? 'n/a'}`]
     if (requiredFails.length) parts.push(`fails=${requiredFails.join(',')}`)
     if (optionalFails.length) parts.push(`optional=${optionalFails.join(',')}`)
-    if (warns.length) parts.push(`warns=${warns.join(',')}`)
+    if (warnNames.length) parts.push(`warns=${warnNames.join(',')}`)
+
+    // Surface fix text for failing/warning checks so users know what to do
+    const actionable = [...fails, ...warns].filter((c: any) => c?.fix)
+    if (actionable.length) {
+      parts.push('\n')
+      for (const c of actionable) {
+        const status = c.status === 'fail' ? 'FAIL' : 'WARN'
+        parts.push(`    ${c.name}: ${status} — ${c.fix}`)
+      }
+    }
     return parts.join(' ')
   })
   section('preflight', '/preflight', (d) => {
