@@ -66,7 +66,7 @@ We don't require a full test suite for documentation changes. We do for anything
 
 ```
 src/
-├── server.ts       # Express app + all routes
+├── server.ts       # Fastify server + all routes
 ├── cli.ts          # CLI commands (reflectt init, start, stop, etc.)
 ├── database.ts     # SQLite initialization and schema
 ├── health.ts       # Board health, SLA alerts, agent tracking
