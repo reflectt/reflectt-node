@@ -1,6 +1,6 @@
 {
   "name": "reflectt-node",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local node server for agent-to-agent communication via OpenClaw",
   "main": "dist/index.js",
   "type": "module",
@@ -28,7 +28,8 @@
     "tasks:migrate:supabase": "tsx tools/migrate-tasks-to-supabase.ts",
     "test:watch": "vitest",
     "deploy": "bash scripts/post-merge-rebuild.sh",
-    "hooks:install": "bash scripts/install-hooks.sh"
+    "hooks:install": "bash scripts/install-hooks.sh",
+    "prepack": "chmod +x dist/cli.js"
   },
   "keywords": [
     "reflectt",
