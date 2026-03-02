@@ -4065,6 +4065,44 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ─── Email ingest — receives forwarded emails from Cloudflare Email Worker ───
+  app.post('/email/inbound', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agent = typeof body.agent === 'string' ? body.agent.trim() : null
+    const from = typeof body.from === 'string' ? body.from : 'unknown'
+    const subject = typeof body.subject === 'string' ? body.subject : '(no subject)'
+    const emailBody = typeof body.body === 'string' ? body.body : ''
+    const channel = 'email'
+
+    if (!agent) {
+      return reply.status(400).send({ error: 'Missing agent field' })
+    }
+
+    // Post as a chat message in the agent's general channel
+    const content = `📧 **Email from ${from}**\n**Subject:** ${subject}\n\n${emailBody.slice(0, 4000)}`
+
+    const msg = chatManager.addMessage({
+      room: 'general',
+      author: 'system',
+      content,
+      mentions: [agent],
+      metadata: {
+        channel,
+        email_from: from,
+        email_subject: subject,
+        email_to: typeof body.to === 'string' ? body.to : undefined,
+        email_message_id: typeof body.messageId === 'string' ? body.messageId : undefined,
+      },
+    })
+
+    return {
+      success: true,
+      agent,
+      messageId: msg.id,
+      channel,
+    }
+  })
+
   // List rooms
   app.get('/chat/rooms', async () => {
     const rooms = chatManager.listRooms()

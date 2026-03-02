@@ -365,6 +365,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | GET | `/inbox/:agent/subscriptions` | List subscriptions |
 | GET | `/inbox/:agent/unread` | Unread count |
 | GET | `/inbox/:agent/mentions` | Get @mentions |
+| POST | `/email/inbound` | Email ingest — receives forwarded emails from Cloudflare Email Worker. Body: `{ agent, from, subject, body }`. Posts to chat as system message with @mention. |
 
 ## Presence
 
