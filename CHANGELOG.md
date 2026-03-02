@@ -11,6 +11,28 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.1.4] — 2026-03-02
+
+Pre-Show HN polish. Doctor no longer fails on fresh installs, error tracking is more useful, and the codebase is ready for external contributors.
+
+### Fixed
+- **Doctor setup-aware mode** — Fresh installs with no API key now get clear SETUP guidance instead of FAIL codes. `github-identity` and `openclaw_bootstrap` checks downgraded from FAIL to WARN. (#613)
+- **Request tracker rolling window** — Replaced counter resets with 1-hour rolling window + granular route groups. Historical data preserved while surfacing current health. (#612)
+- **Gitleaks false positives** — Example `sk-ant-...` text replaced with `<your-key>` placeholder + allowlist regex added. (#614, #615)
+- **Dashboard kanban truncation** — Long kanban columns now truncate properly + humanized compliance timestamps. (#560)
+- **Insight-task-bridge dedup** — Dedup by source reflection ID prevents duplicate task creation from shared insights. (#587)
+
+### Added
+- **CHANGELOG.md** — Proper Keep a Changelog format documenting all releases. (#605)
+- **CONTRIBUTING.md** — Full guide for external contributors: setup, PR workflow, architecture overview. (#611)
+- **Content preflight checklist** — Prevents launch-day content failures. (#567)
+- **Remote gateway pairing docs** — Agent onboarding guidance for remote setups. (#586)
+
+### Changed
+- **CI GHCR visibility fix** — Correct API endpoint for container registry. (#509)
+
+---
+
 ## [0.1.2] — 2026-03-01
 
 Distribution and install quality fixes. `npm install -g reflectt-node` now works correctly end-to-end.
