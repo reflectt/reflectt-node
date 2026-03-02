@@ -19,6 +19,8 @@ import { chatManager } from './chat.js'
 import { slotManager } from './canvas-slots.js'
 import { getDb } from './db.js'
 import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions } from './usage-tracking.js'
+import { listReflections, countReflections } from './reflections.js'
+import { listInsights } from './insights.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
@@ -88,11 +90,13 @@ interface CloudState {
   chatSyncTimer: ReturnType<typeof setInterval> | null
   canvasSyncTimer: ReturnType<typeof setInterval> | null
   usageSyncTimer: ReturnType<typeof setInterval> | null
+  reflectionSyncTimer: ReturnType<typeof setInterval> | null
   heartbeatCount: number
   lastHeartbeat: number | null
   lastTaskSync: number | null
   lastChatSync: number | null
   lastCanvasSync: number | null
+  lastReflectionSync: number | null
   errors: number
   running: boolean
   startedAt: number
@@ -130,11 +134,13 @@ let state: CloudState = {
   chatSyncTimer: null,
   canvasSyncTimer: null,
   usageSyncTimer: null,
+  reflectionSyncTimer: null,
   heartbeatCount: 0,
   lastHeartbeat: null,
   lastTaskSync: null,
   lastChatSync: null,
   lastCanvasSync: null,
+  lastReflectionSync: null,
   errors: 0,
   running: false,
   startedAt: Date.now(),
@@ -212,6 +218,7 @@ export function getCloudStatus() {
     lastTaskSync: state.lastTaskSync,
     lastChatSync: state.lastChatSync,
     lastCanvasSync: state.lastCanvasSync,
+    lastReflectionSync: state.lastReflectionSync,
     errors: state.errors,
     uptimeMs: state.running ? Date.now() - state.startedAt : 0,
     syncHealth: {
@@ -374,6 +381,12 @@ export async function startCloudIntegration(): Promise<void> {
     syncUsage().catch(() => {})
   }, ACTIVE_USAGE_SYNC_MS)
 
+  // Reflection + insight sync — same cadence as task sync
+  syncReflectionsAndInsights().catch(() => {})
+  state.reflectionSyncTimer = setInterval(() => {
+    syncReflectionsAndInsights().catch(() => {})
+  }, config.taskSyncIntervalMs)
+
   // Command polling — adaptive: 10s active, 60s idle
   // Uses the same tick as canvas (5s) with interval gate
   pollAndProcessCommands().catch(() => {})
@@ -451,6 +464,10 @@ export function stopCloudIntegration(): void {
   if (state.usageSyncTimer) {
     clearInterval(state.usageSyncTimer)
     state.usageSyncTimer = null
+  }
+  if (state.reflectionSyncTimer) {
+    clearInterval(state.reflectionSyncTimer)
+    state.reflectionSyncTimer = null
   }
   console.log('☁️  Cloud integration: stopped')
 }
@@ -723,6 +740,105 @@ async function syncTasks(): Promise<void> {
   } else {
     const errorMessage = result.error || 'task sync failed'
     markTaskRowsErrored(dirtyRows, errorMessage)
+    state.errors++
+  }
+}
+
+// ---- Reflection + Insight sync ----
+
+/** Cursor tracking: only sync reflections/insights created after this timestamp */
+let reflectionSyncCursor: number = 0
+let insightSyncCursor: number = 0
+
+async function syncReflectionsAndInsights(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  try {
+    // Sync reflections — fetch all since last cursor, send batch to cloud
+    const reflections = listReflections({
+      since: reflectionSyncCursor || undefined,
+      limit: 200,
+    })
+
+    if (reflections.length > 0) {
+      const payload = reflections.map(r => ({
+        id: r.id,
+        pain: r.pain,
+        impact: r.impact,
+        evidence: r.evidence,
+        went_well: r.went_well,
+        suspected_why: r.suspected_why,
+        proposed_fix: r.proposed_fix,
+        confidence: r.confidence,
+        role_type: r.role_type,
+        severity: r.severity,
+        author: r.author,
+        task_id: r.task_id,
+        tags: r.tags,
+        team_id: r.team_id,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+      }))
+
+      const result = await cloudPost(`/api/hosts/${state.hostId}/reflections/sync`, {
+        reflections: payload,
+      })
+
+      if (result.success || result.data) {
+        // Advance cursor to latest reflection timestamp
+        const maxTs = Math.max(...reflections.map(r => r.created_at))
+        reflectionSyncCursor = maxTs + 1  // +1 to avoid re-syncing the same reflection
+        state.lastReflectionSync = Date.now()
+      } else {
+        console.warn(`[cloud-sync] Reflection sync failed: ${result.error || 'unknown error'}`)
+        state.errors++
+      }
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`[cloud-sync] Reflection sync error: ${msg}`)
+    state.errors++
+  }
+
+  try {
+    // Sync insights — send all (insights are updated frequently, cloud stores by id)
+    const { insights } = listInsights({ limit: 200 })
+
+    if (insights.length > 0) {
+      const payload = insights.map(i => ({
+        id: i.id,
+        cluster_key: i.cluster_key,
+        workflow_stage: i.workflow_stage,
+        failure_family: i.failure_family,
+        impacted_unit: i.impacted_unit,
+        title: i.title,
+        status: i.status,
+        score: i.score,
+        priority: i.priority,
+        reflection_ids: i.reflection_ids,
+        independent_count: i.independent_count,
+        evidence_refs: i.evidence_refs,
+        authors: i.authors,
+        promotion_readiness: i.promotion_readiness,
+        recurring_candidate: i.recurring_candidate,
+        severity_max: i.severity_max,
+        task_id: i.task_id ?? null,
+        created_at: i.created_at,
+        updated_at: i.updated_at,
+      }))
+
+      const result = await cloudPost(`/api/hosts/${state.hostId}/insights/sync`, {
+        insights: payload,
+      })
+
+      if (!result.success && !result.data) {
+        console.warn(`[cloud-sync] Insight sync failed: ${result.error || 'unknown error'}`)
+        state.errors++
+      }
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.warn(`[cloud-sync] Insight sync error: ${msg}`)
     state.errors++
   }
 }
