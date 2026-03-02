@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Intensity Toggle — Design Mock</title>
+<style>
+  /* === Reflectt Node Tokens (subset) === */
+  :root {
+    --bg: #0a0e14;
+    --surface: #141920;
+    --surface-raised: #1a2028;
+    --border: #252d38;
+    --border-subtle: #1e2530;
+    --text: #d4dae3;
+    --text-bright: #eef1f5;
+    --text-muted: #6b7a8d;
+    --accent: #4da6ff;
+    --accent-dim: rgba(77, 166, 255, 0.12);
+    --yellow: #d4a017;
+    --yellow-dim: rgba(212, 160, 23, 0.12);
+    --orange: #e08a20;
+    --orange-dim: rgba(224, 138, 32, 0.12);
+    --green: #3fb950;
+    --green-dim: rgba(63, 185, 80, 0.12);
+    --red: #f85149;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --text-xs: 10px;
+    --text-sm: 11px;
+    --text-base: 13px;
+    --text-md: 14px;
+    --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-weight-normal: 400;
+    --font-weight-medium: 500;
+    --font-weight-semibold: 600;
+    --focus-ring: 0 0 0 2px rgba(77, 166, 255, 0.5);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font-family);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    font-size: var(--text-base);
+    color: var(--text-muted);
+    margin-bottom: 32px;
+  }
+
+  /* === Mock Dashboard Panel === */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    width: 100%;
+    max-width: 480px;
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--text-md);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text-bright);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel-body {
+    padding: var(--space-4) var(--space-5);
+  }
+
+  /* === Runtime Stats (mock) === */
+  .runtime-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-3);
+    margin-bottom: 0;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat-label {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .stat-value {
+    font-size: var(--text-md);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text);
+  }
+  .stat-value.online { color: var(--green); }
+
+  /* === Intensity Control === */
+  .intensity-control {
+    margin-top: var(--space-4);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border);
+  }
+  .intensity-label {
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-semibold);
+    color: var(--text);
+    margin-bottom: var(--space-2);
+  }
+  .intensity-segments {
+    display: flex;
+    gap: 2px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 3px;
+  }
+  .intensity-seg {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    cursor: pointer;
+    transition: all 150ms ease;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-family: inherit;
+  }
+  .intensity-seg:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  .intensity-seg:hover:not(.active) {
+    color: var(--text);
+    background: rgba(255,255,255,0.03);
+  }
+
+  /* Active states — color-coded by level */
+  .intensity-seg.active[data-level="low"] {
+    background: var(--yellow-dim);
+    color: var(--yellow);
+    border-color: var(--yellow);
+    font-weight: var(--font-weight-semibold);
+  }
+  .intensity-seg.active[data-level="normal"] {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent);
+    font-weight: var(--font-weight-semibold);
+  }
+  .intensity-seg.active[data-level="high"] {
+    background: var(--orange-dim);
+    color: var(--orange);
+    border-color: var(--orange);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .intensity-desc {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    margin-top: var(--space-2);
+    line-height: 1.5;
+    min-height: 30px;
+  }
+
+  /* === Toast === */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px 20px;
+    font-size: var(--text-sm);
+    color: var(--text);
+    opacity: 0;
+    transition: all 300ms ease;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .toast.show {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+
+  /* === Mapping Table === */
+  .mapping-section {
+    margin-top: 40px;
+    width: 100%;
+    max-width: 640px;
+  }
+  .mapping-section h2 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 12px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+  }
+  th, td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    color: var(--text-muted);
+    font-weight: var(--font-weight-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: var(--text-xs);
+  }
+  td { color: var(--text); }
+  td.highlight { color: var(--accent); font-weight: var(--font-weight-medium); }
+
+  /* === Footer === */
+  .mock-footer {
+    margin-top: 40px;
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .intensity-seg:hover:not(.active) {
+      color: var(--text);
+      background: rgba(255,255,255,0.03);
+    }
+  }
+  @media not all and (hover: hover) {
+    .intensity-seg:hover:not(.active) {
+      color: var(--text-muted);
+      background: transparent;
+    }
+  }
+</style>
+</head>
+<body>
+
+  <h1>Agent Intensity Toggle</h1>
+  <p class="subtitle">Design mock — where it lives in the dashboard</p>
+
+  <!-- Mock Runtime Truth Card panel -->
+  <div class="panel">
+    <div class="panel-header">🧭 Runtime Truth Card</div>
+    <div class="panel-body">
+
+      <!-- Existing runtime stats (mock) -->
+      <div class="runtime-stats">
+        <div class="stat">
+          <span class="stat-label">Agents</span>
+          <span class="stat-value online">6 online</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Tasks</span>
+          <span class="stat-value">3 active</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Heartbeat</span>
+          <span class="stat-value">30s</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Uptime</span>
+          <span class="stat-value">4h 22m</span>
+        </div>
+      </div>
+
+      <!-- ✨ NEW: Intensity Control -->
+      <div class="intensity-control" role="radiogroup" aria-label="Agent intensity">
+        <div class="intensity-label">⚡ Agent Intensity</div>
+        <div class="intensity-segments">
+          <button role="radio" aria-checked="false" data-level="low" class="intensity-seg" onclick="setIntensity('low')">
+            🐢 Low
+          </button>
+          <button role="radio" aria-checked="true" data-level="normal" class="intensity-seg active" onclick="setIntensity('normal')">
+            ⚡ Normal
+          </button>
+          <button role="radio" aria-checked="false" data-level="high" class="intensity-seg" onclick="setIntensity('high')">
+            🔥 High
+          </button>
+        </div>
+        <div class="intensity-desc" id="intensity-desc">
+          Agents work at standard pace. Tasks processed each heartbeat.
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Mapping reference table -->
+  <div class="mapping-section">
+    <h2>What each level changes</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Setting</th>
+          <th>🐢 Low</th>
+          <th>⚡ Normal</th>
+          <th>🔥 High</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Heartbeat</td>
+          <td>2× slower</td>
+          <td class="highlight">Default</td>
+          <td>2× faster</td>
+        </tr>
+        <tr>
+          <td>Tasks / cycle</td>
+          <td>Max 1</td>
+          <td class="highlight">Config default</td>
+          <td>Unlimited</td>
+        </tr>
+        <tr>
+          <td>Approval</td>
+          <td>All manual</td>
+          <td class="highlight">Routine auto</td>
+          <td>All auto (except close)</td>
+        </tr>
+        <tr>
+          <td>Parallel tasks</td>
+          <td>No</td>
+          <td class="highlight">No</td>
+          <td>Yes</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <div class="mock-footer">
+    Design mock by pixel 🎨 · task-1772244618727-695h6hdsk · reflectt-node
+  </div>
+
+<script>
+const COPY = {
+  low:    'Agents check in less often. Tasks batch up.',
+  normal: 'Agents work at standard pace. Tasks processed each heartbeat.',
+  high:   'Agents move fast. Parallel tasks enabled.',
+};
+
+const TOAST_MSG = {
+  low:    '🐢 Intensity → Low — agents will slow down',
+  normal: '⚡ Intensity → Normal — standard pace',
+  high:   '🔥 Intensity → High — agents moving fast',
+};
+
+function setIntensity(level) {
+  document.querySelectorAll('.intensity-seg').forEach(btn => {
+    const active = btn.dataset.level === level;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-checked', active);
+  });
+  document.getElementById('intensity-desc').textContent = COPY[level];
+  showToast(TOAST_MSG[level]);
+}
+
+let toastTimer;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// Keyboard nav for radiogroup
+document.querySelector('.intensity-segments').addEventListener('keydown', e => {
+  const btns = [...document.querySelectorAll('.intensity-seg')];
+  const idx = btns.indexOf(document.activeElement);
+  if (idx < 0) return;
+  let next;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = btns[(idx + 1) % btns.length];
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = btns[(idx - 1 + btns.length) % btns.length];
+  if (next) { e.preventDefault(); next.focus(); next.click(); }
+});
+</script>
+</body>
+</html>
