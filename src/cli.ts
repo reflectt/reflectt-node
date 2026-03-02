@@ -1061,8 +1061,12 @@ host
     try {
       if (!options.joinToken && !options.apiKey) {
         console.error('❌ Either --join-token or --api-key is required')
-        console.error('   --join-token <token>  From dashboard (human flow)')
-        console.error('   --api-key <key>       Team API key (agent flow)')
+        console.error('')
+        console.error('Get a join token at: https://app.reflectt.ai')
+        console.error('')
+        console.error('Usage:')
+        console.error('  reflectt host connect --join-token <token>')
+        console.error('  reflectt host connect --api-key <key>')
         process.exit(1)
       }
 
