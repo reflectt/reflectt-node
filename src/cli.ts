@@ -68,8 +68,14 @@ function getRuntimePaths() {
   const __filename = fileURLToPath(import.meta.url)
   const __dirname = dirname(__filename)
   const projectRoot = join(__dirname, '..')
-  const serverPath = join(projectRoot, 'src', 'index.ts')
-  return { projectRoot, serverPath }
+
+  // When running from dist/ (npm install), use dist/index.js with node
+  // When running from src/ (development), use src/index.ts with tsx
+  const isDistBuild = __dirname.endsWith('/dist') || __dirname.endsWith('\\dist')
+  const serverPath = isDistBuild
+    ? join(projectRoot, 'dist', 'index.js')
+    : join(projectRoot, 'src', 'index.ts')
+  return { projectRoot, serverPath, isDistBuild }
 }
 
 function buildServerEnv(config: Config): NodeJS.ProcessEnv {
@@ -93,13 +99,17 @@ function buildServerEnv(config: Config): NodeJS.ProcessEnv {
 }
 
 function startServerDetached(config: Config): number {
-  const { projectRoot, serverPath } = getRuntimePaths()
+  const { projectRoot, serverPath, isDistBuild } = getRuntimePaths()
 
   if (!existsSync(serverPath)) {
     throw new Error(`Server file not found: ${serverPath}`)
   }
 
-  const child = spawn('npx', ['tsx', serverPath], {
+  // Use node for dist builds (npm install), tsx for source development
+  const cmd = isDistBuild ? 'node' : 'npx'
+  const args = isDistBuild ? [serverPath] : ['tsx', serverPath]
+
+  const child = spawn(cmd, args, {
     env: buildServerEnv(config),
     detached: true,
     stdio: 'ignore',
@@ -484,7 +494,7 @@ program
     }
 
     const config = loadConfig()
-    const { projectRoot, serverPath } = getRuntimePaths()
+    const { projectRoot, serverPath, isDistBuild } = getRuntimePaths()
 
     if (!existsSync(serverPath)) {
       console.error(`❌ Server file not found: ${serverPath}`)
@@ -513,7 +523,9 @@ program
       }
       console.log('   Press Ctrl+C to stop\n')
 
-      const child = spawn('npx', ['tsx', serverPath], {
+      const fgCmd = isDistBuild ? 'node' : 'npx'
+      const fgArgs = isDistBuild ? [serverPath] : ['tsx', serverPath]
+      const child = spawn(fgCmd, fgArgs, {
         env,
         stdio: 'inherit',
         cwd: projectRoot,

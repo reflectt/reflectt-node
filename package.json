@@ -28,7 +28,8 @@
     "tasks:migrate:supabase": "tsx tools/migrate-tasks-to-supabase.ts",
     "test:watch": "vitest",
     "deploy": "bash scripts/post-merge-rebuild.sh",
-    "hooks:install": "bash scripts/install-hooks.sh"
+    "hooks:install": "bash scripts/install-hooks.sh",
+    "prepack": "chmod +x dist/cli.js"
   },
   "keywords": [
     "reflectt",
