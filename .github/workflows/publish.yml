@@ -19,7 +19,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
+          # Note: registry-url intentionally omitted — it injects NODE_AUTH_TOKEN
+          # from GITHUB_TOKEN which breaks npm OIDC trusted publisher auth
 
       - run: npm ci
       - run: npm run build
