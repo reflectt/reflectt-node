@@ -68,8 +68,15 @@ function getRuntimePaths() {
   const __filename = fileURLToPath(import.meta.url)
   const __dirname = dirname(__filename)
   const projectRoot = join(__dirname, '..')
-  const serverPath = join(projectRoot, 'src', 'index.ts')
-  return { projectRoot, serverPath }
+
+  // Detect whether running from source (dev) or dist (npm install)
+  const srcPath = join(projectRoot, 'src', 'index.ts')
+  const distPath = join(projectRoot, 'dist', 'index.js')
+  const isSource = existsSync(srcPath)
+  const serverPath = isSource ? srcPath : distPath
+  const useNode = !isSource // npm install: use node directly; dev: use tsx
+
+  return { projectRoot, serverPath, useNode }
 }
 
 function buildServerEnv(config: Config): NodeJS.ProcessEnv {
@@ -93,13 +100,16 @@ function buildServerEnv(config: Config): NodeJS.ProcessEnv {
 }
 
 function startServerDetached(config: Config): number {
-  const { projectRoot, serverPath } = getRuntimePaths()
+  const { projectRoot, serverPath, useNode } = getRuntimePaths()
 
   if (!existsSync(serverPath)) {
     throw new Error(`Server file not found: ${serverPath}`)
   }
 
-  const child = spawn('npx', ['tsx', serverPath], {
+  const cmd = useNode ? 'node' : 'npx'
+  const args = useNode ? [serverPath] : ['tsx', serverPath]
+
+  const child = spawn(cmd, args, {
     env: buildServerEnv(config),
     detached: true,
     stdio: 'ignore',
@@ -484,7 +494,7 @@ program
     }
 
     const config = loadConfig()
-    const { projectRoot, serverPath } = getRuntimePaths()
+    const { projectRoot, serverPath, useNode } = getRuntimePaths()
 
     if (!existsSync(serverPath)) {
       console.error(`❌ Server file not found: ${serverPath}`)
@@ -492,6 +502,8 @@ program
     }
 
     const env = buildServerEnv(config)
+    const cmd = useNode ? 'node' : 'npx'
+    const args = useNode ? [serverPath] : ['tsx', serverPath]
 
     if (options.detach) {
       const pid = startServerDetached(config)
@@ -513,7 +525,7 @@ program
       }
       console.log('   Press Ctrl+C to stop\n')
 
-      const child = spawn('npx', ['tsx', serverPath], {
+      const child = spawn(cmd, args, {
         env,
         stdio: 'inherit',
         cwd: projectRoot,
