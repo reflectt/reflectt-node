@@ -988,6 +988,12 @@ export function getDashboardHTML(): string {
     .msg-time { margin-left: 0; }
     .chat-input-bar { padding: 8px 10px; }
     .chat-input-bar select { min-width: 0; width: 100%; }
+    .intensity-control { padding: 8px 12px; gap: 6px; }
+    .intensity-label { font-size: 10px; }
+    .intensity-btn { padding: 4px 8px; font-size: 12px; }
+    .intensity-info { font-size: 10px; margin-left: 4px; }
+    .intensity-sep { display: none; }
+    .pause-toggle-btn { padding: 4px 8px; font-size: 12px; }
   }
 
   @media (min-width: 768px) and (max-width: 1023px) {
@@ -1627,6 +1633,7 @@ export function getDashboardHTML(): string {
   .intensity-control {
     display: flex; align-items: center; gap: 8px; padding: 8px 16px;
     background: var(--surface, #1a1a2e); border-bottom: 1px solid var(--border, #2a2a4a);
+    flex-wrap: wrap; max-width: 100vw; box-sizing: border-box;
   }
   .intensity-label { font-size: var(--text-xs, 11px); color: var(--text-muted, #888); text-transform: uppercase; letter-spacing: 0.05em; margin-right: 4px; }
   .intensity-btn {
