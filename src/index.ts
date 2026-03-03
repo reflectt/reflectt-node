@@ -264,37 +264,128 @@ async function main() {
       const agentsDir = join(DATA_DIR, 'agents')
       const hasAgents = existsSync(agentsDir) && readdirSync(agentsDir).filter(f => !f.startsWith('.')).length > 0
       if (allTasks.length === 0 && !hasAgents) {
-        console.log('🌱 First boot detected — seeding starter team…')
-        const result = await createStarterTeam()
-        console.log(`   Created agents: ${result.created.join(', ') || 'none (already exist)'}`)
+        const teamIntent = process.env.TEAM_INTENT || ''
 
-        // Create a welcome task so the dashboard isn't empty
-        taskManager.createTask({
-          status: 'todo',
-          createdBy: 'system',
-          title: 'Welcome to reflectt-node — explore the dashboard and connect your agents',
-          description: [
-            '## Getting Started',
+        if (teamIntent) {
+          // ── Intent-driven bootstrap: save intent + create bootstrap task ──
+          console.log('🌱 First boot detected with TEAM_INTENT — creating bootstrap task…')
+
+          // Save intent to a file the main agent can read
+          const intentPath = join(DATA_DIR, 'TEAM_INTENT.md')
+          const { writeFileSync, mkdirSync } = await import('node:fs')
+          mkdirSync(DATA_DIR, { recursive: true })
+          writeFileSync(intentPath, [
+            '# Team Intent',
             '',
-            'Your reflectt-node is running! Here\'s what to do next:',
+            '> This was provided by the user during onboarding.',
             '',
-            '1. **Connect OpenClaw agents** — set `OPENCLAW_GATEWAY_URL` and `OPENCLAW_GATEWAY_TOKEN`',
-            '2. **Explore the dashboard** — visit `/dashboard` to see tasks, agents, and chat',
-            '3. **Try the API** — `GET /capabilities` lists every endpoint',
-            '4. **Connect to the cloud** — `reflectt host connect --join-token <token>`',
+            teamIntent,
             '',
-            'When done, move this task to `done`. Your first task cycle is complete!',
-          ].join('\n'),
-          priority: 'P2',
-          assignee: 'builder',
-          reviewer: 'ops',
-          done_criteria: [
-            'Dashboard loads and shows this task',
-            'At least one agent connected via OpenClaw',
-          ],
-          metadata: { source: 'first-boot', reflection_exempt: true, reflection_exempt_reason: 'Auto-created welcome task' },
-        })
-        console.log('   Created welcome task')
+            '---',
+            '',
+            'Use `POST /bootstrap/team` to get the TEAM-ROLES.yaml schema,',
+            'then `PUT /config/team-roles` to save your team configuration.',
+          ].join('\n'), 'utf-8')
+          console.log(`   Saved team intent to ${intentPath}`)
+
+          // Create a single "main" agent so the gateway has someone to talk to
+          const result = await createStarterTeam({
+            agents: [{
+              name: 'main',
+              role: 'team-lead',
+              description: 'Bootstrap agent — reads TEAM_INTENT and creates the rest of the team.',
+              soulMd: [
+                '# Main Agent',
+                '',
+                'You are the first agent on a new team. Your job:',
+                '',
+                '1. Read TEAM_INTENT.md (in your data directory) — this is what the user wants',
+                '2. Call `GET /bootstrap/team` to get the team schema and examples',
+                '3. Design a team that fulfills the user\'s intent',
+                '4. Save it via `PUT /config/team-roles` with the YAML config',
+                '5. Post an intro message to #general explaining the team you built',
+                '6. Create initial tasks for each agent',
+                '',
+                '## The User Said:',
+                '',
+                teamIntent,
+                '',
+                '## Rules',
+                '- Build the right team for their needs, not a generic template',
+                '- Give agents specific names and personalities, not "agent-1"',
+                '- Start small (2-4 agents) — they can add more later',
+                '- Post to #general when done so the user sees activity immediately',
+              ].join('\n'),
+            }],
+          })
+          console.log(`   Created bootstrap agent: ${result.created.join(', ') || 'main (already exists)'}`)
+
+          // Create the bootstrap task
+          taskManager.createTask({
+            status: 'todo',
+            createdBy: 'system',
+            title: 'Bootstrap your team from the user\'s intent',
+            description: [
+              '## Your First Task',
+              '',
+              'The user described what they need:',
+              '',
+              `> ${teamIntent}`,
+              '',
+              '### Steps:',
+              '1. Read `TEAM_INTENT.md` for the full intent',
+              '2. Call `GET /bootstrap/team` for the TEAM-ROLES.yaml schema',
+              '3. Design agents that match what the user needs',
+              '4. Save the team config via `PUT /config/team-roles`',
+              '5. Post an intro to #general: "Hi! I\'m [name], your team lead. Here\'s the team I\'ve set up..."',
+              '6. Create starter tasks for each agent',
+              '',
+              'The user should see a working team with named agents when they check the dashboard.',
+            ].join('\n'),
+            priority: 'P0',
+            assignee: 'main',
+            done_criteria: [
+              'TEAM-ROLES.yaml saved with agents matching user intent',
+              'Intro message posted to #general',
+              'At least one task created per agent',
+            ],
+            metadata: { source: 'first-boot-intent', reflection_exempt: true, reflection_exempt_reason: 'Auto-created bootstrap task' },
+          })
+          console.log('   Created bootstrap task for main agent')
+        } else {
+          // ── Default bootstrap: no intent, create starter team ──
+          console.log('🌱 First boot detected — seeding starter team…')
+          const result = await createStarterTeam()
+          console.log(`   Created agents: ${result.created.join(', ') || 'none (already exist)'}`)
+
+          // Create a welcome task so the dashboard isn't empty
+          taskManager.createTask({
+            status: 'todo',
+            createdBy: 'system',
+            title: 'Welcome to reflectt-node — explore the dashboard and connect your agents',
+            description: [
+              '## Getting Started',
+              '',
+              'Your reflectt-node is running! Here\'s what to do next:',
+              '',
+              '1. **Connect OpenClaw agents** — set `OPENCLAW_GATEWAY_URL` and `OPENCLAW_GATEWAY_TOKEN`',
+              '2. **Explore the dashboard** — visit `/dashboard` to see tasks, agents, and chat',
+              '3. **Try the API** — `GET /capabilities` lists every endpoint',
+              '4. **Connect to the cloud** — `reflectt host connect --join-token <token>`',
+              '',
+              'When done, move this task to `done`. Your first task cycle is complete!',
+            ].join('\n'),
+            priority: 'P2',
+            assignee: 'builder',
+            reviewer: 'ops',
+            done_criteria: [
+              'Dashboard loads and shows this task',
+              'At least one agent connected via OpenClaw',
+            ],
+            metadata: { source: 'first-boot', reflection_exempt: true, reflection_exempt_reason: 'Auto-created welcome task' },
+          })
+          console.log('   Created welcome task')
+        }
       }
     } catch (err) {
       // Non-blocking — don't prevent server from starting
