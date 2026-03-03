@@ -232,9 +232,12 @@ export function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch 
       }
     }
 
-    // 3. Same full cluster_key (stage::family::unit) via insight-bridge source
+    // 3. Same full cluster_key (stage::family::unit) — any task with a linked insight
     // 4. Reflection overlap: source insight shares ≥50% of reflection_ids
-    if (meta.source === 'insight-task-bridge' && typeof meta.insight_id === 'string') {
+    // NOTE: intentionally not restricted to bridge-created tasks — user-created tasks
+    // that reference an insight_id must also be considered for dedup. The insight_id
+    // presence is the filter; source=insight-task-bridge is not required.
+    if (typeof meta.insight_id === 'string') {
       try {
         const sourceInsight = getInsight(meta.insight_id as string)
         if (sourceInsight) {
@@ -735,4 +738,4 @@ export function getBridgeConfig(): BridgeConfig {
   return { ...config, ownershipGuardrail: { ...config.ownershipGuardrail } }
 }
 
-export { handlePromotedInsight as _handlePromotedInsight }
+export { handlePromotedInsight as _handlePromotedInsight, findExistingTaskForInsight as _findExistingTaskForInsight }
