@@ -330,3 +330,65 @@ export function resetPreflightMetrics(): void {
   metrics.latencies = []
   recentKeys.clear()
 }
+
+// ── Persistent daily snapshots ─────────────────────────────────────────────
+
+const DAILY_FILE = join(DATA_DIR, 'alert-preflight-daily.jsonl')
+let lastSnapshotDate = ''
+
+/**
+ * Append a daily metrics snapshot if the date has changed.
+ * Called from getPreflightMetrics() and also from the health endpoint.
+ * Idempotent per calendar day.
+ */
+export function snapshotDailyMetrics(): void {
+  const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+  if (today === lastSnapshotDate) return
+  if (metrics.totalChecked === 0) return // nothing to snapshot
+
+  const sorted = [...metrics.latencies].sort((a, b) => a - b)
+  const p95Index = Math.floor(sorted.length * 0.95)
+  const latencyP95 = sorted.length > 0 ? sorted[p95Index] ?? 0 : 0
+
+  const snapshot = {
+    date: today,
+    ts: Date.now(),
+    totalChecked: metrics.totalChecked,
+    suppressed: metrics.suppressed,
+    canaryFlagged: metrics.canaryFlagged,
+    latencyP95: Math.round(latencyP95 * 100) / 100,
+    mode: getPreflightMode(),
+    falsePositiveRate: metrics.totalChecked > 0
+      ? Math.round((metrics.canaryFlagged / metrics.totalChecked) * 10000) / 100
+      : 0,
+  }
+
+  try {
+    appendFileSync(DAILY_FILE, JSON.stringify(snapshot) + '\n')
+    lastSnapshotDate = today
+  } catch {
+    // Non-fatal — best-effort persistence
+  }
+}
+
+/**
+ * Read all daily snapshots for the observation window report.
+ */
+export function getDailySnapshots(): Array<{
+  date: string
+  totalChecked: number
+  suppressed: number
+  canaryFlagged: number
+  latencyP95: number
+  mode: string
+  falsePositiveRate: number
+}> {
+  try {
+    const { readFileSync } = require('fs')
+    const content = readFileSync(DAILY_FILE, 'utf8').trim()
+    if (!content) return []
+    return content.split('\n').map((line: string) => JSON.parse(line))
+  } catch {
+    return []
+  }
+}

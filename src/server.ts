@@ -16,7 +16,7 @@ import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME } from './config.js'
 import { trackRequest, getRequestMetrics } from './request-tracker.js'
-import { getPreflightMetrics } from './alert-preflight.js'
+import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots } from './alert-preflight.js'
 
 // ── Build info (read once at startup) ──────────────────────────────────────
 const BUILD_VERSION = (() => {
@@ -2538,7 +2538,13 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ─── Alert preflight metrics ───
   app.get('/health/alert-preflight', async () => {
+    snapshotDailyMetrics() // Persist daily checkpoint on health check
     return { ...getPreflightMetrics(), timestamp: Date.now() }
+  })
+
+  app.get('/health/alert-preflight/history', async () => {
+    snapshotDailyMetrics()
+    return { snapshots: getDailySnapshots(), currentSession: getPreflightMetrics() }
   })
 
   // ─── Backlog health: ready counts per lane, breach status, floor compliance ───
