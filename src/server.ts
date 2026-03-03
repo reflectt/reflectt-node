@@ -7360,7 +7360,6 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-<<<<<<< HEAD
   // ── File upload/download ──
   app.post('/files', async (request, reply) => {
     try {
