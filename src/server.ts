@@ -186,7 +186,7 @@ const CreateTaskSchema = z.object({
   title: z.string().min(1),
   type: z.enum(TASK_TYPES).optional(), // optional for backward compat, validated when present
   description: z.string().optional(),
-  status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).default('todo'),
+  status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done', 'cancelled']).default('todo'),
   assignee: z.string().trim().min(1).optional().default('unassigned'),
   reviewer: z.string().trim().min(1).or(z.literal('auto')).default('auto'), // 'auto' triggers load-balanced assignment
   done_criteria: z.array(z.string().trim().min(1)).optional().default([]),
@@ -334,7 +334,7 @@ function normalizeConfiguredModel(value: unknown): { ok: boolean; value?: string
 const UpdateTaskSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
-  status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).optional(),
+  status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done', 'cancelled']).optional(),
   assignee: z.string().optional(),
   reviewer: z.string().optional(),
   done_criteria: z.array(z.string().min(1)).optional(),
@@ -401,7 +401,7 @@ const CreateRecurringTaskSchema = z.object({
   metadata: z.record(z.unknown()).optional(),
   schedule: RecurringTaskScheduleSchema,
   enabled: z.boolean().optional(),
-  status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done']).optional(),
+  status: z.enum(['todo', 'doing', 'blocked', 'validating', 'done', 'cancelled']).optional(),
 })
 
 const UpdateRecurringTaskSchema = z.object({

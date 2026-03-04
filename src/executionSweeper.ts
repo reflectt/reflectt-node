@@ -563,7 +563,7 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   // ── Orphan PR detection ──────────────────────────────────────────────
   // Scan all tasks with PR URLs where the task is done/cancelled but the PR
   // was linked — these represent potential orphan open PRs
-  const cancelledTasks = taskManager.listTasks({ status: 'cancelled' as any })
+  const cancelledTasks = taskManager.listTasks({ status: 'cancelled' })
   const doneAndCancelled = [...doneTasks, ...cancelledTasks]
   for (const task of doneAndCancelled) {
     const meta = (task.metadata || {}) as Record<string, unknown>

@@ -117,7 +117,7 @@ tool(
   {
     title: z.string().describe("Task title"),
     description: z.string().optional().describe("Detailed description"),
-    status: z.enum(["todo", "doing", "blocked", "validating", "done"]).optional().describe("Task status (default: todo)"),
+    status: z.enum(["todo", "doing", "blocked", "validating", "done", "cancelled"]).optional().describe("Task status (default: todo)"),
     assignee: z.string().min(1).describe("Task owner/assignee"),
     reviewer: z.string().min(1).describe("Task reviewer"),
     done_criteria: z.array(z.string().min(1)).min(1).describe("Explicit done criteria"),
@@ -160,7 +160,7 @@ tool(
   "list_tasks",
   "List tasks, optionally filtered by status, assignee, priority, or tags.",
   {
-    status: z.enum(["todo", "doing", "blocked", "validating", "done"]).optional().describe("Filter by status"),
+    status: z.enum(["todo", "doing", "blocked", "validating", "done", "cancelled"]).optional().describe("Filter by status"),
     assignee: z.string().optional().describe("Filter by assignee"),
     createdBy: z.string().optional().describe("Filter by creator"),
     priority: z.enum(["P0", "P1", "P2", "P3"]).optional().describe("Filter by priority"),
@@ -209,7 +209,7 @@ tool(
     id: z.string().describe("Task ID"),
     title: z.string().optional().describe("New title"),
     description: z.string().optional().describe("New description"),
-    status: z.enum(["todo", "doing", "blocked", "validating", "done"]).optional().describe("New status"),
+    status: z.enum(["todo", "doing", "blocked", "validating", "done", "cancelled"]).optional().describe("New status"),
     assignee: z.string().optional().describe("New assignee"),
     priority: z.enum(["P0", "P1", "P2", "P3"]).optional().describe("New priority"),
     blocked_by: z.array(z.string()).optional().describe("Task IDs blocking this task"),
@@ -450,7 +450,7 @@ function initToolHandlers() {
         properties: {
           title: { type: "string", description: "Task title" },
           description: { type: "string", description: "Task description" },
-          status: { type: "string", enum: ["todo", "doing", "blocked", "validating", "done"] },
+          status: { type: "string", enum: ["todo", "doing", "blocked", "validating", "done", "cancelled"] },
           assignee: { type: "string", description: "Assignee" },
           createdBy: { type: "string", description: "Creator" },
           priority: { type: "string", enum: ["P0", "P1", "P2", "P3"] },
@@ -474,7 +474,7 @@ function initToolHandlers() {
       inputSchema: {
         type: "object",
         properties: {
-          status: { type: "string", enum: ["todo", "doing", "blocked", "validating", "done"] },
+          status: { type: "string", enum: ["todo", "doing", "blocked", "validating", "done", "cancelled"] },
           assignee: { type: "string" },
           createdBy: { type: "string" },
           priority: { type: "string", enum: ["P0", "P1", "P2", "P3"] },
@@ -517,7 +517,7 @@ function initToolHandlers() {
           id: { type: "string", description: "Task ID" },
           title: { type: "string" },
           description: { type: "string" },
-          status: { type: "string", enum: ["todo", "doing", "blocked", "validating", "done"] },
+          status: { type: "string", enum: ["todo", "doing", "blocked", "validating", "done", "cancelled"] },
           assignee: { type: "string" },
           priority: { type: "string", enum: ["P0", "P1", "P2", "P3"] },
           blocked_by: { type: "array", items: { type: "string" } },

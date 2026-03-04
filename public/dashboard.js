@@ -779,7 +779,7 @@ function renderKanban() {
   const filtered = currentProject === 'all' ? visible : visible.filter(t => classifyProject(t) === currentProject);
   const cols = currentStatusFilter === 'open'
     ? ['todo', 'doing', 'blocked', 'validating']
-    : ['todo', 'doing', 'blocked', 'validating', 'done'];
+    : ['todo', 'doing', 'blocked', 'validating', 'done', 'cancelled'];
   const grouped = {}; cols.forEach(c => grouped[c] = []);
   filtered.forEach(t => { const s = t.status || 'todo'; if (grouped[s]) grouped[s].push(t); else grouped['todo'].push(t); });
   const pOrder = { P0: 0, P1: 1, P2: 2, P3: 3 };

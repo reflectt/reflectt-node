@@ -31,7 +31,7 @@ export interface Task {
   id: string
   title: string
   description?: string
-  status: 'todo' | 'doing' | 'blocked' | 'validating' | 'done'
+  status: 'todo' | 'doing' | 'blocked' | 'validating' | 'done' | 'cancelled'
   assignee?: string
   reviewer?: string
   done_criteria?: string[]

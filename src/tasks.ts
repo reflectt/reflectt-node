@@ -1174,7 +1174,7 @@ class TaskManager {
       
       return task.blocked_by.some(blockerId => {
         const blocker = queryTask(blockerId)
-        return blocker && blocker.status !== 'done'
+        return blocker && blocker.status !== 'done' && blocker.status !== 'cancelled'
       })
     }
 
@@ -1516,7 +1516,7 @@ class TaskManager {
       if (task.blocked_by && task.blocked_by.includes(completedTaskId)) {
         const stillBlocked = task.blocked_by.some(blockerId => {
           const blocker = queryTask(blockerId)
-          return blocker && blocker.status !== 'done'
+          return blocker && blocker.status !== 'done' && blocker.status !== 'cancelled'
         })
         if (!stillBlocked) {
           unblockedTasks.push(task)
@@ -1565,7 +1565,7 @@ class TaskManager {
       
       return task.blocked_by.some(blockerId => {
         const blocker = queryTask(blockerId)
-        return blocker && blocker.status !== 'done'
+        return blocker && blocker.status !== 'done' && blocker.status !== 'cancelled'
       })
     }
 
@@ -1621,7 +1621,7 @@ class TaskManager {
   getLifecycleInstrumentation() {
     const db = getDb()
     const activeRows = db.prepare(
-      `SELECT * FROM tasks WHERE status NOT IN ('todo', 'done')`
+      `SELECT * FROM tasks WHERE status NOT IN ('todo', 'done', 'cancelled')`
     ).all() as TaskRow[]
     const active = activeRows.map(rowToTask)
     const missingReviewer = active.filter(t => !t.reviewer || t.reviewer.trim().length === 0)
@@ -1665,7 +1665,7 @@ class TaskManager {
       `SELECT status, COUNT(*) as count FROM tasks ${whereClause} GROUP BY status`
     ).all() as Array<{ status: string; count: number }>
     const byStatus: Record<string, number> = {
-      todo: 0, doing: 0, blocked: 0, validating: 0, done: 0, 'in-progress': 0,
+      todo: 0, doing: 0, blocked: 0, validating: 0, done: 0, cancelled: 0, 'in-progress': 0,
     }
     for (const row of byStatusRows) {
       byStatus[row.status] = row.count
