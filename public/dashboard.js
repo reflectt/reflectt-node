@@ -258,7 +258,7 @@ function renderLaneTransitionMeta(task) {
   return `<div style="margin-top:6px;font-size:11px;color:var(--text-muted)">🧭 ${esc(parts.join(' · '))}</div>`;
 }
 
-function mentionsRyan(message) { return /@ryan\b/i.test(message || ''); }
+function hasMention(message) { return /@([a-zA-Z][a-zA-Z0-9_-]*)/i.test(message || ''); }
 
 function resolveSSOTState(lastVerifiedUtc) {
   if (!lastVerifiedUtc) return { state: 'unknown', label: 'unknown', text: 'verification timestamp unavailable' };
@@ -450,12 +450,12 @@ function formatDurationMin(min) {
 
 function statusTemplateFor(agent, taskId) {
   const mentions = agent === 'pixel'
-    ? '@kai @link'
+    ? '@owner @link'
     : agent === 'link'
-      ? '@kai @pixel'
+      ? '@owner @pixel'
       : agent === 'kai'
         ? '@link @pixel'
-        : '@kai @pixel';
+        : '@owner @pixel';
   return [
     mentions,
     'Task: ' + (taskId || '<task-id>'),
@@ -1032,13 +1032,13 @@ async function loadChat(forceFull = false) {
     if (!channelStats.has(ch)) channelStats.set(ch, { total: 0, mentions: 0 });
     const stats = channelStats.get(ch);
     stats.total += 1;
-    if (mentionsRyan(m.content)) stats.mentions += 1;
+    if (hasMention(m.content)) stats.mentions += 1;
   });
 
   const tabs = document.getElementById('channel-tabs');
   tabs.innerHTML = Array.from(channels).map(ch => {
     const stats = ch === 'all'
-      ? { total: allMessages.length, mentions: allMessages.filter(m => mentionsRyan(m.content)).length }
+      ? { total: allMessages.length, mentions: allMessages.filter(m => hasMention(m.content)).length }
       : (channelStats.get(ch) || { total: 0, mentions: 0 });
     const label = ch === 'all' ? '🌐 all' : '#' + esc(ch);
     const countMeta = `<span class="meta">${stats.total}</span>`;
@@ -1069,7 +1069,7 @@ function renderChat() {
   body.innerHTML = shown.map(m => {
     const agent = AGENT_INDEX.get(m.from);
     const roleTag = agent ? `<span class="msg-role">${esc(agent.role)}</span>` : '';
-    const mentioned = mentionsRyan(m.content);
+    const mentioned = hasMention(m.content);
     const channelTag = m.channel ? '<span class="msg-channel">#' + esc(m.channel) + '</span>' : '';
     const editedTag = m.metadata && m.metadata.editedAt ? '<span class="msg-edited">(edited)</span>' : '';
     return `
@@ -1294,9 +1294,9 @@ async function loadSharedArtifacts() {
     const files = entries.filter(e => e && e.type === 'file');
     count.textContent = files.length + ' files';
 
-    // Pinned: Ryan's thoughts (if symlinked into shared workspace process/)
+    // Pinned: operator notes (optional)
     const pinned = [
-      { name: "RYANS-THOUGHTS.md", label: "Ryan's thoughts" },
+      { name: "OPERATOR-NOTES.md", label: "Operator notes" },
     ];
 
     const pinnedRows = pinned.map(p => {
@@ -1770,7 +1770,7 @@ async function escalateReviewBreaches(breachedTasks) {
     return '- ' + t.id + ' (' + (t.title || '').slice(0, 50) + ') — reviewer: @' + reviewer + ', waiting ' + formatDuration(t.timeInReview);
   });
 
-  const content = '@kai Review SLA breach detected:\n' + lines.join('\n');
+  const content = '@owner Review SLA breach detected:\n' + lines.join('\n');
 
   try {
     await fetch(BASE + '/chat/messages', {

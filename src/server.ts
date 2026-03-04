@@ -1573,41 +1573,55 @@ function extractMentions(content: string): string[] {
   }).filter(Boolean)))
 }
 
-function buildAutonomyWarnings(content: string): string[] {
-  const mentions = extractMentions(content)
-  if (mentions.length === 0) return []
+function getOwnerHandlesFromEnv(): string[] {
+  const raw = String(process.env.REFLECTT_OWNER_HANDLES || '').trim()
+  if (!raw) return []
+  return raw
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean)
+}
 
-  // Only warn when the message is explicitly directed at Ryan.
-  const directedAtRyan = mentions.includes('ryan') || mentions.includes('ryancampbell')
-  if (!directedAtRyan) return []
+function isDirectedAtConfiguredOwner(content: string): boolean {
+  const owners = getOwnerHandlesFromEnv()
+  if (owners.length === 0) return false
+  const mentions = extractMentions(content)
+  return owners.some(o => mentions.includes(o))
+}
+
+function buildAutonomyWarnings(content: string): string[] {
+  // If no owner handles are configured, keep this feature off by default.
+  // reflectt-node must remain generic for customers.
+  if (!isDirectedAtConfiguredOwner(content)) return []
 
   const normalized = content.toLowerCase()
 
-  // Detect the specific anti-pattern: asking leadership what to do next.
+  // Detect the specific anti-pattern: asking a human leader/operator what to do next.
   // Keep the pattern narrow to avoid false positives on legitimate asks.
   const approvalSeeking =
     /\b(what should i (do|work on) next|what(?:['’]?s) next(?: for me)?|what do i do next|what do you want me to do next|should i (do|work on)( [^\n\r]{0,80})? next)\b/i
   if (!approvalSeeking.test(normalized)) return []
 
   return [
-    'Autonomy guardrail: avoid asking Ryan what to do next. Pull from the board (/tasks/next) or pick the highest-priority task and ship. Escalate to Ryan only if blocked on a decision only a human can make.',
+    'Autonomy guardrail: avoid asking a human operator what to do next. Pull from the board (/tasks/next) or pick the highest-priority task and ship. Escalate only if you are blocked on a decision or permission that only a human can provide.',
   ]
 }
 
-type RyanApprovalGate = {
+type OwnerApprovalGate = {
   blockingError?: string
   hint?: string
 }
 
-function validateRyanApprovalPing(content: string, from: string, channel?: string): RyanApprovalGate {
-  // Only gate messages directed at Ryan.
-  const mentions = extractMentions(content)
-  const directedAtRyan = mentions.includes('ryan') || mentions.includes('ryancampbell')
-  if (!directedAtRyan) return {}
+function validateOwnerApprovalPing(content: string, from: string, channel?: string): OwnerApprovalGate {
+  const owners = getOwnerHandlesFromEnv()
+  if (owners.length === 0) return {}
 
-  // Don't gate Ryan/system talking to themselves.
+  // Only gate messages directed at configured owner handles.
+  if (!isDirectedAtConfiguredOwner(content)) return {}
+
+  // Don't gate the owner/system talking to themselves.
   const sender = String(from || '').toLowerCase()
-  if (sender === 'ryan' || sender === 'system') return {}
+  if (owners.includes(sender) || sender === 'system') return {}
 
   const normalized = content.toLowerCase()
 
@@ -1618,7 +1632,7 @@ function validateRyanApprovalPing(content: string, from: string, channel?: strin
 
   if (!looksLikePrRequest) return {}
 
-  // Allow if the message explicitly explains why Ryan is required and references a task id.
+  // Allow if the message explicitly explains why a human is required and references a task id.
   const hasTaskId = hasTaskIdReference(content)
   const hasPermissionsReason = /(permission|permissions|auth|authed|rights|cannot|can\s*not|can't|blocked|branch protection|required)/i.test(normalized)
 
@@ -1626,8 +1640,8 @@ function validateRyanApprovalPing(content: string, from: string, channel?: strin
 
   const normalizedChannel = (channel || 'general').toLowerCase()
   return {
-    blockingError: `Don't ask @ryan to approve/merge PRs by default (channel=${normalizedChannel}). Ask the assigned reviewer, or merge it yourself. Escalate to Ryan only when truly blocked by permissions/auth.`,
-    hint: 'If Ryan is genuinely required: include task-<id> and a short permissions/auth reason (e.g., "no merge rights" / "branch protection"), plus the PR link.',
+    blockingError: `Don't ask a human operator to approve/merge PRs by default (channel=${normalizedChannel}). Ask the assigned reviewer, or merge it yourself. Escalate only when truly blocked by permissions/auth.`,
+    hint: 'If a human is genuinely required: include task-<id> and a short permissions/auth reason (e.g., "no merge rights" / "branch protection"), plus the PR link.',
   }
 }
 
@@ -3377,14 +3391,14 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
-    const ryanApprovalGate = validateRyanApprovalPing(data.content, data.from, data.channel)
-    if (ryanApprovalGate.blockingError) {
+    const ownerApprovalGate = validateOwnerApprovalPing(data.content, data.from, data.channel)
+    if (ownerApprovalGate.blockingError) {
       reply.code(400)
       return {
         success: false,
-        error: ryanApprovalGate.blockingError,
-        gate: 'ryan_approval_gate',
-        hint: ryanApprovalGate.hint,
+        error: ownerApprovalGate.blockingError,
+        gate: 'owner_approval_gate',
+        hint: ownerApprovalGate.hint,
       }
     }
 
@@ -9536,7 +9550,7 @@ If your heartbeat shows **no active task** and **no next task**:
 1. **Status updates belong in task comments first** (\`POST /tasks/:id/comments\`).
 2. **Shipped artifacts go to \`#shipping\`** and must include \`@reviewer\` + task ID + PR/artifact link.
 3. **Review requests go to \`#reviews\`** and must include \`@reviewer\` + task ID + exact ask.
-4. **Blockers go to \`#blockers\`** and must include \`@kai\` + task ID + concrete unblock needed.
+4. **Blockers go to \`#blockers\`** and must include \`@owner\` + task ID + concrete unblock needed.
 5. **\`#general\` is decisions/cross-team coordination only** (not routine heartbeat chatter).
 
 ## API Quick Reference
