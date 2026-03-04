@@ -1023,23 +1023,22 @@ async function syncUsage(): Promise<void> {
 // ---- Reflection + Insight sync ----
 
 const REFLECTION_SYNC_INTERVAL_MS = 60_000  // 60s — reflections change less frequently
-let reflectionSyncCursor = 0
 let reflectionSyncErrors = 0
 
 async function syncReflectionsToCloud(): Promise<void> {
   if (!state.hostId || !config) return
 
   try {
-    // Fetch reflections updated since last sync
+    // Always send all reflections — the cloud relay is in-memory and may
+    // lose state on restart.  Sending the full set (max 200 rows) every 60s
+    // is cheap and guarantees the cloud stays populated.  The relay upserts
+    // by id, so duplicates are harmless.
     const allRefs = listReflections({ limit: 200 })
-    const newRefs = reflectionSyncCursor > 0
-      ? allRefs.filter(r => (r.updated_at || r.created_at) > reflectionSyncCursor)
-      : allRefs
 
-    if (newRefs.length === 0) return
+    if (allRefs.length === 0) return
 
     // Map to cloud shape (strip metadata, keep core fields)
-    const payload = newRefs.map(r => ({
+    const payload = allRefs.map(r => ({
       id: r.id,
       pain: r.pain,
       impact: r.impact,
@@ -1063,8 +1062,6 @@ async function syncReflectionsToCloud(): Promise<void> {
     )
 
     if (result.success) {
-      const maxTs = newRefs.reduce((max, r) => Math.max(max, r.updated_at || r.created_at || 0), 0)
-      if (maxTs > 0) reflectionSyncCursor = maxTs
       if (reflectionSyncErrors > 0) {
         console.log(`☁️  [Reflections] Sync recovered after ${reflectionSyncErrors} errors`)
         reflectionSyncErrors = 0
@@ -1083,21 +1080,19 @@ async function syncReflectionsToCloud(): Promise<void> {
   }
 }
 
-let insightSyncCursor = 0
 let insightSyncErrors = 0
 
 async function syncInsightsToCloud(): Promise<void> {
   if (!state.hostId || !config) return
 
   try {
+    // Always send all insights — same rationale as reflections: the cloud
+    // relay is in-memory so we need full re-sync to survive restarts.
     const { insights: allInsights } = listInsights({ limit: 200 })
-    const newInsights = insightSyncCursor > 0
-      ? allInsights.filter(i => (i.updated_at || i.created_at) > insightSyncCursor)
-      : allInsights
 
-    if (newInsights.length === 0) return
+    if (allInsights.length === 0) return
 
-    const payload = newInsights.map(i => ({
+    const payload = allInsights.map(i => ({
       id: i.id,
       cluster_key: i.cluster_key,
       workflow_stage: i.workflow_stage,
@@ -1125,8 +1120,6 @@ async function syncInsightsToCloud(): Promise<void> {
     )
 
     if (result.success) {
-      const maxTs = newInsights.reduce((max, i) => Math.max(max, i.updated_at || i.created_at || 0), 0)
-      if (maxTs > 0) insightSyncCursor = maxTs
       if (insightSyncErrors > 0) {
         console.log(`☁️  [Insights] Sync recovered after ${insightSyncErrors} errors`)
         insightSyncErrors = 0
