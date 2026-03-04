@@ -102,6 +102,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/team` | Team health metrics with compliance + `staleDoing` snapshot. Per-agent rows include `activeTaskTitle` and `activeTaskPrLink` when an agent has a doing task with PR evidence. Flagged agents also include `actionable_reason` (last comment age, last transition, last mention age, suggested action). |
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
+| GET | `/compliance/violations` | State-read-before-assertion compliance violations. Query: `agent`, `severity`, `limit` (max 1000), `since` (epoch ms). Returns `{ violations, count, summary, query }`. |
 | GET | `/health/backlog` | Backlog readiness health by lane (ready counts, floor compliance, breach status, blocked/todo/doing/validating rollups). Query: `include_test=1` to include test-harness tasks. |
 | GET | `/health/system` | System + loop/timer health (quiet-hours suppression, sweeper status, watchdog tick timestamps, uptime/memory) |
 | GET | `/health/build` | Build/runtime identity (version, git SHA, branch, build timestamp, PID, uptime) |
