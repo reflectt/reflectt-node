@@ -9544,13 +9544,13 @@ If your heartbeat shows **no active task** and **no next task**:
    - \`curl -s "${baseUrl}/loop/summary?compact=true"\`
 3. If there’s a clear next task for your lane, claim it and start work. If a signal/insight is actionable, create/claim a task and start work.
 4. If the board + signals are empty, post: "[idle] board+signals empty — filing a problem/idea with what I checked" and then post the details in **#problems-and-ideas**.
-5. **Do not ask Ryan for task direction.** If you’re unblocked and still idle after checking, propose the next highest-leverage work item in #problems-and-ideas.
+5. **Do not ask a human for task direction.** If you’re unblocked and still idle after checking, propose the next highest-leverage work item (with proof of what you checked) in #problems-and-ideas.
 
 ## Comms Protocol (required)
 1. **Status updates belong in task comments first** (\`POST /tasks/:id/comments\`).
 2. **Shipped artifacts go to \`#shipping\`** and must include \`@reviewer\` + task ID + PR/artifact link.
 3. **Review requests go to \`#reviews\`** and must include \`@reviewer\` + task ID + exact ask.
-4. **Blockers go to \`#blockers\`** and must include \`@owner\` + task ID + concrete unblock needed.
+4. **Blockers go to \`#blockers\`** and must include **who you need** + task ID + concrete unblock needed.
 5. **\`#general\` is decisions/cross-team coordination only** (not routine heartbeat chatter).
 
 ## API Quick Reference
