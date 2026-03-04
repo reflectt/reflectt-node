@@ -144,11 +144,11 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
         autoDefault: suggestedPath,
       })
       autoDefaults['metadata.artifact_path'] = suggestedPath
-    } else if (!isNonCode && !artifactPath.startsWith('process/')) {
+    } else if (!isNonCode && !artifactPath.startsWith('process/') && !/^https?:\/\//.test(artifactPath)) {
       items.push({
         field: 'metadata.artifact_path',
         severity: 'error',
-        message: 'artifact_path must be under process/ (repo-relative)',
+        message: 'artifact_path must be under process/ (repo-relative) or a URL (e.g. PR link)',
       })
     }
 
@@ -166,8 +166,8 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
       } else if (handoff.task_id !== taskId) {
         items.push({ field: 'metadata.review_handoff.task_id', severity: 'error', message: `task_id must match: expected "${taskId}"` })
       }
-      if (!isNonCode && !handoff.artifact_path) {
-        items.push({ field: 'metadata.review_handoff.artifact_path', severity: 'error', message: 'artifact_path required in review_handoff (or set non_code=true)' })
+      if (!isNonCode && !handoff.artifact_path && !handoff.pr_url) {
+        items.push({ field: 'metadata.review_handoff.artifact_path', severity: 'error', message: 'artifact_path or pr_url required in review_handoff (or set non_code=true)' })
       }
       if (!isNonCode && !handoff.test_proof) {
         items.push({ field: 'metadata.review_handoff.test_proof', severity: 'error', message: 'test_proof required (e.g. "vitest run: 206 pass") — or set non_code=true' })

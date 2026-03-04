@@ -258,6 +258,8 @@ class TaskManager {
   private isCanonicalArtifactPath(path: string): boolean {
     const normalized = path.trim()
     if (normalized.length === 0) return false
+    // URLs (e.g. PR links) are valid artifact paths
+    if (/^https?:\/\//.test(normalized)) return true
     if (normalized.startsWith('/') || normalized.startsWith('~')) return false
     if (normalized.includes('\\')) return false
     if (normalized.includes('..')) return false
