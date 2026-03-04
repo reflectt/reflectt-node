@@ -31,6 +31,9 @@ jobs:
       - name: Route-to-docs contract check
         run: npm run check:route-docs-contract
 
+      - name: Internal names guard (shipped surfaces)
+        run: node tools/check-internal-names-guard.mjs
+
       - name: Run tests
         run: npm test
 
