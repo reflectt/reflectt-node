@@ -121,7 +121,7 @@ export function buildPayload(task: Task): ShippedHeartbeatPayload | null {
  *
  * Examples:
  *   [SHIP] task-abc123 | shipped:process/spec.md | next:pending review | review:@sage | by:@scout
- *   [SHIP] task-def456 | shipped:src/feature.ts | next:done | review:@kai | by:@link
+ *   [SHIP] task-def456 | shipped:src/feature.ts | next:done | review:@owner | by:@link
  *   [SHIP] task-ghi789 | shipped:docs/runbook.md | next:~2h | review:@pixel | by:@echo
  */
 export function formatMessage(payload: ShippedHeartbeatPayload): string {

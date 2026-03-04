@@ -310,7 +310,7 @@ class TeamHealthMonitor {
   private cadenceAlertState = new Map<string, number>()
   private readonly staleDoingThresholdMin = Number(process.env.STALE_DOING_THRESHOLD_MIN || 240)
 
-  // Mention rescue fallback: if Ryan pings trio and nobody replies quickly, emit a direct system ack.
+  // Mention rescue fallback: if an owner/operator pings a responder group and nobody replies quickly, emit a direct system ack.
   private readonly mentionRescueEnabled = process.env.MENTION_RESCUE_ENABLED !== 'false'
   // Default delay is intentionally non-zero to avoid noisy immediate fallback nudges.
   // We also clamp to a minimum to prevent misconfig (e.g. env="0") from spamming #general.
@@ -1419,7 +1419,7 @@ class TeamHealthMonitor {
           // Rate-limit failure suppressor: trio is silent due to provider outage, not genuine inactivity
           this.markCadenceAlert(key, now)
         } else {
-          const content = `🔁 **[Product Enforcement] Cadence reset**: no #general update from trio for ${trioSilenceMin}m (threshold ${silenceMin}m). @kai @link @pixel post status now: 1) shipped 2) blocker 3) next+ETA. *(Automated — no leadership action needed.)*`
+          const content = `🔁 **[Product Enforcement] Cadence reset**: no #general update from trio for ${trioSilenceMin}m (threshold ${silenceMin}m). @owner @link @pixel post status now: 1) shipped 2) blocker 3) next+ETA. *(Automated — no leadership action needed.)*`
           alerts.push(content)
 
           if (!dryRun) {
@@ -1973,7 +1973,7 @@ class TeamHealthMonitor {
 
         const intro = tier === 1
           ? `@${agent} system reminder: you appear idle for ${inactivityMin}m and have no active task. Pull work now.`
-          : `@${agent} @kai system escalation: ${inactivityMin}m idle and no active task. Pull work now.`
+          : `@${agent} @owner system escalation: ${inactivityMin}m idle and no active task. Pull work now.`
 
         const template = [
           `1) Pull: GET /tasks/next?agent=${agent}`,
@@ -2059,10 +2059,10 @@ class TeamHealthMonitor {
       const needsArtifact = etaOnlyCount >= 2
 
       const intro = needsArtifact
-        ? `@${agent} @kai escalation: ${etaOnlyCount} status updates on ${taskId} with no artifact or blocker. Post artifact link or explicit blocker now, or task will be flagged for reassignment.`
+        ? `@${agent} @owner escalation: ${etaOnlyCount} status updates on ${taskId} with no artifact or blocker. Post artifact link or explicit blocker now, or task will be flagged for reassignment.`
         : tier === 1
           ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
-          : `@${agent} @kai system escalation: ${inactivityMin}m idle. Post required status format now.`
+          : `@${agent} @owner system escalation: ${inactivityMin}m idle. Post required status format now.`
 
       const template = needsArtifact
         ? [

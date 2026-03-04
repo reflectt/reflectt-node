@@ -54,7 +54,7 @@ export interface PolicyConfig {
   /** Stale doing threshold (for health endpoint) */
   staleDoingThresholdMin: number
 
-  /** Mention rescue: nudge trio when Ryan mentions them and nobody responds */
+  /** Mention rescue: nudge configured responders when an owner/operator is mentioned and nobody responds */
   mentionRescue: {
     enabled: boolean
     delayMin: number
