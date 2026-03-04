@@ -54,6 +54,29 @@ interface PendingNudge {
 const pendingNudges: PendingNudge[] = []
 const lastNudgeAt: Record<string, number> = {}
 
+/** Running guard — prevents concurrent tick calls from firing duplicate nudges */
+let _tickRunning = false
+
+/**
+ * Seed lastNudgeAt from DB so that process restarts don't trigger immediate re-nudges.
+ * Called lazily on first tick.
+ */
+let _seeded = false
+function seedLastNudgeAtFromDb(): void {
+  if (_seeded) return
+  _seeded = true
+  try {
+    ensureReflectionTrackingTable()
+    const db = getDb()
+    const rows = db.prepare('SELECT agent, last_nudge_at FROM reflection_tracking WHERE last_nudge_at IS NOT NULL').all() as { agent: string; last_nudge_at: number }[]
+    for (const row of rows) {
+      if (!lastNudgeAt[row.agent] || row.last_nudge_at > lastNudgeAt[row.agent]) {
+        lastNudgeAt[row.agent] = row.last_nudge_at
+      }
+    }
+  } catch { /* db may not be ready */ }
+}
+
 // ── Table ──
 
 export function ensureReflectionTrackingTable(): void {
@@ -128,6 +151,26 @@ export function onReflectionSubmitted(agent: string): void {
  * Fires queued post-task nudges and checks idle reflection SLA.
  */
 export async function tickReflectionNudges(): Promise<{
+  postTaskNudges: number
+  idleNudges: number
+  total: number
+}> {
+  // Guard: skip if a tick is already in progress (prevents concurrent callers from
+  // firing duplicate nudges before lastNudgeAt is updated).
+  if (_tickRunning) return { postTaskNudges: 0, idleNudges: 0, total: 0 }
+  _tickRunning = true
+
+  // Seed lastNudgeAt from DB on first call (survives process restarts)
+  seedLastNudgeAtFromDb()
+
+  try {
+    return await _doTick()
+  } finally {
+    _tickRunning = false
+  }
+}
+
+async function _doTick(): Promise<{
   postTaskNudges: number
   idleNudges: number
   total: number

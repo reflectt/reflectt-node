@@ -222,13 +222,9 @@ export class BoardHealthWorker {
     const reviewActions = await this.checkReviewSla(now, dryRun)
     actions.push(...reviewActions)
 
-    // 3b. Reflection automation nudges
-    if (!dryRun) {
-      try {
-        const { tickReflectionNudges } = await import('./reflection-automation.js')
-        await tickReflectionNudges()
-      } catch { /* reflection automation may not be loaded */ }
-    }
+    // 3b. Reflection automation nudges — handled by continuity loop (step 3e) to avoid
+    // duplicate fires. tickReflectionNudges() was previously called here AND inside
+    // tickContinuityLoop(), causing 2–3x duplicate messages per tick.
 
     // 3c. Working contract enforcement (auto-requeue stale doing tasks)
     if (!dryRun) {
