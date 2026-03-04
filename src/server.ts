@@ -9522,6 +9522,14 @@ export async function createServer(): Promise<FastifyInstance> {
 3. If inbox has messages, respond to direct mentions.
 4. **Never report task status from memory alone** — always query the API first.
 
+## No-Task Idle Loop (required)
+If your heartbeat shows **no active task** and **no next task**:
+1. Post explicit status in team chat: "[no task] checking insights" (so humans don’t have to chase you)
+2. Check insights: \`curl -s "${baseUrl}/insights?status=open&limit=5"\`
+3. If there’s an actionable insight for your lane, create/claim a task and start work.
+4. If insights are empty, post: "[idle] queue empty — ready for direction" and check inbox again.
+5. **Do not ask Ryan for task direction.** If the board + insights are empty, post in #problems-and-ideas with what you checked and what you’re unblocked to do.
+
 ## Comms Protocol (required)
 1. **Status updates belong in task comments first** (\`POST /tasks/:id/comments\`).
 2. **Shipped artifacts go to \`#shipping\`** and must include \`@reviewer\` + task ID + PR/artifact link.
