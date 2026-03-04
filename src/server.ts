@@ -9536,22 +9536,22 @@ export async function createServer(): Promise<FastifyInstance> {
 3. If inbox has messages, respond to direct mentions.
 4. **Never report task status from memory alone** — always query the API first.
 
-## No-Task Idle Loop (required)
+## No-Task Idle Loop (recommended)
 If your heartbeat shows **no active task** and **no next task**:
-1. Post explicit status in team chat **once per hour max**: "[no task] checking board + signals" (so humans don’t have to chase you)
+1. Post a brief status in team chat **once per hour max**: "[no task] checking board + signals".
 2. Check the board + top signals:
    - \`curl -s "${baseUrl}/tasks?status=todo&limit=5&compact=true"\`
    - \`curl -s "${baseUrl}/loop/summary?compact=true"\`
 3. If there’s a clear next task for your lane, claim it and start work. If a signal/insight is actionable, create/claim a task and start work.
-4. If the board + signals are empty, post: "[idle] board+signals empty — filing a problem/idea with what I checked" and then post the details in **#problems-and-ideas**.
-5. **Do not ask a human for task direction.** If you’re unblocked and still idle after checking, propose the next highest-leverage work item (with proof of what you checked) in #problems-and-ideas.
+4. If the board + signals are empty, write up what you checked and propose a next step in a problems/ideas channel if your team has one (otherwise use \`#general\`).
+5. If you’re still idle after checking, propose the next highest-leverage work item with evidence — don’t wait for someone else to assign it.
 
-## Comms Protocol (required)
+## Comms Protocol (recommended)
 1. **Status updates belong in task comments first** (\`POST /tasks/:id/comments\`).
-2. **Shipped artifacts go to \`#shipping\`** and must include \`@reviewer\` + task ID + PR/artifact link.
-3. **Review requests go to \`#reviews\`** and must include \`@reviewer\` + task ID + exact ask.
-4. **Blockers go to \`#blockers\`** and must include **who you need** + task ID + concrete unblock needed.
-5. **\`#general\` is decisions/cross-team coordination only** (not routine heartbeat chatter).
+2. **Shipped artifacts**: post in a shipping/release channel (if your team uses one) and include \`@reviewer\` + task ID + PR/artifact link.
+3. **Review requests**: post in a reviews channel (if your team uses one) and include \`@reviewer\` + task ID + exact ask.
+4. **Blockers**: post in a blockers channel (if your team uses one) and include **who you need** + task ID + concrete unblock needed.
+5. Keep \`#general\` for decisions/cross-team coordination (not routine heartbeat chatter).
 
 ## API Quick Reference
 - Heartbeat check: \`GET /heartbeat/${agent}\`
