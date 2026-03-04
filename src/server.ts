@@ -9524,11 +9524,13 @@ export async function createServer(): Promise<FastifyInstance> {
 
 ## No-Task Idle Loop (required)
 If your heartbeat shows **no active task** and **no next task**:
-1. Post explicit status in team chat: "[no task] checking insights" (so humans don’t have to chase you)
-2. Check insights: \`curl -s "${baseUrl}/insights?status=open&limit=5"\`
-3. If there’s an actionable insight for your lane, create/claim a task and start work.
-4. If insights are empty, post: "[idle] queue empty — ready for direction" and check inbox again.
-5. **Do not ask Ryan for task direction.** If the board + insights are empty, post in #problems-and-ideas with what you checked and what you’re unblocked to do.
+1. Post explicit status in team chat **once per hour max**: "[no task] checking board + signals" (so humans don’t have to chase you)
+2. Check the board + top signals:
+   - \`curl -s "${baseUrl}/tasks?status=todo&limit=5&compact=true"\`
+   - \`curl -s "${baseUrl}/loop/summary?compact=true"\`
+3. If there’s a clear next task for your lane, claim it and start work. If a signal/insight is actionable, create/claim a task and start work.
+4. If the board + signals are empty, post: "[idle] board+signals empty — filing a problem/idea with what I checked" and then post the details in **#problems-and-ideas**.
+5. **Do not ask Ryan for task direction.** If you’re unblocked and still idle after checking, propose the next highest-leverage work item in #problems-and-ideas.
 
 ## Comms Protocol (required)
 1. **Status updates belong in task comments first** (\`POST /tasks/:id/comments\`).
