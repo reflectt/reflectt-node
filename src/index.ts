@@ -7,7 +7,7 @@
  * Entry point
  */
 import { createServer } from './server.js'
-import { serverConfig, isDev, openclawConfig, DATA_DIR } from './config.js'
+import { serverConfig, isDev, openclawConfig, DATA_DIR, REFLECTT_HOME } from './config.js'
 import { acquirePidLock, releasePidLock, getPidPath } from './pidlock.js'
 import { startCloudIntegration, stopCloudIntegration, isCloudConfigured, watchConfigForCloudChanges, stopConfigWatcher } from './cloud.js'
 import { stopConfigWatch } from './assignment.js'
@@ -19,7 +19,7 @@ import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
  * Build-freshness check: warn if dist/ is older than src/
  * Prevents silently running stale compiled code after source changes.
  */
-import { statSync, readdirSync, existsSync, readFileSync } from 'fs'
+import { statSync, readdirSync, existsSync, readFileSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { hostname as osHostname } from 'os'
@@ -260,6 +260,35 @@ async function main() {
     try {
       const { taskManager } = await import('./tasks.js')
       const { createStarterTeam } = await import('./starter-team.js')
+
+      // Seed TEAM.md if missing (every new node needs one)
+      const teamMdPath = join(REFLECTT_HOME, 'TEAM.md')
+      if (!existsSync(teamMdPath)) {
+        const teamName = process.env.TEAM_NAME || 'My Team'
+        const teamIntent = process.env.TEAM_INTENT || ''
+        const teamMdContent = [
+          `# ${teamName}`,
+          '',
+          teamIntent ? `> ${teamIntent}` : '> A team of AI agents working together.',
+          '',
+          '## How We Work',
+          '',
+          '- **Reflect → Tasks → Improve** — every insight becomes an actionable task',
+          '- **Quality over quantity** — ship fewer things that actually work',
+          '- **Read before writing** — understand what exists before changing it',
+          '- **Small changes, shipped often** — easier to review, revert, and understand',
+          '',
+          '## Communication',
+          '',
+          '- Status updates → task comments first',
+          '- Ship announcements → #shipping',
+          '- Blockers → #blockers with assignee + task ID',
+          '- #general is for decisions and coordination',
+        ].join('\n')
+        writeFileSync(teamMdPath, teamMdContent, 'utf-8')
+        console.log(`🌱 Seeded TEAM.md at ${teamMdPath}`)
+      }
+
       const allTasks = taskManager.listTasks({})
       const agentsDir = join(DATA_DIR, 'agents')
       const hasAgents = existsSync(agentsDir) && readdirSync(agentsDir).filter(f => !f.startsWith('.')).length > 0
