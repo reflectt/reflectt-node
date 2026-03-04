@@ -2309,7 +2309,10 @@ describe('Chat Messages', () => {
     expect(body.action_warnings.length).toBeGreaterThan(0)
   })
 
-  it('POST /chat/messages warns on autonomy anti-pattern: asking Ryan what to do next', async () => {
+  it('POST /chat/messages warns on autonomy anti-pattern: asking owner what to do next (when configured)', async () => {
+    const prevOwners = process.env.REFLECTT_OWNER_HANDLES
+    process.env.REFLECTT_OWNER_HANDLES = 'ryan'
+
     const { status, body } = await req('POST', '/chat/messages', {
       from: 'test-runner',
       content: 'hey @ryan what should I do next?',
@@ -2320,9 +2323,15 @@ describe('Chat Messages', () => {
     expect(body.success).toBe(true)
     expect(Array.isArray(body.autonomy_warnings)).toBe(true)
     expect(body.autonomy_warnings[0]).toContain('Autonomy guardrail')
+
+    if (prevOwners === undefined) delete process.env.REFLECTT_OWNER_HANDLES
+    else process.env.REFLECTT_OWNER_HANDLES = prevOwners
   })
 
-  it("POST /chat/messages warns on autonomy anti-pattern: whats next variants", async () => {
+  it("POST /chat/messages warns on autonomy anti-pattern: whats next variants (when configured)", async () => {
+    const prevOwners = process.env.REFLECTT_OWNER_HANDLES
+    process.env.REFLECTT_OWNER_HANDLES = 'ryan'
+
     const variants = [
       'hey @ryan whats next for me?',
       "hey @ryan what's next for me?",
@@ -2343,9 +2352,15 @@ describe('Chat Messages', () => {
       expect(Array.isArray(body.autonomy_warnings)).toBe(true)
       expect(body.autonomy_warnings[0]).toContain('Autonomy guardrail')
     }
+
+    if (prevOwners === undefined) delete process.env.REFLECTT_OWNER_HANDLES
+    else process.env.REFLECTT_OWNER_HANDLES = prevOwners
   })
 
-  it('POST /chat/messages blocks approve/merge requests to Ryan unless task+permissions reason are included', async () => {
+  it('POST /chat/messages blocks approve/merge requests to owner unless task+permissions reason are included (when configured)', async () => {
+    const prevOwners = process.env.REFLECTT_OWNER_HANDLES
+    process.env.REFLECTT_OWNER_HANDLES = 'ryan'
+
     const { status, body } = await req('POST', '/chat/messages', {
       from: 'test-runner',
       content: '@ryan can you approve/merge PR #287 when you have a sec?',
@@ -2354,10 +2369,16 @@ describe('Chat Messages', () => {
 
     expect(status).toBe(400)
     expect(body.success).toBe(false)
-    expect(body.gate).toBe('ryan_approval_gate')
+    expect(body.gate).toBe('owner_approval_gate')
+
+    if (prevOwners === undefined) delete process.env.REFLECTT_OWNER_HANDLES
+    else process.env.REFLECTT_OWNER_HANDLES = prevOwners
   })
 
-  it('POST /chat/messages allows approve/merge escalation to Ryan when blocked by permissions (task+reason)', async () => {
+  it('POST /chat/messages allows approve/merge escalation to owner when blocked by permissions (task+reason) (when configured)', async () => {
+    const prevOwners = process.env.REFLECTT_OWNER_HANDLES
+    process.env.REFLECTT_OWNER_HANDLES = 'ryan'
+
     const { status, body } = await req('POST', '/chat/messages', {
       from: 'test-runner',
       content: '@ryan task-123 no merge rights (auth mismatch) — can you merge PR #287? https://github.com/org/repo/pull/287',
@@ -2366,6 +2387,9 @@ describe('Chat Messages', () => {
 
     expect(status).toBe(200)
     expect(body.success).toBe(true)
+
+    if (prevOwners === undefined) delete process.env.REFLECTT_OWNER_HANDLES
+    else process.env.REFLECTT_OWNER_HANDLES = prevOwners
   })
 
   it('POST /chat/messages does not warn on logistics ask to Ryan (not task-selection)', async () => {
