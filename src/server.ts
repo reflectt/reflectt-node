@@ -7545,6 +7545,45 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, agent, displayName }
   })
 
+  // ── Write TEAM-ROLES.yaml (used by bootstrap agent to configure the team) ──
+  app.put('/config/team-roles', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const yaml = typeof body.yaml === 'string' ? body.yaml.trim() : ''
+
+    if (!yaml) {
+      reply.code(400)
+      return { success: false, error: 'yaml field is required (TEAM-ROLES.yaml content)' }
+    }
+
+    // Basic validation: must contain 'agents:' and at least one agent name
+    if (!yaml.includes('agents:')) {
+      reply.code(400)
+      return { success: false, error: 'Invalid TEAM-ROLES.yaml: must contain "agents:" section' }
+    }
+
+    try {
+      const { writeFileSync } = await import('node:fs')
+      const { join } = await import('node:path')
+      const filePath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
+      writeFileSync(filePath, yaml, 'utf-8')
+
+      // Hot-reload the team config
+      const { loadAgentRoles } = await import('./assignment.js')
+      const reloaded = loadAgentRoles()
+
+      return {
+        success: true,
+        path: filePath,
+        agents: reloaded.roles.length,
+        hint: 'TEAM-ROLES.yaml saved and hot-reloaded. Agents will pick up new routing immediately.',
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to write TEAM-ROLES.yaml'
+      reply.code(500)
+      return { success: false, error: msg }
+    }
+  })
+
   // Resolve a mention string (name, displayName, or alias) to an agent ID
   app.get<{ Params: { mention: string } }>('/resolve/mention/:mention', async (request) => {
     const agentName = resolveAgentMention(request.params.mention)
