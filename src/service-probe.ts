@@ -7,8 +7,8 @@
 // Usage: node dist/service-probe.js [--interval 30] [--max-retries 3] [--dry-run]
 
 import { execSync } from 'node:child_process'
-import { appendFile, mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 
 // ── Configuration ──
 
@@ -106,6 +106,35 @@ const state: ProbeState = {
   totalChecks: 0,
   totalFailures: 0,
   totalRestarts: 0,
+}
+
+// ── State Persistence ──
+
+const STATE_FILE = join(process.env.DATA_DIR || 'data', 'probe-state.json')
+
+async function loadState(): Promise<void> {
+  try {
+    const raw = await readFile(STATE_FILE, 'utf-8')
+    const saved = JSON.parse(raw) as Partial<ProbeState>
+    if (typeof saved.consecutiveFailures === 'number') state.consecutiveFailures = saved.consecutiveFailures
+    if (Array.isArray(saved.restartTimestamps)) state.restartTimestamps = saved.restartTimestamps
+    if (typeof saved.totalChecks === 'number') state.totalChecks = saved.totalChecks
+    if (typeof saved.totalFailures === 'number') state.totalFailures = saved.totalFailures
+    if (typeof saved.totalRestarts === 'number') state.totalRestarts = saved.totalRestarts
+    if (saved.lastCheckAt) state.lastCheckAt = saved.lastCheckAt
+    if (saved.lastSuccessAt) state.lastSuccessAt = saved.lastSuccessAt
+  } catch {
+    // No saved state — fresh start
+  }
+}
+
+async function saveState(): Promise<void> {
+  try {
+    await mkdir(dirname(STATE_FILE), { recursive: true })
+    await writeFile(STATE_FILE, JSON.stringify(state, null, 2))
+  } catch {
+    // Non-fatal — state just won't persist
+  }
 }
 
 // ── Logging ──
@@ -243,6 +272,9 @@ async function runProbe(config: ProbeConfig): Promise<void> {
       triggerRestart(config, `${state.consecutiveFailures} consecutive critical failures on [${failedNames}]: ${errors}`)
     }
   }
+
+  // Persist state after every check so consecutive_failures survives restarts
+  await saveState()
 }
 
 // ── Main ──
@@ -281,6 +313,7 @@ async function main(): Promise<void> {
   const overrides = parseArgs()
   const config: ProbeConfig = { ...DEFAULT_CONFIG, ...overrides }
 
+  await loadState()
   await log('INFO', 'Service probe starting', {
     interval: config.intervalSec,
     maxRetries: config.maxRetries,
