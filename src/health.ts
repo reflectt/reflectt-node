@@ -450,9 +450,15 @@ class TeamHealthMonitor {
     const agents = await this.getAgentHealthStatuses(now)
     const allTasks = taskManager.listTasks({})
 
+    // Fetch messages once for live-state suppression checks below
+    const messages = chatManager.getMessages({ limit: 300 })
+
     const healthyMaxMs = 45 * 60 * 1000
     const stuckMinMs = 60 * 60 * 1000
     const offlineMinMs = 120 * 60 * 1000
+    // Heartbeat cycle window: if an agent has posted within this window,
+    // they are live even if their presence heartbeat is stale.
+    const liveStateWindowMs = 30 * 60 * 1000
 
     const rows: AgentHealthSummaryRow[] = agents.map((agent) => {
       const heartbeatAgeMs = Math.max(0, agent.minutesSinceLastSeen) * 60_000
@@ -460,8 +466,29 @@ class TeamHealthMonitor {
       let state: AgentHealthSummaryRow['state'] = 'healthy'
       let staleReason: string | null = null
       if (agent.lastSeen <= 0 || heartbeatAgeMs >= offlineMinMs) {
-        state = 'offline'
-        staleReason = 'offline-no-heartbeat'
+        // Live-state check: before marking offline, verify the agent hasn't posted
+        // within the heartbeat cycle window. Presence heartbeat can lag while an
+        // agent is mid-task — chat messages and task comments are more reliable signals.
+        const lastMsgAt = this.getLatestAnyMessageAt(messages, agent.agent)
+        const recentMsg = lastMsgAt > 0 && (now - lastMsgAt) < liveStateWindowMs
+
+        // Also check task comments across all doing tasks for this agent
+        const doingTasks = allTasks.filter(
+          (t) => (t.assignee || '').toLowerCase() === agent.agent.toLowerCase() && t.status === 'doing'
+        )
+        const recentComment = doingTasks.some((t) => {
+          const age = this.getTaskCommentAgeForAgent(t.id, agent.agent, now)
+          return age !== null && age * 60_000 < liveStateWindowMs
+        })
+
+        if (recentMsg || recentComment) {
+          // Agent is active — heartbeat is stale but agent is clearly live
+          state = 'idle'
+          staleReason = 'heartbeat-stale-but-active'
+        } else {
+          state = 'offline'
+          staleReason = 'offline-no-heartbeat'
+        }
       } else if (agent.idleWithActiveTask && heartbeatAgeMs >= stuckMinMs) {
         state = 'stuck'
         staleReason = 'active-task-idle-over-60m'
