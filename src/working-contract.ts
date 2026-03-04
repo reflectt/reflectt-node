@@ -52,7 +52,60 @@ export interface ClaimGateResult {
 
 // ── State: track warnings ──
 
-const warningTimestamps: Map<string, number> = new Map() // key: `${agent}:${taskId}`
+/**
+ * warningTimestamps: key → epoch ms when Phase 1 warning was issued.
+ *
+ * Backed by SQLite so restarts don't re-fire warnings. In-memory cache
+ * is seeded from DB on first use.
+ *
+ * Root cause of compliance snapshot 3x bug: this was previously a plain
+ * in-memory Map that reset on every server restart. Each restart would
+ * re-fire the Phase 1 warning for every stale doing task. The stale
+ * duration increments between restarts (e.g. "stale for 45m" vs "46m"),
+ * which bypassed chat.ts content dedup, resulting in 2–3x identical-
+ * looking warning messages per agent per deploy cycle.
+ */
+const warningTimestamps: Map<string, number> = new Map()
+let _warningDbSeeded = false
+
+function ensureWarningTable(): void {
+  const db = getDb()
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS wc_warning_timestamps (
+      key TEXT PRIMARY KEY,
+      warned_at INTEGER NOT NULL
+    )
+  `).run()
+}
+
+function seedWarningTimestamps(): void {
+  if (_warningDbSeeded) return
+  _warningDbSeeded = true
+  try {
+    ensureWarningTable()
+    const db = getDb()
+    const rows = db.prepare('SELECT key, warned_at FROM wc_warning_timestamps').all() as { key: string; warned_at: number }[]
+    for (const row of rows) {
+      warningTimestamps.set(row.key, row.warned_at)
+    }
+  } catch { /* db may not be ready */ }
+}
+
+function persistWarning(key: string, timestamp: number): void {
+  try {
+    ensureWarningTable()
+    const db = getDb()
+    db.prepare('INSERT OR REPLACE INTO wc_warning_timestamps (key, warned_at) VALUES (?, ?)').run(key, timestamp)
+  } catch { /* best-effort */ }
+}
+
+function clearWarning(key: string): void {
+  warningTimestamps.delete(key)
+  try {
+    const db = getDb()
+    db.prepare('DELETE FROM wc_warning_timestamps WHERE key = ?').run(key)
+  } catch { /* best-effort */ }
+}
 
 // ── Enforcement tick ──
 
@@ -63,6 +116,9 @@ const warningTimestamps: Map<string, number> = new Map() // key: `${agent}:${tas
 export async function tickWorkingContract(): Promise<TickResult> {
   const config = getConfig()
   if (!config.enabled) return { warnings: 0, requeued: 0, actions: [] }
+
+  // Seed warningTimestamps from DB on first tick (survives process restarts)
+  seedWarningTimestamps()
 
   const now = Date.now()
   const staleThresholdMs = config.staleAutoRequeueMin * 60_000
@@ -93,6 +149,7 @@ export async function tickWorkingContract(): Promise<TickResult> {
     if (!warnedAt) {
       // Phase 1: Issue warning
       warningTimestamps.set(warningKey, now)
+      persistWarning(warningKey, now)
       const signalInfo = formatActivityWarning(activitySignal, config.staleAutoRequeueMin, now)
       const action: EnforcementAction = {
         type: 'warning',
@@ -122,7 +179,7 @@ export async function tickWorkingContract(): Promise<TickResult> {
       const activitySinceWarning = getLastActivityForAgent(task.id, agent)
       if (activitySinceWarning && activitySinceWarning > warnedAt) {
         // Agent responded — clear warning
-        warningTimestamps.delete(warningKey)
+        clearWarning(warningKey)
         continue
       }
 
@@ -138,7 +195,7 @@ export async function tickWorkingContract(): Promise<TickResult> {
       }
       actions.push(action)
       requeued++
-      warningTimestamps.delete(warningKey)
+      clearWarning(warningKey)
 
       if (!config.dryRun) {
         try {
