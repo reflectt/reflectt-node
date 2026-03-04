@@ -68,6 +68,7 @@ import { alertUnauthorizedApproval, alertFlipAttempt, getMutationAlertStatus, pr
 import { mentionAckTracker } from './mention-ack.js'
 import type { PresenceStatus, FocusLevel } from './presence.js'
 import { analyticsManager } from './analytics.js'
+import { processRequest as complianceProcessRequest, queryViolations, getViolationSummary } from './compliance-detector.js'
 import { getDashboardHTML } from './dashboard.js'
 import { healthMonitor, computeActiveLane } from './health.js'
 import { getSystemLoopTicks, recordSystemLoopTick } from './system-loop-state.js'
@@ -1820,6 +1821,18 @@ export async function createServer(): Promise<FastifyInstance> {
     healthMonitor.trackRequest(duration)
     trackTelemetryRequest(request.method, request.url, reply.statusCode, duration)
     trackRequest(request.method, request.url, reply.statusCode, request.headers['user-agent'])
+
+    // Compliance detector: flag state-read-before-assertion violations
+    try {
+      complianceProcessRequest(
+        request.method,
+        request.url,
+        reply.statusCode,
+        (request.query as Record<string, unknown>) ?? {},
+        request.body,
+        request.headers as Record<string, string | string[] | undefined>,
+      )
+    } catch { /* never let compliance logging break a request */ }
     
     if (reply.statusCode >= 400) {
       healthMonitor.trackError()
@@ -11804,6 +11817,25 @@ export async function createServer(): Promise<FastifyInstance> {
   // Prune old mutation alert tracking every 30 minutes
   const pruneTimer = setInterval(pruneOldAttempts, 30 * 60 * 1000)
   pruneTimer.unref()
+
+  // GET /compliance/violations — state-read-before-assertion compliance violations
+  app.get('/compliance/violations', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const agent = query.agent || undefined
+    const severity = (query.severity as any) || undefined
+    const limit = Math.min(parseInt(query.limit || '100', 10) || 100, 1000)
+    const since = query.since ? parseInt(query.since, 10) : undefined
+
+    const violations = queryViolations({ agent, severity, limit, since })
+    const summary = getViolationSummary(since)
+
+    reply.send({
+      violations,
+      count: violations.length,
+      summary,
+      query: { agent: agent ?? null, severity: severity ?? null, limit, since: since ?? null },
+    })
+  })
 
   // GET /audit/reviews — review-field mutation audit ledger
   app.get('/audit/reviews', async (request, reply) => {
