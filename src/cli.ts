@@ -7,6 +7,7 @@
 import { Command } from 'commander'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs'
 import { collectDoctorReport, formatDoctorHuman } from './doctor.js'
+import { hostConnectGuard } from './hostConnectGuard.js'
 import { homedir, hostname } from 'os'
 import { join, dirname } from 'path'
 import { spawn, execSync } from 'child_process'
@@ -1057,6 +1058,7 @@ host
   .option('--name <hostName>', 'Host display name', hostname())
   .option('--type <hostType>', 'Host type', 'openclaw')
   .option('--auth-token <jwt>', 'Temporary user JWT for environments where claim endpoint is JWT-gated')
+  .option('--force', 'Overwrite existing cloud enrollment (destructive)')
   .option('--no-restart', 'Do not restart/start local reflectt server after enrollment')
   .action(async (options) => {
     try {
@@ -1074,6 +1076,13 @@ host
       ensureReflecttHome()
       const config = loadConfig()
       const cloudUrl = String(options.cloudUrl || 'https://app.reflectt.ai').replace(/\/+$/, '')
+
+      // Guard against destructive overwrite.
+      const decision = hostConnectGuard({ existingCloud: config.cloud, force: Boolean(options.force) })
+      if (!decision.allow) {
+        console.error(decision.warning)
+        process.exit(1)
+      }
 
       console.log('☁️  Enrolling host with Reflectt Cloud...')
       console.log(`   Cloud: ${cloudUrl}`)
