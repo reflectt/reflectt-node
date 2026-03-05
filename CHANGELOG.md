@@ -14,6 +14,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - **First-run banner shows on real first boots** (seeded tasks no longer suppress it) and CTAs no longer 404. (#656)
 - **Avatars: default response instead of 404s** (reduces error-rate pollution). (#657)
+- **Host connect cloud-url default** — points at app.reflectt.ai (avoids 404 trap) + clearer help text. (#660)
 - **Host connect guard** — prevents overwriting an existing enrollment unless `--force` is passed. (#662)
 
 ### Docs / UX
