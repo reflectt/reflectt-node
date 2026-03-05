@@ -4517,6 +4517,45 @@ describe('task comment notification - no truncation', () => {
 
     await req('DELETE', `/tasks/${taskId}`)
   })
+
+  it('does not fan out notifications for test-harness tasks (metadata.is_test)', async () => {
+    const unique = Date.now()
+
+    // Baseline: ensure no existing message contains our marker
+    const marker = `TEST_NO_FANOUT_${unique}`
+    const { body: beforeChat } = await req('GET', '/chat/messages?channel=task-comments&limit=200')
+    expect((beforeChat.messages || []).some((m: any) => m.content.includes(marker))).toBe(false)
+
+    // Create a test-harness task (is_test=true)
+    const { status: createStatus, body: taskBody } = await req('POST', '/tasks', {
+      title: `TEST: test-harness fanout suppression ${unique}`,
+      createdBy: 'test-runner',
+      assignee: 'kai',
+      reviewer: 'sage',
+      done_criteria: ['No fanout for is_test tasks'],
+      eta: '~15m',
+      metadata: {
+        is_test: true,
+        source_reflection: 'ref-test-harness-fanout',
+      },
+    })
+    expect(createStatus).toBe(200)
+    const taskId = taskBody.task.id
+
+    // Post a comment that would normally notify assignee+reviewer
+    const { status: commentStatus } = await req('POST', `/tasks/${taskId}/comments`, {
+      author: 'link',
+      content: `Starting work on this ${marker}`,
+    })
+    expect(commentStatus).toBe(200)
+
+    // Verify: no relay message emitted to task-comments channel
+    const { body: afterChat } = await req('GET', '/chat/messages?channel=task-comments&limit=200')
+    const hit = (afterChat.messages || []).find((m: any) => m.content.includes(marker) && m.content.includes('[task-comment:'))
+    expect(hit).toBeUndefined()
+
+    await req('DELETE', `/tasks/${taskId}`)
+  })
 })
 
 // ── Regression: task updatedAt advances on comment ────────────────────────
