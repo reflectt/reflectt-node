@@ -416,7 +416,7 @@ class TaskManager {
           metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
           schedule: safeJsonParse<RecurringTaskSchedule>(row.schedule)!,
           enabled: Boolean(row.enabled),
-          status: (row.status as Task['status']) ?? undefined,
+          status: (row.status as RecurringTask['status']) ?? undefined,
           lastRunAt: row.last_run_at ?? undefined,
           lastSkipAt: row.last_skip_at ?? undefined,
           lastSkipReason: row.last_skip_reason ?? undefined,
@@ -868,7 +868,7 @@ class TaskManager {
     metadata?: Record<string, unknown>
     schedule: RecurringTaskSchedule
     enabled?: boolean
-    status?: Task['status']
+    status?: RecurringTask['status']
   }): Promise<RecurringTask> {
     if (data.blocked_by && data.blocked_by.length > 0) {
       for (const blockerId of data.blocked_by) {

@@ -741,7 +741,7 @@ function toggleTestTasks() {
   renderStatusFilterTabs();
   renderKanban();
   // Update task count
-  const openCount = getVisibleTasks().filter(t => t.status !== 'done').length;
+  const openCount = getVisibleTasks().filter(t => !['done', 'resolved_externally', 'cancelled'].includes(t.status)).length;
   document.getElementById('task-count').textContent = currentStatusFilter === 'open'
     ? openCount + ' open tasks'
     : getVisibleTasks().length + ' tasks';
@@ -779,9 +779,12 @@ function renderKanban() {
   const filtered = currentProject === 'all' ? visible : visible.filter(t => classifyProject(t) === currentProject);
   const cols = currentStatusFilter === 'open'
     ? ['todo', 'doing', 'blocked', 'validating']
-    : ['todo', 'doing', 'blocked', 'validating', 'done', 'cancelled'];
+    : ['todo', 'doing', 'blocked', 'validating', 'done', 'resolved_externally', 'cancelled'];
   const grouped = {}; cols.forEach(c => grouped[c] = []);
-  filtered.forEach(t => { const s = t.status || 'todo'; if (grouped[s]) grouped[s].push(t); else grouped['todo'].push(t); });
+  const tasksForBoard = currentStatusFilter === 'open'
+    ? filtered.filter(t => cols.includes(t.status || 'todo'))
+    : filtered;
+  tasksForBoard.forEach(t => { const s = t.status || 'todo'; if (grouped[s]) grouped[s].push(t); else grouped['todo'].push(t); });
   const pOrder = { P0: 0, P1: 1, P2: 2, P3: 3 };
   cols.forEach(c => grouped[c].sort((a, b) => (pOrder[a.priority] ?? 9) - (pOrder[b.priority] ?? 9)));
 

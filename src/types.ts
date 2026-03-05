@@ -31,7 +31,7 @@ export interface Task {
   id: string
   title: string
   description?: string
-  status: 'todo' | 'doing' | 'blocked' | 'validating' | 'done' | 'cancelled'
+  status: 'todo' | 'doing' | 'blocked' | 'validating' | 'done' | 'resolved_externally' | 'cancelled'
   assignee?: string
   reviewer?: string
   done_criteria?: string[]
@@ -105,7 +105,7 @@ export interface RecurringTask {
   metadata?: Record<string, unknown>
   schedule: RecurringTaskSchedule
   enabled: boolean
-  status?: 'todo' | 'doing' | 'blocked' | 'validating' | 'done' | 'cancelled' // default generated status: todo
+  status?: 'todo' | 'doing' | 'blocked' | 'validating' | 'done' | 'resolved_externally' | 'cancelled' // default generated status: todo
   lastRunAt?: number
   lastSkipAt?: number
   lastSkipReason?: string

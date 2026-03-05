@@ -2594,7 +2594,7 @@ export async function createServer(): Promise<FastifyInstance> {
       if (!task.blocked_by || task.blocked_by.length === 0) return false
       return task.blocked_by.some((blockerId: string) => {
         const blocker = taskManager.getTask(blockerId)
-        return blocker && blocker.status !== 'done'
+        return blocker && !['done', 'resolved_externally', 'cancelled'].includes(blocker.status)
       })
     }
 
@@ -2616,6 +2616,7 @@ export async function createServer(): Promise<FastifyInstance> {
       const validating = laneTasks.filter(t => t.status === 'validating')
       const blocked = laneTasks.filter(t => t.status === 'blocked' || (t.status === 'todo' && isBlocked(t)))
       const done = laneTasks.filter(t => t.status === 'done')
+      const resolvedExternally = laneTasks.filter(t => t.status === 'resolved_externally')
 
       // Ready = todo + required fields + unblocked
       const ready = todo.filter(t => !isBlocked(t) && hasRequiredFields(t))
@@ -2659,6 +2660,7 @@ export async function createServer(): Promise<FastifyInstance> {
           validating: validating.length,
           blocked: blocked.length,
           done: done.length,
+          resolvedExternally: resolvedExternally.length,
         },
         compliance: {
           status: floorBreaches.length > 0 ? 'breach' : ready.length >= config.readyFloor ? 'healthy' : 'warning',
@@ -3634,7 +3636,7 @@ export async function createServer(): Promise<FastifyInstance> {
         if (!Array.isArray(t.blocked_by) || t.blocked_by.length === 0) return false
         return t.blocked_by.some((blockerId: string) => {
           const blocker = taskManager.getTask(blockerId)
-          return blocker && blocker.status !== 'done'
+          return blocker && !['done', 'resolved_externally', 'cancelled'].includes(blocker.status)
         })
       }
       const nextTodo = taskManager
