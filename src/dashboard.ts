@@ -2127,32 +2127,32 @@ ${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:non
   <!-- Getting Started panel — hidden when configured -->
   <div class="getting-started" id="getting-started">
     <div class="panel-header">
-      🚀 Getting Started
-      <button class="dismiss-btn" onclick="dismissGettingStarted()" aria-label="Dismiss Getting Started panel">Dismiss ✕</button>
+      🚀 Next Steps
+      <button class="dismiss-btn" onclick="dismissGettingStarted()" aria-label="Dismiss panel">Dismiss ✕</button>
     </div>
     <div class="gs-steps" id="gs-steps">
       <div class="gs-step" id="gs-preflight">
         <div class="gs-icon">1</div>
         <div class="gs-content">
-          <div class="gs-title">Run preflight checks</div>
-          <div class="gs-desc">Verify your system is ready — checks connectivity, config, and dependencies.</div>
-          <a class="gs-link" href="/health" target="_blank">Open /health →</a>
+          <div class="gs-title">Server is running</div>
+          <div class="gs-desc">Your reflectt-node is up and healthy. Check status anytime with <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:11px">reflectt status</code></div>
+          <a class="gs-link" href="/health" target="_blank">View health →</a>
         </div>
       </div>
       <div class="gs-step" id="gs-connect">
         <div class="gs-icon">2</div>
         <div class="gs-content">
-          <div class="gs-title">Connect OpenClaw gateway</div>
-          <div class="gs-desc">Set <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:11px">OPENCLAW_GATEWAY_URL</code> and <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:11px">OPENCLAW_GATEWAY_TOKEN</code> env vars. Get your token: <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:11px">openclaw gateway token</code></div>
-          <a class="gs-link" href="https://reflectt.ai/bootstrap" target="_blank">Bootstrap guide →</a>
+          <div class="gs-title">Connect to cloud <span style="font-size:11px;opacity:0.6">(optional)</span></div>
+          <div class="gs-desc">Sync your dashboard to the web. Sign up at <a href="https://app.reflectt.ai" target="_blank" style="color:var(--accent)">app.reflectt.ai</a>, get a join token, then run:<br><code style="background:var(--border);padding:2px 6px;border-radius:3px;font-size:11px;display:inline-block;margin-top:4px">reflectt host connect --join-token &lt;token&gt; --cloud-url https://app.reflectt.ai</code></div>
+          <a class="gs-link" href="https://docs.reflectt.ai/first-time-user-journey" target="_blank">Setup guide →</a>
         </div>
       </div>
       <div class="gs-step" id="gs-task">
         <div class="gs-icon">3</div>
         <div class="gs-content">
-          <div class="gs-title">Create your first task</div>
-          <div class="gs-desc">Post a task or message — your agents will pick it up automatically.</div>
-          <a class="gs-link" href="/docs" target="_blank">API docs →</a>
+          <div class="gs-title">Create a task or connect an agent</div>
+          <div class="gs-desc">Post your first task via the API, or connect an AI agent (OpenClaw, Claude, etc.) to start working. Your team will pick up tasks automatically.</div>
+          <a class="gs-link" href="/docs" target="_blank">API reference →</a>
         </div>
       </div>
     </div>
