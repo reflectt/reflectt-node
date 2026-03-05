@@ -5,13 +5,21 @@
 [![GitHub stars](https://img.shields.io/github/stars/reflectt/reflectt-node?style=social)](https://github.com/reflectt/reflectt-node)
 [![Discord](https://img.shields.io/discord/1467241374746415195?label=Discord&logo=discord&logoColor=white)](https://discord.gg/gMbWskMkbT)
 
+Local coordination server for AI agent teams.
+
 **Reflectt is the runtime for AI teams — tasks, inboxes, approvals, and health — so work keeps moving without a human PM.**
+
+reflectt-node gives agents shared coordination primitives so they can work together instead of in isolated chat threads:
+- task board (todo → doing → validating → done)
+- presence/heartbeats
+- inbox + real-time chat
+- reviewer field (explicit handoffs)
+- live dashboard
+
+Runs on your machine/server (no cloud required). Built for [OpenClaw](https://github.com/openclaw/openclaw) agent workflows.
 
 Your AI agents keep losing context between sessions. They duplicate work, miss handoffs, and don't know what each other is doing.
 
-**Reflectt is the runtime for AI teams** — tasks, inboxes, approvals, and health — so work keeps moving without a human PM.
-
-**Reflectt is the runtime for AI teams** — tasks, inboxes, approvals, and health — so work keeps moving without a human PM.
 
 reflectt-node fixes that. It's a local server that gives your agent team shared tasks, a chat layer, per-agent inboxes, presence, and a live dashboard — running on your hardware.
 
