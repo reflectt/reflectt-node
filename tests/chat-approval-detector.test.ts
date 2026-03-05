@@ -51,7 +51,7 @@ describe('Chat Approval Detector', () => {
         'LGTM',
         'lgtm!',
         'Approved',
-        'This is approved.',
+        'Approved.',
         'Ship it',
         'ship it!',
         'Looks good to me',
@@ -60,7 +60,7 @@ describe('Chat Approval Detector', () => {
         'Good to merge',
         'All good',
         'Looks solid',
-        'Nice work',
+        '[review] approved',
         '✅',
         '👍',
         '✅ approved',
@@ -79,19 +79,19 @@ describe('Chat Approval Detector', () => {
     describe('rejection signal overrides', () => {
       const validatingTask = makeTask({ reviewer: 'sage', status: 'validating' })
 
-      // Messages that contain approval patterns BUT also rejection patterns → rejection_signal
+      // Messages that contain approval-ish words BUT also rejection patterns or don't match approval start
       const approvalWithRejection = [
-        'Not approved — needs changes',
-        'LGTM but needs work on X',
-        'Approved but fix before merge',
+        { msg: 'Not approved — needs changes', reason: 'no_approval_signal' },  // "Not" at start, no approval pattern match
+        { msg: 'LGTM but needs work on X', reason: 'rejection_signal' },        // LGTM at start, but rejection overrides
+        { msg: 'Approved but fix before merge', reason: 'rejection_signal' },    // Approved at start, but rejection overrides
       ]
 
-      for (const msg of approvalWithRejection) {
+      for (const { msg, reason } of approvalWithRejection) {
         it(`detects rejection override in "${msg}"`, () => {
           listTasksSpy.mockReturnValue([validatingTask])
           const result = detectApproval('sage', msg)
           expect(result.detected).toBe(false)
-          expect(result.skipped?.reason).toBe('rejection_signal')
+          expect(result.skipped?.reason).toBe(reason)
         })
       }
 
@@ -102,6 +102,12 @@ describe('Chat Approval Detector', () => {
         'Requested changes',
         'Don\'t ship this yet',
         'Looks good but needs fixes',
+        'you\'re unblocked to approve',
+        'please approve this when ready',
+        'templates are now attached and the task is actually closable',
+        'Approved + closed already (review decision submitted). You\'re unblocked to mint the small eng implementation task.',
+        'this auto-approval trigger looks too eager and can close tasks incorrectly; please harden the rule',
+        'can approve or close it',
       ]
 
       for (const msg of noApprovalSignal) {
