@@ -279,7 +279,7 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
 
   // ── Ready-queue floor warning ────────────────────────────────────────
 
-  if ((targetStatus === 'validating' || targetStatus === 'done') && task.assignee) {
+  if ((targetStatus === 'validating' || targetStatus === 'done' || targetStatus === 'resolved_externally') && task.assignee) {
     const policy = policyManager.get()
     const rqf = policy.readyQueueFloor
     if (rqf?.enabled && rqf.agents.includes(task.assignee)) {
@@ -288,7 +288,7 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
         const blocked = t.metadata?.blocked_by
         if (!blocked) return true
         const blocker = taskManager.getTask(blocked as string)
-        return !blocker || blocker.status === 'done'
+        return !blocker || blocker.status === 'done' || blocker.status === 'resolved_externally' || blocker.status === 'cancelled'
       })
       // This task is leaving the queue, so effective count will drop
       const effectiveReady = unblockedTodo.length

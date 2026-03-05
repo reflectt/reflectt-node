@@ -2395,6 +2395,8 @@ export function getDashboardHTML(): string {
           <button class="status-btn" data-status="blocked" onclick="updateTaskStatus('blocked')">Blocked</button>
           <button class="status-btn" data-status="validating" onclick="updateTaskStatus('validating')">Validating</button>
           <button class="status-btn" data-status="done" onclick="updateTaskStatus('done')">Done</button>
+          <button class="status-btn" data-status="resolved_externally" onclick="updateTaskStatus('resolved_externally')">Resolved ext</button>
+          <button class="status-btn" data-status="cancelled" onclick="updateTaskStatus('cancelled')">Cancelled</button>
         </div>
       </div>
       
