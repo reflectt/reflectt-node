@@ -11,6 +11,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+### Fixed
+- **First-run banner shows on real first boots** (seeded tasks no longer suppress it) and CTAs no longer 404. (#656)
+- **Avatars: default response instead of 404s** (reduces error-rate pollution). (#657)
+- **Host connect guard** — prevents overwriting an existing enrollment unless `--force` is passed. (#662)
+
+### Docs / UX
+- **README: “60-second demo” section** for quick proof of the audit flow. (#659)
+
+
 ## [0.1.4] — 2026-03-02
 
 Pre-Show HN polish. Doctor no longer fails on fresh installs, error tracking is more useful, and the codebase is ready for external contributors.
