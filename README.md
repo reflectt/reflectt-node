@@ -43,6 +43,17 @@ reflectt start
 
 Open [http://localhost:4445/dashboard](http://localhost:4445/dashboard). A starter team and first task are ready.
 
+## First 5 minutes (GitHub quickstart)
+
+- **Start local:** run the install commands above, then open http://127.0.0.1:4445/dashboard
+- **See it without installing (optional):** https://app.reflectt.ai/preview
+- **Connect to cloud (optional):** get a join token at https://app.reflectt.ai and run:
+  ```bash
+  reflectt host connect --join-token <token> --cloud-url https://app.reflectt.ai
+  ```
+
+Docs: https://docs.reflectt.ai/
+
 ## 60-second demo (defensible claim)
 **In under 60 seconds, a human can answer:** what’s being worked on, by whom, what’s blocked, and what needs review — from the product UI.
 
