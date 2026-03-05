@@ -116,6 +116,11 @@ class ChatManager {
   private subscribers = new Set<(message: AgentMessage) => void>()
   private initialized = false
 
+  // Monotonic timestamp guard: ensure message timestamps (and ids) are strictly increasing.
+  // This prevents conditional-caching + since-polling clients from missing messages when
+  // multiple messages share the same millisecond timestamp.
+  private lastTimestamp = 0
+
   constructor() {
     // OpenClaw listener disabled for now — chat works standalone
     // TODO: re-enable when OpenClaw connection is configured
@@ -141,7 +146,9 @@ class ChatManager {
 
       // All queries now go directly to SQLite — no in-memory array.
       const countRow = db.prepare('SELECT COUNT(*) as count FROM chat_messages').get() as { count: number }
-      console.log(`[Chat] SQLite has ${countRow.count} messages (all queries go to DB, no in-memory cache)`)
+      const maxRow = db.prepare('SELECT COALESCE(MAX(timestamp), 0) as maxTs FROM chat_messages').get() as { maxTs: number }
+      this.lastTimestamp = Number(maxRow?.maxTs) || 0
+      console.log(`[Chat] SQLite has ${countRow.count} messages (all queries go to DB, no in-memory cache; maxTs=${this.lastTimestamp})`)
     } finally {
       this.initialized = true
     }
@@ -457,10 +464,15 @@ class ChatManager {
       }
     }
 
+    // Use a monotonic timestamp for ids + sorting/caching correctness.
+    let ts = Date.now()
+    if (ts <= this.lastTimestamp) ts = this.lastTimestamp + 1
+    this.lastTimestamp = ts
+
     const fullMessage: AgentMessage = {
       ...message,
-      id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      timestamp: Date.now(),
+      id: `msg-${ts}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: ts,
       channel,
       reactions: message.reactions || {},
       threadId: message.threadId,
