@@ -67,6 +67,8 @@ const TRACKED_GROUPS: EndpointGroup[] = [
 const requestCounts: Record<string, number> = {}
 const errorCounts: Record<string, number> = {}
 const recentErrors: ErrorEntry[] = []
+/** Error buckets by route+status for top-N display. Key: "group:status" */
+const errorBuckets: Map<string, { group: string; status: number; count: number; lastSeen: number }> = new Map()
 let totalRequests = 0
 let totalErrors = 0
 const startedAt = Date.now()
@@ -112,19 +114,30 @@ export function trackRequest(method: string, url: string, statusCode: number, us
     totalErrors++
     errorCounts[group] = (errorCounts[group] || 0) + 1
     currentBucket.errors++
-  }
 
-  if (statusCode >= 500) {
-    recentErrors.push({
-      ts: now,
-      method,
-      url: url.length > 200 ? url.slice(0, 200) + '…' : url,
-      status: statusCode,
-      message: `${method} ${url} → ${statusCode}`,
-      userAgent: userAgent?.slice(0, 100),
-    })
-    if (recentErrors.length > MAX_ERRORS) {
-      recentErrors.shift()
+    // Track error buckets by group+status
+    const bucketKey = `${group}:${statusCode}`
+    const existing = errorBuckets.get(bucketKey)
+    if (existing) {
+      existing.count++
+      existing.lastSeen = now
+    } else {
+      errorBuckets.set(bucketKey, { group, status: statusCode, count: 1, lastSeen: now })
+    }
+
+    // Capture recent errors (both 4xx and 5xx, skip 404s to avoid noise)
+    if (statusCode !== 404) {
+      recentErrors.push({
+        ts: now,
+        method,
+        url: url.length > 200 ? url.slice(0, 200) + '…' : url,
+        status: statusCode,
+        message: `${method} ${url} → ${statusCode}`,
+        userAgent: userAgent?.slice(0, 100),
+      })
+      if (recentErrors.length > MAX_ERRORS) {
+        recentErrors.shift()
+      }
     }
   }
 }
@@ -180,6 +193,7 @@ export function getRequestMetrics(): {
   uptimeMs: number
   byGroup: Record<string, { requests: number; errors: number }>
   recentErrors: ErrorEntry[]
+  topErrorBuckets: { group: string; status: number; count: number; lastSeen: number }[]
   rps: number
   rolling: { requests: number; errors: number; errorRate: number; windowMinutes: number }
 } {
@@ -204,12 +218,18 @@ export function getRequestMetrics(): {
     }
   }
 
+  // Top error buckets sorted by count desc
+  const topBuckets = [...errorBuckets.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10)
+
   return {
     total: totalRequests,
     errors: totalErrors,
     uptimeMs,
     byGroup,
     recentErrors: [...recentErrors].reverse(), // Most recent first
+    topErrorBuckets: topBuckets,
     rps,
     rolling: getRollingMetrics(),
   }
@@ -222,6 +242,7 @@ export function resetRequestMetrics(): void {
   for (const key of Object.keys(requestCounts)) delete requestCounts[key]
   for (const key of Object.keys(errorCounts)) delete errorCounts[key]
   recentErrors.length = 0
+  errorBuckets.clear()
   rollingBuckets.length = 0
   currentBucket = { requests: 0, errors: 0, startedAt: Date.now() }
 }

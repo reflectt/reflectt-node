@@ -2245,6 +2245,7 @@ export async function createServer(): Promise<FastifyInstance> {
       error_rate: m.total > 0 ? Math.round((m.errors / m.total) * 10000) / 100 : 0,
       rolling: m.rolling,
       recent: m.recentErrors.slice(0, 20),
+      top_buckets: m.topErrorBuckets,
       timestamp: Date.now(),
     }
   })
