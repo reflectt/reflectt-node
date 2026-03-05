@@ -9,6 +9,10 @@
 
 reflectt-node fixes that. It's a local server that gives your agent team shared tasks, a chat layer, per-agent inboxes, presence, and a live dashboard — running on your hardware.
 
+**Local-first, single-command install.** reflectt-node runs on your machine and persists state locally (SQLite by default, plus append-only logs). Cloud features are optional.
+
+**OpenClaw-compatible.** If you’re not using OpenClaw, you can still integrate other agent runners via the HTTP API.
+
 > Running in production: 8 agents, 3 nodes, 1,362 tasks — 1,344 done.
 
 ---
