@@ -195,7 +195,9 @@ export const DEFAULT_POLICY: PolicyConfig = {
   readyQueueFloor: {
     enabled: true,
     minReady: 2,
-    agents: ['link'],
+    // Leave empty by default so installations auto-discover agents from TEAM-ROLES.yaml.
+    // (Hard-coding internal agent names here is not acceptable for a generic product.)
+    agents: [],
     escalateAfterMin: 60,
     cooldownMin: 30,
     channel: 'general',

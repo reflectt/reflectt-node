@@ -19,7 +19,7 @@ import { validateTaskTimestamp, verifyTaskExists } from './health.js'
 import { policyManager } from './policy.js'
 import { getEffectiveActivity } from './activity-signal.js'
 import { presenceManager } from './presence.js'
-import { suggestReviewer } from './assignment.js'
+import { suggestReviewer, getAgentRoles } from './assignment.js'
 import type { Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
 import { recordSystemLoopTick } from './system-loop-state.js'
@@ -463,7 +463,18 @@ export class BoardHealthWorker {
 
     const actions: PolicyAction[] = []
 
-    for (const agent of rqf.agents) {
+    const agents = (rqf.agents && rqf.agents.length > 0)
+      ? rqf.agents
+      : getAgentRoles().map(r => r.name)
+
+    // Reuse idle-nudge exclusions as a sensible default for ready-queue monitoring too.
+    // (Prevents pinging humans/diagnostics accounts.)
+    const excluded = new Set((policy.idleNudge?.excluded || []).map(a => String(a).toLowerCase()))
+
+    for (const agentRaw of agents) {
+      const agent = String(agentRaw || '').trim()
+      if (!agent) continue
+      if (excluded.has(agent.toLowerCase())) continue
       // Count unblocked todo tasks for this agent
       const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
       const unblockedTodo = todoTasks.filter(t => {
@@ -519,7 +530,7 @@ export class BoardHealthWorker {
         const snapshotTime = new Date(now).toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
 
         const msg = isBreach
-          ? `⚠️ Ready-queue floor (idle): @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). @sage @pixel — please spec/assign tasks to keep engineering lane fed.${breakdown}\n  🕐 snapshot: ${snapshotTime}`
+          ? `⚠️ Ready-queue floor (idle): @${agent} has ${readyCount}/${rqf.minReady} unblocked todo tasks (need ${deficit} more). Please spec/assign tasks to keep the lane fed.${breakdown}\n  🕐 snapshot: ${snapshotTime}`
           : `ℹ️ Ready-queue in-flight: @${agent} is active (doing=${doingTasks.length}, validating=${validatingTasks.length}). In validating, next task suggested via /tasks/next. Queue below floor (unblocked todo=${readyCount}, floor=${rqf.minReady}, need ${deficit} more).${breakdown}\n  🕐 snapshot: ${snapshotTime}`
 
         if (!dryRun) {
