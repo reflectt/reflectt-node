@@ -651,7 +651,13 @@ export class BoardHealthWorker {
         if (now - lastReplenish < cooldownMs) continue
 
         // Count unblocked todo tasks for this agent
-        const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
+        // Use metadata.lane if present, fall back to assignee match
+        const allTodo = taskManager.listTasks({ status: 'todo' })
+        const todoTasks = allTodo.filter(t => {
+          const taskLane = (t.metadata?.lane as string | undefined)
+          if (taskLane) return taskLane === lane.name && t.assignee === agent
+          return t.assignee === agent
+        })
         const unblockedTodo = todoTasks.filter(t => {
           const blocked = t.metadata?.blocked_by
           if (!blocked) return true
