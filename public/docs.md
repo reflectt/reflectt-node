@@ -493,6 +493,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/cloud/status` | Cloud connection state (registered, heartbeat age, sync status). Only active when `REFLECTT_HOST_TOKEN` is set. |
+| GET | `/cloud/events` | Connection lifecycle events (connect, disconnect, heartbeat failures/recoveries). Query: `?limit=N` (max 100). |
 | POST | `/cloud/reload` | Hot-reload cloud config from `~/.reflectt/config.json` without server restart. Updates env vars and restarts heartbeat/sync loops. Used by CLI after `host connect` enrollment. |
 | GET | `/provisioning/status` | Host provisioning state: phase, enrollment, config/secrets pull status, webhook routes. Dashboard-safe (no credentials). |
 | POST | `/provisioning/provision` | Full provisioning flow: enroll with cloud (join token or API key), pull config + secrets, configure webhooks. Body: `{ cloudUrl, hostName, joinToken?, apiKey?, capabilities? }`. |

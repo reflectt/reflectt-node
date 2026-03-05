@@ -11266,8 +11266,18 @@ If your heartbeat shows **no active task** and **no next task**:
   // ============ CLOUD INTEGRATION (see docs/CLOUD_ENDPOINTS.md) ============
 
   app.get('/cloud/status', async () => {
-    const { getCloudStatus } = await import('./cloud.js')
-    return getCloudStatus()
+    const { getCloudStatus, getConnectionHealth, getConnectionEvents } = await import('./cloud.js')
+    return {
+      ...getCloudStatus(),
+      connectionHealth: getConnectionHealth(),
+    }
+  })
+
+  app.get('/cloud/events', async (request) => {
+    const { getConnectionEvents } = await import('./cloud.js')
+    const url = new URL(request.url, 'http://localhost')
+    const limit = Math.min(Number(url.searchParams.get('limit')) || 50, 100)
+    return { events: getConnectionEvents(limit) }
   })
 
   app.post('/cloud/reload', async () => {
