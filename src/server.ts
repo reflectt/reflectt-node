@@ -2621,7 +2621,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     // Count tasks missing metadata.lane for visibility
-    const missingLaneCount = allTasks.filter(t => !t.metadata?.lane && t.status !== 'done').length
+    const missingLaneCount = allTasks.filter(t => !t.metadata?.lane && !['done', 'cancelled', 'resolved_externally'].includes(t.status)).length
 
     // Build per-lane health
     // Task belongs to a lane if: (1) metadata.lane matches, OR (2) assignee is in lane agents (fallback)
@@ -6154,7 +6154,7 @@ export async function createServer(): Promise<FastifyInstance> {
           // Deduplication: check existing tasks for similar titles
           if (data.deduplicate) {
             const existingTasks = taskManager.listTasks({})
-            const activeTasks = existingTasks.filter(t => t.status !== 'done')
+            const activeTasks = existingTasks.filter(t => t.status !== 'done' && t.status !== 'cancelled' && t.status !== 'resolved_externally')
             const normalizedNew = taskData.title.toLowerCase().trim()
 
             // Exact title match
@@ -6733,12 +6733,13 @@ export async function createServer(): Promise<FastifyInstance> {
       // Must run before all other gates to give a clear rejection message.
       if (parsed.status && parsed.status !== existing.status) {
         const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-          'todo':       ['doing'],
-          'doing':      ['blocked', 'validating'],
-          'blocked':    ['doing', 'todo'],
+          'todo':       ['doing', 'cancelled'],
+          'doing':      ['blocked', 'validating', 'cancelled'],
+          'blocked':    ['doing', 'todo', 'cancelled'],
           'validating': ['done', 'doing'],   // doing = reviewer rejection / rework
           'done':       [],                   // all exits require reopen
-          'in-progress': ['blocked', 'validating', 'done', 'doing', 'todo'], // legacy, permissive
+          'cancelled':  [],                   // terminal state, like done — requires reopen to revive
+          'in-progress': ['blocked', 'validating', 'done', 'doing', 'todo', 'cancelled'], // legacy, permissive
         }
         const allowed = ALLOWED_TRANSITIONS[existing.status] ?? []
         if (!allowed.includes(parsed.status)) {
@@ -6762,6 +6763,25 @@ export async function createServer(): Promise<FastifyInstance> {
           mergedMeta.reopened_at = Date.now()
           mergedMeta.reopened_from = existing.status
         }
+      }
+
+      // ── Cancel reason gate: require cancel_reason when transitioning to cancelled ──
+      if (parsed.status === 'cancelled') {
+        const meta = (incomingMeta ?? {}) as Record<string, unknown>
+        const cancelReason = typeof meta.cancel_reason === 'string' ? String(meta.cancel_reason).trim() : ''
+        if (!cancelReason) {
+          reply.code(422)
+          return {
+            success: false,
+            error: 'Cancellation requires a cancel_reason in metadata (e.g. "duplicate", "out of scope", "won\'t fix").',
+            code: 'CANCEL_REASON_REQUIRED',
+            gate: 'cancel_reason',
+            hint: 'Include metadata.cancel_reason explaining why this task is being cancelled.',
+          }
+        }
+        mergedMeta.cancel_reason = cancelReason
+        mergedMeta.cancelled_at = Date.now()
+        mergedMeta.cancelled_from = existing.status
       }
 
       // Reviewer-identity gate: only assigned reviewer can set reviewer_approved=true.
