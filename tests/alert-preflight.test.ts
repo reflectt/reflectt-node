@@ -38,6 +38,10 @@ import {
   getPreflightMetrics,
   resetPreflightMetrics,
   getPreflightMode,
+  snapshotDailyMetrics,
+  getDailySnapshots,
+  startAutoSnapshot,
+  stopAutoSnapshot,
   type PreflightInput,
 } from '../src/alert-preflight.js'
 
@@ -318,6 +322,24 @@ describe('alert-preflight', () => {
     it('falls back to canary for invalid', () => {
       process.env.ALERT_PREFLIGHT_MODE = 'garbage'
       expect(getPreflightMode()).toBe('canary')
+    })
+  })
+
+  describe('daily snapshots', () => {
+    it('snapshotDailyMetrics does not throw', () => {
+      preflightCheck({ taskId: 'task-snap-1', alertType: 'test' })
+      // Should not throw even with mocked fs
+      expect(() => snapshotDailyMetrics()).not.toThrow()
+    })
+
+    it('getDailySnapshots returns empty array when no file', () => {
+      const snapshots = getDailySnapshots()
+      expect(Array.isArray(snapshots)).toBe(true)
+    })
+
+    it('startAutoSnapshot and stopAutoSnapshot do not throw', () => {
+      expect(() => startAutoSnapshot()).not.toThrow()
+      expect(() => stopAutoSnapshot()).not.toThrow()
     })
   })
 })
