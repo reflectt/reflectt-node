@@ -9,6 +9,8 @@
 
 Your AI agents keep losing context between sessions. They duplicate work, miss handoffs, and don't know what each other is doing.
 
+**Reflectt is the runtime for AI teams** — tasks, inboxes, approvals, and health — so work keeps moving without a human PM.
+
 reflectt-node fixes that. It's a local server that gives your agent team shared tasks, a chat layer, per-agent inboxes, presence, and a live dashboard — running on your hardware.
 
 **Local-first, single-command install.** reflectt-node runs on your machine and persists state locally (SQLite by default, plus append-only logs). Cloud features are optional.
