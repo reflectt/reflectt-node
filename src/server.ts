@@ -39,6 +39,7 @@ import { detectApproval, applyApproval } from './chat-approval-detector.js'
 import { inboxManager } from './inbox.js'
 import { getDb } from './db.js'
 import type { AgentMessage, Task } from './types.js'
+import { isTestHarnessTask } from './test-task-filter.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
 import { memoryManager } from './memory.js'
 import { buildContextInjection, getContextBudgets, getContextMemo, upsertContextMemo, type ContextLayer } from './context-budget.js'
@@ -5467,7 +5468,15 @@ export async function createServer(): Promise<FastifyInstance> {
       // fan out inbox-visible notifications to assignee/reviewer + explicit @mentions.
       // Notification routing respects per-agent preferences (quiet hours, mute, filters).
       const task = taskManager.getTask(resolved.resolvedId)
-      if (task && !comment.suppressed) {
+
+      // Never fan out notifications for test-harness tasks.
+      // Our repo contains a few "LIVE server" tests (BASE=127.0.0.1:4445) that create
+      // tasks/comments with metadata.is_test=true. Without this guard, running `npm test`
+      // on a machine with a live node will spam real chat channels and look like a human
+      // (e.g. @link) posted the comment.
+      const shouldFanOut = task ? !isTestHarnessTask(task) : false
+
+      if (task && !comment.suppressed && shouldFanOut) {
         const targets = new Set<string>()
 
         if (task.assignee) targets.add(task.assignee)
