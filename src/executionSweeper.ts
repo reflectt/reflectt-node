@@ -984,6 +984,18 @@ export function startSweeper(): void {
     ;(async () => {
       const result = await sweepValidatingQueue()
       escalateViolations(result.violations)
+
+      // Todo hoarding sweep (runs alongside validating sweep)
+      try {
+        const { sweepTodoHoarding } = await import('./todoHoardingGuard.js')
+        const hoarding = await sweepTodoHoarding({ dryRun: false })
+        if (hoarding.unassigned.length > 0) {
+          const summary = hoarding.unassigned.map(a => `• ${a.taskId} (was: ${a.previousAssignee})`).join('\n')
+          console.log(`[Sweeper] Hoarding guard auto-unassigned ${hoarding.unassigned.length} tasks:\n${summary}`)
+        }
+      } catch (err) {
+        console.error('[Sweeper] Hoarding sweep failed:', err)
+      }
     })().catch(err => {
       console.error('[Sweeper] Sweep failed:', err)
       logDryRun('sweep_error', String(err))
