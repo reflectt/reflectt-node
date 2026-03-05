@@ -583,6 +583,8 @@ program
   .description('Check server health and status')
   .action(async () => {
     const config = loadConfig()
+    const DEFAULT_PORT = 4445
+    const configHost = (config.host === '0.0.0.0' || config.host === '::') ? '127.0.0.1' : config.host
     
     // Check PID file
     const isRunning = existsSync(PID_FILE)
@@ -590,29 +592,75 @@ program
     
     console.log('📊 reflectt Status')
     console.log(`   Config: ${CONFIG_PATH}`)
-    console.log(`   URL: http://${config.host}:${config.port}`)
+    
+    // Try config port first, then default port as fallback
+    let health: Record<string, unknown> | null = null
+    let activePort = config.port
+    let activeUrl = `http://${configHost}:${config.port}`
+
+    async function tryPort(port: number): Promise<Record<string, unknown> | null> {
+      try {
+        const url = `http://${configHost}:${port}/health`
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 3000)
+        const res = await fetch(url, { signal: controller.signal })
+        clearTimeout(timeout)
+        if (res.ok) return await res.json() as Record<string, unknown>
+      } catch { /* not responding on this port */ }
+      return null
+    }
+
+    health = await tryPort(config.port)
+    if (!health && config.port !== DEFAULT_PORT) {
+      // Config port failed — try default port (common drift: config says 4446, server runs on 4445)
+      health = await tryPort(DEFAULT_PORT)
+      if (health) {
+        activePort = DEFAULT_PORT
+        activeUrl = `http://${configHost}:${DEFAULT_PORT}`
+        console.log(`   ⚠️  Config port ${config.port} not responding, found server on default port ${DEFAULT_PORT}`)
+        console.log(`   💡 Fix: update ${CONFIG_PATH} → "port": ${DEFAULT_PORT}`)
+      }
+    }
+
+    console.log(`   URL: ${activeUrl}`)
     
     if (pid) {
       try {
         process.kill(Number(pid), 0) // Check if process exists
         console.log(`   Process: Running (PID: ${pid})`)
       } catch (err) {
-        console.log(`   Process: Not found (stale PID file)`)
-        return
+        if (health) {
+          console.log(`   Process: PID file stale, but server is responding on port ${activePort}`)
+        } else {
+          console.log(`   Process: Not found (stale PID file)`)
+          return
+        }
       }
     } else {
-      console.log(`   Process: Not running`)
-      return
+      if (health) {
+        console.log(`   Process: No PID file, but server is responding on port ${activePort}`)
+      } else {
+        console.log(`   Process: Not running`)
+        return
+      }
     }
     
-    // Try to get health status
-    try {
-      const health = await apiRequest('/health')
+    // Show health status
+    if (health) {
       console.log('\n✅ Server Health')
       console.log(`   Status: ${health.status}`)
-      console.log(`   Chat messages: ${health.chat?.messageCount || 0}`)
-      console.log(`   Tasks: ${health.tasks?.taskCount || 0}`)
-    } catch (err) {
+      console.log(`   Version: ${health.version || 'unknown'}`)
+      console.log(`   Chat messages: ${(health.chat as Record<string, unknown>)?.messageCount || 0}`)
+      const tasks = health.tasks as Record<string, unknown> | undefined
+      console.log(`   Tasks: ${tasks?.total || 0}`)
+      if (health.openclaw) {
+        const oc = health.openclaw as Record<string, unknown>
+        console.log(`   OpenClaw: ${oc.status}${oc.gateway ? ` (${oc.gateway})` : ''}`)
+      }
+      if (health.cloud) {
+        console.log(`   Cloud: connected`)
+      }
+    } else {
       console.log('\n⚠️  Server process exists but not responding')
     }
   })
