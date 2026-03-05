@@ -2607,9 +2607,17 @@ export async function createServer(): Promise<FastifyInstance> {
       return hasTitle && hasPriority && hasReviewer && hasDoneCriteria
     }
 
+    // Count tasks missing metadata.lane for visibility
+    const missingLaneCount = allTasks.filter(t => !t.metadata?.lane && t.status !== 'done').length
+
     // Build per-lane health
+    // Task belongs to a lane if: (1) metadata.lane matches, OR (2) assignee is in lane agents (fallback)
     const laneHealth = Object.entries(lanes).map(([laneName, config]) => {
-      const laneTasks = allTasks.filter(t => config.agents.includes(t.assignee || ''))
+      const laneTasks = allTasks.filter(t => {
+        const taskLane = t.metadata?.lane as string | undefined
+        if (taskLane) return taskLane === laneName
+        return config.agents.includes(t.assignee || '')
+      })
 
       const todo = laneTasks.filter(t => t.status === 'todo')
       const doing = laneTasks.filter(t => t.status === 'doing')
@@ -2711,6 +2719,7 @@ export async function createServer(): Promise<FastifyInstance> {
         breachedLaneCount: breachedLanes.length,
         overallStatus: breachedLanes.length > 0 ? 'breach' : totalReady === 0 ? 'critical' : 'healthy',
         staleValidatingCount: staleValidating.length,
+        missingLaneMetadata: missingLaneCount,
       },
       lanes: laneHealth,
       staleValidating,
