@@ -2575,6 +2575,19 @@ export async function createServer(): Promise<FastifyInstance> {
     return { snapshots: getDailySnapshots(), currentSession: getPreflightMetrics() }
   })
 
+  // ─── Todo hoarding health: orphan detection + auto-unassign status ───
+  app.get('/health/hoarding', async (request) => {
+    const query = request.query as Record<string, string>
+    const dryRun = query.dry_run !== '0' && query.dry_run !== 'false' // default: dry run
+    const { sweepTodoHoarding, TODO_CAP, IDLE_THRESHOLD_MS } = await import('./todoHoardingGuard.js')
+    const result = await sweepTodoHoarding({ dryRun })
+    return {
+      ...result,
+      config: { todoCap: TODO_CAP, idleThresholdMinutes: Math.round(IDLE_THRESHOLD_MS / 60000) },
+      dryRun,
+    }
+  })
+
   // ─── Backlog health: ready counts per lane, breach status, floor compliance ───
   app.get('/health/backlog', async (request, reply) => {
     const query = request.query as Record<string, string>
@@ -9422,6 +9435,18 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!task) {
       return { task: null, message: 'No available tasks' }
     }
+
+    // Rule C: auto-claim (todo→doing) when ?claim=1
+    const shouldClaim = query.claim === '1' || query.claim === 'true'
+    if (shouldClaim && agent && task.status === 'todo') {
+      const { claimTask } = await import('./todoHoardingGuard.js')
+      const claimed = await claimTask(task.id, agent)
+      if (claimed) {
+        const enriched = enrichTaskWithComments(claimed)
+        return { task: isCompact(query) ? compactTask(enriched) : enriched, claimed: true }
+      }
+    }
+
     const enriched = enrichTaskWithComments(task)
     return { task: isCompact(query) ? compactTask(enriched) : enriched }
   })

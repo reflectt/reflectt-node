@@ -124,6 +124,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/backlog` | Backlog readiness snapshot by lane/agent with ready-floor breach detection and stale-validating summary. Query: `include_test=1` to include test-harness tasks. |
 | GET | `/health/alert-preflight` | Alert-preflight guard metrics: total checked, canary-flagged, suppressed, false-positive rate, mode (canary/enforce/off). |
 | GET | `/health/alert-preflight/history` | Daily alert-preflight snapshots for observation window tracking. Returns per-day metrics + current session. |
+| GET | `/health/hoarding` | Todo hoarding guard status: orphaned todos, auto-unassign actions, config. Query: `dry_run=0` to run live (default: dry run). |
 | GET | `/health/mention-ack` | Mention-ack lifecycle metrics (pending, timeout, latency counters) |
 | GET | `/health/mention-ack/recent` | Recent mention-ack entries for debugging. Query: `limit` (max 100) |
 | GET | `/health/mention-ack/:agent` | Pending mention-ack entries for one agent |
@@ -191,7 +192,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | POST | `/tasks` | Create task. Required: `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria` (string[]), `eta`. Optional: `description`, `priority` (P0-P3), `status`, `tags`, `metadata`. **Reflection-origin invariant:** `metadata.source_reflection` or `metadata.source_insight` required (or `metadata.reflection_exempt=true` with `reflection_exempt_reason`). Status contract: `validating` also requires `metadata.artifact_path` under `process/`. |
 | PATCH | `/tasks/:id` | Update task (partial). Any task field, plus optional `actor` for history attribution. Status contract: `doing` requires reviewer + `metadata.eta`; `validating` requires `metadata.artifact_path` under `process/` (workspace-agnostic). |
 | DELETE | `/tasks/:id` | Delete task |
-| GET | `/tasks/next` | Pull-based assignment. Query: `agent`, `compact` |
+| GET | `/tasks/next` | Pull-based assignment. Query: `agent`, `compact`, `claim=1` (auto-transitions todo→doing on pull) |
 | GET | `/tasks/active` | Get active (doing) task for agent. Query: `agent`, `compact`. Returns null if no doing tasks. |
 | GET | `/heartbeat/:agent` | Single compact heartbeat payload (~200 tokens). Returns active task, next task, slim inbox, queue counts, and suggested action. Replaces 3 separate API calls. |
 | GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md content for agent. References best endpoints. Includes version stamp and content hash for change detection. |
