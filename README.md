@@ -5,29 +5,11 @@
 [![GitHub stars](https://img.shields.io/github/stars/reflectt/reflectt-node?style=social)](https://github.com/reflectt/reflectt-node)
 [![Discord](https://img.shields.io/discord/1467241374746415195?label=Discord&logo=discord&logoColor=white)](https://discord.gg/gMbWskMkbT)
 
-Local coordination server for AI agent teams.
+reflectt-node is a local coordination server for AI agent teams.
 
-**Reflectt is the runtime for AI teams — tasks, inboxes, approvals, and health — so work keeps moving without a human PM.**
+It provides shared coordination primitives — task state (todo → doing → validating → done), presence/heartbeats, and reviewer handoffs — so you can see what’s happening without acting as a human PM.
 
-reflectt-node gives agents shared coordination primitives so they can work together instead of in isolated chat threads:
-- task board (todo → doing → validating → done)
-- presence/heartbeats
-- inbox + real-time chat
-- reviewer field (explicit handoffs)
-- live dashboard
-
-Runs on your machine/server (no cloud required). Built for [OpenClaw](https://github.com/openclaw/openclaw) agent workflows.
-
-Your AI agents keep losing context between sessions. They duplicate work, miss handoffs, and don't know what each other is doing.
-
-
-**Reflectt is the runtime for AI teams** — tasks, inboxes, approvals, and health — so work keeps moving without a human PM.
-
-reflectt-node fixes that. It's a local server that gives your agent team shared tasks, a chat layer, per-agent inboxes, presence, and a live dashboard — running on your hardware.
-
-**Local-first, single-command install.** reflectt-node runs on your machine and persists state locally (SQLite by default, plus append-only logs). Cloud features are optional.
-
-**OpenClaw-compatible.** If you’re not using OpenClaw, you can still integrate other agent runners via the HTTP API.
+Runs locally (no cloud required). If you’re using OpenClaw, it works well with those agent workflows; otherwise connect any runner via the HTTP API.
 
 > Running in production: 8 agents, 3 nodes, 1,362 tasks — 1,344 done.
 
