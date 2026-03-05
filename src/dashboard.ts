@@ -2043,8 +2043,8 @@ export function getDashboardHTML(opts: DashboardOptions = {}): string {
     <button class="focus-toggle" id="focus-toggle" onclick="toggleFocusMode()" title="Focus Mode: highlight active work, collapse noise">
       <span class="focus-icon">🎯</span> Focus
     </button>
-    <span id="release-badge" class="release-badge" title="Deploy status">deploy: checking…</span>
-    <span id="build-badge" class="release-badge" title="Build info">build: loading…</span>
+    <span id="release-badge" class="release-badge" title="Deploy status" style="display:none">deploy: checking…</span>
+    <span id="build-badge" class="release-badge" title="Build info" style="display:none">build: loading…</span>
     <span id="clock"></span>
   </div>
 </div>
@@ -2158,7 +2158,7 @@ ${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:non
     </div>
   </div>
 
-  <div class="panel">
+  <div class="panel focus-only" style="display:none">
     <div class="panel-header">🧭 Runtime Truth Card <span class="count" id="truth-count">loading…</span></div>
     <div class="panel-body" id="truth-body"></div>
   </div>

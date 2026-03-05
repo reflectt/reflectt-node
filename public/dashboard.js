@@ -1564,6 +1564,7 @@ async function loadReleaseStatus(force = false) {
     badge.classList.toggle('stale', stale);
     badge.classList.toggle('fresh', !stale);
     badge.textContent = stale ? 'deploy: stale' : 'deploy: in sync';
+    badge.style.display = '';
 
     const reasons = Array.isArray(status.reasons) ? status.reasons : [];
     const startupCommit = status.startup && status.startup.commit ? status.startup.commit.slice(0, 8) : 'unknown';
@@ -1599,6 +1600,7 @@ async function loadBuildInfo() {
     badge.classList.toggle('stale', branch !== 'main');
     badge.textContent = `${sha} • ${uptimeStr}`;
     badge.title = `SHA: ${info.gitSha}\nBranch: ${branch}\nCommit: ${info.gitMessage}\nAuthor: ${info.gitAuthor}\nPID: ${info.pid}\nNode: ${info.nodeVersion}\nStarted: ${info.startedAt}`;
+    badge.style.display = '';
   } catch (err) {
     badge.textContent = 'build: error';
     badge.title = 'Failed to load build info';
@@ -2757,6 +2759,11 @@ function toggleFocusMode() {
 
   // Persist preference
   try { localStorage.setItem('reflectt-focus-mode', focusModeActive ? '1' : '0'); } catch {}
+
+  // Show/hide dev-only panels
+  document.querySelectorAll('.panel.focus-only').forEach(panel => {
+    panel.style.display = focusModeActive ? '' : 'none';
+  });
 
   // Re-render kanban to add/remove QA contract details
   renderKanban();
