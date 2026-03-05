@@ -450,6 +450,13 @@ export function getDashboardHTML(opts: DashboardOptions = {}): string {
   .project-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
   .kanban { display: flex; gap: var(--space-3); padding: 16px 18px; overflow-x: auto; min-height: 180px; align-items: flex-start; }
   .kanban-col { flex: 1; min-width: 160px; max-height: 75vh; overflow-y: auto; scrollbar-width: thin; }
+  @media (max-width: 768px) {
+    .kanban { flex-wrap: wrap; gap: var(--space-2); padding: 12px; }
+    .kanban-col { min-width: 140px; flex-basis: calc(50% - 6px); }
+  }
+  @media (max-width: 480px) {
+    .kanban-col { flex-basis: 100%; }
+  }
   .kanban-col::-webkit-scrollbar { width: 4px; }
   .kanban-col::-webkit-scrollbar-track { background: transparent; }
   .kanban-col::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
