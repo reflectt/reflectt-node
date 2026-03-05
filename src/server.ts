@@ -7331,7 +7331,24 @@ export async function createServer(): Promise<FastifyInstance> {
         if (task.reviewer) statusNotifTargets.push({ agent: task.reviewer, type: 'taskCompleted' })
       }
 
+      // Dedupe guard: prevent stale/out-of-order notification events
+      const { shouldEmitNotification } = await import('./notificationDedupeGuard.js')
+
       for (const target of statusNotifTargets) {
+        // Check dedupe guard before emitting
+        const dedupeCheck = shouldEmitNotification({
+          taskId: task.id,
+          eventUpdatedAt: task.updatedAt,
+          eventStatus: parsed.status!,
+          currentTaskStatus: task.status,
+          currentTaskUpdatedAt: task.updatedAt,
+        })
+
+        if (!dedupeCheck.emit) {
+          console.log(`[NotifDedupe] Suppressed: ${dedupeCheck.reason}`)
+          continue
+        }
+
         const routing = notifMgr.shouldNotify({
           type: target.type,
           agent: target.agent,
@@ -7348,6 +7365,7 @@ export async function createServer(): Promise<FastifyInstance> {
               kind: target.type,
               taskId: task.id,
               status: parsed.status,
+              updatedAt: task.updatedAt,
               deliveryMethod: routing.deliveryMethod,
             },
           }).catch(() => {}) // Non-blocking
