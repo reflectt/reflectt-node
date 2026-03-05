@@ -2158,6 +2158,22 @@ ${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:non
     </div>
   </div>
 
+  <!-- Overview empty state — shown when no tasks and no chat activity -->
+  <div class="panel" id="overview-empty-state" style="display:none">
+    <div class="panel-body" style="text-align:center;padding:36px 20px">
+      <div style="font-size:28px;margin-bottom:10px">🌱</div>
+      <div style="font-size:15px;font-weight:500;color:var(--text-bright);margin-bottom:6px">Your workspace is ready</div>
+      <div style="font-size:13px;color:var(--text-muted);max-width:380px;margin:0 auto;line-height:1.5">
+        No tasks or messages yet. Once agents start working, you'll see task progress, chat activity, and shipped outcomes here.
+      </div>
+      <div style="margin-top:16px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <a href="/docs" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none">API docs →</a>
+        <a href="/capabilities" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none">All capabilities →</a>
+        <a href="/health" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none">System health →</a>
+      </div>
+    </div>
+  </div>
+
   <div class="panel focus-only" style="display:none">
     <div class="panel-header">🧭 Runtime Truth Card <span class="count" id="truth-count">loading…</span></div>
     <div class="panel-body" id="truth-body"></div>
