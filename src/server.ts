@@ -3171,8 +3171,11 @@ export async function createServer(): Promise<FastifyInstance> {
     reply.redirect('/dashboard')
   })
 
-  app.get('/dashboard', async (_request, reply) => {
-    reply.type('text/html').send(getDashboardHTML())
+  app.get('/dashboard', async (request, reply) => {
+    const envFlag = process.env.REFLECTT_INTERNAL_UI === '1'
+    const queryFlag = (request.query as Record<string, string>)?.internal === '1'
+    const internalMode = envFlag && queryFlag
+    reply.type('text/html').send(getDashboardHTML({ internalMode }))
   })
 
   // API docs page (markdown — token-efficient for agents)
