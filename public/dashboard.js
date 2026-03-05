@@ -795,6 +795,25 @@ function renderKanban() {
   cols.forEach(c => grouped[c].sort((a, b) => (pOrder[a.priority] ?? 9) - (pOrder[b.priority] ?? 9)));
 
   const kanban = document.getElementById('kanban');
+
+  // Full-board empty state: no tasks at all
+  const totalOnBoard = tasksForBoard.length;
+  if (totalOnBoard === 0) {
+    kanban.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px 20px;color:var(--text-muted)">'
+      + '<div style="font-size:28px;margin-bottom:12px">📋</div>'
+      + '<div style="font-size:15px;font-weight:500;color:var(--text-bright);margin-bottom:6px">No tasks yet</div>'
+      + '<div style="font-size:13px;max-width:380px;margin:0 auto;line-height:1.5">'
+      + 'Your board is empty. Create a task via the API, or connect an AI agent — it will start generating tasks automatically.</div>'
+      + '<div style="font-size:12px;color:var(--text-dim);max-width:360px;margin:10px auto 0;line-height:1.4">'
+      + '<strong>Try it:</strong> <code style="background:var(--border);padding:1px 5px;border-radius:3px;font-size:11px">'
+      + 'curl -X POST localhost:4445/tasks -H "Content-Type: application/json" -d \'{"title":"My first task"}\'</code></div>'
+      + '<div style="margin-top:14px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'
+      + '<a href="/docs" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none">API reference →</a>'
+      + '<a href="/capabilities" target="_blank" style="color:var(--accent);font-size:12px;text-decoration:none">Capabilities →</a>'
+      + '</div></div>';
+    return;
+  }
+
   kanban.innerHTML = cols.map(col => {
     const items = grouped[col];
     const isDone = col === 'done';
@@ -1920,7 +1939,11 @@ function renderApprovalQueue() {
   count.textContent = items.length + ' pending';
 
   if (items.length === 0) {
-    body.innerHTML = '<div class="empty" style="text-align:center;padding:20px;color:var(--text-dim)">✓ Queue is clear — no tasks waiting for approval.</div>';
+    body.innerHTML = '<div class="empty" style="text-align:center;padding:24px;color:var(--text-dim)">'
+      + '<div style="font-size:20px;margin-bottom:8px">✓</div>'
+      + '<div style="font-size:13px;font-weight:500;color:var(--text-bright);margin-bottom:4px">Review queue is clear</div>'
+      + '<div style="font-size:12px;max-width:320px;margin:0 auto;line-height:1.4">No tasks waiting for approval. Tasks move here when agents submit work for review — you\'ll see them with confidence scores and one-click approve.</div>'
+      + '</div>';
     return;
   }
 
