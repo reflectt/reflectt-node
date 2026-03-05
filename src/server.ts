@@ -16,7 +16,7 @@ import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME } from './config.js'
 import { trackRequest, getRequestMetrics } from './request-tracker.js'
-import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots } from './alert-preflight.js'
+import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots, startAutoSnapshot } from './alert-preflight.js'
 
 // ── Build info (read once at startup) ──────────────────────────────────────
 const BUILD_VERSION = (() => {
@@ -12342,6 +12342,9 @@ If your heartbeat shows **no active task** and **no next task**:
     const result = calendarEvents.getAgentNextEvent(query.agent)
     return { agent: query.agent, next_event: result?.event || null, starts_at: result?.starts_at || null }
   })
+
+  // Start hourly auto-snapshot for alert-preflight daily metrics
+  startAutoSnapshot()
 
   return app
 }
