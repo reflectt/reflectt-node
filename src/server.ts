@@ -3225,34 +3225,40 @@ export async function createServer(): Promise<FastifyInstance> {
   // Serve avatar images (with fallback for missing avatars)
   app.get<{ Params: { filename: string } }>('/avatars/:filename', async (request, reply) => {
     const { filename } = request.params
+
     // Security: allow alphanumeric, hyphens, underscores + .png/.svg extension
-    if (!/^[a-z0-9_-]+\.(png|svg)$/i.test(filename)) {
-      return reply.code(404).send({ error: 'Not found' })
-    }
-    
+    // (no slashes / traversal). If invalid, still return a safe default avatar (200)
+    // to avoid error-rate pollution from bad/mismatched filenames.
+    const safe = /^[a-z0-9_-]+\.(png|svg)$/i.test(filename)
+
     try {
       const { promises: fs } = await import('fs')
       const { join } = await import('path')
       const { fileURLToPath } = await import('url')
       const { dirname } = await import('path')
-      
+
       const __filename = fileURLToPath(import.meta.url)
       const __dirname = dirname(__filename)
       const publicDir = join(__dirname, '..', 'public', 'avatars')
-      const filePath = join(publicDir, filename)
-      
-      const data = await fs.readFile(filePath)
-      const ext = filename.endsWith('.svg') ? 'image/svg+xml' : 'image/png'
-      reply.type(ext).send(data)
+
+      if (safe) {
+        const filePath = join(publicDir, filename)
+        const data = await fs.readFile(filePath)
+        const ext = filename.toLowerCase().endsWith('.svg') ? 'image/svg+xml' : 'image/png'
+        reply.type(ext).header('Cache-Control', 'public, max-age=3600').send(data)
+        return
+      }
     } catch {
-      // Return a default avatar SVG instead of 404
-      const initial = (filename.replace(/\.(png|svg)$/i, '').charAt(0) || '?').toUpperCase()
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-        <rect width="64" height="64" rx="12" fill="#21262d"/>
-        <text x="32" y="38" text-anchor="middle" font-family="system-ui,sans-serif" font-size="24" font-weight="600" fill="#8d96a0">${initial}</text>
-      </svg>`
-      reply.type('image/svg+xml').header('Cache-Control', 'public, max-age=3600').send(svg)
+      // fall through to default avatar below
     }
+
+    // Default avatar: render an initial when possible, else '?'
+    const initial = safe ? (filename.replace(/\.(png|svg)$/i, '').charAt(0) || '?').toUpperCase() : '?' 
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+      <rect width="64" height="64" rx="12" fill="#21262d"/>
+      <text x="32" y="38" text-anchor="middle" font-family="system-ui,sans-serif" font-size="24" font-weight="600" fill="#8d96a0">${initial}</text>
+    </svg>`
+    reply.type('image/svg+xml').header('Cache-Control', 'public, max-age=3600').send(svg)
   })
 
   // Serve dashboard JS (extracted from inline template)
