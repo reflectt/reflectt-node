@@ -819,8 +819,15 @@ function renderKanban() {
     const isDone = col === 'done';
     const isTodo = col === 'todo';
     const colLimit = isDone ? 3 : isTodo ? 10 : items.length;
+    const emptyMessages = {
+      todo: 'No tasks queued',
+      doing: 'Nothing in progress',
+      blocked: 'Nothing blocked',
+      validating: 'Nothing awaiting review',
+      done: 'No completed tasks yet',
+    };
     const cards = items.length === 0
-      ? '<div class="empty">—</div>'
+      ? '<div class="empty" style="font-size:12px;padding:12px 8px">' + (emptyMessages[col] || '—') + '</div>'
       : items.map((t, idx) => {
         const isHidden = idx >= colLimit;
         const assigneeAgent = t.assignee ? AGENTS.find(a => a.name === t.assignee) : null;
