@@ -127,6 +127,60 @@ function isIdle(): boolean {
   return Date.now() - lastActivityAt > IDLE_THRESHOLD_MS
 }
 
+// ── Connection lifecycle tracking ──────────────────────────────────
+interface ConnectionEvent {
+  type: 'connected' | 'disconnected' | 'reconnected' | 'error' | 'heartbeat_failed' | 'heartbeat_recovered'
+  timestamp: number
+  reason?: string
+  errorCount?: number
+}
+
+const MAX_CONNECTION_EVENTS = 100
+const connectionEvents: ConnectionEvent[] = []
+
+function logConnectionEvent(event: ConnectionEvent): void {
+  connectionEvents.push(event)
+  if (connectionEvents.length > MAX_CONNECTION_EVENTS) {
+    connectionEvents.splice(0, connectionEvents.length - MAX_CONNECTION_EVENTS)
+  }
+}
+
+/** Get connection lifecycle events (most recent first) */
+export function getConnectionEvents(limit = 50): ConnectionEvent[] {
+  return connectionEvents.slice(-limit).reverse()
+}
+
+/** Get connection health summary */
+export function getConnectionHealth() {
+  const now = Date.now()
+  const last60m = connectionEvents.filter(e => now - e.timestamp < 60 * 60_000)
+  const disconnects = last60m.filter(e => e.type === 'disconnected')
+  const errors = last60m.filter(e => e.type === 'error' || e.type === 'heartbeat_failed')
+  const reconnects = last60m.filter(e => e.type === 'reconnected' || e.type === 'heartbeat_recovered')
+
+  const lastDisconnect = disconnects[disconnects.length - 1] || null
+  const lastError = errors[errors.length - 1] || null
+  const lastConnect = connectionEvents.filter(e => e.type === 'connected' || e.type === 'reconnected').pop() || null
+
+  return {
+    status: state.running && state.heartbeatCount > 0 ? 'connected' : state.errors > 0 ? 'degraded' : 'disconnected',
+    uptimeMs: state.running ? now - state.startedAt : 0,
+    heartbeatCount: state.heartbeatCount,
+    consecutiveErrors: state.errors,
+    rolling60m: {
+      disconnects: disconnects.length,
+      errors: errors.length,
+      reconnects: reconnects.length,
+    },
+    lastConnect: lastConnect?.timestamp || null,
+    lastDisconnect: lastDisconnect?.timestamp || null,
+    lastDisconnectReason: lastDisconnect?.reason || null,
+    lastError: lastError?.timestamp || null,
+    lastErrorReason: lastError?.reason || null,
+    totalEventsLogged: connectionEvents.length,
+  }
+}
+
 let config: CloudConfig | null = null
 let state: CloudState = {
   hostId: null,
@@ -310,6 +364,7 @@ export async function startCloudIntegration(): Promise<void> {
   // Start loops
   state.running = true
   state.startedAt = Date.now()
+  logConnectionEvent({ type: 'connected', timestamp: Date.now(), reason: `host ${config.hostName} → ${config.cloudUrl}` })
 
   // Immediate first heartbeat
   sendHeartbeat().catch(() => {})
@@ -538,6 +593,7 @@ export function stopCloudIntegration(): void {
     clearInterval(state.contextSyncTimer)
     state.contextSyncTimer = null
   }
+  logConnectionEvent({ type: 'disconnected', timestamp: Date.now(), reason: 'shutdown' })
   console.log('☁️  Cloud integration: stopped')
 }
 
@@ -615,10 +671,12 @@ async function sendHeartbeat(): Promise<void> {
     // Reset consecutive error count on success
     if (state.errors > 0) {
       console.log(`☁️  Heartbeat recovered after ${state.errors} errors`)
+      logConnectionEvent({ type: 'heartbeat_recovered', timestamp: Date.now(), errorCount: state.errors })
       state.errors = 0
     }
   } else {
     state.errors++
+    logConnectionEvent({ type: 'heartbeat_failed', timestamp: Date.now(), reason: result.error || 'unknown', errorCount: state.errors })
     if (state.errors <= 5 || state.errors % 20 === 0) {
       console.warn(`☁️  Heartbeat failed (${state.errors} consecutive): ${result.error}`)
     }
