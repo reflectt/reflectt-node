@@ -41,6 +41,16 @@ Returns `text/html`. No parameters.
 open http://localhost:4445/ui-kit
 ```
 
+### `GET /dashboard`
+
+Main `reflectt-node` dashboard UI.
+
+Returns `text/html`.
+
+Internal/cockpit controls are hidden by default. To enable them (for operators debugging their own host), start the server with `REFLECTT_INTERNAL_UI=1` **and** open:
+
+- `http://localhost:4445/dashboard?internal=1`
+
 ---
 
 ## Error Envelope (all endpoints)

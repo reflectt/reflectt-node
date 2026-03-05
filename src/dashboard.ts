@@ -3,10 +3,16 @@
 
 /**
  * Dashboard HTML — self-contained page served at /dashboard
- * v2: Pixel's redesign + chat input for Ryan
+ * v2: redesign + chat input
  */
 
-export function getDashboardHTML(): string {
+export interface DashboardOptions {
+  /** Show internal cockpit controls (intensity, pause, etc.). Default: false */
+  internalMode?: boolean
+}
+
+export function getDashboardHTML(opts: DashboardOptions = {}): string {
+  const internalMode = opts.internalMode ?? false
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2042,7 +2048,7 @@ export function getDashboardHTML(): string {
     <span id="clock"></span>
   </div>
 </div>
-<div id="pause-banner" class="pause-banner" style="display:none">
+${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:none">
   <span class="pause-icon">⏸️</span>
   <span id="pause-message">Team paused</span>
   <button onclick="resumeFromBanner()" class="pause-resume-btn">Resume</button>
@@ -2055,7 +2061,7 @@ export function getDashboardHTML(): string {
   <span id="intensity-info" class="intensity-info"></span>
   <span class="intensity-sep">|</span>
   <button id="pause-toggle-btn" class="pause-toggle-btn" onclick="toggleTeamPause()" aria-label="Pause team" tabindex="0">⏸️ Pause</button>
-</div>
+</div>` : '<!-- internal controls hidden (set REFLECTT_INTERNAL_UI=1 to enable) -->'}
 
 <div class="first-boot-banner" id="first-boot-banner" role="region" aria-label="Welcome banner" hidden>
   <button class="banner-dismiss" aria-label="Dismiss welcome banner" onclick="dismissFirstBootBanner()">✕</button>
