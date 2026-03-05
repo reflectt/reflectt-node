@@ -23,3 +23,26 @@ Snapshot reference for key dashboard panels and their data sources.
 - if panel is empty, verify endpoint returns data directly
 - if counts stale, force full refresh and compare `updatedAt`/timestamps
 - if link refs fail, check task IDs exist in current `/tasks` payload
+
+## Internal Mode
+
+The dashboard supports an **internal mode** that reveals additional cockpit controls
+(team intensity, pause toggle) intended for internal/development use only.
+
+### Enabling internal mode
+
+Both conditions must be met:
+
+1. Set environment variable: `REFLECTT_INTERNAL_UI=1`
+2. Append `?internal=1` to the dashboard URL
+
+When internal mode is **OFF** (default), the dashboard shows only customer-facing UI:
+task board, team health, chat, activity, and compliance panels.
+
+### Gated controls
+
+| Control | Element ID | Purpose |
+|---|---|---|
+| Intensity selector | `#intensity-control` | Low / Normal / High team intensity |
+| Pause banner | `#pause-banner` | Displays when team is paused |
+| Pause toggle | `#pause-toggle-btn` | Pause/resume team operations |

@@ -3,7 +3,7 @@
 
 /**
  * Dashboard HTML — self-contained page served at /dashboard
- * v2: Pixel's redesign + chat input for operators
+ * v2: redesign + chat input
  */
 
 export interface DashboardOptions {
