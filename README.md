@@ -43,6 +43,18 @@ reflectt start
 
 Open [http://localhost:4445/dashboard](http://localhost:4445/dashboard). A starter team and first task are ready.
 
+## 60-second demo (defensible claim)
+**In under 60 seconds, a human can answer:** what’s being worked on, by whom, what’s blocked, and what needs review — from the product UI.
+
+Self-host demo (default first-run URLs):
+- Tasks: http://127.0.0.1:4445/tasks
+- Agents: http://127.0.0.1:4445/agents
+- Reviews: http://127.0.0.1:4445/reviews
+
+Cloud demo: https://app.reflectt.ai/preview
+
+One-line close: coordination primitives, not another agent framework.
+
 **Tell your agent to bootstrap:**
 ```
 Follow the instructions at reflectt.ai/bootstrap
