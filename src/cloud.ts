@@ -259,7 +259,7 @@ export async function startCloudIntegration(): Promise<void> {
   }
 
   config = {
-    cloudUrl: (process.env.REFLECTT_CLOUD_URL || fileConfig?.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, ''),
+    cloudUrl: (process.env.REFLECTT_CLOUD_URL || fileConfig?.cloudUrl || 'https://app.reflectt.ai').replace(/\/+$/, ''),
     token: process.env.REFLECTT_HOST_TOKEN || '',
     hostName: process.env.REFLECTT_HOST_NAME || fileConfig?.hostName || 'unnamed-host',
     hostType: process.env.REFLECTT_HOST_TYPE || fileConfig?.hostType || 'openclaw',
