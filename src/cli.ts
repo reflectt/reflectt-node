@@ -5,7 +5,7 @@
  * reflectt CLI - Command line interface for reflectt-node
  */
 import { Command } from 'commander'
-import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, statSync, chmodSync } from 'fs'
 import { collectDoctorReport, formatDoctorHuman } from './doctor.js'
 import { hostConnectGuard } from './hostConnectGuard.js'
 import { homedir, hostname } from 'os'
@@ -36,6 +36,7 @@ interface Config {
 function loadConfig(): Config {
   if (existsSync(CONFIG_PATH)) {
     try {
+      migrateConfigPermissions()
       return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'))
     } catch (err) {
       console.error('⚠️  Failed to parse config.json, using defaults')
@@ -45,7 +46,20 @@ function loadConfig(): Config {
 }
 
 function saveConfig(config: Config) {
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2))
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 })
+}
+
+/** Tighten config.json permissions if too open (contains cloud credentials). */
+function migrateConfigPermissions(): void {
+  if (!existsSync(CONFIG_PATH)) return
+  try {
+    const stat = statSync(CONFIG_PATH)
+    const mode = stat.mode & 0o777
+    if (mode !== 0o600) {
+      chmodSync(CONFIG_PATH, 0o600)
+      console.log(`🔒 Tightened ${CONFIG_PATH} permissions: ${mode.toString(8)} → 600 (contains credentials)`)
+    }
+  } catch { /* best-effort */ }
 }
 
 function ensureReflecttHome() {
