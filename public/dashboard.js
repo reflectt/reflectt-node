@@ -2856,9 +2856,9 @@ async function checkGettingStarted() {
     const hasTasks = (health.tasks?.total || 0) > 0;
     const hasMessages = (health.chat?.total || 0) > 0;
 
-    // Step 1: preflight — done if server is healthy
+    // Step 1: server running — always done if dashboard loads
     const step1 = document.getElementById('gs-preflight');
-    if (step1 && hasHeartbeat) {
+    if (step1) {
       step1.classList.add('done');
       step1.querySelector('.gs-icon').textContent = '✓';
     }
