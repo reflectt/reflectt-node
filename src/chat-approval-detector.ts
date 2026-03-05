@@ -26,18 +26,25 @@ import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js
 
 // ── Approval signal patterns ──
 
+/**
+ * Approval patterns — intentionally strict to avoid false positives.
+ * "approved" in a longer sentence (e.g. "you're unblocked to approve") must NOT trigger.
+ * Patterns require either: start-of-message, standalone statement, or explicit task reference context.
+ */
 const APPROVAL_PATTERNS: RegExp[] = [
-  /\blgtm\b/i,
-  /\bapproved?\b/i,
-  /\bship\s*it\b/i,
-  /\blooks\s+good\s+to\s+me\b/i,
-  /\blooks\s+great\b/i,
-  /\b(?:good\s+to\s+(?:go|merge|ship))\b/i,
-  /\b(?:all\s+good|looks\s+solid|nice\s+work|well\s+done)\b/i,
-  /\b(?:✅|👍)\s*(?:approved?|lgtm|merge|ship)?\b/i,
-  /(?:✅|👍)\s*$/,  // standalone emoji at end of message
-  /^\s*(?:✅|👍)\s*$/,  // standalone emoji as entire message
+  /^\s*lgtm\b/i,                                  // "LGTM" at start
+  /^\s*approved?\b/i,                              // "Approved" at start
+  /^\s*ship\s*it\b/i,                              // "Ship it" at start
+  /^\s*looks\s+good\s+to\s+me\b/i,                // "Looks good to me" at start
+  /^\s*looks\s+great\b/i,                          // "Looks great" at start
+  /^\s*(?:good\s+to\s+(?:go|merge|ship))\b/i,     // "Good to go/merge/ship" at start
+  /^\s*(?:all\s+good|looks\s+solid)\b/i,           // "All good" / "Looks solid" at start
+  /\[review\]\s*approved?\b/i,                     // "[review] approved" anywhere (formal pattern)
+  /^\s*(?:✅|👍)\s*(?:approved?|lgtm|merge|ship)?\s*$/i,  // standalone emoji (entire message)
 ]
+
+/** Maximum message length for approval detection — long messages are unlikely to be simple approvals */
+const MAX_APPROVAL_MESSAGE_LENGTH = 300
 
 // Negative patterns — if these match, don't treat as approval
 const REJECTION_PATTERNS: RegExp[] = [
@@ -46,9 +53,17 @@ const REJECTION_PATTERNS: RegExp[] = [
   /\bneeds?\s+(?:work|changes?|fixes?|rework)\b/i,
   /\breject(?:ed|ing)?\b/i,
   /\bblock(?:ed|ing|er)?\b/i,
-  /\bnit(?:s|pick)?\b/i,   // nit alone is not rejection but…
+  /\bnit(?:s|pick)?\b/i,
   /\bfix\s+before\s+merge\b/i,
   /\brequested?\s+changes?\b/i,
+  /\bplease\s+(?:approve|review)\b/i,       // asking someone else to approve
+  /\b(?:to|can|should|will|could)\s+approve\b/i, // "unblocked to approve", "can approve"
+  /\bapprove\s+(?:or|and|it|this|the)\b/i,  // "approve or close", "approve this task"
+  /\b(?:auto|self)[- ]?approv/i,             // discussing auto-approval mechanism
+  /\b(?:harden|fix|tighten).*approv/i,       // discussing approval logic itself
+  /\bapproved?\s*\+\s*closed\b/i,           // "Approved + closed already" (status update)
+  /\bapproved?\s+(?:already|earlier|before|previously)\b/i, // past-tense status report
+  /\bnot\s+approved?\b/i,                   // "Not approved"
 ]
 
 // ── Task ID extraction ──
@@ -88,6 +103,11 @@ export function detectApproval(
   from: string,
   content: string,
 ): DetectionResult {
+  // Step 0: Skip long messages — unlikely to be simple approvals
+  if (content.length > MAX_APPROVAL_MESSAGE_LENGTH) {
+    return { detected: false, skipped: { reason: 'no_approval_signal', details: 'message too long for approval signal' } }
+  }
+
   // Step 1: Check for approval signal in content
   const approvalMatch = APPROVAL_PATTERNS.find(p => p.test(content))
   if (!approvalMatch) {
