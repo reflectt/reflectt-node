@@ -71,8 +71,14 @@ function updateFirstBootBanner() {
   const el = document.getElementById('first-boot-banner');
   if (!el) return;
   const dismissed = localStorage.getItem('reflectt-first-boot-dismissed');
-  const hasTasks = allTasks.length > 0;
-  el.hidden = dismissed === '1' || hasTasks;
+  // We seed a welcome task on first boot, so `allTasks.length > 0` is not a good proxy for
+  // "user has started using the system". Only hide the banner once a *non-seeded* task exists.
+  const seededSources = new Set(['first-boot', 'first-boot-intent']);
+  const hasRealTasks = allTasks.some(t => {
+    const src = t && t.metadata && t.metadata.source;
+    return !src || !seededSources.has(src);
+  });
+  el.hidden = dismissed === '1' || hasRealTasks;
 }
 function dismissFirstBootBanner() {
   localStorage.setItem('reflectt-first-boot-dismissed', '1');

@@ -2066,11 +2066,11 @@ ${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:non
 <div class="first-boot-banner" id="first-boot-banner" role="region" aria-label="Welcome banner" hidden>
   <button class="banner-dismiss" aria-label="Dismiss welcome banner" onclick="dismissFirstBootBanner()">✕</button>
   <div class="banner-status"><span class="banner-status-dot"></span> Running</div>
-  <h2 class="banner-heading">Your node is running.</h2>
-  <p class="banner-subtext">Here's what to do next.</p>
+  <h2 class="banner-heading">Welcome — your node is running.</h2>
+  <p class="banner-subtext">Next: connect your agents, create your first task, or explore the API.</p>
   <div class="banner-pills">
-    <a href="/docs/getting-started" class="banner-pill"><span>🤖</span> Connect agents</a>
-    <a href="/docs/getting-started#try-the-api" class="banner-pill"><span>✅</span> Create a task</a>
+    <a href="/docs" class="banner-pill"><span>📖</span> Read docs</a>
+    <a href="/capabilities" class="banner-pill"><span>🧭</span> Explore endpoints</a>
     <a href="https://app.reflectt.ai" class="banner-pill" target="_blank" rel="noopener"><span>☁️</span> Connect to cloud <span class="banner-pill-optional">(optional)</span></a>
   </div>
 </div>
