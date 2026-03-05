@@ -10,7 +10,8 @@ describe('Ready-Queue Floor', () => {
     expect(policy.readyQueueFloor).toBeDefined()
     expect(policy.readyQueueFloor.enabled).toBe(true)
     expect(policy.readyQueueFloor.minReady).toBe(2)
-    expect(policy.readyQueueFloor.agents).toContain('link')
+    // Default is intentionally empty: auto-discover agents from TEAM-ROLES.yaml
+    expect(Array.isArray(policy.readyQueueFloor.agents)).toBe(true)
   })
 
   it('should have readyQueueFloor in default policy', () => {
@@ -18,7 +19,7 @@ describe('Ready-Queue Floor', () => {
     expect(policy.readyQueueFloor).toMatchObject({
       enabled: true,
       minReady: 2,
-      agents: ['link'],
+      agents: [],
       escalateAfterMin: 60,
       cooldownMin: 30,
       channel: 'general',
@@ -26,6 +27,8 @@ describe('Ready-Queue Floor', () => {
   })
 
   it('should count unblocked todo tasks for monitored agents', () => {
+    // Force monitor `link` for this test (default is auto-discover placeholder agents)
+    policyManager.patch({ readyQueueFloor: { agents: ['link'] } } as any)
     // Create test tasks
     const t1 = taskManager.createTask({
       title: 'TEST: ready-queue task 1',

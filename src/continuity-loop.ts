@@ -136,17 +136,22 @@ export async function tickContinuityLoop(): Promise<{
   replenished: number
 }> {
   const config = getConfig()
+  const now = Date.now()
+
+  // Always record the tick when the loop is enabled so /continuity/stats reflects
+  // real scheduler activity even on no-op cycles (e.g. zero agents configured).
+  if (config.enabled) {
+    stats.cyclesRun++
+    stats.lastRunAt = now
+  }
+
   if (!config.enabled || config.agents.length === 0) {
     return { actions: [], agentsChecked: 0, replenished: 0 }
   }
 
-  const now = Date.now()
   const cooldownMs = config.cooldownMin * 60_000
   const actions: ContinuityAction[] = []
   let replenished = 0
-
-  stats.cyclesRun++
-  stats.lastRunAt = now
 
   for (const agent of config.agents) {
     // Cooldown check
