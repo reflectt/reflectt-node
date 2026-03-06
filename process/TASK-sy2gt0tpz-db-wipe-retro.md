@@ -12,8 +12,8 @@ Assignee: harmony | Reviewer: sage
 - **PR #730** — exposes `dbPath` / `REFLECTT_HOME` / `NODE_ENV` in `/health/deploy` for visibility.
 
 ## 3. What is still open
-- 5 other test files with unscoped DELETEs on other tables — still a latent risk.
-- Boot guard (`task-1772836443932-7d13u87zn`): refuse `NODE_ENV=production` on non-main branch — assigned to @link, in queue.
+- 5 other test files with unscoped DELETEs on other tables — covered by `task-1772836571034-4llnrste9` (@link queue).
+- Boot guard: already shipped in PR #730 (`e009b43`) — `process.exit(1)` on non-main branch + production DB path. `task-1772836443932-7d13u87zn` cancelled as duplicate.
 
 ## Additional safeguard proposed
 Enforce a team norm: any test file touching task/insight tables must declare `testDbPath` or equivalent isolation annotation. Treat missing isolation as a **PR blocker** in code review. @sage @kai to add to PR checklist.
