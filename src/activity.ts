@@ -71,6 +71,13 @@ export interface ActivityRange {
   tz: string
 }
 
+export interface GroupingStats {
+  rawCount: number
+  groupedCount: number
+  droppedCount: number
+  dropReasons: Record<string, number>
+}
+
 export interface ActivityResponse {
   events: TimelineEvent[]
   total: number     // post-grouping count
@@ -82,6 +89,9 @@ export interface ActivityResponse {
   generated_at: string
   generated_at_ms: number
   next_cursor: string | null
+  debug?: {
+    grouping: GroupingStats
+  }
 }
 
 export interface ActivityQuery {
@@ -90,6 +100,7 @@ export interface ActivityQuery {
   agent?: string        // filter by actor
   limit?: number
   after?: string        // cursor (opaque base64url-encoded ts_ms)
+  debug?: boolean       // include grouping stats (localhost-only)
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -562,24 +573,41 @@ export function queryActivity(opts: ActivityQuery = {}): ActivityResponse {
   // Sort newest-first
   events.sort((a, b) => b.ts_ms - a.ts_ms)
 
-  // De-dupe by id
+  // De-dupe by id — track drops for debug mode
   const seen = new Set<string>()
+  const dropReasons: Record<string, number> = {}
+  let dedupeDrops = 0
   events = events.filter(e => {
-    if (seen.has(e.id)) return false
+    if (seen.has(e.id)) {
+      dedupeDrops++
+      dropReasons[`dedupe:${e.type}`] = (dropReasons[`dedupe:${e.type}`] || 0) + 1
+      return false
+    }
     seen.add(e.id)
     return true
   })
 
   // Apply type filter at event level
+  let typeFilterDrops = 0
   if (typeFilter) {
+    const beforeFilter = events.length
     events = events.filter(e => {
       const prefix = e.type.split('.')[0]
       return [...typeFilter].some(t => t === prefix || t === e.type)
     })
+    typeFilterDrops = beforeFilter - events.length
+    if (typeFilterDrops > 0) {
+      dropReasons['type_filter'] = typeFilterDrops
+    }
   }
+
+  const rawCount = events.length + dedupeDrops + typeFilterDrops
 
   // Group events
   events = groupEvents(events)
+
+  const groupedCount = events.length
+  const droppedCount = dedupeDrops
 
   // Clean up internal _groupKey from meta
   for (const e of events) {
@@ -629,6 +657,12 @@ export function queryActivity(opts: ActivityQuery = {}): ActivityResponse {
 
   if (missingSources.length > 0) {
     response.partial = { missing: missingSources, reason: 'source_unavailable' }
+  }
+
+  if (opts.debug) {
+    response.debug = {
+      grouping: { rawCount, groupedCount, droppedCount, dropReasons },
+    }
   }
 
   return response

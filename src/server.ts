@@ -8731,8 +8731,12 @@ export async function createServer(): Promise<FastifyInstance> {
     const limit = query.limit ? Number(query.limit) : undefined
     const after = query.after || undefined
 
+    // debug=1 only allowed from localhost
+    const isLocalhost = request.ip === '127.0.0.1' || request.ip === '::1' || request.ip === '::ffff:127.0.0.1'
+    const debug = query.debug === '1' && isLocalhost
+
     try {
-      return queryActivity({ range, type, agent, limit, after })
+      return queryActivity({ range, type, agent, limit, after, debug })
     } catch (err) {
       request.log.error({ err }, 'Activity query failed')
       throw err
