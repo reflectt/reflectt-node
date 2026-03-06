@@ -369,6 +369,57 @@ describe('alert-preflight', () => {
       }
     })
 
+    it('canary-flagged reason appears in metrics countsByReason', () => {
+      // Override default mock: task has drifted status → triggers stale_state suppression
+      mockGetTask.mockReturnValue({
+        id: 'task-reason-test', title: 'Test', status: 'done',
+        assignee: 'link', reviewer: 'sage', createdBy: 'test',
+        createdAt: Date.now(), updatedAt: Date.now() - 600000,
+        done_criteria: [], priority: 'P2',
+      })
+
+      preflightCheck({
+        taskId: 'task-reason-test',
+        alertType: 'sla_breach',
+        expectedStatus: 'doing', // drift: expected doing but task is done
+      })
+
+      const m = getPreflightMetrics()
+      expect(m.countsByAlertType).toHaveProperty('sla_breach')
+      expect(m.countsByAlertType['sla_breach']).toBeGreaterThanOrEqual(1)
+      // stale_state reason should appear since status drifted
+      expect(m.countsByReason).toHaveProperty('stale_state')
+      expect(m.countsByReason['stale_state']).toBeGreaterThanOrEqual(1)
+    })
+
+    it('getDailySnapshots includes countsByReason and countsByAlertType when present', async () => {
+      const fs = await import('fs')
+      const path = await import('path')
+      const dailyFile = path.join('/tmp/test-data', 'alert-preflight-daily.jsonl')
+      fs.mkdirSync('/tmp/test-data', { recursive: true })
+      const entry = {
+        date: '2026-03-06',
+        totalChecked: 5,
+        suppressed: 1,
+        canaryFlagged: 2,
+        latencyP95: 0.3,
+        mode: 'canary',
+        falsePositiveRate: 40,
+        countsByReason: { stale_state: 2, dedup: 1 },
+        countsByAlertType: { sla_breach: 3, requeue: 2 },
+      }
+      fs.writeFileSync(dailyFile, JSON.stringify(entry) + '\n')
+      try {
+        const snapshots = getDailySnapshots()
+        expect(snapshots.length).toBeGreaterThan(0)
+        const s = snapshots[0]!
+        expect(s.countsByReason).toEqual({ stale_state: 2, dedup: 1 })
+        expect(s.countsByAlertType).toEqual({ sla_breach: 3, requeue: 2 })
+      } finally {
+        try { fs.unlinkSync(dailyFile) } catch { /* cleanup */ }
+      }
+    })
+
     it('startAutoSnapshot and stopAutoSnapshot do not throw', () => {
       expect(() => startAutoSnapshot()).not.toThrow()
       expect(() => stopAutoSnapshot()).not.toThrow()

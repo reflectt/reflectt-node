@@ -125,7 +125,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/reflection-pipeline` | Reflection→Insight→Promotion health signal. Returns recent reflection/insight/promotion counts, status (`idle`\|`healthy`\|`at_risk`\|`broken`), and alert timestamps. Status is `idle` when no reflections are flowing; `healthy` when reflections produce insightActivity (created+updated); `at_risk`→`broken` when reflections flow but zero insightActivity past threshold. |
 | GET | `/health/backlog` | Backlog readiness snapshot by lane/agent with ready-floor breach detection and stale-validating summary. Query: `include_test=1` to include test-harness tasks. |
 | GET | `/health/alert-preflight` | Alert-preflight guard metrics: total checked, canary-flagged, suppressed, false-positive rate, mode (canary/enforce/off). |
-| GET | `/health/alert-preflight/history` | Daily alert-preflight snapshots for observation window tracking. Returns per-day metrics + current session. |
+| GET | `/health/alert-preflight/history` | Daily alert-preflight snapshots with reason/type breakdowns. Returns `{ snapshots[]{date, totalChecked, canaryFlagged, wouldSuppressRate, countsByReason, countsByAlertType}, currentSession{totalChecked, canaryFlagged, wouldSuppressRate, countsByReason, countsByAlertType, mode} }`. Auto-backfills from audit log if daily file is missing. |
 | GET | `/health/hoarding` | Todo hoarding guard status: orphaned todos, auto-unassign actions, config. Query: `dry_run=0` to run live (default: dry run). |
 | GET | `/health/mention-ack` | Mention-ack lifecycle metrics (pending, timeout, latency counters) |
 | GET | `/health/mention-ack/recent` | Recent mention-ack entries for debugging. Query: `limit` (max 100) |
