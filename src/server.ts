@@ -2051,7 +2051,7 @@ export async function createServer(): Promise<FastifyInstance> {
     recentPromotions: 0,
     windowMin: 30,
     zeroInsightThresholdMin: 10,
-    status: 'unknown' as 'healthy' | 'at_risk' | 'broken' | 'unknown',
+    status: 'unknown' as 'idle' | 'healthy' | 'at_risk' | 'broken' | 'unknown',
   }
 
   function computeReflectionPipelineHealth(now = Date.now()) {
@@ -2073,7 +2073,7 @@ export async function createServer(): Promise<FastifyInstance> {
     reflectionPipelineHealth.lastCheckedAt = now
 
     if (recentReflections === 0) {
-      reflectionPipelineHealth.status = 'healthy'
+      reflectionPipelineHealth.status = 'idle'
       reflectionPipelineHealth.firstZeroInsightAt = 0
       return reflectionPipelineHealth
     }
@@ -2113,7 +2113,7 @@ export async function createServer(): Promise<FastifyInstance> {
         chatManager.sendMessage({
           channel: 'general',
           from: 'system',
-          content: `🚨 Reflection pipeline broken: ${health.recentReflections} reflections in last ${health.windowMin}m but 0 insights created. @link @sage investigate ingestion/listener path.`,
+          content: `🚨 Reflection pipeline broken: ${health.recentReflections} reflections in last ${health.windowMin}m but 0 recentInsightActivity (created+updated). @link @sage investigate ingestion/listener path.`,
         }).catch(() => {})
       }
     }

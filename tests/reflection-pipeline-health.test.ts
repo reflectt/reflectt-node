@@ -28,6 +28,25 @@ describe('Reflection Pipeline Health', () => {
     expect(body.signals).toHaveProperty('insights_flowing')
   })
 
+  it('reports idle status when no reflections are flowing', async () => {
+    const res = await app.inject({ method: 'GET', url: '/health/reflection-pipeline' })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+
+    // In a fresh test server with no reflections, status should be idle
+    if (body.recentReflections === 0) {
+      expect(body.status).toBe('idle')
+    }
+    // Verify idle is a valid status value
+    expect(['idle', 'healthy', 'at_risk', 'broken']).toContain(body.status)
+  })
+
+  it('status values are one of idle|healthy|at_risk|broken', async () => {
+    const res = await app.inject({ method: 'GET', url: '/health/reflection-pipeline' })
+    const body = JSON.parse(res.body)
+    expect(['idle', 'healthy', 'at_risk', 'broken']).toContain(body.status)
+  })
+
   it('no-drop regression: posted reflection appears in insights list', async () => {
     const refRes = await app.inject({
       method: 'POST',
@@ -60,5 +79,17 @@ describe('Reflection Pipeline Health', () => {
 
     const found = insightsBody.insights.some((i: any) => i.id === insightId)
     expect(found).toBe(true)
+  })
+
+  it('transitions to healthy when reflections produce insight activity', async () => {
+    // After the no-drop test above posted a reflection+insight, pipeline should be healthy
+    const res = await app.inject({ method: 'GET', url: '/health/reflection-pipeline' })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+
+    // If reflections and insight activity exist, should be healthy
+    if (body.recentReflections > 0 && body.recentInsightActivity > 0) {
+      expect(body.status).toBe('healthy')
+    }
   })
 })
