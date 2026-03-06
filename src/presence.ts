@@ -46,7 +46,8 @@ export interface AgentActivity {
   first_seen_today?: number
 }
 
-const EXPIRY_MS = 10 * 60 * 1000 // 10 minutes
+const IDLE_THRESHOLD_MS = 15 * 60 * 1000 // 15 minutes — active agents decay to idle
+const OFFLINE_THRESHOLD_MS = 30 * 60 * 1000 // 30 minutes — idle agents decay to offline
 
 interface DailyActivity {
   date: string // YYYY-MM-DD
@@ -402,22 +403,33 @@ class PresenceManager {
   }
 
   /**
-   * Check for expired presence and set to offline
+   * Two-step presence decay:
+   * 1. working/reviewing/blocked → idle after IDLE_THRESHOLD_MS (15m)
+   * 2. idle → offline after OFFLINE_THRESHOLD_MS (30m)
    */
   private checkExpiry(): void {
     const now = Date.now()
-    let expiredCount = 0
+    let idledCount = 0
+    let offlinedCount = 0
 
     for (const [agent, presence] of this.presence) {
-      if (presence.status !== 'offline' && now - presence.lastUpdate > EXPIRY_MS) {
-        // Don't count auto-expiry as activity
+      const inactiveMs = now - presence.lastUpdate
+      if (presence.status !== 'offline' && presence.status !== 'idle' && inactiveMs > IDLE_THRESHOLD_MS) {
+        // Step 1: Active → idle (preserve lastUpdate so step 2 timing is from original activity)
+        this.presence.set(agent, { ...presence, status: 'idle', since: now })
+        idledCount++
+      } else if (presence.status === 'idle' && inactiveMs > OFFLINE_THRESHOLD_MS) {
+        // Step 2: idle → offline
         this.updatePresence(agent, 'offline', undefined, undefined, false)
-        expiredCount++
+        offlinedCount++
       }
     }
 
-    if (expiredCount > 0) {
-      console.log(`[Presence] Auto-expired ${expiredCount} agents to offline`)
+    if (idledCount > 0) {
+      console.log(`[Presence] Decayed ${idledCount} agents to idle`)
+    }
+    if (offlinedCount > 0) {
+      console.log(`[Presence] Auto-expired ${offlinedCount} agents to offline`)
     }
   }
 
