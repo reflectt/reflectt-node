@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // Keep this test unit-level: mock out chat + preflight so we can assert digest suppression.
 const sendMessage = vi.hoisted(() => vi.fn(async () => {}))
@@ -61,6 +61,10 @@ describe('Sweeper Digest dedupe/suppression', () => {
     sendMessage.mockClear()
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-03-06T13:00:00.000Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('suppresses repeated identical digests within suppression window', async () => {
