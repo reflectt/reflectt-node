@@ -160,7 +160,7 @@ function collectTaskEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
           actor: { kind: 'agent', label: row.actor },
           subject: { kind: 'task', id: row.task_id, label: taskTitle, href: `/tasks/${row.task_id}` },
           summary: `${row.actor} approved "${truncate(taskTitle, 60)}"`,
-          severity: 'success', source: 'reviews', meta: data ?? undefined,
+          severity: 'success', source: 'tasks', meta: data ?? undefined,
         })
         continue
       }
@@ -171,7 +171,7 @@ function collectTaskEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
           subject: { kind: 'task', id: row.task_id, label: taskTitle, href: `/tasks/${row.task_id}` },
           summary: `${row.actor} rejected "${truncate(taskTitle, 60)}"`,
           detail: (data?.review_reason as string) || undefined,
-          severity: 'warning', source: 'reviews', meta: data ?? undefined,
+          severity: 'warning', source: 'tasks', meta: data ?? undefined,
         })
         continue
       }
@@ -483,11 +483,13 @@ export function queryActivity(opts: ActivityQuery = {}): ActivityResponse {
     : toMs
   const limit = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT)
 
-  // Type filter — handle both string and string[]
-  const typeRaw = opts.type
-    ? (Array.isArray(opts.type) ? opts.type : opts.type.split(',').map(t => t.trim()))
+  // Type filter: event prefix/type strings (e.g. "task", "chat", "chat.message")
+  const typeRaw = (opts.type && opts.type.length > 0)
+    ? opts.type.map((t) => String(t).trim()).filter(Boolean)
     : null
-  const typeFilter = typeRaw && typeRaw.length > 0 ? new Set(typeRaw.map(t => t.toLowerCase())) : null
+  const typeFilter: Set<string> | null = typeRaw && typeRaw.length > 0
+    ? new Set(typeRaw.map((t) => t.toLowerCase()))
+    : null
 
   const sourceForType = (source: ActivitySource): boolean => {
     if (!typeFilter) return true
