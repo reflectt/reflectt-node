@@ -44,6 +44,8 @@ export interface Task {
   tags?: string[]
   metadata?: Record<string, unknown>
   teamId?: string
+  dueAt?: number         // epoch ms — when the task is due
+  scheduledFor?: number  // epoch ms — when work should start
 }
 
 export type TaskHistoryEventType = 'created' | 'assigned' | 'status_changed' | 'commented' | 'lane_transition'

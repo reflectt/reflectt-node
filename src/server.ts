@@ -204,6 +204,8 @@ const CreateTaskSchema = z.object({
   tags: z.array(z.string()).optional(),
   teamId: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
+  dueAt: z.number().int().positive().optional(),           // epoch ms — when the task is due
+  scheduledFor: z.number().int().positive().optional(),     // epoch ms — when work should start
 })
 
 /**
@@ -350,6 +352,8 @@ const UpdateTaskSchema = z.object({
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
   actor: z.string().trim().min(1).optional(),
+  dueAt: z.number().int().positive().nullable().optional(),         // epoch ms, null to clear
+  scheduledFor: z.number().int().positive().nullable().optional(),  // epoch ms, null to clear
 })
 
 const CreateTaskCommentSchema = z.object({
@@ -9862,7 +9866,11 @@ export async function createServer(): Promise<FastifyInstance> {
     const todoTasks = taskManager.listTasks({ status: 'todo', assigneeIn: getAgentAliases(agent) })
     const validatingTasks = taskManager.listTasks({ status: 'validating', assigneeIn: getAgentAliases(agent) })
 
-    const slim = (t: Task | null | undefined) => t ? { id: t.id, title: t.title, status: t.status, priority: t.priority } : null
+    const slim = (t: Task | null | undefined) => t ? {
+      id: t.id, title: t.title, status: t.status, priority: t.priority,
+      ...(t.dueAt ? { dueAt: t.dueAt } : {}),
+      ...(t.scheduledFor ? { scheduledFor: t.scheduledFor } : {}),
+    } : null
     presenceManager.recordActivity(agent, 'heartbeat')
 
     // Check pause status
