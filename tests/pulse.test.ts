@@ -67,4 +67,44 @@ describe('Team Pulse', () => {
       expect(review.reviewer).toBeDefined()
     }
   })
+
+  it('full pulse includes deploy with uptimeS', () => {
+    const pulse = generatePulse()
+    expect(pulse.deploy).toBeDefined()
+    expect(typeof pulse.deploy!.pid).toBe('number')
+    // uptimeS may be undefined if startedAtMs is not set, but the field should exist
+    if (pulse.deploy!.startedAt) {
+      expect(typeof pulse.deploy!.uptimeS).toBe('number')
+      expect(pulse.deploy!.uptimeS).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('full pulse includes alertPreflight summary', () => {
+    const pulse = generatePulse()
+    expect(pulse.alertPreflight).toBeDefined()
+    expect(typeof pulse.alertPreflight!.mode).toBe('string')
+    expect(['canary', 'enforce', 'off']).toContain(pulse.alertPreflight!.mode)
+    expect(typeof pulse.alertPreflight!.totalChecked).toBe('number')
+    expect(typeof pulse.alertPreflight!.suppressed).toBe('number')
+  })
+
+  it('compact pulse includes deploy and alertPreflight strings', () => {
+    const compact = generateCompactPulse()
+    // deploy string format: "commit up:XhYm vZ.Z.Z"
+    if (compact.deploy) {
+      expect(typeof compact.deploy).toBe('string')
+      expect(compact.deploy).toContain('up:')
+    }
+    // alertPreflight string format: "mode checked:N suppressed:N"
+    if (compact.alertPreflight) {
+      expect(typeof compact.alertPreflight).toBe('string')
+      expect(compact.alertPreflight).toContain('checked:')
+    }
+  })
+
+  it('compact pulse with deploy+alertPreflight still under 2000 chars', () => {
+    const compact = generateCompactPulse()
+    const serialized = JSON.stringify(compact)
+    expect(serialized.length).toBeLessThan(2000)
+  })
 })

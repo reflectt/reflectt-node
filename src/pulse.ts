@@ -16,6 +16,7 @@ import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
 import { getFocusSummary } from './focus.js'
 import { getBuildInfo } from './buildInfo.js'
+import { getPreflightMetrics } from './alert-preflight.js'
 import type { Task } from './types.js'
 
 export interface PulseAgent {
@@ -27,7 +28,8 @@ export interface PulseAgent {
 
 export interface PulseSnapshot {
   ts: number
-  deploy?: { version?: string; commit?: string; pid?: number; startedAt?: number }
+  deploy?: { version?: string; commit?: string; pid?: number; startedAt?: number; uptimeS?: number }
+  alertPreflight?: { mode: string; totalChecked: number; suppressed: number; canaryFlagged: number }
   focus?: { focus: string; setBy: string; setAt: number } | null
   board: { todo: number; doing: number; validating: number; done: number; blocked: number }
   agents: PulseAgent[]
@@ -37,6 +39,8 @@ export interface PulseSnapshot {
 
 export interface CompactPulse {
   ts: number
+  deploy?: string  // e.g. "a481ec9 up:2h34m v0.1.5"
+  alertPreflight?: string  // e.g. "enforce checked:1 suppressed:1"
   focus?: string | null
   board: string  // e.g. "T:3 D:2 V:1 ✓:5 B:0"
   agents: string[] // e.g. ["link:working→task-123(activity endpoint)", "pixel:working→task-456(UI scaffold)"]
@@ -46,14 +50,31 @@ export interface CompactPulse {
 function getDeployInfo(): PulseSnapshot['deploy'] {
   try {
     const info = getBuildInfo()
+    const startedAtMs = info.startedAtMs
+    const uptimeS = startedAtMs ? Math.round((Date.now() - startedAtMs) / 1000) : undefined
     return {
       version: info.appVersion || process.env.npm_package_version,
       commit: info.gitShortSha || info.gitSha,
       pid: process.pid,
-      startedAt: info.startedAtMs,
+      startedAt: startedAtMs,
+      uptimeS,
     }
   } catch {
     return { pid: process.pid }
+  }
+}
+
+function getAlertPreflightSummary(): PulseSnapshot['alertPreflight'] {
+  try {
+    const m = getPreflightMetrics()
+    return {
+      mode: m.mode,
+      totalChecked: m.totalChecked,
+      suppressed: m.suppressed,
+      canaryFlagged: m.canaryFlagged,
+    }
+  } catch {
+    return undefined
   }
 }
 
@@ -108,6 +129,7 @@ export function generatePulse(): PulseSnapshot {
   return {
     ts: Date.now(),
     deploy: getDeployInfo(),
+    alertPreflight: getAlertPreflightSummary(),
     focus: getFocusSummary(),
     board: { todo: todoCount, doing: doingCount, validating: validatingCount, done: doneCount, blocked: blockedCount },
     agents,
@@ -121,6 +143,24 @@ export function generatePulse(): PulseSnapshot {
 
 export function generateCompactPulse(): CompactPulse {
   const pulse = generatePulse()
+
+  // Deploy summary
+  const d = pulse.deploy
+  let deployStr: string | undefined
+  if (d) {
+    const uptimeHrs = d.uptimeS ? `${Math.floor(d.uptimeS / 3600)}h${Math.floor((d.uptimeS % 3600) / 60)}m` : '?'
+    deployStr = `${d.commit || '?'} up:${uptimeHrs} v${d.version || '?'}`
+  }
+
+  // Alert-preflight summary
+  const ap = pulse.alertPreflight
+  let apStr: string | undefined
+  if (ap) {
+    apStr = `${ap.mode} checked:${ap.totalChecked} suppressed:${ap.suppressed}`
+    if (ap.mode === 'canary' && ap.canaryFlagged > 0) {
+      apStr += ` flagged:${ap.canaryFlagged}`
+    }
+  }
 
   const boardStr = `T:${pulse.board.todo} D:${pulse.board.doing} V:${pulse.board.validating} ✓:${pulse.board.done} B:${pulse.board.blocked}`
 
@@ -139,6 +179,8 @@ export function generateCompactPulse(): CompactPulse {
 
   return {
     ts: pulse.ts,
+    deploy: deployStr,
+    alertPreflight: apStr,
     focus: pulse.focus?.focus || null,
     board: boardStr,
     agents: agentStrs,
