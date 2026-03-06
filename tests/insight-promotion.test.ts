@@ -57,10 +57,11 @@ beforeEach(async () => {
   _clearInsightStore()
   _clearReflectionStore()
   ensurePromotionAuditTable()
-  // Clear tasks
+  // Clear test tasks — scoped to test DB (setup.ts sets REFLECTT_HOME to temp dir)
+  // Defense-in-depth: never use unscoped DELETE FROM tasks
   const db = getDb()
-  db.prepare('DELETE FROM tasks').run()
-  db.prepare('DELETE FROM task_comments').run()
+  db.prepare("DELETE FROM tasks WHERE created_by = 'test' OR created_by = 'system'").run()
+  db.prepare("DELETE FROM task_comments").run()
   // Reload task manager
   await taskManager.loadTasks()
 })
