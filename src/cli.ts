@@ -494,8 +494,17 @@ program
   .option('-d, --detach', 'Run in background')
   .action(async (options) => {
     if (!existsSync(REFLECTT_HOME)) {
-      console.error('❌ reflectt not initialized. Run: reflectt init')
-      process.exit(1)
+      console.log('📦 First run — initializing reflectt...')
+      // Auto-init: create directories and default config
+      mkdirSync(REFLECTT_HOME, { recursive: true })
+      mkdirSync(DATA_DIR, { recursive: true })
+      mkdirSync(join(DATA_DIR, 'inbox'), { recursive: true })
+      if (!existsSync(CONFIG_PATH)) {
+        saveConfig({ port: 4445, host: '127.0.0.1' })
+        console.log('  ✅ config.json')
+      }
+      console.log('  ✅ ~/.reflectt/ created')
+      console.log('')
     }
     
     // Check if already running
@@ -528,10 +537,30 @@ program
 
     if (options.detach) {
       const pid = startServerDetached(config)
-      console.log('✅ Server started in background')
+      const clientHost = (config.host === '0.0.0.0' || config.host === '::') ? '127.0.0.1' : config.host
+      console.log(`⏳ Starting reflectt server (PID: ${pid})...`)
+
+      // Health check: wait up to 10s for server to respond
+      let healthy = false
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 500))
+        try {
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 2000)
+          const res = await fetch(`http://${clientHost}:${config.port}/health`, { signal: controller.signal })
+          clearTimeout(timeout)
+          if (res.ok) { healthy = true; break }
+        } catch { /* not ready yet */ }
+      }
+
+      if (healthy) {
+        console.log('✅ Server is running!')
+      } else {
+        console.log('⚠️  Server started but not responding yet (may still be booting)')
+      }
       console.log(`   PID: ${pid}`)
-      console.log(`   URL: http://${config.host}:${config.port}`)
-      console.log(`   Dashboard: http://${config.host}:${config.port}/dashboard`)
+      console.log(`   URL: http://${clientHost}:${config.port}`)
+      console.log(`   Dashboard: http://${clientHost}:${config.port}/dashboard`)
       if (config.cloud) {
         console.log(`   Cloud: ${config.cloud.cloudUrl} (host: ${config.cloud.hostName})`)
       }
@@ -632,7 +661,14 @@ program
         activePort = DEFAULT_PORT
         activeUrl = `http://${configHost}:${DEFAULT_PORT}`
         console.log(`   ⚠️  Config port ${config.port} not responding, found server on default port ${DEFAULT_PORT}`)
-        console.log(`   💡 Fix: update ${CONFIG_PATH} → "port": ${DEFAULT_PORT}`)
+        // Auto-fix config port to match reality
+        try {
+          config.port = DEFAULT_PORT
+          saveConfig(config)
+          console.log(`   🔧 Auto-fixed config.json → port ${DEFAULT_PORT}`)
+        } catch {
+          console.log(`   💡 Fix: update ${CONFIG_PATH} → "port": ${DEFAULT_PORT}`)
+        }
       }
     }
 
