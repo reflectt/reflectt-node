@@ -218,6 +218,15 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/board-health` | Board-level health metrics for backlog replenishment. Returns per-agent breakdown (doing, validating, todo, active counts), `needsWork`/`lowWatermark` flags, and `replenishNeeded` trigger (fires when 2+ agents idle or <3 backlog tasks). Query: `include_test=1` to include test-harness tasks. |
 | GET | `/agents/roles` | Agent role registry with live WIP status. Returns all agents with `name`, `displayName`, `role`, `affinityTags`, `protectedDomains`, `wipCap`, `wipCount`, `overCap`. |
 | POST | `/config/identity` | Set an agent's display name. Body: `{ "agent": "agent-1", "displayName": "Juniper" }`. Persists to TEAM-ROLES.yaml, hot-reloads. Dashboard and mentions use display name. |
+
+## Insights
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/insights` | List insights. Query: `status`, `priority`, `workflow_stage`, `failure_family`, `impacted_unit`, `limit`, `offset`, `compact=1|true`. When `status=candidate` and `offset=0`, the server may run hygiene (`sweepShippedCandidates()`) to cooldown candidates whose promoted task is already done/cancelled. |
+| GET | `/insights/:id` | Fetch one insight by ID. Returns `{ insight }` or 404. |
+| POST | `/insights/:id/cooldown` | **Localhost-only operator endpoint.** Cooldown a noisy/stale insight candidate without enabling the broader mutation API. Body: `{ actor (required), reason (required), notes?, cooldown_ms?, cooldown_until?, cooldown_reason? }`. If `REFLECTT_INSIGHT_MUTATION_TOKEN` is set, requires `x-reflectt-admin-token` header (or `Authorization: Bearer ...`). |
+| POST | `/insights/:id/close` | **Localhost-only operator endpoint.** Close an insight. Body: `{ actor (required), reason (required), notes? }`. If `REFLECTT_INSIGHT_MUTATION_TOKEN` is set, requires `x-reflectt-admin-token` header (or `Authorization: Bearer ...`). |
 | PUT | `/config/team-roles` | Write TEAM-ROLES.yaml. Body: `{ "yaml": "agents:\n  - name: link\n    role: engineer..." }`. Hot-reloads on save. Used by bootstrap agent to configure team from user intent. |
 | GET | `/resolve/mention/:mention` | Resolve a mention string (name, displayName, or alias) to canonical agent ID. Returns `{ agent, displayName, role }`. |
 | POST | `/tasks/suggest-assignee` | Suggest best assignee for a task. Body: `{ "title": "...", "tags": [...], "done_criteria": [...] }`. Returns `suggested` agent name, `scores` array with affinity/WIP/throughput breakdown, and `protectedMatch` if a protected domain applies. |
