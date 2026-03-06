@@ -471,7 +471,6 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 |--------|------|-------------|
 | GET | `/agents/activity` | All agents activity summary |
 | GET | `/agents/:agent/activity` | Single agent activity |
-| GET | `/activity` | Activity timeline: unified event feed with server-side grouping (see Activity section below) |
 | GET | `/analytics/foragents` | forAgents.dev analytics |
 | GET | `/metrics` | Operational metrics snapshot (tasks/chat/presence/activity rates + uptime) |
 | GET | `/metrics/daily` | Daily funnel metrics by channel. Query: `timezone` (IANA tz, default `America/Vancouver`) |
