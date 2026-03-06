@@ -2684,8 +2684,17 @@ export async function createServer(): Promise<FastifyInstance> {
           done: done.length,
           resolvedExternally: resolvedExternally.length,
         },
+        // Top-level convenience aliases (never null)
+        readyCount: ready.length,
+        wipCount: doing.length,
         compliance: {
           status: floorBreaches.length > 0 ? 'breach' : ready.length >= config.readyFloor ? 'healthy' : 'warning',
+          breaches: floorBreaches.map(a => ({
+            agent: a.agent,
+            ready: a.ready,
+            required: config.readyFloor,
+            deficit: config.readyFloor - a.ready,
+          })),
           floorBreaches: floorBreaches.map(a => ({
             agent: a.agent,
             ready: a.ready,
@@ -5633,6 +5642,50 @@ export async function createServer(): Promise<FastifyInstance> {
     } catch (err: any) {
       reply.code(400)
       return { success: false, error: err.message || 'Failed to capture outcome verdict' }
+    }
+  })
+
+  // ── Cancel a task (convenience endpoint) ──
+  app.post<{ Params: { id: string } }>('/tasks/:id/cancel', async (request, reply) => {
+    const task = taskManager.getTask(request.params.id)
+    if (!task) {
+      reply.code(404)
+      return { success: false, error: 'Task not found' }
+    }
+
+    if (task.status === 'cancelled') {
+      return { success: true, message: 'Task already cancelled', task: enrichTaskWithComments(task) }
+    }
+
+    if (task.status === 'done') {
+      reply.code(400)
+      return { success: false, error: 'Cannot cancel a done task. Use metadata.reopen=true first.' }
+    }
+
+    const body = (request.body || {}) as Record<string, unknown>
+    const reason = typeof body.reason === 'string' ? body.reason : undefined
+    const author = typeof body.author === 'string' ? body.author : 'system'
+
+    if (!reason) {
+      reply.code(400)
+      return { success: false, error: 'Cancel reason required. Include { "reason": "..." } in request body.' }
+    }
+
+    try {
+      const updated = await taskManager.updateTask(task.id, {
+        status: 'cancelled',
+        metadata: {
+          ...(task.metadata || {}),
+          cancel_reason: reason,
+          cancelled_by: author,
+          cancelled_at: new Date().toISOString(),
+        },
+      })
+
+      return { success: true, task: updated ? enrichTaskWithComments(updated) : null }
+    } catch (err: any) {
+      reply.code(400)
+      return { success: false, error: err.message || 'Failed to cancel task' }
     }
   })
 
