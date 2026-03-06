@@ -20,6 +20,7 @@ import { execSync } from 'child_process'
 import { createHash } from 'crypto'
 import { processAutoMerge, generateRemediation } from './prAutoMerge.js'
 import { preflightCheck, type PreflightInput } from './alert-preflight.js'
+import { SuppressionLedger } from './suppression-ledger.js'
 
 /**
  * Send an alert message through chatManager with preflight guard.
@@ -140,6 +141,7 @@ const flaggedOrphanPRs = new Set<string>()
  */
 const DIGEST_SUPPRESSION_MS = 2 * 60 * 60 * 1000 // 2 hours
 const recentDigestFingerprints = new Map<string, number>()
+const sweeperDigestLedger = new SuppressionLedger(DIGEST_SUPPRESSION_MS)
 
 function pruneDigestFingerprints(now: number): void {
   for (const [fp, ts] of recentDigestFingerprints) {
@@ -760,14 +762,32 @@ async function escalateViolations(violations: SweepViolation[]): Promise<void> {
   if (violations.length === 0) return
 
   // Digest-level dedupe: don't re-emit the same digest repeatedly while unchanged.
+  // IMPORTANT: this must persist across server restarts (deploys, crashes), otherwise
+  // we can re-spam the same open violation every cold start.
   const now = Date.now()
-  pruneDigestFingerprints(now)
   const fingerprint = computeDigestFingerprint(violations)
+
+  // 0) In-process suppression (cheap) — extra guard within a single uptime
+  pruneDigestFingerprints(now)
   const lastEmittedAt = recentDigestFingerprints.get(fingerprint) || 0
   if (lastEmittedAt && (now - lastEmittedAt) < DIGEST_SUPPRESSION_MS) {
     logDryRun('sweeper_digest_suppressed', `fp=${fingerprint} ageMs=${now - lastEmittedAt}`)
     return
   }
+
+  // 1) Persistent suppression (SQLite) — survives restarts
+  const dup = sweeperDigestLedger.check({
+    category: 'sweeper_digest',
+    channel: 'general',
+    from: 'sweeper',
+    // Only include a stable fingerprint so the dedup key doesn't churn with age_minutes.
+    content: `fp=${fingerprint}`,
+  })
+  if (dup.isDuplicate) {
+    logDryRun('sweeper_digest_suppressed', `fp=${fingerprint} dedup_key=${dup.dedup_key}`)
+    return
+  }
+
   recentDigestFingerprints.set(fingerprint, now)
 
   // ── Batch violations into a single summary message ─────────────────

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { getDb } from '../src/db.js'
 
 // Keep this test unit-level: mock out chat + preflight so we can assert digest suppression.
 const sendMessage = vi.hoisted(() => vi.fn(async () => {}))
@@ -57,6 +58,10 @@ import {
 
 describe('Sweeper Digest dedupe/suppression', () => {
   beforeEach(() => {
+    // Ensure persistent suppression ledger doesn't leak between tests
+    const db = getDb()
+    db.prepare('DELETE FROM suppression_ledger').run()
+
     _resetSweeperDigestSuppressionForTest()
     sendMessage.mockClear()
     vi.useFakeTimers()
@@ -103,6 +108,29 @@ describe('Sweeper Digest dedupe/suppression', () => {
     await _escalateViolationsForTest(violations)
 
     expect(sendMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it('suppresses identical digests across in-memory resets (persists across restarts)', async () => {
+    const violations: SweepViolation[] = [
+      {
+        taskId: 'task-1',
+        title: 'Test task',
+        assignee: 'harmony',
+        reviewer: 'sage',
+        type: 'orphan_pr',
+        age_minutes: 120,
+        message: 'orphan',
+      },
+    ]
+
+    await _escalateViolationsForTest(violations)
+
+    // Simulate a process restart wiping the in-memory fingerprint cache
+    _resetSweeperDigestSuppressionForTest()
+
+    await _escalateViolationsForTest(violations)
+
+    expect(sendMessage).toHaveBeenCalledTimes(1)
   })
 
   it('does not suppress when violation set changes (new fingerprint)', async () => {
