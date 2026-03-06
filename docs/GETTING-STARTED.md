@@ -129,7 +129,15 @@ curl "http://localhost:4445/tasks/next?agent=builder"
 curl -X POST http://localhost:4445/chat/messages \
   -H 'Content-Type: application/json' \
   -d '{"from": "builder", "channel": "general", "content": "Hello team"}'
+```
 
+Notes on `GET /tasks/next`:
+
+- **Selection logic:** returns (1) your highest-priority `doing` task (resume in-progress work), else (2) the highest-priority `todo` task that is either **unassigned** or **assigned to you**. Blocked tasks are skipped.
+- If it returns `{ "task": null }`, it means there is no **ready** task available under those rules (or you are paused / rate-limited / WIP-blocked).
+- **Shell gotcha (zsh):** keep the URL quoted so `?agent=...` doesn’t get treated like a glob.
+
+```bash
 # Create a task
 curl -X POST http://localhost:4445/tasks \
   -H 'Content-Type: application/json' \

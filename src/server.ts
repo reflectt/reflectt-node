@@ -9544,7 +9544,31 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const task = taskManager.getNextTask(agent, { includeTest })
     if (!task) {
-      return { task: null, message: 'No available tasks' }
+      const aliases = agent ? getAgentAliases(agent) : []
+
+      // "Ready" counts: match /tasks/next selection semantics (blocked excluded)
+      const readyTodo = taskManager.listTasks({ status: 'todo', includeBlocked: false, includeTest })
+      const ready_todo_unassigned = readyTodo.filter(t => !t.assignee || String(t.assignee).trim().length === 0).length
+      const ready_todo_assigned = agent
+        ? taskManager.listTasks({ status: 'todo', assigneeIn: aliases, includeBlocked: false, includeTest }).length
+        : 0
+      const ready_doing_assigned = agent
+        ? taskManager.listTasks({ status: 'doing', assigneeIn: aliases, includeBlocked: false, includeTest }).length
+        : 0
+      const ready_validating_assigned = agent
+        ? taskManager.listTasks({ status: 'validating', assigneeIn: aliases, includeBlocked: false, includeTest }).length
+        : 0
+
+      const { formatTasksNextEmptyResponse } = await import('./tasks-next-diagnostics.js')
+      const payload = formatTasksNextEmptyResponse({
+        agent,
+        ready_doing_assigned,
+        ready_todo_unassigned,
+        ready_todo_assigned,
+        ready_validating_assigned,
+      })
+
+      return { task: null, ...payload }
     }
 
     // Rule C: auto-claim (todo→doing) when ?claim=1
