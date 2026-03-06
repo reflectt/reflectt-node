@@ -184,6 +184,45 @@ describe('Orphan PR detection accuracy', () => {
     expect(orphanForThisTask).toHaveLength(0)
   })
 
+  it('done task with PR URL but without pr_merged metadata is NOT flagged (avoid digest spam)', async () => {
+    // Simulate a common real-world case: task is marked done, PR metadata was never populated.
+    // We should NOT emit orphan_pr violations for done tasks during periodic sweep.
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      payload: {
+        title: 'Orphan test — done task missing pr_merged metadata',
+        description: 'Regression: sweeper should not flag done tasks as orphan PRs',
+        status: 'done',
+        assignee: 'link',
+        reviewer: 'sage',
+        priority: 'P2',
+        createdBy: 'test',
+        eta: '1h',
+        done_criteria: ['Task is complete'],
+        metadata: {
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/99999',
+          // intentionally missing pr_merged / reviewer_approved
+        },
+      },
+    })
+    expect(createRes.statusCode).toBe(200)
+    const task = JSON.parse(createRes.body).task
+
+    // Advance time past the orphan threshold (2h) so the old logic would have flagged.
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(task.updatedAt + 3 * 60 * 60 * 1000)
+
+    const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
+    const result = await sweepValidatingQueue()
+    const orphanForThisTask = result.violations.filter(
+      v => v.taskId === task.id && v.type === 'orphan_pr',
+    )
+    expect(orphanForThisTask).toHaveLength(0)
+
+    nowSpy.mockRestore()
+  })
+
   it('orphan alert includes @assignee and @reviewer mentions', async () => {
     const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
     const result = await sweepValidatingQueue()
