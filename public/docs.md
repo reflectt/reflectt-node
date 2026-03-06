@@ -471,7 +471,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 |--------|------|-------------|
 | GET | `/agents/activity` | All agents activity summary |
 | GET | `/agents/:agent/activity` | Single agent activity |
-| GET | `/activity` | Global activity feed |
+| GET | `/activity` | Activity timeline: unified event feed with server-side grouping (see below) |
 | GET | `/analytics/foragents` | forAgents.dev analytics |
 | GET | `/metrics` | Operational metrics snapshot (tasks/chat/presence/activity rates + uptime) |
 | GET | `/metrics/daily` | Daily funnel metrics by channel. Query: `timezone` (IANA tz, default `America/Vancouver`) |
@@ -595,8 +595,8 @@ Multi-host management: remote hosts register via heartbeat and are tracked by st
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/insights/ingest` | Ingest a reflection into clustering. Body: `{ reflection_id }`. Cluster key auto-derived from reflection tags/content. Promotion gate: 2 independent reflections (distinct authors) OR severity high/critical. 24h cooldown after promotion. |
-| GET | `/activity` | Activity timeline: unified event feed with server-side grouping. Query: `range` (24h\|7d, default 24h), `type` (comma-separated: task,review,chat,presence,reflection,insight), `agent` (filter by actor), `limit` (default 50, max 200), `after` (cursor for pagination). Returns `events[]`, `total`, `range{from,to,tz}`, `partial?{missing[],reason}`, `generated_at`, `next_cursor`. |
-| GET | `/activity/sources` | List allowed activity source names (for partial.missing enum and type filter). |
+| GET | `/activity` | Activity timeline: unified event feed with server-side grouping. Query: `range` (24h\|7d, default 24h), `type` (comma-separated: task,review,chat,presence,reflection,insight), `agent` (filter by actor), `limit` (default 50, max 200), `after` (opaque cursor for pagination, exclusive). Returns `events[]`, `total`, `range{from,to,from_ms,to_ms,tz}`, `partial?{missing[],reason}`, `generated_at`, `generated_at_ms`, `next_cursor`. |
+| GET | `/activity/sources` | List allowed activity source names: tasks, reviews, chat, presence, reflections, insights. Used for `partial.missing` enum and `type` filter values. |
 | GET | `/activity` | Unified activity timeline. Returns `TimelineEvent[]` from tasks, chat, reflections, insights, and presence. Query: `range` (24h\|7d, default 24h), `type` (comma-separated: task.created, task.assigned, task.status_changed, task.commented, review.approved, review.rejected, agent.online, agent.offline, chat.message, reflection.created, insight.promoted), `agent` (filter by actor), `limit` (max 500, default 100), `after` (ISO cursor for pagination). Server-side grouping: chat bursts (5min), status churn (10min), presence flaps (10min). Response: `{ events[], total, next_cursor, range: {from, to, tz}, partial?: {missing[]} }`. |
 | GET | `/insights` | List insights. Supports `compact=true` (slim: id/title/score/priority/status/task_id/independent_count). Query: `status` (candidate\|promoted\|pending_triage\|task_created\|cooldown\|closed), `priority` (P0-P3), `workflow_stage`, `failure_family`, `impacted_unit`, `limit`, `offset`. Sorted by score desc. |
 | GET | `/insights/bridge/stats` | Insight→Task bridge stats: auto-created count, triaged count, duplicates skipped, errors. |

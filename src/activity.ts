@@ -99,10 +99,11 @@ const MAX_LIMIT = 200
 
 // ── Event ID generation ────────────────────────────────────────────────────
 
-function makeEventId(type: string, subjectId: string, tsMs: number): string {
-  const bucket = Math.floor(tsMs / 1000) // 1-second buckets
+function makeEventId(type: string, uniqueRowId: string, tsMs: number): string {
+  // Use the source row's unique ID (chat_messages.id, task_history.id, etc.)
+  // to avoid collisions between events of the same type in the same second.
   const hash = createHash('sha256')
-    .update(`${type}:${subjectId}:${bucket}`)
+    .update(`${type}:${uniqueRowId}:${tsMs}`)
     .digest('hex')
     .slice(0, 12)
   return `evt-${hash}`
@@ -111,6 +112,7 @@ function makeEventId(type: string, subjectId: string, tsMs: number): string {
 // ── Internal raw event type ────────────────────────────────────────────────
 
 interface RawEvent {
+  rowId: string      // unique source row ID (e.g. task_history.id, chat_messages.id)
   ts_ms: number
   type: TimelineEventType
   actor?: TimelineActor
@@ -153,7 +155,7 @@ function collectTaskEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
       // Check if this is a review decision
       if (to === 'done' && data?.review_action === 'approved') {
         events.push({
-          ts_ms: row.timestamp, type: 'review.approved',
+          rowId: row.id, ts_ms: row.timestamp, type: 'review.approved',
           actor: { kind: 'agent', label: row.actor },
           subject: { kind: 'task', id: row.task_id, label: taskTitle, href: `/tasks/${row.task_id}` },
           summary: `${row.actor} approved "${truncate(taskTitle, 60)}"`,
@@ -163,7 +165,7 @@ function collectTaskEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
       }
       if (data?.review_action === 'rejected') {
         events.push({
-          ts_ms: row.timestamp, type: 'review.rejected',
+          rowId: row.id, ts_ms: row.timestamp, type: 'review.rejected',
           actor: { kind: 'agent', label: row.actor },
           subject: { kind: 'task', id: row.task_id, label: taskTitle, href: `/tasks/${row.task_id}` },
           summary: `${row.actor} rejected "${truncate(taskTitle, 60)}"`,
@@ -177,7 +179,7 @@ function collectTaskEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
         : to === 'blocked' ? 'warning' as const : 'info' as const
 
       events.push({
-        ts_ms: row.timestamp, type: 'task.status_changed',
+        rowId: row.id, ts_ms: row.timestamp, type: 'task.status_changed',
         actor: { kind: 'agent', label: row.actor },
         subject: { kind: 'task', id: row.task_id, label: taskTitle, href: `/tasks/${row.task_id}` },
         summary: `${row.actor} moved "${truncate(taskTitle, 50)}" ${from} → ${to}`,
@@ -187,7 +189,7 @@ function collectTaskEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
       })
     } else if (row.type === 'created') {
       events.push({
-        ts_ms: row.timestamp, type: 'task.created',
+        rowId: row.id, ts_ms: row.timestamp, type: 'task.created',
         actor: { kind: 'agent', label: row.actor },
         subject: { kind: 'task', id: row.task_id, label: taskTitle, href: `/tasks/${row.task_id}` },
         summary: `${row.actor} created "${truncate(taskTitle, 60)}"`,
@@ -195,7 +197,7 @@ function collectTaskEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
       })
     } else if (row.type === 'assigned' || row.type === 'assignee_changed') {
       events.push({
-        ts_ms: row.timestamp, type: 'task.assigned',
+        rowId: row.id, ts_ms: row.timestamp, type: 'task.assigned',
         actor: { kind: 'agent', label: row.actor },
         subject: { kind: 'task', id: row.task_id, label: taskTitle, href: `/tasks/${row.task_id}` },
         summary: `${row.actor} assigned "${truncate(taskTitle, 50)}" to ${(data?.assignee as string) || '?'}`,
@@ -219,7 +221,7 @@ function collectTaskEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
   for (const row of commentRows) {
     if (agentFilter && row.author !== agentFilter) continue
     events.push({
-      ts_ms: row.timestamp, type: 'task.commented',
+      rowId: row.id, ts_ms: row.timestamp, type: 'task.commented',
       actor: { kind: 'agent', label: row.author },
       subject: { kind: 'task', id: row.task_id, label: row.title || row.task_id, href: `/tasks/${row.task_id}` },
       summary: `${row.author} commented on "${truncate(row.title || row.task_id, 50)}"`,
@@ -246,7 +248,7 @@ function collectChatEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
   for (const row of rows) {
     if (agentFilter && row.from !== agentFilter) continue
     events.push({
-      ts_ms: row.timestamp, type: 'chat.message',
+      rowId: row.id, ts_ms: row.timestamp, type: 'chat.message',
       actor: { kind: 'agent', label: row.from },
       subject: { kind: 'chat', id: row.channel, label: `#${row.channel}` },
       summary: `${row.from} in #${row.channel}: "${truncate(row.content, 80)}"`,
@@ -273,11 +275,11 @@ function collectPresenceEvents(db: ReturnType<typeof getDb>, fromMs: number, _to
       if (agentFilter && agent !== agentFilter) continue
       const isOnline = host.status === 'online'
       events.push({
-        ts_ms: host.last_seen_at,
+        rowId: `${host.id}:${agent}`, ts_ms: host.last_seen_at,
         type: isOnline ? 'agent.online' : 'agent.offline',
         actor: { kind: 'system', label: 'system' },
         subject: { kind: 'agent', id: agent, label: agent },
-        summary: `${agent} ${isOnline ? 'came online' : 'went offline'}`,
+        summary: `${agent} ${isOnline ? 'seen online' : 'reported offline'}`,
         severity: isOnline ? 'info' : 'warning',
         source: 'presence', groupKey: `presence:${agent}`,
       })
@@ -300,7 +302,7 @@ function collectReflectionEvents(db: ReturnType<typeof getDb>, fromMs: number, t
   for (const row of rows) {
     if (agentFilter && row.author !== agentFilter) continue
     events.push({
-      ts_ms: row.created_at, type: 'reflection.created',
+      rowId: row.id, ts_ms: row.created_at, type: 'reflection.created',
       actor: { kind: 'agent', label: row.author },
       subject: { kind: 'reflection', id: row.id, label: truncate(row.pain, 60) },
       summary: `${row.author} reflected: "${truncate(row.pain, 80)}"`,
@@ -328,7 +330,7 @@ function collectInsightEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs
     const authors: string[] = row.authors ? safeJsonParse<string[]>(row.authors) || [] : []
     if (agentFilter && !authors.includes(agentFilter)) continue
     events.push({
-      ts_ms: row.updated_at, type: 'insight.promoted',
+      rowId: row.id, ts_ms: row.updated_at, type: 'insight.promoted',
       actor: { kind: 'system', label: 'system' },
       subject: { kind: 'insight', id: row.id, label: truncate(row.title, 60) },
       summary: `Insight promoted: "${truncate(row.title, 60)}"${row.task_id ? ` → task ${row.task_id}` : ''}`,
@@ -464,7 +466,7 @@ export function queryActivity(opts: ActivityQuery = {}): ActivityResponse {
   const toMs = now
   const fromMs = now - rangeMs
 
-  // Parse cursor (base64url-encoded ts_ms)
+  // Parse cursor (base64url-encoded ts_ms) — exclusive boundary
   let cursorMs: number | null = null
   if (opts.after) {
     try {
@@ -472,7 +474,8 @@ export function queryActivity(opts: ActivityQuery = {}): ActivityResponse {
       if (isNaN(cursorMs)) cursorMs = null
     } catch { cursorMs = null }
   }
-  const effectiveToMs = cursorMs ?? toMs
+  // Subtract 1ms to make cursor exclusive (last event of page N won't reappear on page N+1)
+  const effectiveToMs = cursorMs != null ? cursorMs - 1 : toMs
   const limit = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT)
 
   // Type filter — handle both string and string[]
@@ -523,7 +526,7 @@ export function queryActivity(opts: ActivityQuery = {}): ActivityResponse {
 
   // Convert to TimelineEvents
   let events: TimelineEvent[] = allRawEvents.map(raw => ({
-    id: makeEventId(raw.type, raw.subject?.id || raw.actor?.label || 'unknown', raw.ts_ms),
+    id: makeEventId(raw.type, raw.rowId, raw.ts_ms),
     ts: new Date(raw.ts_ms).toISOString(),
     ts_ms: raw.ts_ms,
     type: raw.type,
