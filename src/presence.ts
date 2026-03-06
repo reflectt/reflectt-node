@@ -10,6 +10,7 @@
 
 import { eventBus } from './events.js'
 import { getDb } from './db.js'
+import { getAgentRoles } from './assignment.js'
 
 export type PresenceStatus = 'idle' | 'working' | 'reviewing' | 'blocked' | 'offline'
 
@@ -159,12 +160,18 @@ class PresenceManager {
         'SELECT DISTINCT assignee as agent FROM tasks WHERE status = \'doing\' AND assignee IS NOT NULL AND assignee != \'\''
       ).all() as Array<{ agent: string }>
 
+      // Build set of known agents from TEAM-ROLES registry to prevent cross-node leakage
+      const knownAgents = new Set(getAgentRoles().map(r => r.name.toLowerCase()))
+
       const agents = new Set<string>()
       for (const row of [...chatAgents, ...taskAgents]) {
         const name = (row.agent || '').toLowerCase().trim()
-        // Skip system/email senders and empty names
+        // Skip system/email senders, empty names, and agents not in registry
         if (name && !name.startsWith('email:') && name !== 'system' && name !== 'user') {
-          agents.add(name)
+          // Only seed agents known to this node's TEAM-ROLES registry
+          if (knownAgents.size === 0 || knownAgents.has(name)) {
+            agents.add(name)
+          }
         }
       }
 

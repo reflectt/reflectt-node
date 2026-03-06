@@ -10618,14 +10618,22 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get('/presence', async () => {
     const explicitPresences = presenceManager.getAllPresence()
     const allActivity = presenceManager.getAllActivity()
+
+    // Filter to agents known to this node's TEAM-ROLES registry
+    const knownAgentNames = new Set(getAgentRoles().map(r => r.name.toLowerCase()))
     
-    // Build map of explicit presence by agent
-    const presenceMap = new Map(explicitPresences.map(p => [p.agent, p]))
+    // Build map of explicit presence by agent (filtered to registry)
+    const presenceMap = new Map(
+      explicitPresences
+        .filter(p => knownAgentNames.size === 0 || knownAgentNames.has(p.agent.toLowerCase()))
+        .map(p => [p.agent, p])
+    )
     
-    // Add inferred presence for agents with only activity
+    // Add inferred presence for agents with only activity (registry-gated)
     const now = Date.now()
     for (const activity of allActivity) {
-      if (!presenceMap.has(activity.agent) && activity.last_active) {
+      if (!presenceMap.has(activity.agent) && activity.last_active
+          && (knownAgentNames.size === 0 || knownAgentNames.has(activity.agent.toLowerCase()))) {
         const inactiveMs = now - activity.last_active
         
         let status: PresenceStatus = 'offline'
