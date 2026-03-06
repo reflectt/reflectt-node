@@ -189,12 +189,108 @@ describe('status churn grouping', () => {
 })
 
 describe('GET /activity/sources', () => {
-  it('returns source list', async () => {
+  it('returns source list including reviews', async () => {
     const res = await app.inject({ method: 'GET', url: '/activity/sources' })
     expect(res.statusCode).toBe(200)
     const body = JSON.parse(res.body)
     expect(body.sources).toContain('tasks')
+    expect(body.sources).toContain('reviews')
     expect(body.sources).toContain('chat')
     expect(body.sources).toContain('presence')
+    expect(body.sources).toContain('reflections')
+    expect(body.sources).toContain('insights')
+  })
+})
+
+describe('event ID collision regression', () => {
+  it('two chat messages in same channel same second produce distinct events', async () => {
+    const db = getDb()
+    const now = Date.now()
+    const channel = `collision-test-${now}`
+    const tsExact = now - 5000 // same exact millisecond
+
+    db.prepare(`INSERT INTO chat_messages (id, "from", content, timestamp, channel) VALUES (?, ?, ?, ?, ?)`)
+      .run(`msg-collision-a-${now}`, 'alice', 'first message', tsExact, channel)
+    db.prepare(`INSERT INTO chat_messages (id, "from", content, timestamp, channel) VALUES (?, ?, ?, ?, ?)`)
+      .run(`msg-collision-b-${now}`, 'bob', 'second message', tsExact, channel)
+
+    try {
+      const res = await app.inject({ method: 'GET', url: '/activity?type=chat&limit=200' })
+      expect(res.statusCode).toBe(200)
+      const body = JSON.parse(res.body)
+
+      // Both messages must appear (either as individual events or inside a group)
+      const relevant = body.events.filter((e: any) =>
+        e.summary?.includes(channel) ||
+        e.group?.children?.some((c: any) => c.summary?.includes(channel))
+      )
+
+      // Count total child events (ungrouped or within groups)
+      let totalMessages = 0
+      for (const e of relevant) {
+        if (e.group?.children) {
+          totalMessages += e.group.children.filter((c: any) => c.summary?.includes(channel)).length
+        } else {
+          totalMessages += 1
+        }
+      }
+
+      expect(totalMessages).toBeGreaterThanOrEqual(2)
+    } finally {
+      db.prepare('DELETE FROM chat_messages WHERE id = ?').run(`msg-collision-a-${now}`)
+      db.prepare('DELETE FROM chat_messages WHERE id = ?').run(`msg-collision-b-${now}`)
+    }
+  })
+})
+
+describe('cursor pagination exclusivity', () => {
+  it('last event of page 1 does not appear on page 2', async () => {
+    const db = getDb()
+    const now = Date.now()
+    const channel = `cursor-test-${now}`
+
+    // Insert 3 messages with distinct timestamps
+    for (let i = 0; i < 3; i++) {
+      db.prepare(`INSERT INTO chat_messages (id, "from", content, timestamp, channel) VALUES (?, ?, ?, ?, ?)`)
+        .run(`msg-cursor-${now}-${i}`, 'testbot', `cursor msg ${i}`, now - (i + 1) * 60000, channel)
+    }
+
+    try {
+      // Page 1: limit 2
+      const res1 = await app.inject({ method: 'GET', url: `/activity?type=chat&limit=2` })
+      expect(res1.statusCode).toBe(200)
+      const page1 = JSON.parse(res1.body)
+
+      if (page1.next_cursor) {
+        // Page 2: use cursor
+        const res2 = await app.inject({ method: 'GET', url: `/activity?type=chat&limit=2&after=${page1.next_cursor}` })
+        expect(res2.statusCode).toBe(200)
+        const page2 = JSON.parse(res2.body)
+
+        // Collect all event IDs from both pages (including grouped children)
+        const collectIds = (events: any[]) => {
+          const ids: string[] = []
+          for (const e of events) {
+            ids.push(e.id)
+            if (e.group?.children) {
+              for (const c of e.group.children) ids.push(c.id)
+            }
+          }
+          return ids
+        }
+
+        const page1Ids = new Set(collectIds(page1.events))
+        const page2Ids = collectIds(page2.events)
+
+        // No ID from page 2 should appear in page 1
+        for (const id of page2Ids) {
+          expect(page1Ids.has(id)).toBe(false)
+        }
+      }
+    } finally {
+      for (let i = 0; i < 3; i++) {
+        db.prepare('DELETE FROM chat_messages WHERE id = ?').run(`msg-cursor-${now}-${i}`)
+      }
+    }
   })
 })
