@@ -14,7 +14,7 @@ import { resolve, sep, join } from 'path'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
-import { serverConfig, openclawConfig, isDev, REFLECTT_HOME } from './config.js'
+import { serverConfig, openclawConfig, isDev, REFLECTT_HOME, DATA_DIR } from './config.js'
 import { trackRequest, getRequestMetrics } from './request-tracker.js'
 import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots, startAutoSnapshot } from './alert-preflight.js'
 
@@ -3113,6 +3113,8 @@ export async function createServer(): Promise<FastifyInstance> {
       pid: build.pid,
       nodeVersion: build.nodeVersion,
       uptime: build.uptime,
+      dataDir: DATA_DIR,
+      reflecttHome: REFLECTT_HOME,
     }
   })
 
