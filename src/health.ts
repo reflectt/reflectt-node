@@ -135,6 +135,7 @@ export interface AgentHealthStatus {
   status: 'active' | 'idle' | 'silent' | 'blocked' | 'offline'
   lastSeen: number
   minutesSinceLastSeen: number
+  silentMs: number
   currentTask?: string
   activeTaskId?: string
   activeTaskTitle?: string
@@ -346,8 +347,10 @@ class TeamHealthMonitor {
     const compliance = await this.getCollaborationCompliance(now)
     const staleDoing = this.getStaleDoingSnapshot(now)
 
+    const SILENT_THRESHOLD_MS = 24 * 60 * 60 * 1000 // 24h
+    const ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000 // 7d
     const silentAgents = agents
-      .filter(a => a.status === 'silent')
+      .filter(a => a.silentMs > SILENT_THRESHOLD_MS && a.lastSeen > now - ACTIVITY_WINDOW_MS)
       .map(a => a.agent)
 
     const activeAgents = agents
@@ -1086,6 +1089,7 @@ class TeamHealthMonitor {
         status,
         lastSeen,
         minutesSinceLastSeen,
+        silentMs: lastSeen > 0 ? Math.max(0, now - lastSeen) : 0,
         currentTask: activeTask?.title,
         activeTaskId: activeTask?.id,
         activeTaskTitle: activeTask?.title,
