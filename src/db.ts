@@ -502,6 +502,16 @@ export function runMigrations(db: Database.Database): void {
         ALTER TABLE chat_messages ADD COLUMN attachments TEXT;
       `,
     },
+    {
+      version: 19,
+      sql: `
+        -- Team-level focus directive (priority anchor for heartbeats)
+        CREATE TABLE IF NOT EXISTS kv (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
@@ -535,6 +545,7 @@ export function runMigrations(db: Database.Database): void {
     { version: 15, tables: ['context_memos'] },
     { version: 16, tables: ['hosts'] },
     { version: 17, tables: ['system_loop_ticks'] },
+    { version: 19, tables: ['kv'] },
   ]
 
   const existingTables = new Set(

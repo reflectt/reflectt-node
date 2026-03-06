@@ -387,6 +387,9 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/focus` | Current team focus directive (included in heartbeat) |
+| POST | `/focus` | Set team focus. Body: `{ "directive": "...", "setBy": "kai", "expiresAt?": 1234, "tags?": ["shipping"] }` |
+| DELETE | `/focus` | Clear team focus |
 | GET | `/presence` | All agents' presence |
 | GET | `/presence/:agent` | Single agent presence |
 | POST | `/presence/:agent` | Update presence. Body: `{ "status": "working|idle|blocked|reviewing|offline" }` |
