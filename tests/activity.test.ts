@@ -77,6 +77,40 @@ describe('GET /activity', () => {
     }
   })
 
+  it('after cursor is exclusive (page 2 does not repeat last event from page 1)', async () => {
+    const db = getDb()
+    const now = Date.now()
+    const channel = `test-cursor-${now}`
+
+    // Insert 2 chat messages with distinct timestamps so ordering is deterministic.
+    db.prepare(`INSERT INTO chat_messages (id, "from", content, timestamp, channel) VALUES (?, ?, ?, ?, ?)`).run(
+      `chat-cursor-${now}-1`, 'testbot', 'first', now - 1000, channel
+    )
+    db.prepare(`INSERT INTO chat_messages (id, "from", content, timestamp, channel) VALUES (?, ?, ?, ?, ?)`).run(
+      `chat-cursor-${now}-2`, 'testbot', 'second', now - 2000, channel
+    )
+
+    try {
+      const res1 = await app.inject({ method: 'GET', url: `/activity?type=chat&limit=1` })
+      expect(res1.statusCode).toBe(200)
+      const body1 = JSON.parse(res1.body)
+      expect(body1.events.length).toBe(1)
+      expect(body1.next_cursor).toBeTruthy()
+
+      const firstId = body1.events[0].id
+
+      const res2 = await app.inject({ method: 'GET', url: `/activity?type=chat&limit=1&after=${body1.next_cursor}` })
+      expect(res2.statusCode).toBe(200)
+      const body2 = JSON.parse(res2.body)
+      if (body2.events.length > 0) {
+        expect(body2.events[0].id).not.toBe(firstId)
+      }
+    } finally {
+      db.prepare('DELETE FROM chat_messages WHERE id = ?').run(`chat-cursor-${now}-1`)
+      db.prepare('DELETE FROM chat_messages WHERE id = ?').run(`chat-cursor-${now}-2`)
+    }
+  })
+
   it('events have required fields', async () => {
     const res = await app.inject({ method: 'GET', url: '/activity?limit=5' })
     const body = JSON.parse(res.body)

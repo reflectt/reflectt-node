@@ -158,22 +158,30 @@ function collectTaskEvents(db: ReturnType<typeof getDb>, fromMs: number, toMs: n
       // Check if this is a review decision
       if (to === 'done' && data?.review_action === 'approved') {
         events.push({
-      rowId: row.id, ts_ms: row.timestamp, type: 'review.approved',
+          rowId: row.id,
+          ts_ms: row.timestamp,
+          type: 'review.approved',
           actor: { kind: 'agent', label: row.actor },
           subject: { kind: 'task', id: row.task_id, label: taskTitle, href: `/tasks/${row.task_id}` },
           summary: `${row.actor} approved "${truncate(taskTitle, 60)}"`,
-          severity: 'success', source: 'tasks', meta: data ?? undefined,
+          severity: 'success',
+          source: 'reviews',
+          meta: data ?? undefined,
         })
         continue
       }
       if (data?.review_action === 'rejected') {
         events.push({
-      rowId: row.id, ts_ms: row.timestamp, type: 'review.rejected',
+          rowId: row.id,
+          ts_ms: row.timestamp,
+          type: 'review.rejected',
           actor: { kind: 'agent', label: row.actor },
           subject: { kind: 'task', id: row.task_id, label: taskTitle, href: `/tasks/${row.task_id}` },
           summary: `${row.actor} rejected "${truncate(taskTitle, 60)}"`,
           detail: (data?.review_reason as string) || undefined,
-          severity: 'warning', source: 'tasks', meta: data ?? undefined,
+          severity: 'warning',
+          source: 'reviews',
+          meta: data ?? undefined,
         })
         continue
       }
