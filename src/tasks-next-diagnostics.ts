@@ -35,7 +35,7 @@ export function formatTasksNextEmptyResponse(
     }
   } else {
     if (diagnostics.ready_todo_unassigned === 0) {
-      hint = 'No unassigned todo tasks exist. Create a todo with no assignee (assignee=null) to enable pull-based routing.'
+      hint = 'No unassigned todo tasks exist. Create a todo with no assignee (omit assignee / assignee=null / assignee="unassigned") to enable pull-based routing.'
     }
   }
 

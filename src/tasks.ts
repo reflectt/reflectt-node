@@ -1596,9 +1596,11 @@ class TaskManager {
       }
     }
 
-    // Then check todo tasks: unassigned or assigned to this agent
+    // Then check todo tasks: unassigned (NULL/empty/'unassigned') or assigned to this agent
+    // NOTE: server CreateTaskSchema historically defaulted assignee to the string "unassigned",
+    // so we must treat that sentinel as unassigned for pull-based assignment.
     const todoUnassignedRows = db.prepare(
-      'SELECT * FROM tasks WHERE status = ? AND assignee IS NULL'
+      "SELECT * FROM tasks WHERE status = ? AND (assignee IS NULL OR TRIM(assignee) = '' OR LOWER(assignee) = 'unassigned')"
     ).all('todo') as TaskRow[]
     let tasks = todoUnassignedRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t))
 

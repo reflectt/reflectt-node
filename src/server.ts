@@ -9575,7 +9575,10 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // "Ready" counts: match /tasks/next selection semantics (blocked excluded)
       const readyTodo = taskManager.listTasks({ status: 'todo', includeBlocked: false, includeTest })
-      const ready_todo_unassigned = readyTodo.filter(t => !t.assignee || String(t.assignee).trim().length === 0).length
+      const ready_todo_unassigned = readyTodo.filter(t => {
+        const a = String(t.assignee || '').trim().toLowerCase()
+        return a.length === 0 || a === 'unassigned'
+      }).length
       const ready_todo_assigned = agent
         ? taskManager.listTasks({ status: 'todo', assigneeIn: aliases, includeBlocked: false, includeTest }).length
         : 0
