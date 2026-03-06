@@ -3276,11 +3276,47 @@ export async function createServer(): Promise<FastifyInstance> {
       const publicDir = join(__dirname, '..', 'public', 'avatars')
 
       if (safe) {
-        const filePath = join(publicDir, filename)
-        const data = await fs.readFile(filePath)
-        const ext = filename.toLowerCase().endsWith('.svg') ? 'image/svg+xml' : 'image/png'
-        reply.type(ext).header('Cache-Control', 'public, max-age=3600').send(data)
-        return
+        const lower = filename.toLowerCase()
+        const ext = lower.endsWith('.svg') ? 'image/svg+xml' : 'image/png'
+
+        // 1) Exact avatar file
+        try {
+          const filePath = join(publicDir, filename)
+          const data = await fs.readFile(filePath)
+          reply.type(ext).header('Cache-Control', 'public, max-age=3600').send(data)
+          return
+        } catch {
+          // fall through to fallback handling below
+        }
+
+        // 2) Some clients request generic agent-N.png assets. Serve a deterministic
+        // fallback PNG instead of returning 404 (noise) or a mismatched SVG.
+        if (lower.endsWith('.png')) {
+          const match = /^agent-(\d+)\.png$/.exec(lower)
+          const fallbackPool = [
+            'kai.png',
+            'link.png',
+            'sage.png',
+            'pixel.png',
+            'echo.png',
+            'scout.png',
+            'harmony.png',
+            'spark.png',
+            'rhythm.png',
+            'ryan.png',
+          ]
+          const n = match ? Number(match[1]) : NaN
+          const index = Number.isFinite(n) ? (Math.max(1, n) - 1) % fallbackPool.length : 0
+          const fallbackName = fallbackPool[index] || 'ryan.png'
+
+          try {
+            const data = await fs.readFile(join(publicDir, fallbackName))
+            reply.type('image/png').header('Cache-Control', 'public, max-age=3600').send(data)
+            return
+          } catch {
+            // fall through to SVG default below
+          }
+        }
       }
     } catch {
       // fall through to default avatar below
