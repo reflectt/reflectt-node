@@ -337,6 +337,38 @@ describe('alert-preflight', () => {
       expect(Array.isArray(snapshots)).toBe(true)
     })
 
+    it('getDailySnapshots returns snapshots from daily file (ESM regression)', async () => {
+      // Write a temp daily file to the mocked DATA_DIR
+      const fs = await import('fs')
+      const path = await import('path')
+      const dataDir = '/tmp/test-data'
+      fs.mkdirSync(dataDir, { recursive: true })
+      const dailyFile = path.join(dataDir, 'alert-preflight-daily.jsonl')
+
+      const snapshot = {
+        date: '2026-03-05',
+        ts: Date.now(),
+        totalChecked: 10,
+        suppressed: 0,
+        canaryFlagged: 2,
+        latencyP95: 0.42,
+        mode: 'canary',
+        falsePositiveRate: 20,
+      }
+      fs.writeFileSync(dailyFile, JSON.stringify(snapshot) + '\n')
+
+      try {
+        const snapshots = getDailySnapshots()
+        expect(Array.isArray(snapshots)).toBe(true)
+        expect(snapshots.length).toBeGreaterThan(0)
+        expect(snapshots[0].date).toBe('2026-03-05')
+        expect(snapshots[0].totalChecked).toBe(10)
+      } finally {
+        // Clean up
+        try { fs.unlinkSync(dailyFile) } catch { /* ignore */ }
+      }
+    })
+
     it('startAutoSnapshot and stopAutoSnapshot do not throw', () => {
       expect(() => startAutoSnapshot()).not.toThrow()
       expect(() => stopAutoSnapshot()).not.toThrow()

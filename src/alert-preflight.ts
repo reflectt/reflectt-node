@@ -15,7 +15,7 @@
  */
 
 import { createHash } from 'crypto'
-import { appendFileSync } from 'fs'
+import { appendFileSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { DATA_DIR } from './config.js'
 import { taskManager } from './tasks.js'
@@ -343,8 +343,6 @@ let snapshotTimer: ReturnType<typeof setInterval> | null = null
  */
 function initSnapshotState(): void {
   try {
-    const { readFileSync, existsSync } = require('fs')
-
     // Recover lastSnapshotDate so restarts don't duplicate today's entry
     if (existsSync(DAILY_FILE)) {
       const lines = readFileSync(DAILY_FILE, 'utf8').trim().split('\n').filter(Boolean)
@@ -367,8 +365,6 @@ function initSnapshotState(): void {
  */
 function backfillFromAuditLog(): void {
   try {
-    const { readFileSync, existsSync } = require('fs')
-
     if (!existsSync(AUDIT_FILE)) return
 
     const auditContent = readFileSync(AUDIT_FILE, 'utf8').trim()
@@ -504,7 +500,7 @@ export function getDailySnapshots(): Array<{
   backfilled?: boolean
 }> {
   try {
-    const { readFileSync } = require('fs')
+    if (!existsSync(DAILY_FILE)) return []
     const content = readFileSync(DAILY_FILE, 'utf8').trim()
     if (!content) return []
     return content.split('\n').map((line: string) => JSON.parse(line))
