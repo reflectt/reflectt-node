@@ -11,14 +11,39 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.1.5] — 2026-03-05
+
+A big reliability + onboarding sprint: better state-machine clarity (`cancelled` / `resolved_externally`), less notification spam, stronger health/observability, and clearer first-run UX.
+
+### Added
+- **Task state: `cancelled`** — first-class lifecycle state with API + UI support. (#668)
+- **Task state: `resolved_externally`** — close-out path for work completed outside the board. (#646)
+- **Todo hoarding guard** — detects orphaned todos and auto-unassigns to keep the board claimable. (#666)
+- **Notification dedupe guard** — monotonic cursor + stale event suppression to prevent repeats. (#667)
+- **/health/errors** — recent samples + top buckets for fast triage. (#673)
+- **Cloud connection lifecycle tracking** + `GET /cloud/events`. (#677)
+- **Internal cockpit gating** — internal controls now require `REFLECTT_INTERNAL_UI=1` + `?internal=1`. (#647)
+
 ### Fixed
 - **First-run banner shows on real first boots** (seeded tasks no longer suppress it) and CTAs no longer 404. (#656)
-- **Avatars: default response instead of 404s** (reduces error-rate pollution). (#657)
-- **Host connect cloud-url default** — points at app.reflectt.ai (avoids 404 trap) + clearer help text. (#660)
-- **Host connect guard** — prevents overwriting an existing enrollment unless `--force` is passed. (#662)
+- **Avatars: default response instead of 404s** (reduces error-rate pollution). (#657, #654)
+- **Monotonic chat message timestamps** — prevents ordering drift. (#652)
+- **Lane-based routing for backlog health + sweeper** — reduces false signal and misrouting. (#655)
+- **Ready-queue floor** auto-discovers agents (catches long idle sooner). (#645)
+- **Alert-preflight snapshots** persist across restarts. (#644)
+- **Chat approval false positives** — casual messages no longer trigger auto-close. (#674)
+- **CLI status port mismatch** — falls back to default port when config is off. (#675)
+
+### Security
+- **config.json permissions** hardened (644 → 600) since it may contain credentials. (#676)
 
 ### Docs / UX
-- **README: “60-second demo” section** for quick proof of the audit flow. (#659)
+- **README: first 5 minutes** quickstart. (#663)
+- **README: 60-second demo** section for quick proof of the audit flow. (#659)
+- **Onboarding copy polish** — clearer next steps, fewer internal terms. (#658, #664)
+- **Dashboard empty-states** — tasks/reviews/overview empty-state copy + layout fixes. (#669, #670, #672)
+- **Release notes**: March 5 rollup. (#665)
+- **README positioning / intro tighten** for GitHub-first users. (#648, #650, #651, #653, #671)
 
 
 ## [0.1.4] — 2026-03-02
@@ -110,7 +135,9 @@ Initial public release.
 
 ---
 
-[Unreleased]: https://github.com/reflectt/reflectt-node/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/reflectt/reflectt-node/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/reflectt/reflectt-node/compare/v0.1.4...v0.1.5
+[0.1.4]: https://github.com/reflectt/reflectt-node/compare/v0.1.2...v0.1.4
 [0.1.2]: https://github.com/reflectt/reflectt-node/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/reflectt/reflectt-node/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/reflectt/reflectt-node/releases/tag/v0.1.0
