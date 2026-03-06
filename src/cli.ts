@@ -524,6 +524,28 @@ program
     }
 
     const config = loadConfig()
+
+    // Port-level guard: refuse to start if something is already listening
+    // (catches LaunchAgent-managed instances that don't leave a PID file)
+    const clientHost = (config.host === '0.0.0.0' || config.host === '::') ? '127.0.0.1' : config.host
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 2000)
+      const res = await fetch(`http://${clientHost}:${config.port}/health/deploy`, { signal: controller.signal })
+      clearTimeout(timeout)
+      if (res.ok) {
+        const deploy = await res.json().catch(() => ({})) as Record<string, unknown>
+        const pid = deploy.pid ?? 'unknown'
+        const sha = deploy.gitSha ?? 'unknown'
+        console.error(`❌ Server already running on port ${config.port} (PID: ${pid}, sha: ${sha})`)
+        console.error('   If managed by LaunchAgent: launchctl kickstart -k gui/$(id -u)/com.reflectt.node')
+        console.error('   Otherwise: reflectt stop && reflectt start')
+        process.exit(1)
+      }
+    } catch {
+      // Port not responding — safe to start
+    }
+
     const { projectRoot, serverPath, useNode } = getRuntimePaths()
 
     if (!existsSync(serverPath)) {
