@@ -17,6 +17,49 @@ import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import type { Task } from './types.js'
 
+// ── Idempotency ─────────────────────────────────────────────────────────
+// Prevent duplicate notifications when the same PR merge is detected multiple
+// times (e.g. sweeper re-scans, multiple detection paths).
+// Key: "{prNumber}:{mergedTaskId || 'none'}" — TTL 7 days.
+
+const IDEMPOTENCY_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+const notifiedKeys = new Map<string, number>() // key → timestamp
+
+function makeIdempotencyKey(prNumber: number, mergedTaskId?: string): string {
+  return `${prNumber}:${mergedTaskId || 'none'}`
+}
+
+function isAlreadyNotified(key: string): boolean {
+  const ts = notifiedKeys.get(key)
+  if (!ts) return false
+  if (Date.now() - ts > IDEMPOTENCY_TTL_MS) {
+    notifiedKeys.delete(key)
+    return false
+  }
+  return true
+}
+
+function markNotified(key: string): void {
+  notifiedKeys.set(key, Date.now())
+  // Purge expired entries periodically (keep map small)
+  if (notifiedKeys.size > 100) {
+    const now = Date.now()
+    for (const [k, t] of notifiedKeys) {
+      if (now - t > IDEMPOTENCY_TTL_MS) notifiedKeys.delete(k)
+    }
+  }
+}
+
+/** Exported for testing */
+export function _resetIdempotency(): void {
+  notifiedKeys.clear()
+}
+
+/** Exported for testing */
+export function _getNotifiedKeys(): Map<string, number> {
+  return notifiedKeys
+}
+
 export interface ScopeOverlapMatch {
   taskId: string
   taskTitle: string
@@ -187,6 +230,13 @@ export async function scanAndNotify(
 
   const significant = result.matches.filter(m => m.confidence !== 'low')
   if (significant.length === 0) return result
+
+  // Idempotency: skip if we already notified for this PR+task combo
+  const idemKey = makeIdempotencyKey(prNumber, mergedTaskId)
+  if (isAlreadyNotified(idemKey)) {
+    return result
+  }
+  markNotified(idemKey)
 
   // Build notification message
   const lines = [
