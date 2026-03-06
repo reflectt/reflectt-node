@@ -2,8 +2,9 @@
 // Copyright (c) Reflectt AI
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { scanScopeOverlap } from '../src/scopeOverlap.js'
+import { scanScopeOverlap, scanAndNotify, _resetIdempotency, _getNotifiedKeys } from '../src/scopeOverlap.js'
 import { taskManager } from '../src/tasks.js'
+import { chatManager } from '../src/chat.js'
 
 const BASE_TASK = {
   createdBy: 'test',
@@ -141,5 +142,81 @@ describe('Scope Overlap Scanner', () => {
 
     const result = scanScopeOverlap(700, 'feat: pulse snapshot endpoint', 'kai/pulse-snapshot')
     expect(result.matches.length).toBeGreaterThan(0)
+  })
+})
+
+describe('Scope Overlap Idempotency', () => {
+  beforeEach(() => {
+    _resetIdempotency()
+    const all = taskManager.listTasks({})
+    for (const t of all) {
+      taskManager.deleteTask(t.id)
+    }
+  })
+
+  it('sends notification on first call', async () => {
+    // Create a task that will match
+    await taskManager.createTask({
+      ...BASE_TASK,
+      title: 'Add pulse snapshot feature endpoint',
+      assignee: 'rhythm',
+      status: 'todo',
+    })
+
+    const before = chatManager.getMessages({}).length
+    await scanAndNotify(800, 'feat: pulse snapshot endpoint', 'kai/pulse-snapshot')
+    const after = chatManager.getMessages({}).length
+    expect(after).toBeGreaterThan(before)
+  })
+
+  it('does NOT send duplicate notification on second call with same PR', async () => {
+    // Create a task that will match
+    await taskManager.createTask({
+      ...BASE_TASK,
+      title: 'Add pulse snapshot feature endpoint',
+      assignee: 'rhythm',
+      status: 'todo',
+    })
+
+    // First call — should notify
+    await scanAndNotify(900, 'feat: pulse snapshot endpoint', 'kai/pulse-snapshot')
+    const afterFirst = chatManager.getMessages({}).length
+
+    // Second call — same PR, should NOT notify again
+    await scanAndNotify(900, 'feat: pulse snapshot endpoint', 'kai/pulse-snapshot')
+    const afterSecond = chatManager.getMessages({}).length
+
+    expect(afterSecond).toBe(afterFirst)
+  })
+
+  it('tracks notified keys', async () => {
+    await taskManager.createTask({
+      ...BASE_TASK,
+      title: 'Add pulse snapshot feature endpoint',
+      assignee: 'rhythm',
+      status: 'todo',
+    })
+
+    await scanAndNotify(1000, 'feat: pulse snapshot endpoint', 'kai/pulse-snapshot', 'task-123')
+    const keys = _getNotifiedKeys()
+    expect(keys.has('1000:task-123')).toBe(true)
+  })
+
+  it('allows notification for different PR numbers', async () => {
+    await taskManager.createTask({
+      ...BASE_TASK,
+      title: 'Add pulse snapshot feature endpoint',
+      assignee: 'rhythm',
+      status: 'todo',
+    })
+
+    const before = chatManager.getMessages({}).length
+    await scanAndNotify(1100, 'feat: pulse snapshot endpoint', 'kai/pulse-snapshot')
+    const afterFirst = chatManager.getMessages({}).length
+    expect(afterFirst).toBeGreaterThan(before)
+
+    await scanAndNotify(1101, 'feat: pulse snapshot endpoint', 'kai/pulse-snapshot')
+    const afterSecond = chatManager.getMessages({}).length
+    expect(afterSecond).toBeGreaterThan(afterFirst)
   })
 })
