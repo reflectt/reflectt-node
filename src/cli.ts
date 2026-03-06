@@ -566,6 +566,16 @@ program
     const args = useNode ? [serverPath] : ['tsx', serverPath]
 
     if (options.detach) {
+      // Warn in ephemeral containers: detach means the server dies when the container exits
+      const inDocker = existsSync('/.dockerenv') || existsSync('/run/.containerenv')
+      if (inDocker) {
+        console.log('⚠️  Running inside a container. --detach will background the server,')
+        console.log('   but it will stop when the container exits.')
+        console.log('   Recommended: use `docker run -d` or `docker compose up -d` instead,')
+        console.log('   and run `reflectt start` (foreground) as the container entrypoint.')
+        console.log('')
+      }
+
       const pid = startServerDetached(config)
       const clientHost = (config.host === '0.0.0.0' || config.host === '::') ? '127.0.0.1' : config.host
       console.log(`⏳ Starting reflectt server (PID: ${pid})...`)
@@ -719,12 +729,25 @@ program
     if (pid) {
       try {
         process.kill(Number(pid), 0) // Check if process exists
-        console.log(`   Process: Running (PID: ${pid})`)
+        if (health) {
+          console.log(`   Process: Running (PID: ${pid})`)
+        } else {
+          // Process exists but /health not responding — not actually serving
+          console.log(`   Process: PID ${pid} exists but server is not responding on port ${activePort}`)
+          console.log(`   ⚠️  The process may be starting up, crashed, or the port is wrong.`)
+          console.log(`   Troubleshooting:`)
+          console.log(`     - Check logs: tail ~/Library/Logs/reflectt-node.log`)
+          console.log(`     - Kill stale: kill ${pid} && rm ${PID_FILE}`)
+          console.log(`     - Restart: reflectt stop && reflectt start`)
+          return
+        }
       } catch (err) {
         if (health) {
           console.log(`   Process: PID file stale, but server is responding on port ${activePort}`)
         } else {
           console.log(`   Process: Not found (stale PID file)`)
+          console.log(`   🧹 Cleaning up stale PID file...`)
+          try { unlinkSync(PID_FILE) } catch { /* ignore */ }
           return
         }
       }
@@ -733,6 +756,7 @@ program
         console.log(`   Process: No PID file, but server is responding on port ${activePort}`)
       } else {
         console.log(`   Process: Not running`)
+        console.log(`\n   Start with: reflectt start`)
         return
       }
     }
