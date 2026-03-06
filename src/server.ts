@@ -10578,13 +10578,13 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // ── Scope Overlap Scanner ──────────────────────────────────────────
   // POST /scope-overlap — trigger scope overlap scan after a PR merge
-  app.post<{ Body: { prNumber: number; prTitle: string; prBranch: string; mergedTaskId?: string; repo?: string; notify?: boolean } }>('/scope-overlap', async (request) => {
-    const { prNumber, prTitle, prBranch, mergedTaskId, repo, notify } = request.body || {} as any
+  app.post<{ Body: { prNumber: number; prTitle: string; prBranch: string; mergedTaskId?: string; repo?: string; mergeCommit?: string; notify?: boolean } }>('/scope-overlap', async (request) => {
+    const { prNumber, prTitle, prBranch, mergedTaskId, repo, mergeCommit, notify } = request.body || {} as any
     if (!prNumber || !prTitle || !prBranch) {
       return { success: false, error: 'Required: prNumber, prTitle, prBranch' }
     }
     if (notify !== false) {
-      const result = await scanAndNotify(prNumber, prTitle, prBranch, mergedTaskId, repo)
+      const result = await scanAndNotify(prNumber, prTitle, prBranch, mergedTaskId, repo, mergeCommit)
       return { success: true, ...result }
     }
     const result = scanScopeOverlap(prNumber, prTitle, prBranch, mergedTaskId, repo)
