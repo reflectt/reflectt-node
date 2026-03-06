@@ -10637,8 +10637,10 @@ If your heartbeat shows **no active task** and **no next task**:
         const inactiveMs = now - activity.last_active
         
         let status: PresenceStatus = 'offline'
-        if (inactiveMs < 10 * 60 * 1000) { // Active in last 10 minutes
+        if (inactiveMs < 15 * 60 * 1000) { // Active in last 15 minutes — match presence.ts IDLE_THRESHOLD_MS
           status = activity.tasks_completed_today > 0 ? 'working' : 'idle'
+        } else if (inactiveMs < 30 * 60 * 1000) { // 15-30 min — idle grace period before offline
+          status = 'idle'
         }
         
         presenceMap.set(activity.agent, {
@@ -10691,10 +10693,12 @@ If your heartbeat shows **no active task** and **no next task**:
         const now = Date.now()
         const inactiveMs = now - activity.last_active
         
-        // Infer status based on recent activity
+        // Infer status based on recent activity — match presence.ts thresholds
         let status: PresenceStatus = 'offline'
-        if (inactiveMs < 10 * 60 * 1000) { // Active in last 10 minutes
+        if (inactiveMs < 15 * 60 * 1000) { // Active in last 15 minutes
           status = activity.tasks_completed_today > 0 ? 'working' : 'idle'
+        } else if (inactiveMs < 30 * 60 * 1000) { // 15-30 min idle grace
+          status = 'idle'
         }
         
         presence = {
