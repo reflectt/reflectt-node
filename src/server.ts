@@ -39,6 +39,7 @@ import { detectApproval, applyApproval } from './chat-approval-detector.js'
 import { inboxManager } from './inbox.js'
 import { getFocus, setFocus, clearFocus, getFocusSummary } from './focus.js'
 import { generatePulse, generateCompactPulse } from './pulse.js'
+import { scanScopeOverlap, scanAndNotify } from './scopeOverlap.js'
 import { getDb } from './db.js'
 import type { AgentMessage, Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
@@ -10524,6 +10525,21 @@ If your heartbeat shows **no active task** and **no next task**:
       return generateCompactPulse()
     }
     return generatePulse()
+  })
+
+  // ── Scope Overlap Scanner ──────────────────────────────────────────
+  // POST /scope-overlap — trigger scope overlap scan after a PR merge
+  app.post<{ Body: { prNumber: number; prTitle: string; prBranch: string; mergedTaskId?: string; repo?: string; notify?: boolean } }>('/scope-overlap', async (request) => {
+    const { prNumber, prTitle, prBranch, mergedTaskId, repo, notify } = request.body || {} as any
+    if (!prNumber || !prTitle || !prBranch) {
+      return { success: false, error: 'Required: prNumber, prTitle, prBranch' }
+    }
+    if (notify !== false) {
+      const result = await scanAndNotify(prNumber, prTitle, prBranch, mergedTaskId, repo)
+      return { success: true, ...result }
+    }
+    const result = scanScopeOverlap(prNumber, prTitle, prBranch, mergedTaskId, repo)
+    return { success: true, ...result }
   })
 
   // ── Team Focus ─────────────────────────────────────────────────────
