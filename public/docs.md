@@ -120,7 +120,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/team/summary` | Compact team health summary |
 | GET | `/health/team/history` | Historical team health data |
 | GET | `/health/workflow` | Unified per-agent workflow state: doing-task age, last shipped timestamp, blocker flag, artifact path, and linked PR state. Query: `include_test=1` to include test-harness tasks. |
-| GET | `/health/reflection-pipeline` | Reflection→Insight→Promotion health signal. Returns recent reflection/insight/promotion counts, status (`healthy`\|`at_risk`\|`broken`), and alert timestamps. Triggers alert when reflections flow but insights remain zero past threshold. |
+| GET | `/health/reflection-pipeline` | Reflection→Insight→Promotion health signal. Returns recent reflection/insight/promotion counts, status (`idle`\|`healthy`\|`at_risk`\|`broken`), and alert timestamps. Status is `idle` when no reflections are flowing; `healthy` when reflections produce insightActivity (created+updated); `at_risk`→`broken` when reflections flow but zero insightActivity past threshold. |
 | GET | `/health/backlog` | Backlog readiness snapshot by lane/agent with ready-floor breach detection and stale-validating summary. Query: `include_test=1` to include test-harness tasks. |
 | GET | `/health/alert-preflight` | Alert-preflight guard metrics: total checked, canary-flagged, suppressed, false-positive rate, mode (canary/enforce/off). |
 | GET | `/health/alert-preflight/history` | Daily alert-preflight snapshots for observation window tracking. Returns per-day metrics + current session. |
