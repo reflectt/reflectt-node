@@ -227,6 +227,39 @@ async function main() {
     })
 
     const baseUrl = `http://${serverConfig.host}:${serverConfig.port}`
+
+    // ── Startup task count guard ──────────────────────────────────────
+    // Detect unexpected task count drops that indicate DB wipe/corruption.
+    try {
+      const db = getDb()
+      const currentCount = (db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number })?.count ?? 0
+      const lastKnown = db.prepare("SELECT value FROM kv WHERE key = 'startup_task_count'").get() as { value: string } | undefined
+      const lastCount = lastKnown ? parseInt(lastKnown.value, 10) : 0
+
+      // Save current count for next startup
+      db.prepare("INSERT OR REPLACE INTO kv (key, value) VALUES ('startup_task_count', ?)").run(String(currentCount))
+
+      if (lastCount > 0 && currentCount < lastCount * 0.5) {
+        const dropPct = Math.round((1 - currentCount / lastCount) * 100)
+        console.error(`🚨 [STARTUP GUARD] Task count dropped ${dropPct}%: ${lastCount} → ${currentCount}. Possible DB wipe/corruption!`)
+        console.error(`   Data dir: ${DATA_DIR}`)
+        console.error(`   DB path: ${join(DATA_DIR, 'reflectt.db')}`)
+        // Post to chat if possible (best-effort)
+        try {
+          const { chatManager } = await import('./chat.js')
+          await chatManager.sendMessage({
+            from: 'system',
+            content: `🚨 **STARTUP GUARD ALERT**: Task count dropped ${dropPct}% (${lastCount} → ${currentCount}). Possible DB wipe or corruption. Data dir: \`${DATA_DIR}\``,
+            channel: 'ops',
+          })
+        } catch { /* non-critical */ }
+      } else if (currentCount > 0) {
+        console.log(`📊 Startup guard: ${currentCount} tasks (previous: ${lastCount || 'first run'})`)
+      }
+    } catch (err) {
+      console.warn('[STARTUP GUARD] Could not run task count check:', err)
+    }
+
     console.log(`✅ Server running at ${baseUrl}`)
     console.log(`   - Dashboard: ${baseUrl}/dashboard`)
     console.log(`   - REST API: ${baseUrl}`)
