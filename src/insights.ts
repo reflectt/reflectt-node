@@ -882,7 +882,12 @@ export function listInsights(opts: InsightListOpts = {}): { insights: Insight[];
     `SELECT * FROM insights ${whereClause} ORDER BY score DESC, created_at DESC LIMIT ? OFFSET ?`
   ).all(...params, limit, offset) as InsightRow[]
 
-  return { insights: rows.map(rowToInsight), total }
+  const insights = rows.map(rowToInsight)
+
+  // NOTE: listInsights() is intentionally a pure read.
+  // Any hygiene operations (e.g. cooling down shipped candidates) should be
+  // performed explicitly by callers (routes/cron) via sweepShippedCandidates().
+  return { insights, total }
 }
 
 export function insightStats(): {
@@ -970,6 +975,57 @@ export function updateInsightStatus(
 }
 
 export { COOLDOWN_MS, PROMOTION_THRESHOLD, SCORING_ENGINE_VERSION as _SCORING_ENGINE_VERSION }
+
+// ── Shipped-candidate sweep ──────────────────────────────────────────────
+
+/**
+ * Proactive sweep: find candidate insights whose metadata.promoted_task_id
+ * points to a done/cancelled task and cooldown them.
+ * Returns the number of insights cooled down.
+ *
+ * Safe to call repeatedly — already-cooled insights won't be touched.
+ */
+export function sweepShippedCandidates(): number {
+  const db = getDb()
+  const TERMINAL_STATUSES = new Set(['done', 'cancelled'])
+  const COOLDOWN_14D = 14 * 24 * 60 * 60 * 1000
+  const now = Date.now()
+  let swept = 0
+
+  const rows = db.prepare(
+    `SELECT * FROM insights WHERE status = 'candidate'`
+  ).all() as InsightRow[]
+
+  const taskStmt = db.prepare('SELECT status FROM tasks WHERE id = ?')
+  const cooldownStmt = db.prepare(
+    `UPDATE insights SET status = 'cooldown', cooldown_until = ?, cooldown_reason = ?, updated_at = ? WHERE id = ?`
+  )
+
+  for (const row of rows) {
+    const ins = rowToInsight(row)
+    const meta = (ins.metadata as Record<string, unknown> | undefined) ?? {}
+    const ptId = meta.promoted_task_id as string | undefined
+
+    let reason: string | null = null
+
+    if (ptId) {
+      const taskRow = taskStmt.get(ptId) as { status: string } | undefined
+      if (taskRow && TERMINAL_STATUSES.has(taskRow.status)) {
+        reason = `promoted task ${ptId} is ${taskRow.status}`
+      }
+    }
+
+    // NOTE: We intentionally do not infer "already fixed" from free-text evidence.
+    // If we need that behavior, add an explicit structured triage flag (e.g. metadata.already_fixed=true).
+
+    if (reason) {
+      cooldownStmt.run(now + COOLDOWN_14D, reason, now, ins.id)
+      swept++
+    }
+  }
+
+  return swept
+}
 
 // ── Loop summary: top signals from the reflection loop ──
 
