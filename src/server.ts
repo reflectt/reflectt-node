@@ -132,7 +132,7 @@ import {
 } from './escalation.js'
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS, recordReflectionDuplicate } from './reflections.js'
-import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary } from './insights.js'
+import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary, sweepShippedCandidates } from './insights.js'
 import { patchInsightById } from './insight-mutation.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
@@ -8678,6 +8678,15 @@ export async function createServer(): Promise<FastifyInstance> {
 
   app.get('/insights', async (request) => {
     const query = request.query as Record<string, string>
+
+    // Hygiene: when listing candidate insights, proactively cool down any
+    // candidates whose promoted task is already done/cancelled so they don't resurface.
+    // Keep listInsights() itself pure (no DB writes on read).
+    if (query.status === 'candidate') {
+      const offset = query.offset ? Number(query.offset) || 0 : 0
+      if (offset === 0) sweepShippedCandidates()
+    }
+
     const result = listInsights({
       status: query.status,
       priority: query.priority,

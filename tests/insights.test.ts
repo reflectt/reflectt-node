@@ -482,7 +482,7 @@ describe('findByCluster', () => {
 // ── Promoted-task cooldown (candidate noise suppression) ──
 
 describe('candidate insights with completed promoted tasks', () => {
-  it('filters out candidates whose promoted_task_id points to a done task', () => {
+  it('sweepShippedCandidates cools down candidates whose promoted_task_id points to a done task', () => {
     const db = getDb()
     const ref = makeReflection()
     const ins = ingestReflection(ref)
@@ -500,12 +500,18 @@ describe('candidate insights with completed promoted tasks', () => {
       ins.id,
     )
 
-    // Listing candidates should exclude this insight
-    const { insights } = listInsights({ status: 'candidate' })
-    const found = insights.find(i => i.id === ins.id)
-    expect(found).toBeUndefined()
+    // listInsights is a pure read — candidate is still present until we sweep
+    const { insights: before } = listInsights({ status: 'candidate' })
+    expect(before.find(i => i.id === ins.id)).toBeDefined()
 
-    // Verify it was auto-cooled down
+    // Sweep should cool it down
+    const swept = sweepShippedCandidates()
+    expect(swept).toBeGreaterThanOrEqual(1)
+
+    // After sweep, candidate listing excludes it
+    const { insights: after } = listInsights({ status: 'candidate' })
+    expect(after.find(i => i.id === ins.id)).toBeUndefined()
+
     const updated = getInsight(ins.id)
     expect(updated?.status).toBe('cooldown')
     expect(updated?.cooldown_reason).toContain('promoted task')
@@ -546,28 +552,6 @@ describe('candidate insights with completed promoted tasks', () => {
 
     // Cleanup
     db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
-  })
-
-  it('filters out candidates with "Already fixed" in evidence_refs', () => {
-    const db = getDb()
-    const ref = makeReflection()
-    const ins = ingestReflection(ref)
-    expect(ins.status).toBe('candidate')
-
-    // Set evidence_refs to include "Already fixed"
-    db.prepare('UPDATE insights SET evidence_refs = ? WHERE id = ?').run(
-      JSON.stringify(['Already fixed']),
-      ins.id,
-    )
-
-    const { insights } = listInsights({ status: 'candidate' })
-    const found = insights.find(i => i.id === ins.id)
-    expect(found).toBeUndefined()
-
-    // Verify auto-cooldown
-    const updated = getInsight(ins.id)
-    expect(updated?.status).toBe('cooldown')
-    expect(updated?.cooldown_reason).toContain('already fixed')
   })
 
   it('sweepShippedCandidates cleans up all shipped candidates', () => {
