@@ -134,7 +134,7 @@ import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS, recordReflectionDuplicate } from './reflections.js'
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary, sweepShippedCandidates } from './insights.js'
 import { queryActivity, ACTIVITY_SOURCES } from './activity.js'
-import { patchInsightById } from './insight-mutation.js'
+import { patchInsightById, cooldownInsightById, closeInsightById } from './insight-mutation.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
 import { listLineage, getLineage, lineageStats } from './lineage.js'
@@ -8837,6 +8837,119 @@ export async function createServer(): Promise<FastifyInstance> {
           ...(typeof metadata.cluster_key_override === 'string' ? { cluster_key_override: metadata.cluster_key_override } : {}),
         },
       } : {}),
+    })
+
+    if (!result.success) {
+      const notFound = result.error === 'Insight not found'
+      reply.code(notFound ? 404 : 400)
+      return { success: false, error: result.error }
+    }
+
+    return { success: true, insight: result.insight }
+  })
+
+  // Narrow localhost-only admin endpoints for routine hygiene: cooldown/close.
+  // These avoid enabling the broader PATCH /insights/:id mutation API.
+  app.post<{ Params: { id: string } }>('/insights/:id/cooldown', async (request, reply) => {
+    const ip = String((request as any).ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'Forbidden: localhost-only endpoint',
+        hint: `Request ip (${ip || 'unknown'}) is not loopback`,
+      }
+    }
+
+    const requiredToken = process.env.REFLECTT_INSIGHT_MUTATION_TOKEN
+    if (requiredToken) {
+      const raw = (request.headers as any)['x-reflectt-admin-token']
+      let provided = Array.isArray(raw) ? raw[0] : raw
+      const auth = (request.headers as any).authorization
+      if ((!provided || typeof provided !== 'string') && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+        provided = auth.slice('Bearer '.length)
+      }
+
+      if (typeof provided !== 'string' || provided !== requiredToken) {
+        reply.code(403)
+        return {
+          success: false,
+          error: 'Forbidden: missing/invalid admin token',
+          hint: 'Provide x-reflectt-admin-token header (or Authorization: Bearer ...) matching REFLECTT_INSIGHT_MUTATION_TOKEN.'
+        }
+      }
+    }
+
+    const body = (request.body ?? {}) as Record<string, unknown>
+    const actor = typeof body.actor === 'string' ? body.actor : ''
+    const reason = typeof body.reason === 'string' ? body.reason : ''
+    const notes = typeof body.notes === 'string' ? body.notes : undefined
+    const cooldown_reason = typeof body.cooldown_reason === 'string' ? body.cooldown_reason : undefined
+
+    const cooldown_until = typeof body.cooldown_until === 'number' && Number.isFinite(body.cooldown_until)
+      ? body.cooldown_until
+      : (typeof body.cooldown_ms === 'number' && Number.isFinite(body.cooldown_ms)
+        ? Date.now() + Math.max(0, body.cooldown_ms)
+        : undefined)
+
+    const result = cooldownInsightById(request.params.id, {
+      actor,
+      reason,
+      ...(notes ? { notes } : {}),
+      ...(cooldown_until ? { cooldown_until } : {}),
+      ...(cooldown_reason ? { cooldown_reason } : {}),
+    })
+
+    if (!result.success) {
+      const notFound = result.error === 'Insight not found'
+      reply.code(notFound ? 404 : 400)
+      return { success: false, error: result.error }
+    }
+
+    return { success: true, insight: result.insight }
+  })
+
+  app.post<{ Params: { id: string } }>('/insights/:id/close', async (request, reply) => {
+    const ip = String((request as any).ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      return {
+        success: false,
+        error: 'Forbidden: localhost-only endpoint',
+        hint: `Request ip (${ip || 'unknown'}) is not loopback`,
+      }
+    }
+
+    const requiredToken = process.env.REFLECTT_INSIGHT_MUTATION_TOKEN
+    if (requiredToken) {
+      const raw = (request.headers as any)['x-reflectt-admin-token']
+      let provided = Array.isArray(raw) ? raw[0] : raw
+      const auth = (request.headers as any).authorization
+      if ((!provided || typeof provided !== 'string') && typeof auth === 'string' && auth.startsWith('Bearer ')) {
+        provided = auth.slice('Bearer '.length)
+      }
+
+      if (typeof provided !== 'string' || provided !== requiredToken) {
+        reply.code(403)
+        return {
+          success: false,
+          error: 'Forbidden: missing/invalid admin token',
+          hint: 'Provide x-reflectt-admin-token header (or Authorization: Bearer ...) matching REFLECTT_INSIGHT_MUTATION_TOKEN.'
+        }
+      }
+    }
+
+    const body = (request.body ?? {}) as Record<string, unknown>
+    const actor = typeof body.actor === 'string' ? body.actor : ''
+    const reason = typeof body.reason === 'string' ? body.reason : ''
+    const notes = typeof body.notes === 'string' ? body.notes : undefined
+
+    const result = closeInsightById(request.params.id, {
+      actor,
+      reason,
+      ...(notes ? { notes } : {}),
     })
 
     if (!result.success) {
