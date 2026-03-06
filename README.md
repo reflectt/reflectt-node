@@ -17,6 +17,17 @@ Runs locally (no cloud required). If you’re using OpenClaw, it works well with
 
 ## Install
 
+### Quick try (no global install)
+
+```bash
+npx reflectt-node
+```
+
+Then open http://127.0.0.1:4445/dashboard (or the URL printed in your terminal).
+
+### Install globally
+
+
 ```bash
 npm install -g reflectt-node
 reflectt init
