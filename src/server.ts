@@ -133,6 +133,7 @@ import {
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS, recordReflectionDuplicate } from './reflections.js'
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary, sweepShippedCandidates } from './insights.js'
+import { queryActivity } from './activity.js'
 import { patchInsightById } from './insight-mutation.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
@@ -8676,6 +8677,32 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, insight, cluster_key: extractClusterKey(reflection) }
   })
 
+  // ── Activity Timeline ──────────────────────────────────────────────────
+
+  app.get('/activity', async (request) => {
+    const query = request.query as Record<string, string>
+
+    const range = query.range === '7d' ? '7d' as const : '24h' as const
+    const type = query.type ? query.type.split(',').map(t => t.trim()).filter(Boolean) : undefined
+    const agent = query.agent || undefined
+    const limit = query.limit ? Number(query.limit) : undefined
+    const after = query.after || undefined
+
+    try {
+      return queryActivity({ range, type, agent, limit, after })
+    } catch (err) {
+      request.log.error({ err }, 'Activity query failed')
+      throw err
+    }
+  })
+
+  app.get('/activity/sources', async () => {
+    return {
+      sources: ['tasks', 'chat', 'reflections', 'insights', 'presence'],
+      description: 'Allowed values for partial.missing[] and type filter',
+    }
+  })
+
   app.get('/insights', async (request) => {
     const query = request.query as Record<string, string>
 
@@ -9856,6 +9883,12 @@ If your heartbeat shows **no active task** and **no next task**:
           { method: 'GET', path: '/reflections', hint: 'List. Query: author, limit' },
         ],
       },
+      activity: {
+        description: 'Unified activity timeline',
+        endpoints: [
+          { method: 'GET', path: '/activity', hint: 'Timeline feed. Query: range (24h|7d), type, agent, limit, after (cursor)' },
+        ],
+      },
       system: {
         description: 'System health and discovery',
         endpoints: [
@@ -10555,21 +10588,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // ============ ACTIVITY FEED ENDPOINT ============
 
-  // Get recent activity across all systems
-  app.get('/activity', async (request, reply) => {
-    const query = request.query as Record<string, string>
-    const events = eventBus.getEvents({
-      agent: query.agent,
-      limit: boundedLimit(query.limit, DEFAULT_LIMITS.activity, MAX_LIMITS.activity),
-      since: parseEpochMs(query.since),
-    })
-    const payload = { events, count: events.length }
-    const lastModified = events.length > 0 ? Math.max(...events.map(e => e.timestamp || 0)) : undefined
-    if (applyConditionalCaching(request, reply, payload, lastModified)) {
-      return
-    }
-    return payload
-  })
+  // Legacy activity endpoint replaced by unified /activity timeline (see above)
 
   // ============ SECRET VAULT ENDPOINTS ============
 
