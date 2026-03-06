@@ -731,13 +731,22 @@ program
         if (health) {
           console.log(`   Process: Running (PID: ${pid})`)
         } else {
-          console.log(`   Process: PID ${pid} exists but /health not responding — server may be unhealthy`)
+          // Process exists but /health not responding — not actually serving
+          console.log(`   Process: PID ${pid} exists but server is not responding on port ${activePort}`)
+          console.log(`   ⚠️  The process may be starting up, crashed, or the port is wrong.`)
+          console.log(`   Troubleshooting:`)
+          console.log(`     - Check logs: tail ~/Library/Logs/reflectt-node.log`)
+          console.log(`     - Kill stale: kill ${pid} && rm ${PID_FILE}`)
+          console.log(`     - Restart: reflectt stop && reflectt start`)
+          return
         }
       } catch (err) {
         if (health) {
           console.log(`   Process: PID file stale, but server is responding on port ${activePort}`)
         } else {
           console.log(`   Process: Not found (stale PID file)`)
+          console.log(`   🧹 Cleaning up stale PID file...`)
+          try { unlinkSync(PID_FILE) } catch { /* ignore */ }
           return
         }
       }
@@ -746,6 +755,7 @@ program
         console.log(`   Process: No PID file, but server is responding on port ${activePort}`)
       } else {
         console.log(`   Process: Not running`)
+        console.log(`\n   Start with: reflectt start`)
         return
       }
     }
