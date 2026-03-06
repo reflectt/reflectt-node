@@ -17,6 +17,7 @@ import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import type { Task } from './types.js'
 import { execSync } from 'child_process'
+import { createHash } from 'crypto'
 import { processAutoMerge, generateRemediation } from './prAutoMerge.js'
 import { preflightCheck, type PreflightInput } from './alert-preflight.js'
 
@@ -132,6 +133,30 @@ const escalated = new Map<string, { level: 'warning' | 'critical'; at: number }>
 
 /** Track which orphan PRs we've already flagged */
 const flaggedOrphanPRs = new Set<string>()
+
+/**
+ * Track recently emitted sweeper digest fingerprints to avoid repeating
+ * unchanged digests (digest-level spam control).
+ */
+const DIGEST_SUPPRESSION_MS = 2 * 60 * 60 * 1000 // 2 hours
+const recentDigestFingerprints = new Map<string, number>()
+
+function pruneDigestFingerprints(now: number): void {
+  for (const [fp, ts] of recentDigestFingerprints) {
+    if (now - ts > DIGEST_SUPPRESSION_MS) recentDigestFingerprints.delete(fp)
+  }
+}
+
+function computeDigestFingerprint(violations: SweepViolation[]): string {
+  // Stable fingerprint of the set of violations.
+  // Intentionally excludes age_minutes and titles to avoid churn.
+  const stable = violations
+    .map(v => `${v.type}:${v.taskId}`)
+    .sort()
+    .join('|')
+
+  return createHash('sha256').update(stable).digest('hex').slice(0, 12)
+}
 
 /** Track sweep stats for the /execution-health endpoint */
 let lastSweepAt = 0
@@ -734,6 +759,17 @@ export function hasRequiredArtifacts(meta: Record<string, unknown>): boolean {
 async function escalateViolations(violations: SweepViolation[]): Promise<void> {
   if (violations.length === 0) return
 
+  // Digest-level dedupe: don't re-emit the same digest repeatedly while unchanged.
+  const now = Date.now()
+  pruneDigestFingerprints(now)
+  const fingerprint = computeDigestFingerprint(violations)
+  const lastEmittedAt = recentDigestFingerprints.get(fingerprint) || 0
+  if (lastEmittedAt && (now - lastEmittedAt) < DIGEST_SUPPRESSION_MS) {
+    logDryRun('sweeper_digest_suppressed', `fp=${fingerprint} ageMs=${now - lastEmittedAt}`)
+    return
+  }
+  recentDigestFingerprints.set(fingerprint, now)
+
   // ── Batch violations into a single summary message ─────────────────
   // Instead of spamming one message per violation, group them by type
   // and post a single digest. Reduces noise from N messages to 1.
@@ -785,6 +821,14 @@ async function escalateViolations(violations: SweepViolation[]): Promise<void> {
 
   console.log(`[Sweeper] Escalated ${violations.length} violation(s) (batched):`,
     violations.map(v => `${v.type}:${v.taskId}`).join(', '))
+}
+
+export function _resetSweeperDigestSuppressionForTest(): void {
+  recentDigestFingerprints.clear()
+}
+
+export async function _escalateViolationsForTest(violations: SweepViolation[]): Promise<void> {
+  return escalateViolations(violations)
 }
 
 // ── PR-State Drift Detection (webhook-triggered) ──────────────────────────
