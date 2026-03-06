@@ -352,10 +352,18 @@ function printStep(name: string, pass: boolean, detail: string) {
 
 const program = new Command()
 
+// Read version from package.json at runtime
+const PKG_VERSION = (() => {
+  try {
+    const pkgPath = join(import.meta.dirname ?? __dirname, '..', 'package.json')
+    return JSON.parse(readFileSync(pkgPath, 'utf-8')).version ?? '0.0.0'
+  } catch { return '0.0.0' }
+})()
+
 program
   .name('reflectt')
   .description('CLI for reflectt-node - local agent communication server')
-  .version('0.1.0')
+  .version(PKG_VERSION)
 
 // ============ INIT COMMAND ============
 program
