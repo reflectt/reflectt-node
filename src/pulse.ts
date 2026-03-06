@@ -16,6 +16,7 @@ import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
 import { getFocusSummary } from './focus.js'
 import { getBuildInfo } from './buildInfo.js'
+import { getPreflightMetrics } from './alert-preflight.js'
 import type { Task } from './types.js'
 
 export interface PulseAgent {
@@ -27,7 +28,8 @@ export interface PulseAgent {
 
 export interface PulseSnapshot {
   ts: number
-  deploy?: { version?: string; commit?: string; pid?: number; startedAt?: number }
+  deploy?: { version?: string; commit?: string; pid?: number; startedAt?: number; uptimeS?: number }
+  alertPreflight?: { mode: string; totalChecked: number; suppressed: number; wouldSuppressRate: number }
   focus?: { focus: string; setBy: string; setAt: number } | null
   board: { todo: number; doing: number; validating: number; done: number; blocked: number }
   agents: PulseAgent[]
@@ -37,6 +39,8 @@ export interface PulseSnapshot {
 
 export interface CompactPulse {
   ts: number
+  deploy?: string // e.g. "v0.1.5@a1b2c3d up:3h"
+  alertPreflight?: string // e.g. "enforce 42/50 suppress:84%"
   focus?: string | null
   board: string  // e.g. "T:3 D:2 V:1 ✓:5 B:0"
   agents: string[] // e.g. ["link:working→task-123(activity endpoint)", "pixel:working→task-456(UI scaffold)"]
@@ -51,9 +55,24 @@ function getDeployInfo(): PulseSnapshot['deploy'] {
       commit: info.gitShortSha || info.gitSha,
       pid: process.pid,
       startedAt: info.startedAtMs,
+      uptimeS: Math.round(info.uptime),
     }
   } catch {
     return { pid: process.pid }
+  }
+}
+
+function getAlertPreflightSummary(): PulseSnapshot['alertPreflight'] {
+  try {
+    const m = getPreflightMetrics()
+    return {
+      mode: m.mode,
+      totalChecked: m.totalChecked,
+      suppressed: m.suppressed,
+      wouldSuppressRate: m.wouldSuppressRate,
+    }
+  } catch {
+    return undefined
   }
 }
 
@@ -108,6 +127,7 @@ export function generatePulse(): PulseSnapshot {
   return {
     ts: Date.now(),
     deploy: getDeployInfo(),
+    alertPreflight: getAlertPreflightSummary(),
     focus: getFocusSummary(),
     board: { todo: todoCount, doing: doingCount, validating: validatingCount, done: doneCount, blocked: blockedCount },
     agents,
@@ -137,8 +157,19 @@ export function generateCompactPulse(): CompactPulse {
     `${r.taskId.slice(-12)}→${r.reviewer}`
   )
 
+  // Compact deploy string
+  const d = pulse.deploy
+  const uptimeHrs = d?.uptimeS ? `${Math.floor(d.uptimeS / 3600)}h` : '?'
+  const deployStr = d ? `v${d.version || '?'}@${(d.commit || '?').slice(0, 7)} up:${uptimeHrs}` : undefined
+
+  // Compact alert-preflight string
+  const ap = pulse.alertPreflight
+  const apStr = ap ? `${ap.mode} ${ap.suppressed}/${ap.totalChecked} suppress:${ap.wouldSuppressRate}%` : undefined
+
   return {
     ts: pulse.ts,
+    deploy: deployStr,
+    alertPreflight: apStr,
     focus: pulse.focus?.focus || null,
     board: boardStr,
     agents: agentStrs,
