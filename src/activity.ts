@@ -9,7 +9,10 @@ import { getDb } from './db.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export const ACTIVITY_SOURCES = ['tasks', 'reviews', 'chat', 'presence', 'reflections', 'insights'] as const
+// Sources = collectors that may be partially unavailable.
+// Note: "reviews" are emitted as a subset of task-history events (type prefix = review.*),
+// so they are intentionally NOT a top-level source.
+export const ACTIVITY_SOURCES = ['tasks', 'chat', 'presence', 'reflections', 'insights'] as const
 export type ActivitySource = typeof ACTIVITY_SOURCES[number]
 
 export type TimelineEventType =
@@ -472,7 +475,12 @@ export function queryActivity(opts: ActivityQuery = {}): ActivityResponse {
       if (isNaN(cursorMs)) cursorMs = null
     } catch { cursorMs = null }
   }
-  const effectiveToMs = cursorMs ?? toMs
+
+  // Pagination semantics: `after` is an opaque cursor representing the ts_ms of the
+  // last event seen on the previous page. We query strictly older events to avoid duplicates.
+  const effectiveToMs = cursorMs !== null
+    ? Math.max(0, cursorMs - 1)
+    : toMs
   const limit = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT)
 
   // Type filter — handle both string and string[]
@@ -485,7 +493,11 @@ export function queryActivity(opts: ActivityQuery = {}): ActivityResponse {
     if (!typeFilter) return true
     const mapping: Record<string, ActivitySource[]> = {
       task: ['tasks'], tasks: ['tasks'],
-      review: ['reviews'], reviews: ['reviews'],
+
+      // Reviews are derived from task history (review_action metadata), so requesting
+      // review events still requires collecting task history.
+      review: ['tasks'], reviews: ['tasks'],
+
       chat: ['chat'], presence: ['presence'],
       reflection: ['reflections'], reflections: ['reflections'],
       insight: ['insights'], insights: ['insights'],
