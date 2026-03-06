@@ -1,41 +1,59 @@
-# TASK-025vzgyh4 — Sweeper Digest dedupe/suppression (stop repeating unchanged digest)
+# QA Bundle — task-1772802018782-025vzgyh4
 
-Task: task-1772802018782-025vzgyh4
 PR: https://github.com/reflectt/reflectt-node/pull/696
 
 ## Root cause
+`Sweeper Digest` suppression was effectively **in-memory only** (either via a local fingerprint cache, or via `alert-preflight`’s short idempotency window). When `reflectt-node` restarted (deploy, crash, dev reload), that in-memory state reset and the same unchanged open violation(s) could get re-emitted again.
 
-The Sweeper Digest emitter was effectively deduped only by `alert-preflight`’s in-memory idempotent-key window:
+This is why we saw repeated identical digest notifications even though the underlying task/violation was unchanged.
 
-- `DEDUP_WINDOW_MS = 15m` (in `src/alert-preflight.ts`)
+## Fix (suppression key + window)
+In `src/executionSweeper.ts`:
 
-So if the underlying violations were unchanged, the digest would still be emitted again once that 15-minute window expired, which looks like ~4x/hour spam.
-
-## Fix
-
-Add digest-level suppression in `src/executionSweeper.ts`:
-
-- Compute a stable digest fingerprint from the *set* of violations: sorted `"{type}:{taskId}"` entries.
+- Compute a **stable digest fingerprint** from the set of violations: sorted `"{type}:{taskId}"` entries.
   - Intentionally ignores `age_minutes` and titles to avoid churn.
-- Maintain an in-memory map `fingerprint -> lastEmittedAt`.
-- Suppress emitting the digest again within a 2 hour window (`DIGEST_SUPPRESSION_MS = 2h`) when the fingerprint is unchanged.
+- Add **persistent** suppression using `SuppressionLedger` (SQLite) with a **2 hour** window:
+  - `category: "sweeper_digest"`
+  - `content: "fp=<fingerprint>"` (stable, avoids `age_minutes` churn)
+- Keep the existing in-process suppression map as a cheap extra guard within a single uptime.
 
-## Tests
+**Suppression window:** 2h
 
-Added unit tests:
+## Before / After
+**Before:** restart/cold-start could spam the same digest again for the same unchanged open violations.
 
-- `tests/sweeper-digest-dedupe.test.ts`
-  - suppresses repeated identical digests within window
-  - re-emits after window elapses
-  - does not suppress when the violation set changes
+**After:** identical digest fingerprints are suppressed for **2 hours even across restarts**. A new digest can still emit immediately if the violation set meaningfully changes (new fingerprint).
 
-Local proof:
+## Tests / Proof
+Unit tests updated in `tests/sweeper-digest-dedupe.test.ts`:
+
+- suppresses repeated identical digests within window
+- re-emits after window elapses
+- does not suppress when violation set changes
+- **new regression:** suppresses identical digests across an in-memory reset (simulated restart)
+
+Proof:
 
 ```bash
-npx vitest run tests/sweeper-digest-dedupe.test.ts
+npm test
 ```
 
-## Notes / tradeoffs
-
-- Suppression is in-memory (restart clears it). This is acceptable as a first reliability layer; primary goal is to stop frequent repeats while the process is running.
-- If we want cross-restart dedupe later, we can persist last digest fingerprint + timestamp to data/.
+## Review Packet
+```json
+{
+  "task_id": "task-1772802018782-025vzgyh4",
+  "pr_url": "https://github.com/reflectt/reflectt-node/pull/696",
+  "commit": "4d114d0ebbf82562d6c91dfcbdd79b5b7565fe3a",
+  "changed_files": [
+    ".gitignore",
+    "process/TASK-025vzgyh4-sweeper-digest-dedupe.md",
+    "src/executionSweeper.ts",
+    "tests/sweeper-digest-dedupe.test.ts"
+  ],
+  "artifact_path": "process/TASK-025vzgyh4-sweeper-digest-dedupe.md",
+  "caveats": [
+    "Suppression is keyed by digest fingerprint (type+taskId set); if the violation set changes, a new digest can emit immediately.",
+    "If PR head changes, update commit/changed_files to match (or set metadata.pr_integrity_override=true)."
+  ]
+}
+```
