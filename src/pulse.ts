@@ -15,6 +15,7 @@ import { taskManager } from './tasks.js'
 import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
 import { getFocusSummary } from './focus.js'
+import { getBuildInfo } from './buildInfo.js'
 import type { Task } from './types.js'
 
 export interface PulseAgent {
@@ -44,12 +45,12 @@ export interface CompactPulse {
 
 function getDeployInfo(): PulseSnapshot['deploy'] {
   try {
-    const buildInfo = require('./buildInfo.js')
+    const info = getBuildInfo()
     return {
-      version: buildInfo.version || process.env.npm_package_version,
-      commit: buildInfo.commit,
+      version: info.appVersion || process.env.npm_package_version,
+      commit: info.gitShortSha || info.gitSha,
       pid: process.pid,
-      startedAt: buildInfo.startedAt,
+      startedAt: info.startedAtMs,
     }
   } catch {
     return { pid: process.pid }

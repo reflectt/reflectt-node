@@ -10015,6 +10015,7 @@ If your heartbeat shows **no active task** and **no next task**:
         description: 'System health and discovery',
         endpoints: [
           { method: 'GET', path: '/health', hint: 'System health + version + stats' },
+          { method: 'GET', path: '/pulse', compact: true, hint: 'Team pulse snapshot: deploy + board + per-agent doing + reviews. Query: compact' },
           { method: 'GET', path: '/capabilities', hint: 'This endpoint. Query: category to filter' },
           { method: 'GET', path: '/me/:agent', compact: true, hint: 'Full dashboard. Use /heartbeat/:agent for polls.' },
           { method: 'GET', path: '/docs', hint: 'Full API reference (68K chars). Use /capabilities instead when possible.' },
