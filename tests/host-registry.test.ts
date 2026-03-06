@@ -3,6 +3,8 @@ import { getDb } from '../src/db.js'
 import { upsertHostHeartbeat, getHost, listHosts, removeHost } from '../src/host-registry.js'
 
 function clearHosts() {
+  // Defense-in-depth: only wipe in test mode (setup.ts sets REFLECTT_HOME to temp dir)
+  if (!process.env.REFLECTT_TEST_MODE) throw new Error('Refusing unscoped DELETE outside test mode')
   try { getDb().prepare('DELETE FROM hosts').run() } catch { /* table may not exist */ }
 }
 

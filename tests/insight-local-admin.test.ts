@@ -51,6 +51,8 @@ beforeAll(async () => {
 })
 
 beforeEach(() => {
+  // Defense-in-depth: only wipe in test mode (setup.ts sets REFLECTT_HOME to temp dir)
+  if (!process.env.REFLECTT_TEST_MODE) throw new Error('Refusing unscoped DELETE outside test mode')
   const db = getDb()
   try {
     db.prepare('DELETE FROM insights').run()

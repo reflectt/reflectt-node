@@ -35,6 +35,8 @@ beforeEach(() => {
     )
   `)
   // Clear between tests
+  // Defense-in-depth: only wipe in test mode (setup.ts sets REFLECTT_HOME to temp dir)
+  if (!process.env.REFLECTT_TEST_MODE) throw new Error('Refusing unscoped DELETE outside test mode')
   db.exec('DELETE FROM mention_rescue_state')
 })
 
