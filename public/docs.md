@@ -387,7 +387,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/pulse` | Team pulse snapshot: board counts + per-agent doing tasks + pending reviews + focus. Use `?compact=true` for <2000 char version |
+| GET | `/pulse` | Team pulse snapshot: board counts + per-agent doing tasks + pending reviews + focus + deploy info + alert-preflight mode. Use `?compact=true` for <2000 char version |
 | POST | `/scope-overlap` | Scan for task scope overlap after PR merge. Body: `{ "prNumber": 707, "prTitle": "...", "prBranch": "kai/task-...", "mergedTaskId?": "...", "notify?": true }` |
 | GET | `/focus` | Current team focus directive (included in heartbeat) |
 | POST | `/focus` | Set team focus. Body: `{ "directive": "...", "setBy": "kai", "expiresAt?": 1234, "tags?": ["shipping"] }` |
