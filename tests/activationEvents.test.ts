@@ -119,6 +119,20 @@ describe('Activation Funnel Events', () => {
     await emitActivationEvent('first_task_started', 'user-1', { taskId: 'task-123' })
     expect(hasCompletedEvent('user-1', 'first_task_started')).toBe(true)
   })
+
+  it('flags mutually exclusive preflight outcomes (pass+fail) and excludes from aggregates', async () => {
+    await emitActivationEvent('signup_completed', 'u1')
+    await emitActivationEvent('host_preflight_passed', 'u1')
+    await emitActivationEvent('host_preflight_failed', 'u1')
+
+    const state = getUserFunnelState('u1')
+    expect(state.flags).toContain('preflight_both_pass_and_fail')
+    expect(state.validForAggregation).toBe(false)
+
+    const funnel = getConversionFunnel()
+    const signup = funnel.find(s => s.step === 'signup_completed')!
+    expect(signup.reached).toBe(0) // user excluded from cohort
+  })
 })
 
 // ── Dashboard / Telemetry Tests ──
@@ -136,6 +150,22 @@ describe('Onboarding Telemetry Dashboard', () => {
         expect(step.reached).toBe(0)
         expect(step.conversionRate).toBe(0)
       }
+    })
+
+    it('never returns conversionRate > 1 (ignores users missing prereq steps)', async () => {
+      // u1 emits a late-step event without earlier steps; should not inflate conversion.
+      await emitActivationEvent('first_task_started', 'u1')
+      await emitActivationEvent('signup_completed', 'u2')
+
+      const funnel = getConversionFunnel()
+      for (const step of funnel) {
+        expect(step.conversionRate).toBeGreaterThanOrEqual(0)
+        expect(step.conversionRate).toBeLessThanOrEqual(1)
+      }
+
+      const started = funnel.find(s => s.step === 'first_task_started')!
+      // No ordered path to first_task_started exists in this setup.
+      expect(started.reached).toBe(0)
     })
 
     it('computes conversion rates between steps', async () => {
@@ -207,6 +237,17 @@ describe('Onboarding Telemetry Dashboard', () => {
       const preflightDrop = dist.find(s => s.step === 'host_preflight_passed')!
       expect(preflightDrop.droppedCount).toBe(1)
       expect(preflightDrop.reasons.some(r => r.reason === 'cloud-reachable')).toBe(true)
+    })
+
+    it('provides a non-unspecified bucket for workspace_ready drops', async () => {
+      await emitActivationEvent('signup_completed', 'u1')
+      await emitActivationEvent('host_preflight_passed', 'u1')
+      // u1 never reaches workspace_ready
+
+      const dist = getFailureDistribution()
+      const workspaceDrop = dist.find(s => s.step === 'workspace_ready')!
+      expect(workspaceDrop.droppedCount).toBe(1)
+      expect(workspaceDrop.reasons.some(r => r.reason === 'workspace_ready_not_emitted')).toBe(true)
     })
   })
 

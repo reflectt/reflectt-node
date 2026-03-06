@@ -258,6 +258,10 @@ export async function scanAndNotify(
       from: 'system',
       content: lines.join('\n'),
       channel: 'general',
+      // This notification is already idempotent at the source (PR number + merged task + commit).
+      // Bypass the suppression ledger so test runs and repeated CI suites don't swallow
+      // the first notification as a "duplicate".
+      metadata: { category: 'scope-overlap', bypass_budget: true },
     })
     markNotified(idemKey)
   } catch (err) {
