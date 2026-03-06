@@ -329,3 +329,56 @@ describe('cursor pagination exclusivity', () => {
     }
   })
 })
+
+describe('debug mode — grouping stats', () => {
+  it('returns grouping stats when debug=1 from localhost', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/activity?debug=1&limit=10',
+      remoteAddress: '127.0.0.1',
+    })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(body.debug).toBeDefined()
+    expect(body.debug.grouping).toBeDefined()
+    expect(body.debug.grouping).toHaveProperty('rawCount')
+    expect(body.debug.grouping).toHaveProperty('groupedCount')
+    expect(body.debug.grouping).toHaveProperty('droppedCount')
+    expect(body.debug.grouping).toHaveProperty('dropReasons')
+    expect(typeof body.debug.grouping.rawCount).toBe('number')
+    expect(typeof body.debug.grouping.droppedCount).toBe('number')
+  })
+
+  it('does NOT return debug stats without debug=1', async () => {
+    const res = await app.inject({ method: 'GET', url: '/activity?limit=5' })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    expect(body.debug).toBeUndefined()
+  })
+
+  it('droppedCount==0 for same-second multi-message inserts', async () => {
+    const db = getDb()
+    const now = Date.now()
+
+    // Insert 5 chat messages at the EXACT same timestamp in different channels
+    for (let i = 0; i < 5; i++) {
+      db.prepare(`INSERT INTO chat_messages (id, "from", content, timestamp, channel) VALUES (?, ?, ?, ?, ?)`)
+        .run(`msg-samesec-${now}-${i}`, `bot${i}`, `message ${i}`, now, `ch-${i}`)
+    }
+
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/activity?debug=1&type=chat.message&limit=50',
+        remoteAddress: '127.0.0.1',
+      })
+      expect(res.statusCode).toBe(200)
+      const body = JSON.parse(res.body)
+      expect(body.debug.grouping.droppedCount).toBe(0)
+    } finally {
+      for (let i = 0; i < 5; i++) {
+        db.prepare('DELETE FROM chat_messages WHERE id = ?').run(`msg-samesec-${now}-${i}`)
+      }
+    }
+  })
+})
