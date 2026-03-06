@@ -111,10 +111,25 @@ function rowToMessage(row: ChatMessageRow): AgentMessage {
   }
 }
 
+interface DropCounter {
+  total: number
+  rolling: { ts: number }[]
+  reasons: Record<string, number>
+}
+
+const DROP_WINDOW_MS = 60 * 60 * 1000  // 1 hour rolling window
+const DROP_ALERT_THRESHOLD = 10
+const DROP_ALERT_WINDOW_MS = 10 * 60 * 1000
+const DROP_ALERT_DEDUP_MS = 30 * 60 * 1000
+
 class ChatManager {
   private rooms = new Map<string, ChatRoom>()
   private subscribers = new Set<(message: AgentMessage) => void>()
   private initialized = false
+
+  // Drop tracking per agent
+  private dropCounters = new Map<string, DropCounter>()
+  private lastAlertAt = 0
 
   // Monotonic timestamp guard: ensure message timestamps (and ids) are strictly increasing.
   // This prevents conditional-caching + since-polling clients from missing messages when
@@ -402,6 +417,7 @@ class ChatManager {
       const dedupKey = (message.metadata as any)?.dedup_key as string | undefined
       if (this.checkDuplicate(message.from, channel, message.content, dedupKey)) {
         console.log(`[Chat/NoiseBudget] Suppressed duplicate from ${message.from} in #${channel}`)
+        this.recordDrop(message.from, 'duplicate')
         // Return a synthetic message so callers don't break
         return {
           ...message,
@@ -453,6 +469,7 @@ class ChatManager {
 
       if (check.isDuplicate) {
         console.log(`[Chat/SuppressionLedger] Suppressed duplicate (key=${dedupKey}) from ${message.from} in #${channel}`)
+        this.recordDrop(message.from, 'ledger-suppressed')
         return {
           ...message,
           id: `msg-${Date.now()}-ledger-suppressed`,
@@ -816,6 +833,51 @@ class ChatManager {
     return rows.map(rowToMessage).reverse()
   }
 
+  recordDrop(agent: string, reason: string) {
+    const now = Date.now()
+    let counter = this.dropCounters.get(agent)
+    if (!counter) {
+      counter = { total: 0, rolling: [], reasons: {} }
+      this.dropCounters.set(agent, counter)
+    }
+    counter.total++
+    counter.rolling.push({ ts: now })
+    counter.reasons[reason] = (counter.reasons[reason] || 0) + 1
+
+    // Prune rolling window
+    const cutoff = now - DROP_WINDOW_MS
+    counter.rolling = counter.rolling.filter(e => e.ts > cutoff)
+
+    // Alert check
+    const alertCutoff = now - DROP_ALERT_WINDOW_MS
+    const recentDrops = counter.rolling.filter(e => e.ts > alertCutoff).length
+    if (recentDrops >= DROP_ALERT_THRESHOLD && (now - this.lastAlertAt) > DROP_ALERT_DEDUP_MS) {
+      this.lastAlertAt = now
+      console.warn(`[Chat/DropAlert] Agent ${agent} dropped ${recentDrops} messages in ${DROP_ALERT_WINDOW_MS / 60000}m`)
+      void this.sendMessage({
+        from: 'system',
+        channel: 'ops',
+        content: `⚠️ **Chat Drop Alert**: Agent \`${agent}\` dropped ${recentDrops} messages in the last ${DROP_ALERT_WINDOW_MS / 60000} minutes. Check /health/chat for details.`,
+        metadata: { category: 'chat-drop-alert', bypass_budget: true },
+      })
+    }
+  }
+
+  getDropStats(): Record<string, { total: number; rolling_1h: number; reasons: Record<string, number> }> {
+    const now = Date.now()
+    const cutoff = now - DROP_WINDOW_MS
+    const result: Record<string, { total: number; rolling_1h: number; reasons: Record<string, number> }> = {}
+    for (const [agent, counter] of this.dropCounters) {
+      counter.rolling = counter.rolling.filter(e => e.ts > cutoff)
+      result[agent] = {
+        total: counter.total,
+        rolling_1h: counter.rolling.length,
+        reasons: { ...counter.reasons },
+      }
+    }
+    return result
+  }
+
   getStats() {
     const db = getDb()
     const totalRow = db.prepare('SELECT COUNT(*) as count FROM chat_messages').get() as { count: number } | undefined
@@ -825,6 +887,7 @@ class ChatManager {
       rooms: this.rooms.size,
       subscribers: this.subscribers.size,
       initialized: this.initialized,
+      drops: this.getDropStats(),
     }
   }
 }
