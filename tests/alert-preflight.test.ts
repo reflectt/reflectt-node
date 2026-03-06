@@ -231,6 +231,13 @@ describe('alert-preflight', () => {
       const result = preflightCheck(input)
       expect(result.proceed).toBe(false) // enforce: actually suppresses
       expect(result.reason).toContain('status drift')
+
+      // Metrics semantics: in enforce mode wouldSuppressRate should reflect actual suppressed/checked.
+      const metrics = getPreflightMetrics()
+      expect(metrics.mode).toBe('enforce')
+      expect(metrics.totalChecked).toBeGreaterThan(0)
+      expect(metrics.suppressed).toBeGreaterThan(0)
+      expect(metrics.wouldSuppressRate).toBeGreaterThan(0)
     })
   })
 

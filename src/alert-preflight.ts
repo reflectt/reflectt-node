@@ -322,15 +322,20 @@ export function getPreflightMetrics(): {
   const p95Index = Math.floor(sorted.length * 0.95)
   const latencyP95 = sorted.length > 0 ? sorted[p95Index] ?? 0 : 0
 
+  const mode = getPreflightMode()
+  const wouldSuppressNumerator = mode === 'enforce' ? metrics.suppressed : metrics.canaryFlagged
+
   return {
     totalChecked: metrics.totalChecked,
     suppressed: metrics.suppressed,
     canaryFlagged: metrics.canaryFlagged,
+    // In canary: % of checks that would have been suppressed under enforce.
+    // In enforce: % of checks actually suppressed.
     wouldSuppressRate: metrics.totalChecked > 0
-      ? Math.round((metrics.canaryFlagged / metrics.totalChecked) * 10000) / 100
+      ? Math.round((wouldSuppressNumerator / metrics.totalChecked) * 10000) / 100
       : 0,
     latencyP95: Math.round(latencyP95 * 100) / 100,
-    mode: getPreflightMode(),
+    mode,
     countsByReason: { ...metrics.countsByReason },
     countsByAlertType: { ...metrics.countsByAlertType },
   }
@@ -417,10 +422,14 @@ function backfillFromAuditLog(): void {
         day.total++
         if (entry.alertType) day.countsByAlertType[entry.alertType] = (day.countsByAlertType[entry.alertType] || 0) + 1
         if (entry.category) {
-          day.flagged++ // any categorized entry = would-be suppression
+          // Categorized entries represent a suppression reason (stale_state, dedup, etc.)
           day.countsByReason[entry.category] = (day.countsByReason[entry.category] || 0) + 1
         }
-        if (entry.mode === 'canary' && !entry.proceed) day.flagged++
+
+        // For canary runs, a suppression candidate increments flagged.
+        if (entry.mode === 'canary' && entry.category) day.flagged++
+
+        // For enforce runs, an actual suppression increments suppressed.
         if (entry.mode === 'enforce' && !entry.proceed) day.suppressed++
       } catch { /* skip malformed */ }
     }
@@ -477,8 +486,10 @@ export function snapshotDailyMetrics(): void {
     canaryFlagged: metrics.canaryFlagged,
     latencyP95: Math.round(latencyP95 * 100) / 100,
     mode: getPreflightMode(),
+    // In canary: canaryFlagged/totalChecked. In enforce: suppressed/totalChecked.
+    // Note: this snapshot captures the mode at snapshot time.
     wouldSuppressRate: metrics.totalChecked > 0
-      ? Math.round((metrics.canaryFlagged / metrics.totalChecked) * 10000) / 100
+      ? Math.round((((getPreflightMode() === 'enforce' ? metrics.suppressed : metrics.canaryFlagged) / metrics.totalChecked)) * 10000) / 100
       : 0,
     countsByReason: { ...metrics.countsByReason },
     countsByAlertType: { ...metrics.countsByAlertType },
