@@ -17,6 +17,39 @@ import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import type { Task } from './types.js'
 
+/**
+ * Idempotency ledger — prevents duplicate scope-overlap notifications.
+ * Keyed by `${repo}:${prNumber}:${mergeCommit || branch}`.
+ * Entries expire after 7 days.
+ */
+const IDEM_TTL_MS = 7 * 24 * 60 * 60 * 1000
+const notifiedLedger = new Map<string, number>()
+
+function idempotencyKey(prNumber: number, prBranch: string, repo?: string): string {
+  return `${repo || 'unknown'}:${prNumber}:${prBranch}`
+}
+
+function wasAlreadyNotified(key: string): boolean {
+  const ts = notifiedLedger.get(key)
+  if (!ts) return false
+  if (Date.now() - ts > IDEM_TTL_MS) {
+    notifiedLedger.delete(key)
+    return false
+  }
+  return true
+}
+
+function markNotified(key: string): void {
+  notifiedLedger.set(key, Date.now())
+  // Prune expired entries (keep ledger small)
+  if (notifiedLedger.size > 500) {
+    const now = Date.now()
+    for (const [k, v] of notifiedLedger) {
+      if (now - v > IDEM_TTL_MS) notifiedLedger.delete(k)
+    }
+  }
+}
+
 export interface ScopeOverlapMatch {
   taskId: string
   taskTitle: string
@@ -188,6 +221,10 @@ export async function scanAndNotify(
   const significant = result.matches.filter(m => m.confidence !== 'low')
   if (significant.length === 0) return result
 
+  // Idempotency: don't notify twice for the same PR merge
+  const iKey = idempotencyKey(prNumber, prBranch, repo)
+  if (wasAlreadyNotified(iKey)) return result
+
   // Build notification message
   const lines = [
     `⚠️ **Scope overlap detected** after PR #${prNumber} merged ("${prTitle}")`,
@@ -208,5 +245,6 @@ export async function scanAndNotify(
     channel: 'general',
   })
 
+  markNotified(iKey)
   return result
 }
