@@ -14,6 +14,7 @@ import {
   computeScore,
   canPromote,
   scoreToPriority,
+  sweepShippedCandidates,
 } from '../src/insights.js'
 import {
   createReflection,
@@ -475,5 +476,134 @@ describe('findByCluster', () => {
     db.prepare('UPDATE insights SET status = ? WHERE id = ?').run('closed', ins.id)
 
     expect(findByCluster(ins.cluster_key)).toBeNull()
+  })
+})
+
+// ── Promoted-task cooldown (candidate noise suppression) ──
+
+describe('candidate insights with completed promoted tasks', () => {
+  it('filters out candidates whose promoted_task_id points to a done task', () => {
+    const db = getDb()
+    const ref = makeReflection()
+    const ins = ingestReflection(ref)
+    expect(ins.status).toBe('candidate')
+
+    // Create a task and mark it done
+    const taskId = `task-test-promoted-${Date.now()}`
+    db.prepare(
+      `INSERT INTO tasks (id, title, status, priority, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(taskId, 'Test promoted task', 'done', 'P2', 'test', Date.now(), Date.now())
+
+    // Set promoted_task_id in insight metadata
+    db.prepare('UPDATE insights SET metadata = ? WHERE id = ?').run(
+      JSON.stringify({ promoted_task_id: taskId }),
+      ins.id,
+    )
+
+    // Listing candidates should exclude this insight
+    const { insights } = listInsights({ status: 'candidate' })
+    const found = insights.find(i => i.id === ins.id)
+    expect(found).toBeUndefined()
+
+    // Verify it was auto-cooled down
+    const updated = getInsight(ins.id)
+    expect(updated?.status).toBe('cooldown')
+    expect(updated?.cooldown_reason).toContain('promoted task')
+
+    // Cleanup
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+  })
+
+  it('does NOT filter candidates without promoted_task_id', () => {
+    const ref = makeReflection()
+    const ins = ingestReflection(ref)
+    expect(ins.status).toBe('candidate')
+
+    const { insights } = listInsights({ status: 'candidate' })
+    const found = insights.find(i => i.id === ins.id)
+    expect(found).toBeDefined()
+  })
+
+  it('does NOT filter candidates whose promoted task is still in-progress', () => {
+    const db = getDb()
+    const ref = makeReflection()
+    const ins = ingestReflection(ref)
+
+    const taskId = `task-test-inprog-${Date.now()}`
+    db.prepare(
+      `INSERT INTO tasks (id, title, status, priority, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(taskId, 'In-progress task', 'doing', 'P2', 'test', Date.now(), Date.now())
+
+    db.prepare('UPDATE insights SET metadata = ? WHERE id = ?').run(
+      JSON.stringify({ promoted_task_id: taskId }),
+      ins.id,
+    )
+
+    const { insights } = listInsights({ status: 'candidate' })
+    const found = insights.find(i => i.id === ins.id)
+    expect(found).toBeDefined()
+    expect(found?.status).toBe('candidate')
+
+    // Cleanup
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+  })
+
+  it('filters out candidates with "Already fixed" in evidence_refs', () => {
+    const db = getDb()
+    const ref = makeReflection()
+    const ins = ingestReflection(ref)
+    expect(ins.status).toBe('candidate')
+
+    // Set evidence_refs to include "Already fixed"
+    db.prepare('UPDATE insights SET evidence_refs = ? WHERE id = ?').run(
+      JSON.stringify(['Already fixed']),
+      ins.id,
+    )
+
+    const { insights } = listInsights({ status: 'candidate' })
+    const found = insights.find(i => i.id === ins.id)
+    expect(found).toBeUndefined()
+
+    // Verify auto-cooldown
+    const updated = getInsight(ins.id)
+    expect(updated?.status).toBe('cooldown')
+    expect(updated?.cooldown_reason).toContain('already fixed')
+  })
+
+  it('sweepShippedCandidates cleans up all shipped candidates', () => {
+    const db = getDb()
+
+    // Create two insights: one with done promoted task, one clean
+    const ref1 = makeReflection({ pain: 'Sweep test 1' })
+    const ins1 = ingestReflection(ref1)
+    const ref2 = makeReflection({
+      pain: 'Sweep test 2 - clean',
+      tags: ['stage:build', 'family:config-error', 'unit:deploy'],
+    })
+    const ins2 = ingestReflection(ref2)
+
+    const taskId = `task-test-sweep-${Date.now()}`
+    db.prepare(
+      `INSERT INTO tasks (id, title, status, priority, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(taskId, 'Swept task', 'done', 'P2', 'test', Date.now(), Date.now())
+
+    db.prepare('UPDATE insights SET metadata = ? WHERE id = ?').run(
+      JSON.stringify({ promoted_task_id: taskId }),
+      ins1.id,
+    )
+
+    const swept = sweepShippedCandidates()
+    expect(swept).toBeGreaterThanOrEqual(1)
+
+    // ins1 should be cooled down
+    const updated1 = getInsight(ins1.id)
+    expect(updated1?.status).toBe('cooldown')
+
+    // ins2 should remain candidate
+    const updated2 = getInsight(ins2.id)
+    expect(updated2?.status).toBe('candidate')
+
+    // Cleanup
+    db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
   })
 })

@@ -882,7 +882,47 @@ export function listInsights(opts: InsightListOpts = {}): { insights: Insight[];
     `SELECT * FROM insights ${whereClause} ORDER BY score DESC, created_at DESC LIMIT ? OFFSET ?`
   ).all(...params, limit, offset) as InsightRow[]
 
-  return { insights: rows.map(rowToInsight), total }
+  let insights = rows.map(rowToInsight)
+
+  // Filter out candidates whose promoted task is already done/cancelled/resolvedExternally.
+  // Auto-cooldown them so they don't resurface (14-day cooldown).
+  if (opts.status === 'candidate' || !opts.status || opts.status === 'all') {
+    const TERMINAL_STATUSES = new Set(['done', 'cancelled', 'resolvedExternally'])
+    const COOLDOWN_14D = 14 * 24 * 60 * 60 * 1000
+    const taskStmt = db.prepare('SELECT status FROM tasks WHERE id = ?')
+    const cooldownStmt = db.prepare(
+      `UPDATE insights SET status = 'cooldown', cooldown_until = ?, cooldown_reason = ?, updated_at = ? WHERE id = ?`
+    )
+
+    insights = insights.filter(ins => {
+      if (ins.status !== 'candidate') return true
+
+      const meta = (ins.metadata as Record<string, unknown> | undefined) ?? {}
+      const ptId = meta.promoted_task_id as string | undefined
+
+      // Check 1: promoted_task_id points to a terminal task
+      if (ptId) {
+        const taskRow = taskStmt.get(ptId) as { status: string } | undefined
+        if (taskRow && TERMINAL_STATUSES.has(taskRow.status)) {
+          const now = Date.now()
+          cooldownStmt.run(now + COOLDOWN_14D, `promoted task ${ptId} is ${taskRow.status}`, now, ins.id)
+          return false
+        }
+      }
+
+      // Check 2: evidence_refs explicitly say "Already fixed" (manual signal)
+      const refs = ins.evidence_refs || []
+      if (refs.some(r => /already\s+fixed/i.test(String(r)))) {
+        const now = Date.now()
+        cooldownStmt.run(now + COOLDOWN_14D, 'evidence_refs indicate already fixed', now, ins.id)
+        return false
+      }
+
+      return true
+    })
+  }
+
+  return { insights, total }
 }
 
 export function insightStats(): {
@@ -970,6 +1010,61 @@ export function updateInsightStatus(
 }
 
 export { COOLDOWN_MS, PROMOTION_THRESHOLD, SCORING_ENGINE_VERSION as _SCORING_ENGINE_VERSION }
+
+// ── Shipped-candidate sweep ──────────────────────────────────────────────
+
+/**
+ * Proactive sweep: find all candidate insights whose promoted_task_id
+ * points to a done/cancelled task (or whose evidence says "already fixed")
+ * and cooldown them. Returns the number of insights cooled down.
+ *
+ * Safe to call repeatedly — already-cooled insights won't be touched.
+ */
+export function sweepShippedCandidates(): number {
+  const db = getDb()
+  const TERMINAL_STATUSES = new Set(['done', 'cancelled', 'resolvedExternally'])
+  const COOLDOWN_14D = 14 * 24 * 60 * 60 * 1000
+  const now = Date.now()
+  let swept = 0
+
+  const rows = db.prepare(
+    `SELECT * FROM insights WHERE status = 'candidate'`
+  ).all() as InsightRow[]
+
+  const taskStmt = db.prepare('SELECT status FROM tasks WHERE id = ?')
+  const cooldownStmt = db.prepare(
+    `UPDATE insights SET status = 'cooldown', cooldown_until = ?, cooldown_reason = ?, updated_at = ? WHERE id = ?`
+  )
+
+  for (const row of rows) {
+    const ins = rowToInsight(row)
+    const meta = (ins.metadata as Record<string, unknown> | undefined) ?? {}
+    const ptId = meta.promoted_task_id as string | undefined
+
+    let reason: string | null = null
+
+    if (ptId) {
+      const taskRow = taskStmt.get(ptId) as { status: string } | undefined
+      if (taskRow && TERMINAL_STATUSES.has(taskRow.status)) {
+        reason = `promoted task ${ptId} is ${taskRow.status}`
+      }
+    }
+
+    if (!reason) {
+      const refs = ins.evidence_refs || []
+      if (refs.some(r => /already\s+fixed/i.test(String(r)))) {
+        reason = 'evidence_refs indicate already fixed'
+      }
+    }
+
+    if (reason) {
+      cooldownStmt.run(now + COOLDOWN_14D, reason, now, ins.id)
+      swept++
+    }
+  }
+
+  return swept
+}
 
 // ── Loop summary: top signals from the reflection loop ──
 
