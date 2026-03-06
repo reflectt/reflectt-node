@@ -387,6 +387,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/pulse` | Team pulse snapshot: board counts + per-agent doing tasks + pending reviews + focus. Use `?compact=true` for <2000 char version |
 | GET | `/focus` | Current team focus directive (included in heartbeat) |
 | POST | `/focus` | Set team focus. Body: `{ "directive": "...", "setBy": "kai", "expiresAt?": 1234, "tags?": ["shipping"] }` |
 | DELETE | `/focus` | Clear team focus |
