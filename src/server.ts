@@ -133,7 +133,7 @@ import {
 import { slotManager as canvasSlots } from './canvas-slots.js'
 import { createReflection, getReflection, listReflections, countReflections, reflectionStats, validateReflection, ROLE_TYPES, SEVERITY_LEVELS, recordReflectionDuplicate } from './reflections.js'
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary, sweepShippedCandidates } from './insights.js'
-import { queryActivity } from './activity.js'
+import { queryActivity, ACTIVITY_SOURCES } from './activity.js'
 import { patchInsightById } from './insight-mutation.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
@@ -8698,7 +8698,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   app.get('/activity/sources', async () => {
     return {
-      sources: ['tasks', 'chat', 'reflections', 'insights', 'presence'],
+      sources: [...ACTIVITY_SOURCES],
       description: 'Allowed values for partial.missing[] and type filter',
     }
   })
