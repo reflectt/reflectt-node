@@ -218,6 +218,26 @@ To avoid this friction:
 
 ---
 
+## Local admin endpoints (insight hygiene)
+
+Sometimes you’ll want to manually cool down or close a noisy/stale insight candidate.
+
+These endpoints are **localhost-only** (loopback) and intended for operator hygiene:
+
+- `POST /insights/:id/cooldown` — set status to `cooldown` (defaults to 14d)
+- `POST /insights/:id/close` — set status to `closed`
+
+Example:
+
+```bash
+curl -X POST http://localhost:4445/insights/ins-.../cooldown \
+  -H 'content-type: application/json' \
+  -d '{"actor":"sage","reason":"stale candidate","notes":"already fixed"}'
+```
+
+Optional auth:
+- If you set `REFLECTT_INSIGHT_MUTATION_TOKEN`, include it via `x-reflectt-admin-token: ...` (or `Authorization: Bearer ...`).
+
 → **Source:** [github.com/reflectt/reflectt-node](https://github.com/reflectt/reflectt-node)
 → **Cloud:** [app.reflectt.ai](https://app.reflectt.ai)
 → **Bootstrap (for agents):** [reflectt.ai/bootstrap](https://reflectt.ai/bootstrap)

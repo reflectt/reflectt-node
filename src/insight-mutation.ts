@@ -7,6 +7,8 @@ import { getDb, safeJsonParse, safeJsonStringify } from './db.js'
 import { DATA_DIR } from './config.js'
 import { INSIGHT_STATUSES, type Insight, type InsightStatus } from './insights.js'
 
+const DEFAULT_COOLDOWN_14D_MS = 14 * 24 * 60 * 60 * 1000
+
 // ── Audit log ─────────────────────────────────────────────────────────────
 
 const AUDIT_FILE = process.env.REFLECTT_INSIGHT_MUTATION_AUDIT_FILE || path.join(DATA_DIR, 'insight-mutation-audit.jsonl')
@@ -60,6 +62,24 @@ export interface InsightPatchRequest {
   }
 }
 
+export interface InsightCooldownRequest {
+  actor: string
+  reason: string
+  /** Absolute ms timestamp; defaults to now+14d */
+  cooldown_until?: number
+  /** Stored in cooldown_reason; defaults to reason */
+  cooldown_reason?: string
+  /** Optional operator notes (merged into metadata.notes) */
+  notes?: string
+}
+
+export interface InsightCloseRequest {
+  actor: string
+  reason: string
+  /** Optional operator notes (merged into metadata.notes) */
+  notes?: string
+}
+
 function parseClusterKeyString(clusterKey: string): { workflow_stage: string; failure_family: string; impacted_unit: string } | null {
   const parts = clusterKey.split('::').map(p => p.trim()).filter(Boolean)
   if (parts.length !== 3) return null
@@ -76,6 +96,8 @@ function diff(before: Insight, after: Insight): Array<{ field: string; before: u
     'workflow_stage',
     'failure_family',
     'impacted_unit',
+    'cooldown_until',
+    'cooldown_reason',
     'metadata',
     'updated_at',
   ]
@@ -87,18 +109,8 @@ function diff(before: Insight, after: Insight): Array<{ field: string; before: u
   return changes
 }
 
-export function patchInsightById(insightId: string, patch: InsightPatchRequest): { success: boolean; insight?: Insight; error?: string } {
-  const db = getDb()
-
-  if (!patch.actor?.trim()) return { success: false, error: 'actor is required' }
-  if (!patch.reason?.trim()) return { success: false, error: 'reason is required' }
-
-  const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(insightId) as any
-  if (!row) return { success: false, error: 'Insight not found' }
-
-  // Defer to rowToInsight mapping via getInsight to keep consistent shapes.
-  const current = db.prepare('SELECT * FROM insights WHERE id = ?').get(insightId) as any
-  const before: Insight = {
+function rowToInsightShape(current: any): Insight {
+  return {
     id: current.id,
     cluster_key: current.cluster_key,
     workflow_stage: current.workflow_stage,
@@ -122,6 +134,26 @@ export function patchInsightById(insightId: string, patch: InsightPatchRequest):
     created_at: current.created_at,
     updated_at: current.updated_at,
   } as unknown as Insight
+}
+
+function mergeAllowedMetadata(beforeMeta: Record<string, unknown> | undefined, notes?: string, cluster_key_override?: string): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...(beforeMeta ?? {}) }
+  if (typeof notes === 'string') next.notes = notes
+  if (typeof cluster_key_override === 'string') next.cluster_key_override = cluster_key_override
+  return next
+}
+
+export function patchInsightById(insightId: string, patch: InsightPatchRequest): { success: boolean; insight?: Insight; error?: string } {
+  const db = getDb()
+
+  if (!patch.actor?.trim()) return { success: false, error: 'actor is required' }
+  if (!patch.reason?.trim()) return { success: false, error: 'reason is required' }
+
+  const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(insightId) as any
+  if (!row) return { success: false, error: 'Insight not found' }
+
+  const current = db.prepare('SELECT * FROM insights WHERE id = ?').get(insightId) as any
+  const before: Insight = rowToInsightShape(current)
 
   // Validate status
   if (patch.status !== undefined) {
@@ -196,6 +228,104 @@ export function patchInsightById(insightId: string, patch: InsightPatchRequest):
     reason: patch.reason,
     changes: diff(before, after),
     context: 'PATCH /insights/:id',
+  })
+
+  return { success: true, insight: after }
+}
+
+export function cooldownInsightById(
+  insightId: string,
+  req: InsightCooldownRequest,
+): { success: boolean; insight?: Insight; error?: string } {
+  const db = getDb()
+
+  if (!req.actor?.trim()) return { success: false, error: 'actor is required' }
+  if (!req.reason?.trim()) return { success: false, error: 'reason is required' }
+
+  const current = db.prepare('SELECT * FROM insights WHERE id = ?').get(insightId) as any
+  if (!current) return { success: false, error: 'Insight not found' }
+
+  const before = rowToInsightShape(current)
+
+  const now = Date.now()
+  const until = typeof req.cooldown_until === 'number' && Number.isFinite(req.cooldown_until)
+    ? req.cooldown_until
+    : now + DEFAULT_COOLDOWN_14D_MS
+
+  const cooldownReason = (req.cooldown_reason && String(req.cooldown_reason).trim())
+    ? String(req.cooldown_reason).trim()
+    : req.reason
+
+  // Merge metadata (allowlist only)
+  const beforeMetaStr = (current.metadata ?? null) as string | null
+  const nextMeta = mergeAllowedMetadata(before.metadata as any, req.notes)
+  const nextMetaStr = safeJsonStringify(nextMeta)
+
+  db.prepare(`
+    UPDATE insights SET
+      status = 'cooldown',
+      cooldown_until = ?,
+      cooldown_reason = ?,
+      metadata = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(until, cooldownReason, nextMetaStr ?? beforeMetaStr, now, insightId)
+
+  const updated = db.prepare('SELECT * FROM insights WHERE id = ?').get(insightId) as any
+  const after = rowToInsightShape(updated)
+
+  void recordInsightMutation({
+    timestamp: now,
+    insightId,
+    actor: req.actor,
+    reason: req.reason,
+    changes: diff(before, after),
+    context: 'POST /insights/:id/cooldown',
+  })
+
+  return { success: true, insight: after }
+}
+
+export function closeInsightById(
+  insightId: string,
+  req: InsightCloseRequest,
+): { success: boolean; insight?: Insight; error?: string } {
+  const db = getDb()
+
+  if (!req.actor?.trim()) return { success: false, error: 'actor is required' }
+  if (!req.reason?.trim()) return { success: false, error: 'reason is required' }
+
+  const current = db.prepare('SELECT * FROM insights WHERE id = ?').get(insightId) as any
+  if (!current) return { success: false, error: 'Insight not found' }
+
+  const before = rowToInsightShape(current)
+  const now = Date.now()
+
+  // Merge metadata (allowlist only)
+  const beforeMetaStr = (current.metadata ?? null) as string | null
+  const nextMeta = mergeAllowedMetadata(before.metadata as any, req.notes)
+  const nextMetaStr = safeJsonStringify(nextMeta)
+
+  db.prepare(`
+    UPDATE insights SET
+      status = 'closed',
+      cooldown_until = NULL,
+      cooldown_reason = NULL,
+      metadata = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).run(nextMetaStr ?? beforeMetaStr, now, insightId)
+
+  const updated = db.prepare('SELECT * FROM insights WHERE id = ?').get(insightId) as any
+  const after = rowToInsightShape(updated)
+
+  void recordInsightMutation({
+    timestamp: now,
+    insightId,
+    actor: req.actor,
+    reason: req.reason,
+    changes: diff(before, after),
+    context: 'POST /insights/:id/close',
   })
 
   return { success: true, insight: after }
