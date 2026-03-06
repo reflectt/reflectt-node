@@ -577,6 +577,18 @@ program
 
       if (healthy) {
         console.log('✅ Server is running!')
+        // Show deploy info for verification
+        try {
+          const controller = new AbortController()
+          const timeout = setTimeout(() => controller.abort(), 2000)
+          const dRes = await fetch(`http://${clientHost}:${config.port}/health/deploy`, { signal: controller.signal })
+          clearTimeout(timeout)
+          if (dRes.ok) {
+            const deploy = await dRes.json() as Record<string, unknown>
+            if (deploy.gitSha) console.log(`   Commit: ${String(deploy.gitSha).slice(0, 12)}`)
+            if (deploy.startedAt) console.log(`   Started: ${deploy.startedAt}`)
+          }
+        } catch { /* deploy endpoint not available */ }
       } else {
         console.log('⚠️  Server started but not responding yet (may still be booting)')
       }
@@ -722,6 +734,22 @@ program
       console.log('\n✅ Server Health')
       console.log(`   Status: ${health.status}`)
       console.log(`   Version: ${health.version || 'unknown'}`)
+
+      // Fetch deploy info (commit SHA + startedAt) for done_criteria #3
+      try {
+        const deployUrl = `http://${configHost}:${activePort}/health/deploy`
+        const controller = new AbortController()
+        const timeout = setTimeout(() => controller.abort(), 3000)
+        const dRes = await fetch(deployUrl, { signal: controller.signal })
+        clearTimeout(timeout)
+        if (dRes.ok) {
+          const deploy = await dRes.json() as Record<string, unknown>
+          if (deploy.gitSha) console.log(`   Commit: ${String(deploy.gitSha).slice(0, 12)}`)
+          if (deploy.startedAt) console.log(`   Started: ${deploy.startedAt}`)
+          if (deploy.pid) console.log(`   Server PID: ${deploy.pid}`)
+        }
+      } catch { /* deploy endpoint not available */ }
+
       console.log(`   Chat messages: ${(health.chat as Record<string, unknown>)?.messageCount || 0}`)
       const tasks = health.tasks as Record<string, unknown> | undefined
       console.log(`   Tasks: ${tasks?.total || 0}`)
