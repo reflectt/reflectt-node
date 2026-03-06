@@ -15,6 +15,7 @@ import { execSync } from 'node:child_process'
 import { taskManager } from './tasks.js'
 import type { Task } from './types.js'
 import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
+import { scanAndNotify } from './scopeOverlap.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -470,6 +471,15 @@ export function processAutoMerge(tasks: Task[]): {
         action: 'merge_skipped',
         detail: 'PR already merged, auto-populated close gates',
       })
+      // Scan for scope overlap
+      try {
+        const prMatch = prUrl.match(/\/pull\/(\d+)/)
+        const prNumber = prMatch ? parseInt(prMatch[1], 10) : 0
+        const branchMatch = (meta.branch as string) || (meta.pr_branch as string) || ''
+        if (prNumber > 0) {
+          scanAndNotify(prNumber, task.title, branchMatch, task.id).catch(() => {})
+        }
+      } catch { /* non-critical */ }
       continue
     }
 
@@ -525,6 +535,18 @@ export function processAutoMerge(tasks: Task[]): {
       // Try auto-close
       const closeResult = tryAutoCloseTask(task.id)
       if (closeResult.closed) autoCloses++
+
+      // Scan for scope overlap with open tasks
+      try {
+        const prMatch = prUrl.match(/\/pull\/(\d+)/)
+        const prNumber = prMatch ? parseInt(prMatch[1], 10) : 0
+        const branchMatch = (meta.branch as string) || (meta.pr_branch as string) || ''
+        if (prNumber > 0) {
+          scanAndNotify(prNumber, task.title, branchMatch, task.id).catch(() => {})
+        }
+      } catch {
+        // Non-critical — don't break merge flow
+      }
     } else {
       logMergeAttempt({
         taskId: task.id,
