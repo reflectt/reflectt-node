@@ -199,7 +199,7 @@ describe('Scope Overlap Idempotency', () => {
 
     await scanAndNotify(1000, 'feat: pulse snapshot endpoint', 'kai/pulse-snapshot', 'task-123')
     const keys = _getNotifiedKeys()
-    expect(keys.has('1000:task-123')).toBe(true)
+    expect(keys.has('default:1000:task-123:none')).toBe(true)
   })
 
   it('allows notification for different PR numbers', async () => {

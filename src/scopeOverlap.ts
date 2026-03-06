@@ -25,8 +25,8 @@ import type { Task } from './types.js'
 const IDEMPOTENCY_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 const notifiedKeys = new Map<string, number>() // key → timestamp
 
-function makeIdempotencyKey(prNumber: number, mergedTaskId?: string): string {
-  return `${prNumber}:${mergedTaskId || 'none'}`
+function makeIdempotencyKey(prNumber: number, mergedTaskId?: string, repo?: string, mergeCommit?: string): string {
+  return `${repo || 'default'}:${prNumber}:${mergedTaskId || 'none'}:${mergeCommit || 'none'}`
 }
 
 function isAlreadyNotified(key: string): boolean {
@@ -225,18 +225,18 @@ export async function scanAndNotify(
   prBranch: string,
   mergedTaskId?: string,
   repo?: string,
+  mergeCommit?: string,
 ): Promise<ScopeOverlapResult> {
   const result = scanScopeOverlap(prNumber, prTitle, prBranch, mergedTaskId, repo)
 
   const significant = result.matches.filter(m => m.confidence !== 'low')
   if (significant.length === 0) return result
 
-  // Idempotency: skip if we already notified for this PR+task combo
-  const idemKey = makeIdempotencyKey(prNumber, mergedTaskId)
+  // Idempotency: skip if we already notified for this exact PR+repo+commit combo
+  const idemKey = makeIdempotencyKey(prNumber, mergedTaskId, repo, mergeCommit)
   if (isAlreadyNotified(idemKey)) {
     return result
   }
-  markNotified(idemKey)
 
   // Build notification message
   const lines = [
@@ -252,11 +252,18 @@ export async function scanAndNotify(
 
   lines.push('', 'If your task is superseded by this PR, close it. If it\'s still needed, confirm and continue.')
 
-  await chatManager.sendMessage({
-    from: 'system',
-    content: lines.join('\n'),
-    channel: 'general',
-  })
+  // No-drop: only mark as notified AFTER successful send
+  try {
+    await chatManager.sendMessage({
+      from: 'system',
+      content: lines.join('\n'),
+      channel: 'general',
+    })
+    markNotified(idemKey)
+  } catch (err) {
+    console.error(`[ScopeOverlap] Failed to send notification for ${idemKey}, will retry on next scan:`, err)
+    // Do NOT mark as notified — allows retry on next trigger
+  }
 
   return result
 }
