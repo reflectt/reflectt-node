@@ -38,6 +38,7 @@ import { taskManager } from './tasks.js'
 import { detectApproval, applyApproval } from './chat-approval-detector.js'
 import { inboxManager } from './inbox.js'
 import { getFocus, setFocus, clearFocus, getFocusSummary } from './focus.js'
+import { generatePulse, generateCompactPulse } from './pulse.js'
 import { getDb } from './db.js'
 import type { AgentMessage, Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
@@ -10514,6 +10515,15 @@ If your heartbeat shows **no active task** and **no next task**:
     } catch (err: any) {
       return { success: false, error: err.message }
     }
+  })
+
+  // ── Team Pulse ─────────────────────────────────────────────────────
+  app.get<{ Querystring: { compact?: string } }>('/pulse', async (request) => {
+    const compact = request.query.compact === 'true' || request.query.compact === '1'
+    if (compact) {
+      return generateCompactPulse()
+    }
+    return generatePulse()
   })
 
   // ── Team Focus ─────────────────────────────────────────────────────
