@@ -31,8 +31,8 @@ function importTasks(db: Database.Database, records: unknown[]): number {
     INSERT OR REPLACE INTO tasks (
       id, title, description, status, assignee, reviewer, done_criteria,
       created_by, created_at, updated_at, priority, blocked_by, epic_id,
-      tags, metadata, team_id, comment_count
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      tags, metadata, team_id, comment_count, due_at, scheduled_for
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const insertMany = db.transaction((tasks: unknown[]) => {
@@ -55,7 +55,9 @@ function importTasks(db: Database.Database, records: unknown[]): number {
         safeJsonStringify(task.tags),
         safeJsonStringify(task.metadata),
         task.teamId ?? null,
-        0 // comment_count will be recalculated when comments are imported
+        0, // comment_count will be recalculated when comments are imported
+        task.dueAt ?? null,
+        task.scheduledFor ?? null,
       )
     }
   })
@@ -194,6 +196,8 @@ interface TaskRow {
   metadata: string | null
   team_id: string | null
   comment_count: number
+  due_at: number | null
+  scheduled_for: number | null
 }
 
 function rowToTask(row: TaskRow): Task {
@@ -214,6 +218,8 @@ function rowToTask(row: TaskRow): Task {
     tags: safeJsonParse<string[]>(row.tags),
     metadata: safeJsonParse<Record<string, unknown>>(row.metadata),
     teamId: row.team_id ?? undefined,
+    dueAt: row.due_at ?? undefined,
+    scheduledFor: row.scheduled_for ?? undefined,
   }
 }
 
@@ -728,8 +734,8 @@ class TaskManager {
         INSERT OR REPLACE INTO tasks (
           id, title, description, status, assignee, reviewer, done_criteria,
           created_by, created_at, updated_at, priority, blocked_by, epic_id,
-          tags, metadata, team_id, comment_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          tags, metadata, team_id, comment_count, due_at, scheduled_for
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         task.id,
         task.title,
@@ -747,7 +753,9 @@ class TaskManager {
         safeJsonStringify(task.tags),
         safeJsonStringify(task.metadata),
         task.teamId ?? null,
-        commentCount
+        commentCount,
+        task.dueAt ?? null,
+        task.scheduledFor ?? null,
       )
     } catch (err) {
       console.error(`[Tasks] Failed to write task ${task.id} to SQLite:`, err)

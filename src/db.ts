@@ -512,6 +512,15 @@ export function runMigrations(db: Database.Database): void {
         );
       `,
     },
+    {
+      version: 20,
+      sql: `
+        -- Task time awareness: due date and scheduled start
+        ALTER TABLE tasks ADD COLUMN due_at INTEGER;     -- epoch ms, when the task is due
+        ALTER TABLE tasks ADD COLUMN scheduled_for INTEGER;  -- epoch ms, when work should start
+        CREATE INDEX IF NOT EXISTS idx_tasks_due_at ON tasks(due_at);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
