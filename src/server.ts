@@ -9817,6 +9817,14 @@ If your heartbeat shows **no active task** and **no next task**:
           { method: 'GET', path: '/docs', hint: 'Full API reference (68K chars). Use /capabilities instead when possible.' },
         ],
       },
+      hosts: {
+        description: 'Multi-host registry and cloud connection',
+        endpoints: [
+          { method: 'GET', path: '/hosts', compact: true, hint: 'List registered hosts. Query: compact' },
+          { method: 'GET', path: '/cloud/status', hint: 'Cloud connection state + health summary' },
+          { method: 'GET', path: '/cloud/events', hint: 'Connection lifecycle event log. Query: limit' },
+        ],
+      },
       manage: {
         description: 'Remote node management (auth-gated)',
         endpoints: [
