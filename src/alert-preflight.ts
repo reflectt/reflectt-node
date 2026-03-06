@@ -54,6 +54,8 @@ interface PreflightMetrics {
   suppressed: number
   canaryFlagged: number
   latencies: number[]
+  countsByReason: Record<string, number>
+  countsByAlertType: Record<string, number>
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -76,6 +78,8 @@ const metrics: PreflightMetrics = {
   suppressed: 0,
   canaryFlagged: 0,
   latencies: [],
+  countsByReason: {},
+  countsByAlertType: {},
 }
 
 /** Map of idempotentKey → timestamp for dedup */
@@ -111,6 +115,7 @@ export function preflightCheck(input: PreflightInput): PreflightResult {
   }
 
   metrics.totalChecked++
+  metrics.countsByAlertType[input.alertType] = (metrics.countsByAlertType[input.alertType] || 0) + 1
 
   // 1. Compute state hash for idempotent key
   const stateHash = computeStateHash(input)
@@ -273,6 +278,7 @@ function recordLatency(ms: number): void {
 }
 
 function recordSuppression(input: PreflightInput, result: PreflightResult, category: string): void {
+  metrics.countsByReason[category] = (metrics.countsByReason[category] || 0) + 1
   const entry = {
     ts: Date.now(),
     taskId: input.taskId,
@@ -306,8 +312,11 @@ export function getPreflightMetrics(): {
   totalChecked: number
   suppressed: number
   canaryFlagged: number
+  wouldSuppressRate: number
   latencyP95: number
   mode: PreflightMode
+  countsByReason: Record<string, number>
+  countsByAlertType: Record<string, number>
 } {
   const sorted = [...metrics.latencies].sort((a, b) => a - b)
   const p95Index = Math.floor(sorted.length * 0.95)
@@ -317,8 +326,13 @@ export function getPreflightMetrics(): {
     totalChecked: metrics.totalChecked,
     suppressed: metrics.suppressed,
     canaryFlagged: metrics.canaryFlagged,
+    wouldSuppressRate: metrics.totalChecked > 0
+      ? Math.round((metrics.canaryFlagged / metrics.totalChecked) * 10000) / 100
+      : 0,
     latencyP95: Math.round(latencyP95 * 100) / 100,
     mode: getPreflightMode(),
+    countsByReason: { ...metrics.countsByReason },
+    countsByAlertType: { ...metrics.countsByAlertType },
   }
 }
 
@@ -328,6 +342,8 @@ export function resetPreflightMetrics(): void {
   metrics.suppressed = 0
   metrics.canaryFlagged = 0
   metrics.latencies = []
+  metrics.countsByReason = {}
+  metrics.countsByAlertType = {}
   recentKeys.clear()
 }
 
@@ -385,7 +401,11 @@ function backfillFromAuditLog(): void {
     }
 
     // Aggregate audit entries by date
-    const byDate = new Map<string, { total: number; flagged: number; suppressed: number }>()
+    const byDate = new Map<string, {
+      total: number; flagged: number; suppressed: number
+      countsByReason: Record<string, number>
+      countsByAlertType: Record<string, number>
+    }>()
     for (const line of auditContent.split('\n')) {
       try {
         const entry = JSON.parse(line)
@@ -393,10 +413,14 @@ function backfillFromAuditLog(): void {
         if (existingDates.has(date)) continue // already have a snapshot
 
         let day = byDate.get(date)
-        if (!day) { day = { total: 0, flagged: 0, suppressed: 0 }; byDate.set(date, day) }
+        if (!day) { day = { total: 0, flagged: 0, suppressed: 0, countsByReason: {}, countsByAlertType: {} }; byDate.set(date, day) }
         day.total++
-        if (entry.mode === 'canary' && !entry.proceed) day.flagged++ // shouldn't happen, canary always proceeds
-        if (entry.category) day.flagged++ // any categorized entry = would-be suppression
+        if (entry.alertType) day.countsByAlertType[entry.alertType] = (day.countsByAlertType[entry.alertType] || 0) + 1
+        if (entry.category) {
+          day.flagged++ // any categorized entry = would-be suppression
+          day.countsByReason[entry.category] = (day.countsByReason[entry.category] || 0) + 1
+        }
+        if (entry.mode === 'canary' && !entry.proceed) day.flagged++
         if (entry.mode === 'enforce' && !entry.proceed) day.suppressed++
       } catch { /* skip malformed */ }
     }
@@ -413,10 +437,12 @@ function backfillFromAuditLog(): void {
         canaryFlagged: day.flagged,
         latencyP95: 0, // not available from audit log
         mode: 'canary',
-        falsePositiveRate: day.total > 0
+        wouldSuppressRate: day.total > 0
           ? Math.round((day.flagged / day.total) * 10000) / 100
           : 0,
         backfilled: true,
+        countsByReason: Object.keys(day.countsByReason).length > 0 ? day.countsByReason : undefined,
+        countsByAlertType: Object.keys(day.countsByAlertType).length > 0 ? day.countsByAlertType : undefined,
       }
       try {
         appendFileSync(DAILY_FILE, JSON.stringify(snapshot) + '\n')
@@ -451,9 +477,11 @@ export function snapshotDailyMetrics(): void {
     canaryFlagged: metrics.canaryFlagged,
     latencyP95: Math.round(latencyP95 * 100) / 100,
     mode: getPreflightMode(),
-    falsePositiveRate: metrics.totalChecked > 0
+    wouldSuppressRate: metrics.totalChecked > 0
       ? Math.round((metrics.canaryFlagged / metrics.totalChecked) * 10000) / 100
       : 0,
+    countsByReason: { ...metrics.countsByReason },
+    countsByAlertType: { ...metrics.countsByAlertType },
   }
 
   try {
@@ -496,14 +524,28 @@ export function getDailySnapshots(): Array<{
   canaryFlagged: number
   latencyP95: number
   mode: string
-  falsePositiveRate: number
+  wouldSuppressRate: number
   backfilled?: boolean
+  countsByReason?: Record<string, number>
+  countsByAlertType?: Record<string, number>
 }> {
   try {
+    // Re-backfill if file is missing (e.g. deleted for refresh)
+    if (!existsSync(DAILY_FILE)) {
+      backfillFromAuditLog()
+    }
     if (!existsSync(DAILY_FILE)) return []
     const content = readFileSync(DAILY_FILE, 'utf8').trim()
     if (!content) return []
-    return content.split('\n').map((line: string) => JSON.parse(line))
+    return content.split('\n').map((line: string) => {
+      const entry = JSON.parse(line)
+      // Rename falsePositiveRate → wouldSuppressRate for clarity
+      if ('falsePositiveRate' in entry && !('wouldSuppressRate' in entry)) {
+        entry.wouldSuppressRate = entry.falsePositiveRate
+        delete entry.falsePositiveRate
+      }
+      return entry
+    })
   } catch {
     return []
   }
