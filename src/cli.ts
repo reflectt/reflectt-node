@@ -566,6 +566,15 @@ program
     const args = useNode ? [serverPath] : ['tsx', serverPath]
 
     if (options.detach) {
+      // Ephemeral container warning: detach is a trap in docker run --rm
+      const isContainer = existsSync('/.dockerenv') || existsSync('/run/.containerenv')
+      if (isContainer) {
+        console.warn('⚠️  Detected container environment. Using --detach here is risky:')
+        console.warn('   The server will stop when the container exits.')
+        console.warn('   Consider: reflectt start (foreground) or use Docker CMD directly.')
+        console.warn('')
+      }
+
       const pid = startServerDetached(config)
       const clientHost = (config.host === '0.0.0.0' || config.host === '::') ? '127.0.0.1' : config.host
       console.log(`⏳ Starting reflectt server (PID: ${pid})...`)
@@ -719,7 +728,11 @@ program
     if (pid) {
       try {
         process.kill(Number(pid), 0) // Check if process exists
-        console.log(`   Process: Running (PID: ${pid})`)
+        if (health) {
+          console.log(`   Process: Running (PID: ${pid})`)
+        } else {
+          console.log(`   Process: PID ${pid} exists but /health not responding — server may be unhealthy`)
+        }
       } catch (err) {
         if (health) {
           console.log(`   Process: PID file stale, but server is responding on port ${activePort}`)
