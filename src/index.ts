@@ -22,7 +22,7 @@ import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
 import { statSync, readdirSync, existsSync, readFileSync, writeFileSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { hostname as osHostname } from 'os'
+import { hostname as osHostname, homedir } from 'os'
 import { randomBytes } from 'crypto'
 
 function checkBuildFreshness(): void {
@@ -178,6 +178,31 @@ async function main() {
 
   // Docker identity isolation (must run before bootstrap)
   checkDockerIdentity()
+
+  // Branch guard: refuse to run non-main branch against production DB
+  // unless REFLECTT_ALLOW_BRANCH_DB=1 is set
+  try {
+    const { getBuildInfo } = await import('./buildInfo.js')
+    const build = getBuildInfo()
+    const branch = build.gitBranch || ''
+    const isMainBranch = branch === 'main' || branch === 'master' || branch === ''
+    const isProdDb = DATA_DIR === join(homedir(), '.reflectt', 'data')
+    const allowOverride = process.env.REFLECTT_ALLOW_BRANCH_DB === '1'
+
+    if (!isMainBranch && isProdDb && !allowOverride) {
+      console.error('')
+      console.error(`🚫 [BRANCH GUARD] Refusing to start: branch "${branch}" is using production DB path`)
+      console.error(`   DB path: ${DATA_DIR}`)
+      console.error(`   Only "main" branch should run against the production database.`)
+      console.error(`   To override: set REFLECTT_ALLOW_BRANCH_DB=1`)
+      console.error('')
+      process.exit(1)
+    } else if (!isMainBranch && isProdDb && allowOverride) {
+      console.warn(`⚠️  [BRANCH GUARD] Running branch "${branch}" against production DB (override active)`)
+    }
+  } catch {
+    // Non-fatal — skip if build-info not available
+  }
 
   // Docker bootstrap guidance (non-blocking)
   checkDockerBootstrap()
