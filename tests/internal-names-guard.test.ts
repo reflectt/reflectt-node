@@ -1,8 +1,8 @@
 /**
  * Tests for internal-names-guard config correctness.
  * Ensures:
- * - Internal hostnames (localhost, *.internal) are still caught
- * - Public URLs in dashboard.ts are allowed by the config
+ * - Public reflectt.ai URLs are still caught in shipped files by default
+ * - Those URLs are allowed only where explicitly intended (dashboard.ts + README)
  * - Agent names are still caught in shipped surfaces
  */
 import { describe, it, expect } from 'vitest'
@@ -46,9 +46,7 @@ function isBanned(filePath: string, lineText: string): boolean {
 }
 
 describe('internal-names-guard config', () => {
-  it('catches localhost in any shipped file', () => {
-    // localhost isn't currently banned, but internal domains are;
-    // this test validates that reflectt.ai domain patterns still fire on non-allowed files
+  it('catches app.reflectt.ai in non-allowed shipped files', () => {
     expect(isBanned('src/routes.ts', 'const url = "https://app.reflectt.ai/api"')).toBe(true)
   })
 

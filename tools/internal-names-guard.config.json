@@ -30,7 +30,7 @@
     },
     {
       "pathPattern": "^src/dashboard\\.ts$",
-      "pattern": "(app|docs)?\\.?reflectt\\.ai",
+      "pattern": "(?:app\\.|docs\\.)?reflectt\\.ai",
       "reason": "Public-facing URLs in dashboard copy (cloud signup, docs links)"
     }
   ]
