@@ -37,6 +37,7 @@ import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { detectApproval, applyApproval } from './chat-approval-detector.js'
 import { inboxManager } from './inbox.js'
+import { getFocus, setFocus, clearFocus, getFocusSummary } from './focus.js'
 import { getDb } from './db.js'
 import type { AgentMessage, Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
@@ -9838,12 +9839,15 @@ export async function createServer(): Promise<FastifyInstance> {
     const allDrops = chatManager.getDropStats()
     const agentDrops = allDrops[agent]
 
+    const focusSummary = getFocusSummary()
+
     return {
       agent, ts: Date.now(),
       active: slim(activeTask), next: pauseStatus.paused ? null : slim(nextTask),
       inbox: slimInbox, inboxCount: inbox.length,
       queue: { todo: todoTasks.length, doing: doingTasks.length, validating: validatingTasks.length },
       intensity: { preset: intensity.preset, pullsRemaining: pullBudget.remaining, wipLimit: intensity.limits.wipLimit },
+      ...(focusSummary ? { focus: focusSummary } : {}),
       ...(agentDrops ? { drops: { total: agentDrops.total, rolling_1h: agentDrops.rolling_1h } } : {}),
       ...(pauseStatus.paused ? { paused: true, pauseMessage: pauseStatus.message, resumesAt: pauseStatus.entry?.pausedUntil ?? null } : {}),
       action: pauseStatus.paused ? `PAUSED: ${pauseStatus.message}`
@@ -10510,6 +10514,29 @@ If your heartbeat shows **no active task** and **no next task**:
     } catch (err: any) {
       return { success: false, error: err.message }
     }
+  })
+
+  // ── Team Focus ─────────────────────────────────────────────────────
+  // GET /focus — current team focus directive
+  app.get('/focus', async () => {
+    const focus = getFocus()
+    return focus ? { focus } : { focus: null, message: 'No focus set. Use POST /focus to set one.' }
+  })
+
+  // POST /focus — set team focus directive
+  app.post<{ Body: { directive: string; setBy: string; expiresAt?: number; tags?: string[] } }>('/focus', async (request) => {
+    const { directive, setBy, expiresAt, tags } = request.body || {} as any
+    if (!directive || !setBy) {
+      return { success: false, error: 'Required: directive, setBy' }
+    }
+    const focus = setFocus(directive, setBy, { expiresAt, tags })
+    return { success: true, focus }
+  })
+
+  // DELETE /focus — clear team focus
+  app.delete('/focus', async () => {
+    clearFocus()
+    return { success: true, message: 'Focus cleared' }
   })
 
   // Get all agent presences
