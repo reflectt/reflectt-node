@@ -80,14 +80,15 @@ describe('GET /activity', () => {
   it('after cursor is exclusive (page 2 does not repeat last event from page 1)', async () => {
     const db = getDb()
     const now = Date.now()
-    const channel = `test-cursor-${now}`
+    const channel1 = `test-cursor-a-${now}`
+    const channel2 = `test-cursor-b-${now}`
 
-    // Insert 2 chat messages with distinct timestamps so ordering is deterministic.
+    // Insert 2 chat messages in different channels to avoid chat-burst grouping.
     db.prepare(`INSERT INTO chat_messages (id, "from", content, timestamp, channel) VALUES (?, ?, ?, ?, ?)`).run(
-      `chat-cursor-${now}-1`, 'testbot', 'first', now - 1000, channel
+      `chat-cursor-${now}-1`, 'testbot', 'first', now - 1000, channel1
     )
     db.prepare(`INSERT INTO chat_messages (id, "from", content, timestamp, channel) VALUES (?, ?, ?, ?, ?)`).run(
-      `chat-cursor-${now}-2`, 'testbot', 'second', now - 2000, channel
+      `chat-cursor-${now}-2`, 'testbot', 'second', now - 2000, channel2
     )
 
     try {
