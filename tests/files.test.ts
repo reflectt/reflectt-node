@@ -12,6 +12,8 @@ describe('files', () => {
     // Clean DB table between tests to avoid cross-test pollution
     const { getDb } = await import('../src/db.js')
     const db = getDb()
+    // Defense-in-depth: only wipe in test mode (setup.ts sets REFLECTT_HOME to temp dir)
+    if (!process.env.REFLECTT_TEST_MODE) throw new Error('Refusing unscoped DELETE outside test mode')
     try { db.exec('DELETE FROM files') } catch {}
   })
 
