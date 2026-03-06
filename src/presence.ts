@@ -72,6 +72,9 @@ class PresenceManager {
     // Reset daily activity at midnight
     this.scheduleDailyReset()
 
+    // Seed presence from recent activity so heartbeat doesn't send empty agents
+    this.seedPresenceFromRecentActivity()
+
     // Restore persisted focus states from SQLite
     this.loadFocusStates()
   }
@@ -132,6 +135,58 @@ class PresenceManager {
     } catch (err: any) {
       // DB might not be ready yet on very first boot — non-fatal
       console.warn('[Focus] Could not load persisted focus states:', err?.message)
+    }
+  }
+
+  /**
+   * Seed presence from recent chat/task activity on startup.
+   * Prevents the cold-start problem where heartbeat sends empty agents
+   * to cloud, making the sidebar show "No agents online".
+   */
+  private seedPresenceFromRecentActivity(): void {
+    try {
+      const db = getDb()
+      const now = Date.now()
+      const recentWindow = 10 * 60 * 1000 // 10 minutes
+
+      // Agents with recent chat messages
+      const chatAgents = db.prepare(
+        'SELECT DISTINCT "from" as agent FROM chat_messages WHERE timestamp > ? AND "from" NOT IN (\'system\', \'user\')'
+      ).all(now - recentWindow) as Array<{ agent: string }>
+
+      // Agents with recent task updates (assignees of doing tasks)
+      const taskAgents = db.prepare(
+        'SELECT DISTINCT assignee as agent FROM tasks WHERE status = \'doing\' AND assignee IS NOT NULL AND assignee != \'\''
+      ).all() as Array<{ agent: string }>
+
+      const agents = new Set<string>()
+      for (const row of [...chatAgents, ...taskAgents]) {
+        const name = (row.agent || '').toLowerCase().trim()
+        // Skip system/email senders and empty names
+        if (name && !name.startsWith('email:') && name !== 'system' && name !== 'user') {
+          agents.add(name)
+        }
+      }
+
+      let seeded = 0
+      for (const agent of agents) {
+        if (!this.presence.has(agent)) {
+          this.presence.set(agent, {
+            agent,
+            status: 'idle',
+            since: now,
+            lastUpdate: now,
+          })
+          seeded++
+        }
+      }
+
+      if (seeded > 0) {
+        console.log(`[Presence] Seeded ${seeded} agent(s) from recent activity: ${[...agents].join(', ')}`)
+      }
+    } catch (err: any) {
+      // Non-fatal — presence will populate as agents interact
+      console.warn('[Presence] Could not seed from recent activity:', err?.message)
     }
   }
 
