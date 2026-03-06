@@ -586,11 +586,17 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   }
 
   // ── Orphan PR detection ──────────────────────────────────────────────
-  // Scan all tasks with PR URLs where the task is done/cancelled but the PR
-  // was linked — these represent potential orphan open PRs
+  // Scan tasks with PR URLs where the task is cancelled (not done) but a PR
+  // was linked — these represent potential orphan open PRs.
+  //
+  // Note: We intentionally DO NOT scan `status=done` here.
+  // In practice, done tasks often have incomplete PR metadata (e.g. missing
+  // `pr_merged`), and relying on metadata-only checks creates noisy false
+  // positives that spam the sweeper digest. Live PR checks require `gh` and
+  // are intentionally avoided in the periodic sweep (execSync blocks).
+  // Use /drift-report for deeper investigation.
   const cancelledTasks = taskManager.listTasks({ status: 'cancelled' })
-  const doneAndCancelled = [...doneTasks, ...cancelledTasks]
-  for (const task of doneAndCancelled) {
+  for (const task of cancelledTasks) {
     const meta = (task.metadata || {}) as Record<string, unknown>
     const prUrl = extractPrUrl(meta)
     if (!prUrl || flaggedOrphanPRs.has(prUrl)) continue
