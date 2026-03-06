@@ -2237,6 +2237,16 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // ─── Request errors — last N errors for launch-day debugging ───
+  app.get('/health/chat', async () => {
+    const stats = chatManager.getStats()
+    return {
+      totalMessages: stats.totalMessages,
+      rooms: stats.rooms,
+      subscribers: stats.subscribers,
+      drops: stats.drops,
+    }
+  })
+
   app.get('/health/errors', async () => {
     const m = getRequestMetrics()
     return {
@@ -9648,12 +9658,17 @@ export async function createServer(): Promise<FastifyInstance> {
     const intensity = getIntensity()
     const pullBudget = checkPullBudget(agent)
 
+    // Drop stats for this agent
+    const allDrops = chatManager.getDropStats()
+    const agentDrops = allDrops[agent]
+
     return {
       agent, ts: Date.now(),
       active: slim(activeTask), next: pauseStatus.paused ? null : slim(nextTask),
       inbox: slimInbox, inboxCount: inbox.length,
       queue: { todo: todoTasks.length, doing: doingTasks.length, validating: validatingTasks.length },
       intensity: { preset: intensity.preset, pullsRemaining: pullBudget.remaining, wipLimit: intensity.limits.wipLimit },
+      ...(agentDrops ? { drops: { total: agentDrops.total, rolling_1h: agentDrops.rolling_1h } } : {}),
       ...(pauseStatus.paused ? { paused: true, pauseMessage: pauseStatus.message, resumesAt: pauseStatus.entry?.pausedUntil ?? null } : {}),
       action: pauseStatus.paused ? `PAUSED: ${pauseStatus.message}`
         : activeTask ? `Continue ${activeTask.id}`

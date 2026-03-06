@@ -103,6 +103,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/health/chat` | Chat subsystem health: message counts, drop counters per agent (total + rolling 1h + reasons). Returns `{ totalMessages, rooms, subscribers, drops }`. |
 | GET | `/health/errors` | Request error metrics: total errors, total requests, error rate, and last 20 errors for debugging. Returns `{ total_errors, total_requests, error_rate, recent[], timestamp }`. |
 | GET | `/health/keepalive` | Self-keepalive status for CF/serverless: warm boot detection, ping state, cold start count, environment info. |
 | GET | `/health/ping` | Ultra-lightweight keepalive — no DB access. Returns `{ status, uptime_seconds, ts }`. Use for cron triggers, load balancers, uptime monitors. |
