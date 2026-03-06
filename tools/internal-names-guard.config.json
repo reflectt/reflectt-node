@@ -27,6 +27,11 @@
       "pathPattern": "^README\\.md$",
       "pattern": "reflectt\\.ai",
       "reason": "Allowed in README marketing context"
+    },
+    {
+      "pathPattern": "^src/dashboard\\.ts$",
+      "pattern": "(app|docs)?\\.?reflectt\\.ai",
+      "reason": "Public-facing URLs in dashboard copy (cloud signup, docs links)"
     }
   ]
 }
