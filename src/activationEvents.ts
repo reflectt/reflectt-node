@@ -20,6 +20,7 @@
 
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { getAgentRoles } from './assignment.js'
 
 const DATA_DIR = process.env.REFLECTT_DATA_DIR || path.join(process.cwd(), 'data')
 const FUNNEL_FILE = path.join(DATA_DIR, 'activation-funnel.jsonl')
@@ -48,6 +49,10 @@ export interface UserFunnelState {
   events: Record<ActivationEventType, number | null> // timestamp or null
   currentStep: number   // 0-6, how far through the funnel
   completedAt: number | null // timestamp when all 6 completed
+  /** Data-quality flags (e.g. out-of-order timestamps, missing prereqs, pass+fail) */
+  flags?: string[]
+  /** Whether the user is considered valid for aggregate funnel telemetry */
+  validForAggregation?: boolean
 }
 
 /* ─── In-memory state ─── */
@@ -70,6 +75,70 @@ const FUNNEL_ORDER: ActivationEventType[] = [
   'first_team_message_sent',
   'day2_return_action',
 ]
+
+// ── Cohort filtering + data quality ─────────────────────────────────
+
+function isExcludedUserId(userId: string): boolean {
+  if (!userId) return true
+  const lower = userId.toLowerCase()
+  if (lower === 'system') return true
+  if (lower.startsWith('agent-')) return true
+  if (lower.startsWith('test-') || lower.startsWith('proof-') || lower.startsWith('lane-')) return true
+
+  // Exclude known agent ids/aliases from TEAM-ROLES.yaml (e.g. rhythm, link, kai)
+  try {
+    const roles = getAgentRoles()
+    for (const r of roles) {
+      if (r.name === userId) return true
+      if (Array.isArray(r.aliases) && r.aliases.includes(userId)) return true
+      if (typeof r.displayName === 'string' && r.displayName === userId) return true
+    }
+  } catch {
+    // ignore role-load issues; do not block telemetry
+  }
+
+  return false
+}
+
+function getUserFunnelFlags(userMap: Map<ActivationEventType, number>): string[] {
+  const flags: string[] = []
+
+  // Mutually exclusive outcomes (preflight pass + fail)
+  if (userMap.has('host_preflight_passed') && userMap.has('host_preflight_failed')) {
+    flags.push('preflight_both_pass_and_fail')
+  }
+
+  // Missing prerequisites and timestamp ordering problems
+  for (let i = 1; i < FUNNEL_ORDER.length; i++) {
+    const prev = FUNNEL_ORDER[i - 1]
+    const step = FUNNEL_ORDER[i]
+    const prevTs = userMap.get(prev)
+    const thisTs = userMap.get(step)
+
+    if (thisTs !== undefined && prevTs === undefined) {
+      flags.push(`missing_prereq:${step}`)
+    }
+
+    if (prevTs !== undefined && thisTs !== undefined && thisTs < prevTs) {
+      flags.push(`out_of_order:${prev}->${step}`)
+    }
+  }
+
+  return flags
+}
+
+function hasOrderedPath(userMap: Map<ActivationEventType, number>, stepIndex: number): boolean {
+  // stepIndex is index into FUNNEL_ORDER
+  let lastTs: number | null = null
+  for (let i = 0; i <= stepIndex; i++) {
+    const step = FUNNEL_ORDER[i]
+    const ts = userMap.get(step)
+    if (ts === undefined) return false
+    if (lastTs !== null && ts < lastTs) return false
+    lastTs = ts
+  }
+  return true
+}
 
 /* ─── Core API ─── */
 
@@ -153,7 +222,16 @@ export function getUserFunnelState(userId: string): UserFunnelState {
     ? Math.max(...Object.values(events).filter((v): v is number => v !== null))
     : null
 
-  return { userId, events, currentStep, completedAt }
+  const flags = userMap ? getUserFunnelFlags(userMap) : []
+
+  return {
+    userId,
+    events,
+    currentStep,
+    completedAt,
+    flags,
+    validForAggregation: !!userMap && flags.length === 0 && !isExcludedUserId(userId),
+  }
 }
 
 /**
@@ -179,7 +257,12 @@ export function getFunnelSummary(): {
   const funnelByUser: UserFunnelState[] = []
   let completedUsers = 0
 
+  let totalUsers = 0
+
   for (const userId of userFunnels.keys()) {
+    if (isExcludedUserId(userId)) continue
+    totalUsers++
+
     const state = getUserFunnelState(userId)
     funnelByUser.push(state)
 
@@ -193,7 +276,7 @@ export function getFunnelSummary(): {
   }
 
   return {
-    totalUsers: userFunnels.size,
+    totalUsers,
     stepCounts,
     completedUsers,
     funnelByUser,
@@ -300,26 +383,36 @@ export interface WeeklyTrend {
  */
 export function getConversionFunnel(): StepConversion[] {
   const conversions: StepConversion[] = []
-  let prevReached = userFunnels.size // total users = denominator for first step
+
+  // Cohort: exclude system/test/agent users; exclude invalid sequences/outcomes.
+  const cohort = Array.from(userFunnels.entries())
+    .filter(([userId]) => !isExcludedUserId(userId))
+    .map(([userId, userMap]) => ({ userId, userMap, flags: getUserFunnelFlags(userMap) }))
+    .filter(u => u.flags.length === 0)
+
+  let prevReached = cohort.length // denominator for first step
 
   for (let i = 0; i < FUNNEL_ORDER.length; i++) {
     const step = FUNNEL_ORDER[i]
-    let reached = 0
 
-    for (const userMap of userFunnels.values()) {
-      if (userMap.has(step)) reached++
+    // Reached = users with an ordered path through this step (all prior steps present and monotonic).
+    let reached = 0
+    for (const u of cohort) {
+      if (hasOrderedPath(u.userMap, i)) reached++
     }
 
-    // Compute median time from previous step
+    // Compute median time from previous step, only for users that reached this step via ordered path.
     let medianTimeMs: number | null = null
     if (i > 0) {
       const prevStep = FUNNEL_ORDER[i - 1]
       const deltas: number[] = []
-      for (const userMap of userFunnels.values()) {
-        const prevTs = userMap.get(prevStep)
-        const thisTs = userMap.get(step)
+      for (const u of cohort) {
+        if (!hasOrderedPath(u.userMap, i)) continue
+        const prevTs = u.userMap.get(prevStep)
+        const thisTs = u.userMap.get(step)
         if (prevTs !== undefined && thisTs !== undefined) {
-          deltas.push(thisTs - prevTs)
+          const d = thisTs - prevTs
+          if (d >= 0) deltas.push(d)
         }
       }
       if (deltas.length > 0) {
@@ -348,51 +441,64 @@ export function getConversionFunnel(): StepConversion[] {
 export function getFailureDistribution(): FailureDistribution[] {
   const distribution: FailureDistribution[] = []
 
+  const cohort = Array.from(userFunnels.entries())
+    .filter(([userId]) => !isExcludedUserId(userId))
+    .map(([userId, userMap]) => ({ userId, userMap, flags: getUserFunnelFlags(userMap) }))
+    .filter(u => u.flags.length === 0)
+
   for (let i = 0; i < FUNNEL_ORDER.length; i++) {
     const step = FUNNEL_ORDER[i]
     const prevStep = i > 0 ? FUNNEL_ORDER[i - 1] : null
 
-    // Count users who reached prev step but not this one
+    // Count users who reached prev step (ordered path) but not this one.
     let droppedCount = 0
     const reasonCounts = new Map<string, number>()
 
-    for (const [userId, userMap] of userFunnels.entries()) {
-      const reachedPrev = prevStep === null || userMap.has(prevStep)
-      const reachedThis = userMap.has(step)
+    for (const u of cohort) {
+      const reachedPrev = prevStep === null ? true : hasOrderedPath(u.userMap, i - 1)
+      const reachedThis = hasOrderedPath(u.userMap, i)
 
       if (reachedPrev && !reachedThis) {
         droppedCount++
 
-        // Check if there's a failure event with metadata
-        // For preflight: host_preflight_failed has failed_checks/first_blocker
-        const failEvent = step === 'host_preflight_passed'
-          ? eventLog.find(e => e.userId === userId && e.type === 'host_preflight_failed')
-          : null
-
-        if (failEvent?.metadata) {
-          const meta = failEvent.metadata
-          if (Array.isArray(meta.failed_checks)) {
-            for (const check of meta.failed_checks as string[]) {
-              reasonCounts.set(check, (reasonCounts.get(check) || 0) + 1)
+        // Preflight failures: use host_preflight_failed metadata (failed_checks/first_blocker)
+        if (step === 'host_preflight_passed') {
+          const failEvent = eventLog.find(e => e.userId === u.userId && e.type === 'host_preflight_failed')
+          const meta = failEvent?.metadata
+          if (meta) {
+            const fc: unknown = (meta as any).failed_checks
+            if (Array.isArray(fc)) {
+              for (const check of fc) {
+                const reason = String(check)
+                reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
+              }
+            } else if (typeof fc === 'string' && fc) {
+              const reason = fc
+              reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
+            } else if ((meta as any).first_blocker) {
+              const reason = String((meta as any).first_blocker)
+              reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
+            } else if ((meta as any).error) {
+              const reason = String((meta as any).error)
+              reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
             }
-          } else if (meta.first_blocker) {
-            const reason = String(meta.first_blocker)
-            reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
-          } else if (meta.error) {
-            const reason = String(meta.error)
-            reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
           }
         }
 
-        // Generic: check for any failure metadata on events at this step
-        const stepFailEvents = eventLog.filter(
-          e => e.userId === userId && e.metadata?.failedAt === step
-        )
-        for (const fe of stepFailEvents) {
-          const reason = String(fe.metadata?.reason || 'unknown')
-          reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
+        // Workspace-ready drops: we don't have a dedicated failure event type yet.
+        // Provide an actionable bucket instead of leaving everything "unspecified".
+        if (step === 'workspace_ready') {
+          reasonCounts.set('workspace_ready_not_emitted', (reasonCounts.get('workspace_ready_not_emitted') || 0) + 1)
         }
 
+        // Generic: check for explicit failure metadata on any events for this user.
+        const stepFailEvents = eventLog.filter(
+          e => e.userId === u.userId && (e.metadata as any)?.failedAt === step
+        )
+        for (const fe of stepFailEvents) {
+          const reason = String((fe.metadata as any)?.reason || 'unknown')
+          reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
+        }
       }
     }
 
@@ -451,6 +557,7 @@ export function getWeeklyTrends(weekCount = 12): WeeklyTrend[] {
 
     // Count events in this week window
     for (const event of eventLog) {
+      if (isExcludedUserId(event.userId)) continue
       if (event.timestamp >= mondayTs && event.timestamp <= sundayTs) {
         if (event.type in stepCounts) {
           stepCounts[event.type as ActivationEventType]++

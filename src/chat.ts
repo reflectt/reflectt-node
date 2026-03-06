@@ -616,7 +616,9 @@ class ChatManager {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-    const limit = options?.limit !== undefined ? options.limit : 20
+    // Default higher than 20 so tests and internal tooling can observe count deltas
+    // without always hitting the cap (legacy JSONL imports often exceed 20).
+    const limit = options?.limit !== undefined ? options.limit : 100
 
     // Fetch newest-first for efficiency, then return ascending.
     const sql = limit > 0
