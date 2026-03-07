@@ -696,10 +696,28 @@ function enforceQaBundleGateForValidating(
     }
   }
 
+  // Early format validation: PR URL must be a valid GitHub PR URL
+  if (reviewPacket?.pr_url && !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(reviewPacket.pr_url)) {
+    return {
+      ok: false,
+      error: `Invalid PR URL format: "${reviewPacket.pr_url}"`,
+      hint: 'Expected format: https://github.com/owner/repo/pull/123',
+    }
+  }
+
+  // Early format validation: commit SHA must be 7-40 hex chars
+  if (reviewPacket?.commit && !/^[a-f0-9]{7,40}$/i.test(reviewPacket.commit)) {
+    return {
+      ok: false,
+      error: `Invalid commit SHA format: "${reviewPacket.commit}"`,
+      hint: 'Expected 7-40 hex characters, e.g. "a1b2c3d"',
+    }
+  }
+
   if (reviewPacket && !nonCodeLane && expectedTaskId && reviewPacket.task_id !== expectedTaskId) {
     return {
       ok: false,
-      error: `Review packet task mismatch: metadata.qa_bundle.review_packet.task_id must match ${expectedTaskId}`,
+      error: `Review packet task mismatch: got "${reviewPacket.task_id}", expected "${expectedTaskId}"`,
       hint: 'Set review_packet.task_id to the current task ID before moving to validating.',
     }
   }
@@ -708,7 +726,7 @@ function enforceQaBundleGateForValidating(
   if (reviewPacket && !nonCodeLane && artifactPath && artifactPath !== reviewPacket.artifact_path) {
     return {
       ok: false,
-      error: 'Review packet mismatch: metadata.qa_bundle.review_packet.artifact_path must match metadata.artifact_path',
+      error: `Review packet artifact_path mismatch: got "${reviewPacket.artifact_path}", expected "${artifactPath}"`,
       hint: 'Use the same canonical process/... artifact path in both fields.',
     }
   }
@@ -1017,7 +1035,7 @@ function enforceReviewHandoffGateForValidating(
   if (handoff.task_id !== taskId) {
     return {
       ok: false,
-      error: `Review handoff task_id mismatch: expected ${taskId}`,
+      error: `Review handoff task_id mismatch: got "${handoff.task_id}", expected "${taskId}"`,
       hint: 'Set metadata.review_handoff.task_id to the exact task being transitioned.',
     }
   }
@@ -7012,6 +7030,30 @@ export async function createServer(): Promise<FastifyInstance> {
           error: duplicateGate.error,
           gate: 'duplicate_evidence',
           hint: duplicateGate.hint,
+        }
+      }
+
+      // Early format validation: catch bad PR URLs and commit SHAs on any update, not just at validating transition
+      const earlyReviewPacket = (mergedMeta as Record<string, any>)?.qa_bundle?.review_packet as Record<string, unknown> | undefined
+      const earlyHandoff = (mergedMeta as Record<string, any>)?.review_handoff as Record<string, unknown> | undefined
+      const earlyPrUrl = (earlyReviewPacket?.pr_url ?? earlyHandoff?.pr_url) as string | undefined
+      const earlyCommit = (earlyReviewPacket?.commit ?? earlyHandoff?.commit_sha) as string | undefined
+      if (earlyPrUrl && typeof earlyPrUrl === 'string' && !/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.test(earlyPrUrl)) {
+        reply.code(400)
+        return {
+          success: false,
+          error: `Invalid PR URL format: "${earlyPrUrl}"`,
+          gate: 'format_validation',
+          hint: 'Expected format: https://github.com/owner/repo/pull/123',
+        }
+      }
+      if (earlyCommit && typeof earlyCommit === 'string' && earlyCommit.length > 0 && !/^[a-f0-9]{7,40}$/i.test(earlyCommit)) {
+        reply.code(400)
+        return {
+          success: false,
+          error: `Invalid commit SHA format: "${earlyCommit}"`,
+          gate: 'format_validation',
+          hint: 'Expected 7-40 hex characters, e.g. "a1b2c3d"',
         }
       }
 
