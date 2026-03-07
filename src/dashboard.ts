@@ -2121,9 +2121,9 @@ ${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:non
     <a class="sidebar-link" href="/ui-kit" target="_blank">
       <span class="nav-icon">🎨</span><span class="nav-label">UI Kit</span>
     </a>
-    <a class="sidebar-link" href="/health" target="_blank">
+    <button class="sidebar-link" data-page="doctor" onclick="navigateTo('doctor')">
       <span class="nav-icon">🩺</span><span class="nav-label">Doctor</span>
-    </a>
+    </button>
   </div>
 </nav>
 
@@ -2401,6 +2401,21 @@ ${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:non
   </div>
 
   </div><!-- /page-artifacts -->
+
+  <!-- ═══ PAGE: Doctor ═══ -->
+  <div class="page" id="page-doctor">
+
+  <div class="panel">
+    <div class="panel-header">🩺 System Diagnostics <button class="btn-sm" onclick="loadDoctorPage()" style="margin-left:auto;font-size:11px;padding:2px 8px">Refresh</button></div>
+    <div class="panel-body" id="doctor-body"><div class="empty-state">Loading diagnostics…</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">🔍 Raw Health JSON <button class="btn-sm" onclick="window.open('/health','_blank')" style="margin-left:auto;font-size:11px;padding:2px 8px">Open raw ↗</button></div>
+    <div class="panel-body" id="doctor-raw" style="font-family:var(--font-mono,monospace);font-size:12px;white-space:pre-wrap;overflow-x:auto;max-height:400px"></div>
+  </div>
+
+  </div><!-- /page-doctor -->
 
 </div><!-- /.main -->
 </div><!-- /.app-layout -->
