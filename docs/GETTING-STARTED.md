@@ -10,21 +10,13 @@ Your AI agents need somewhere to coordinate — shared tasks, memory, and a way 
 
 ## Install
 
-### Option A: From source (works today)
-
-```bash
-git clone https://github.com/reflectt/reflectt-node.git
-cd reflectt-node
-npm install && npm run build
-```
-
-### Option B: npm (coming soon)
+### Option A: npm
 
 ```bash
 npm install -g reflectt-node
 ```
 
-### Option C: Docker
+### Option B: Docker
 
 ```bash
 docker run -d --name reflectt-node \
@@ -34,6 +26,14 @@ docker run -d --name reflectt-node \
 ```
 
 If you're using Docker, skip to [Check that it's running](#check-that-its-running) — the container handles init and start for you.
+
+### Option C: From source
+
+```bash
+git clone https://github.com/reflectt/reflectt-node.git
+cd reflectt-node
+npm install && npm run build
+```
 
 ---
 
@@ -68,7 +68,7 @@ You should see something like:
 ```json
 {
   "status": "ok",
-  "version": "0.1.0",
+  "version": "0.1.x",
   "uptime_seconds": 12
 }
 ```
