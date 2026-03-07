@@ -545,6 +545,13 @@ export function suggestReviewer(
     )
     const affinityBonus = Math.min(matchedTags.length * 0.1, 0.3)
 
+    // Domain-mismatch penalty: domain-limited agents (voice, designer, growth, analyst)
+    // that have zero affinity-tag overlap with this task are likely the wrong reviewer.
+    // Penalize them to prevent e.g. content/voice agents winning reviewer slots on
+    // engineering PRs. Ops/reviewer roles are general-purpose and exempt from this penalty.
+    const DOMAIN_LIMITED_ROLES = ['voice', 'designer', 'growth', 'analyst']
+    const mismatchPenalty = DOMAIN_LIMITED_ROLES.includes(agent.role) && agent.affinityTags.length > 0 && matchedTags.length === 0 ? 0.4 : 0
+
     // Load penalty: more validating work = lower score
     const loadPenalty = (validatingLoad * 0.3) + (pendingLoad * 0.1)
 
@@ -556,7 +563,7 @@ export function suggestReviewer(
     ).length
     const slaRiskPenalty = highPriorityReviewLoad * 0.2
 
-    const score = Math.round((roleBonus + affinityBonus - loadPenalty - slaRiskPenalty) * 100) / 100
+    const score = Math.round((roleBonus + affinityBonus - loadPenalty - slaRiskPenalty - mismatchPenalty) * 100) / 100
 
     return { agent: agent.name, score, validatingLoad, role: agent.role }
   })
