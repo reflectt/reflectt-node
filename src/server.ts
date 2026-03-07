@@ -4243,22 +4243,36 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // List tasks
   app.get('/tasks', async (request, reply) => {
-    const query = request.query as Record<string, string>
-    const updatedSince = parseEpochMs(query.updatedSince || query.since)
-    const limit = boundedLimit(query.limit, DEFAULT_LIMITS.tasks, MAX_LIMITS.tasks)
+    const query = request.query as Record<string, string | string[]>
+    const updatedSince = parseEpochMs((Array.isArray(query.updatedSince) ? query.updatedSince[0] : query.updatedSince) || (Array.isArray(query.since) ? query.since[0] : query.since))
+    const limitRaw = Array.isArray(query.limit) ? query.limit[0] : query.limit
+    const limit = boundedLimit(limitRaw, DEFAULT_LIMITS.tasks, MAX_LIMITS.tasks)
 
-    const tagFilter = query.tag
-      ? [query.tag]
-      : (query.tags ? query.tags.split(',') : undefined)
+    const tagRaw = Array.isArray(query.tag) ? query.tag[0] : query.tag
+    const tagsRaw = Array.isArray(query.tags) ? query.tags[0] : query.tags
+    const tagFilter = tagRaw
+      ? [tagRaw]
+      : (tagsRaw ? tagsRaw.split(',') : undefined)
 
-    const includeTest = query.include_test === '1' || query.include_test === 'true'
+    const includeTestRaw = Array.isArray(query.include_test) ? query.include_test[0] : query.include_test
+    const includeTest = includeTestRaw === '1' || includeTestRaw === 'true'
+
+    // Normalize status: supports ?status=todo, ?status[]=todo&status[]=doing,
+    // and repeated ?status=todo&status=doing (Fastify parses as array)
+    const VALID_STATUSES: Task['status'][] = ['todo', 'doing', 'blocked', 'validating', 'done', 'cancelled']
+    const statusRaw = query.status
+    const statusFilter = statusRaw === undefined
+      ? undefined
+      : (Array.isArray(statusRaw)
+          ? statusRaw.filter((s): s is Task['status'] => VALID_STATUSES.includes(s as Task['status']))
+          : VALID_STATUSES.includes(statusRaw as Task['status']) ? [statusRaw as Task['status']] : undefined)
 
     let tasks = taskManager.listTasks({
-      status: query.status as Task['status'] | undefined,
-      assignee: query.assignee || query.assignedTo, // Support both for backward compatibility
-      createdBy: query.createdBy,
-      teamId: normalizeTeamId(query.teamId),
-      priority: query.priority as Task['priority'] | undefined,
+      status: statusFilter && statusFilter.length === 1 ? statusFilter[0] : (statusFilter && statusFilter.length > 1 ? statusFilter : undefined),
+      assignee: (Array.isArray(query.assignee) ? query.assignee[0] : query.assignee) || (Array.isArray(query.assignedTo) ? query.assignedTo[0] : query.assignedTo),
+      createdBy: Array.isArray(query.createdBy) ? query.createdBy[0] : query.createdBy,
+      teamId: normalizeTeamId(Array.isArray(query.teamId) ? query.teamId[0] : query.teamId),
+      priority: (Array.isArray(query.priority) ? query.priority[0] : query.priority) as Task['priority'] | undefined,
       tags: tagFilter,
       includeTest,
     })
@@ -4268,7 +4282,8 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     // Text search filter
-    const searchQuery = (query.q || '').trim().toLowerCase()
+    const qRaw = Array.isArray(query.q) ? query.q[0] : query.q
+    const searchQuery = (qRaw || '').trim().toLowerCase()
     if (searchQuery) {
       tasks = tasks.filter(task =>
         (task.title || '').toLowerCase().includes(searchQuery) ||
@@ -4279,7 +4294,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const total = tasks.length
-    const offset = parsePositiveInt(query.offset) || 0
+    const offset = parsePositiveInt(Array.isArray(query.offset) ? query.offset[0] : query.offset) || 0
     tasks = tasks.slice(offset, offset + limit)
     const hasMore = offset + tasks.length < total
 
