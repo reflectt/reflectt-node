@@ -11,7 +11,7 @@ document.addEventListener('keydown', function(e) {
 /* ============================================================
    SIDEBAR NAV — hash-based client-side routing
    ============================================================ */
-const VALID_PAGES = ['overview', 'tasks', 'chat', 'reviews', 'health', 'outcomes', 'research', 'artifacts'];
+const VALID_PAGES = ['overview', 'tasks', 'chat', 'reviews', 'health', 'outcomes', 'research', 'artifacts', 'doctor'];
 
 function navigateTo(page) {
   if (!VALID_PAGES.includes(page)) page = 'overview';
@@ -1618,6 +1618,51 @@ async function loadHealth() {
     document.getElementById('health-body').innerHTML = '<div class="empty">Failed to load health data</div>';
     document.getElementById('compliance-body').innerHTML = '<div class="empty">Failed to load compliance data</div>';
   }
+}
+
+async function loadDoctorPage() {
+  const body = document.getElementById('doctor-body');
+  const raw = document.getElementById('doctor-raw');
+  if (!body) return;
+  body.innerHTML = '<div class="loading">Loading diagnostics…</div>';
+
+  try {
+    const res = await fetch(BASE + '/health');
+    const data = await res.json();
+
+    // Render pretty summary
+    const rows = [
+      ['Status', data.status ?? '—'],
+      ['Version', data.version ?? '—'],
+      ['Uptime', data.uptime != null ? `${Math.floor(data.uptime / 60)}m ${data.uptime % 60}s` : '—'],
+      ['PID', data.pid ?? data.runtime?.pid ?? '—'],
+      ['Node', data.nodeVersion ?? data.runtime?.nodeVersion ?? '—'],
+      ['Port', data.port ?? data.runtime?.port ?? '—'],
+      ['Deploy stale', data.deploy?.stale != null ? (data.deploy.stale ? '⚠️ Yes' : '✅ No') : '—'],
+      ['Deploy grace', data.deploy?.withinGrace ? `⏳ ${Math.round((data.deploy.graceRemainingMs || 0) / 60000)}m left` : '—'],
+      ['Tasks (todo)', data.tasks?.todo ?? '—'],
+      ['Tasks (doing)', data.tasks?.doing ?? '—'],
+    ];
+
+    body.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+      ${rows.map(([k, v]) => `<tr>
+        <td style="padding:6px 12px 6px 0;color:var(--muted);width:40%;white-space:nowrap">${k}</td>
+        <td style="padding:6px 0;font-family:var(--font-mono,monospace)">${String(v)}</td>
+      </tr>`).join('')}
+    </table>
+    <div style="margin-top:8px;font-size:11px;color:var(--muted)">Last refreshed: ${new Date().toLocaleTimeString()}</div>`;
+
+    if (raw) raw.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    body.innerHTML = `<div class="empty-state">Failed to load diagnostics: ${e.message}</div>`;
+  }
+}
+
+// Hook into page activation: load doctor data when the page is shown
+const _origActivatePage = activatePage;
+function activatePage(page) {
+  _origActivatePage(page);
+  if (page === 'doctor') loadDoctorPage();
 }
 
 async function loadReleaseStatus(force = false) {
