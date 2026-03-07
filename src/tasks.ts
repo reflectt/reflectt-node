@@ -341,6 +341,20 @@ class TaskManager {
       // Also check legacy location for migration
       importJsonlIfNeeded(db, LEGACY_TASKS_FILE, 'tasks', importTasks)
 
+      // ── Backfill: normalize legacy "in-progress" → "doing" ────────────────
+      // Older callers used "in-progress" before the enum was locked to "doing".
+      // These tasks are invisible to list/next endpoints (status not in allowlist)
+      // but counted by health/stats, causing confusion and PATCH 400 loops.
+      const inProgressCount = (db.prepare(
+        `SELECT COUNT(*) as n FROM tasks WHERE status = 'in-progress'`
+      ).get() as { n: number }).n
+      if (inProgressCount > 0) {
+        db.prepare(`UPDATE tasks SET status = 'doing', updated_at = ? WHERE status = 'in-progress'`)
+          .run(Date.now())
+        console.log(`[Tasks] Backfilled ${inProgressCount} in-progress → doing`)
+      }
+      // ──────────────────────────────────────────────────────────────────────
+
       // All tasks queried from SQLite on demand — no in-memory Map
       const count = taskCount()
       console.log(`[Tasks] SQLite has ${count} tasks (all queries go to DB)`)
