@@ -29,6 +29,7 @@
     "test:watch": "vitest",
     "deploy": "bash scripts/post-merge-rebuild.sh",
     "hooks:install": "bash scripts/install-hooks.sh",
+    "prepublishOnly": "npm run build",
     "prepack": "chmod +x dist/cli.js"
   },
   "keywords": [

@@ -13,6 +13,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod"
 import { chatManager } from "./chat.js"
 import { taskManager } from "./tasks.js"
+import { PKG_VERSION } from "./version.js"
 import type { AgentMessage, Task } from "./types.js"
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -21,7 +22,7 @@ import type { AgentMessage, Task } from "./types.js"
 
 const server = new McpServer({
   name: "reflectt-node",
-  version: "0.1.0",
+  version: PKG_VERSION,
 })
 
 // Wrapper to avoid TS2589 (excessively deep type instantiation) with MCP SDK + Zod
@@ -608,7 +609,7 @@ async function handleJsonRpcMessage(message: any): Promise<any> {
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "reflectt-node", version: "0.1.0" },
+        serverInfo: { name: "reflectt-node", version: PKG_VERSION },
       },
     }
   }
