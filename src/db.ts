@@ -684,7 +684,10 @@ export function initVectorSearch(): void {
     _vecInitialized = true
     console.log('[DB] Vector search tables initialized')
   } catch (err: any) {
-    console.warn('[DB] Vector search not available:', err?.message)
+    // Vector search is optional — only log at debug level to avoid alarming new users
+    if (process.env.DEBUG || process.env.REFLECTT_DEBUG) {
+      console.warn('[DB] Vector search not available:', err?.message)
+    }
   }
 }
 
