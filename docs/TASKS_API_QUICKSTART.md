@@ -45,29 +45,12 @@ TASK_ID="task-REPLACE_ME"
 
 ## 2) Move to `doing`
 
-> Note: docs/runtime drift currently exists for claim flow in some builds.
-> If `POST /tasks/:id/claim` fails with `doing requires metadata.eta`, use PATCH below.
-
-### Preferred (claim)
-
-```bash
-curl -s -X POST "$BASE/tasks/$TASK_ID/claim" \
-  -H 'Content-Type: application/json' \
-  -d '{"agent":"echo"}'
-```
-
-### Fallback (contract-safe patch)
-
 ```bash
 curl -s -X PATCH "$BASE/tasks/$TASK_ID" \
   -H 'Content-Type: application/json' \
   -d '{
     "assignee": "echo",
     "status": "doing",
-    "metadata": {
-      "eta": "30m",
-      "first_artifact_eta": "5m"
-    },
     "actor": "echo"
   }'
 ```
