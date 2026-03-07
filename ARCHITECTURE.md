@@ -145,6 +145,12 @@ The gateway handles:
 - Data stays local until you choose to sync
 - Works offline
 
+**Multi-team topology:**
+- One node = one team (self-contained coordination)
+- Multiple nodes = multiple teams (each on its own host)
+- Cloud = org layer (cross-team visibility, provisioning, unified dashboard)
+- You can run N nodes for N product areas, clients, or departments — the cloud connects them without coupling them
+
 **Agent-centric:**
 - Built for agents, not humans (though humans can use it too)
 - Simple API that agents can actually call
