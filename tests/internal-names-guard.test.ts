@@ -50,9 +50,12 @@ describe('internal-names-guard config', () => {
     expect(isBanned('src/routes.ts', 'const url = "https://app.reflectt.ai/api"')).toBe(true)
   })
 
-  it('catches reflectt.ai in non-dashboard shipped files', () => {
-    expect(isBanned('src/server.ts', 'redirect to https://reflectt.ai')).toBe(true)
+  it('catches reflectt.ai in non-allowed shipped files', () => {
+    // server.ts is explicitly allowed (health endpoint docs URL)
+    expect(isBanned('src/server.ts', 'redirect to https://reflectt.ai')).toBe(false)
     expect(isBanned('public/index.html', 'Visit app.reflectt.ai')).toBe(true)
+    // Other source files should still be caught
+    expect(isBanned('src/routes.ts', 'redirect to https://reflectt.ai')).toBe(true)
   })
 
   it('allows reflectt.ai and app.reflectt.ai in src/dashboard.ts', () => {
