@@ -290,6 +290,38 @@ describe('Onboarding Telemetry Dashboard', () => {
     })
   })
 
+  describe('internal user exclusion', () => {
+    it('excludes infrastructure user IDs from funnel summary', async () => {
+      // Emit events for internal-pattern user IDs
+      const internalIds = [
+        'sweeper-persist-123', 'artifact-test-agent-456', 'branch-agent-789',
+        'autoq-1234', 'active-test-5678', 'hb-boot-9012', 'debug-agent',
+        'watchdog', 'support', 'finance', 'unassigned', 'legal-agent-1',
+      ]
+      for (const id of internalIds) {
+        await emitActivationEvent('first_task_started', id)
+      }
+      // Emit for a real user
+      await emitActivationEvent('signup_completed', 'user-real-1')
+
+      const summary = getFunnelSummary()
+      expect(summary.totalUsers).toBe(1) // only real user
+      expect(summary.stepCounts.first_task_started).toBe(0) // all internal excluded
+      expect(summary.stepCounts.signup_completed).toBe(1)
+    })
+
+    it('raw=true includes internal users for debugging', async () => {
+      await emitActivationEvent('first_task_started', 'sweeper-test-1')
+      await emitActivationEvent('signup_completed', 'user-real-2')
+
+      const clean = getFunnelSummary()
+      const raw = getFunnelSummary({ raw: true })
+
+      expect(raw.totalUsers).toBeGreaterThan(clean.totalUsers)
+      expect(raw.stepCounts.first_task_started).toBeGreaterThanOrEqual(1)
+    })
+  })
+
   describe('getOnboardingDashboard', () => {
     it('returns complete dashboard snapshot', async () => {
       await emitActivationEvent('signup_completed', 'u-dash-1')

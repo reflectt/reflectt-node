@@ -78,12 +78,25 @@ const FUNNEL_ORDER: ActivationEventType[] = [
 
 // ── Cohort filtering + data quality ─────────────────────────────────
 
+/** Internal-infrastructure prefixes that should never appear in user-facing funnel metrics. */
+const INTERNAL_PREFIXES = [
+  'agent-', 'test-', 'proof-', 'lane-',
+  'sweeper-', 'artifact-', 'branch-', 'autoq-',
+  'active-', 'hb-', 'debug-', 'legal-',
+]
+
+/** Exact user IDs that are infrastructure, not real users. */
+const INTERNAL_EXACT = new Set([
+  'system', 'watchdog', 'support', 'finance', 'unassigned',
+])
+
 function isExcludedUserId(userId: string): boolean {
   if (!userId) return true
   const lower = userId.toLowerCase()
-  if (lower === 'system') return true
-  if (lower.startsWith('agent-')) return true
-  if (lower.startsWith('test-') || lower.startsWith('proof-') || lower.startsWith('lane-')) return true
+  if (INTERNAL_EXACT.has(lower)) return true
+  for (const prefix of INTERNAL_PREFIXES) {
+    if (lower.startsWith(prefix)) return true
+  }
 
   // Exclude known agent ids/aliases from TEAM-ROLES.yaml (e.g. rhythm, link, kai)
   try {
@@ -247,13 +260,15 @@ export function getUserFunnelState(userId: string): UserFunnelState {
 
 /**
  * Get funnel summary across all users.
+ * @param opts.raw — if true, include ALL users (including internal infrastructure) for debugging
  */
-export function getFunnelSummary(): {
+export function getFunnelSummary(opts?: { raw?: boolean }): {
   totalUsers: number
   stepCounts: Record<ActivationEventType, number>
   completedUsers: number
   funnelByUser: UserFunnelState[]
 } {
+  const raw = opts?.raw === true
   const stepCounts: Record<ActivationEventType, number> = {
     signup_completed: 0,
     host_preflight_passed: 0,
@@ -271,7 +286,7 @@ export function getFunnelSummary(): {
   let totalUsers = 0
 
   for (const userId of userFunnels.keys()) {
-    if (isExcludedUserId(userId)) continue
+    if (!raw && isExcludedUserId(userId)) continue
     totalUsers++
 
     const state = getUserFunnelState(userId)
@@ -391,13 +406,15 @@ export interface WeeklyTrend {
 
 /**
  * Get step-by-step conversion funnel with rates and timing.
+ * @param opts.raw — if true, include ALL users (including internal infrastructure) for debugging
  */
-export function getConversionFunnel(): StepConversion[] {
+export function getConversionFunnel(opts?: { raw?: boolean }): StepConversion[] {
+  const raw = opts?.raw === true
   const conversions: StepConversion[] = []
 
   // Cohort: exclude system/test/agent users; exclude invalid sequences/outcomes.
   const cohort = Array.from(userFunnels.entries())
-    .filter(([userId]) => !isExcludedUserId(userId))
+    .filter(([userId]) => raw || !isExcludedUserId(userId))
     .map(([userId, userMap]) => ({ userId, userMap, flags: getUserFunnelFlags(userMap) }))
     .filter(u => u.flags.length === 0)
 
@@ -603,13 +620,14 @@ export function getWeeklyTrends(weekCount = 12): WeeklyTrend[] {
  * Full onboarding telemetry dashboard snapshot.
  * Combines funnel, failure distribution, and trends.
  */
-export function getOnboardingDashboard(opts?: { weeks?: number }) {
+export function getOnboardingDashboard(opts?: { weeks?: number; raw?: boolean }) {
+  const raw = opts?.raw === true
   return {
     timestamp: Date.now(),
-    funnel: getConversionFunnel(),
+    funnel: getConversionFunnel({ raw }),
     failures: getFailureDistribution(),
     trends: getWeeklyTrends(opts?.weeks || 12),
-    summary: getFunnelSummary(),
+    summary: getFunnelSummary({ raw }),
   }
 }
 
