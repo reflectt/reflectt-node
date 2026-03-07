@@ -500,19 +500,24 @@ async function main() {
       console.warn(`⚠️  First-boot seeding: ${(err as Error)?.message || err}`)
     }
 
-    // Post-restart auto-wake: @mention all agents so they activate
+    // Post-restart auto-wake: seed presence + @mention all agents
     try {
       const { getAgentRoles } = await import('./assignment.js')
       const { chatManager } = await import('./chat.js')
+      const { presenceManager } = await import('./presence.js')
       const agents = getAgentRoles()
       if (agents.length > 0) {
+        // Seed presence so idle-nudge system has agents to evaluate
+        for (const agent of agents) {
+          presenceManager.updatePresence(agent.name, 'idle')
+        }
         const mentions = agents.map(a => `@${a.name}`).join(' ')
         await chatManager.sendMessage({
           from: 'system',
           content: `${mentions} Server restarted. Resume your work.`,
           channel: 'general',
         })
-        console.log(`🔔 Auto-wake: pinged ${agents.length} agents`)
+        console.log(`🔔 Auto-wake: seeded presence + pinged ${agents.length} agents`)
       }
     } catch (err) {
       console.warn(`⚠️  Auto-wake failed: ${(err as Error)?.message || err}`)
