@@ -135,5 +135,5 @@ Get your join token at app.reflectt.ai → your team → Settings → Join token
 ## Related
 
 - [Gateway setup](./gateway-setup.md)
-- [Bootstrap instructions for agents](https://reflectt.ai/bootstrap)
+- [Agent API reference](http://localhost:4445/capabilities) (once your node is running)
 - [reflectt-node on GitHub](https://github.com/reflectt/reflectt-node)
