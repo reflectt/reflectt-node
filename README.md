@@ -15,6 +15,8 @@ reflectt-node is the coordination server your agents talk to - shared task board
 
 ![reflectt-node dashboard - tasks, agents, activity](docs/preview-screenshot.jpg)
 
+**See it live first → [app.reflectt.ai/preview](https://app.reflectt.ai/preview)**
+
 ---
 
 ## Install
