@@ -11074,17 +11074,19 @@ If your heartbeat shows **no active task** and **no next task**:
    * GET /activation/funnel — per-user funnel state + aggregate summary.
    * Query params:
    *   ?userId=xxx — get single user's funnel state
-   *   (no params) — get aggregate summary across all users
+   *   ?raw=true   — include internal/infrastructure users (for debugging)
+   *   (no params) — get aggregate summary across all users (clean, external only)
    */
   app.get('/activation/funnel', async (request) => {
     const query = request.query as Record<string, string>
     const userId = query.userId
+    const raw = query.raw === 'true'
 
     if (userId) {
       return { funnel: getUserFunnelState(userId) }
     }
 
-    return { funnel: getFunnelSummary() }
+    return { funnel: getFunnelSummary({ raw }) }
   })
 
   /**
@@ -11127,15 +11129,18 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get('/activation/dashboard', async (request) => {
     const query = request.query as Record<string, string>
     const weeks = query.weeks ? parseInt(query.weeks, 10) : 12
-    return { success: true, dashboard: getOnboardingDashboard({ weeks }) }
+    const raw = query.raw === 'true'
+    return { success: true, dashboard: getOnboardingDashboard({ weeks, raw }) }
   })
 
   /**
    * GET /activation/funnel/conversions — Step-by-step conversion rates.
    * Returns per-step reach count, conversion rate, and median step time.
    */
-  app.get('/activation/funnel/conversions', async () => {
-    return { success: true, conversions: getConversionFunnel() }
+  app.get('/activation/funnel/conversions', async (request) => {
+    const query = request.query as Record<string, string>
+    const raw = query.raw === 'true'
+    return { success: true, conversions: getConversionFunnel({ raw }) }
   })
 
   /**
