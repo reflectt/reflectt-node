@@ -3005,9 +3005,10 @@ async function checkGettingStarted() {
       step3.querySelector('.gs-icon').textContent = '✓';
     }
 
-    // Auto-hide if all steps done
+    // Auto-hide if all steps done, OR if the system clearly isn't a fresh install
     const allDone = panel.querySelectorAll('.gs-step.done').length === 3;
-    if (allDone) {
+    const clearlyNotFresh = (health.tasks?.total || 0) > 5 || (health.chat?.total || 0) > 100;
+    if (allDone || clearlyNotFresh) {
       panel.classList.add('hidden');
     }
   } catch {}
