@@ -11,6 +11,57 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.1.6] — 2026-03-07
+
+Observability, reliability, and first-run UX sprint. Includes a critical fix for an unscoped `DELETE` that could wipe the task database. New endpoints for activity timeline, team pulse, scope-overlap detection, and task cancellation. First-run experience substantially improved: welcome banner, corrected CTAs, and startup noise eliminated.
+
+### Added
+- **GET /activity** — unified team activity timeline with server-side grouping and optional debug mode. (#699, #701, #717)
+- **GET /pulse** — team pulse snapshot: active agents, task health, alert-preflight summary, deploy info. (#707, #711, #720)
+- **POST /scope-overlap** — detects open tasks overlapping a merged PR's scope; auto-triggers on merge with idempotency. (#709, #714, #723, #726)
+- **POST /tasks/:id/cancel** — first-class task cancellation endpoint with `cancelled` status in state machine. (#686)
+- **Task time fields: `dueAt` / `scheduledFor`** — MVP time awareness for scheduled and deadline-driven work. (#715)
+- **Team focus directive** — priority anchor surfaced in heartbeats to keep agents aligned on the current sprint. (#706)
+- **Chat drop counters + GET /health/chat** — tracks dropped or undeliverable chat messages; included in heartbeat health. (#691)
+- **Alert-preflight history** — reason/type breakdown + `wouldSuppressRate` for suppression transparency. (#708)
+- **Insights: admin cooldown/close endpoints** — `POST /insights/:id/cooldown` and `POST /insights/:id/close` for localhost admin. (#703)
+- **First-run welcome banner** — clear next steps printed to terminal on first boot; CTAs point to correct URLs. (#739)
+- **Post-restart auto-wake** — server @mentions all agents on restart to surface it in chat. (#738)
+- **`silentMs` per agent in GET /health/team** — surfaces per-agent silence duration for compliance checks. (#734)
+- **PNG fallback for generic agent avatars** — `/agent-N.png` requests return a default instead of 404. (#713)
+
+### Fixed
+- **CRITICAL: unscoped `DELETE FROM tasks`** — root cause of DB wipe incidents. Statement now requires a `WHERE` clause or `REFLECTT_TEST_MODE`. (#729, #733)
+- **Startup DB integrity guard** — alerts on task count drop at boot, catching wipe/corruption before the team runs blind. (#728)
+- **CLI `--version` was hardcoded `0.1.0`** — now reads from `package.json` at runtime; `prepublishOnly` prevents recurrence. (#741, #684)
+- **TeamConfig startup noise** — 7 individual warnings on first run collapsed into a single friendly message. (#742)
+- **Vector search warning suppressed** — debug-only; no longer logged on every startup for users who don't use semantic search. (#743)
+- **Presence too aggressive on Offline** — two-step decay (working → idle → offline) prevents false dropouts. (#724, #725)
+- **Presence seeded from recent activity on startup** — agents no longer appear Offline immediately after server restart. (#710)
+- **`/tasks/next` diagnostics** — treats `assignee=unassigned` correctly; richer empty-queue response. (#697, #700)
+- **Sweeper digest suppressed when unchanged** — no more repeated identical digests cluttering chat. (#698)
+- **Shipped insights filtered from listings** — prevents already-shipped work from being re-proposed. (#695)
+- **Cloud-relay messages no longer sync back to cloud** — prevents echo loop on cloud-connected nodes. (#740)
+- **First-run banner CTAs corrected** — pointed to broken `npx` command; now uses correct package name and cloud onboard URL.
+- **Container detach warning + status health verification** — Docker users get clear feedback instead of silent failures. (#689)
+- **`/tasks/:id` null `dueAt`/`scheduledFor`** — can now be cleared by passing `null`. (#716)
+- **Sweeper should not flag `done` tasks as orphan PR issues** — reduced false-positive alerts. (#712)
+- **`/health/backlog` null breach counts** — no longer throws on empty data. (#685)
+- **Alert-preflight `wouldSuppressRate`** — now reflects enforce-suppressed/checked correctly. (#718)
+
+### Security
+- **Branch guard on destructive operations** — `DELETE` statements in tests require `REFLECTT_TEST_MODE=1`. (#733)
+- **`/health/deploy` exposes DB path** — operators can verify which database file is live. (#730)
+
+### Docs
+- **Discord Quick Try + FAQ** — onboarding guide for Discord-first users. (#688)
+- **DB-wipe retrospective** — documents root cause, fix, and prevention for the unscoped DELETE incident. (#731)
+- **Agent silence detection protocol** — spec for detecting and handling agent silence (task-z89zs36bl). (#732)
+- **README: problem-first rewrite + screenshot** — opens with user pain, drops pitch-deck language, adds preview image. (#737)
+- **GETTING-STARTED.md: npm as primary install path** — npm promoted to Option A; startup noise documented in Troubleshooting. (#746)
+
+---
+
 ## [0.1.5] — 2026-03-05
 
 A big reliability + onboarding sprint: better state-machine clarity (`cancelled` / `resolved_externally`), less notification spam, stronger health/observability, and clearer first-run UX.
