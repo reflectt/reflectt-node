@@ -1026,7 +1026,9 @@ class TeamHealthMonitor {
         })
       const agentMessages = messages.filter((m: any) => m.from === agent)
 
-      const lastSeen = presence?.lastUpdate || 0
+      // Use the most recent signal: presence heartbeat OR recorded activity (chat/task).
+      // recordActivity() updates last_active but not lastUpdate, causing stale reads.
+      const lastSeen = Math.max(presence?.lastUpdate || 0, presence?.last_active || 0)
       const minutesSinceLastSeen = Math.floor((now - lastSeen) / 1000 / 60)
 
       // Count messages in last 24h
