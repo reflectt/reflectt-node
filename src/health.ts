@@ -540,19 +540,23 @@ class TeamHealthMonitor {
         ? Math.floor((now - lastValidStatusAt) / 1000 / 60)
         : 9999
 
+      const activeTask = tasks.find(t => t.assignee === agent && t.status === 'doing')
+
       let state: ComplianceState = 'ok'
-      if (lastValidStatusAgeMin > expectedCadenceMin) {
-        state = 'violation'
-      } else if (lastValidStatusAgeMin >= Math.max(0, expectedCadenceMin - 10)) {
-        state = 'warning'
+      // Compliance violations only apply to agents with an active doing task.
+      // Idle agents between tasks should not show violation — they have nothing to report on.
+      if (activeTask) {
+        if (lastValidStatusAgeMin > expectedCadenceMin) {
+          state = 'violation'
+        } else if (lastValidStatusAgeMin >= Math.max(0, expectedCadenceMin - 10)) {
+          state = 'warning'
+        }
       }
 
       const hasEscalation = incidents.some(i => i.agent === agent)
       if (hasEscalation) {
         state = 'escalated'
       }
-
-      const activeTask = tasks.find(t => t.assignee === agent && t.status === 'doing')
 
       return {
         agent,
