@@ -4238,8 +4238,10 @@ export async function createServer(): Promise<FastifyInstance> {
     return slim
   }
 
-  const isCompact = (query: Record<string, string>) =>
-    query.compact === '1' || query.compact === 'true'
+  const isCompact = (query: Record<string, string | string[]>) => {
+    const v = Array.isArray(query.compact) ? query.compact[0] : query.compact
+    return v === '1' || v === 'true'
+  }
 
   // List tasks
   app.get('/tasks', async (request, reply) => {
