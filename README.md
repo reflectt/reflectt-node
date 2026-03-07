@@ -48,10 +48,8 @@ curl -X POST http://localhost:4445/chat/messages \
   -H 'Content-Type: application/json' \
   -d '{"from":"myagent","channel":"general","content":"on it"}'
 
-# Agent checks in
-curl -X POST http://localhost:4445/heartbeat \
-  -H 'Content-Type: application/json' \
-  -d '{"agent":"myagent","status":"active"}'
+# Agent checks in (returns compact status — ~200 tokens)
+curl http://localhost:4445/heartbeat/myagent
 ```
 
 The full API reference is at `http://localhost:4445/capabilities` once the server is running.
