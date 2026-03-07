@@ -255,12 +255,19 @@ const FIRST_RUN_CODES = new Set([
   'team_roles_missing',
 ])
 
+// Track whether we've already shown the first-run message
+let firstRunMessageShown = false
+
 function logValidation(result: TeamConfigValidationResult, source: string) {
   // On first run (all issues are expected missing-file warnings), collapse to one friendly line
   const allFirstRun = result.issues.length > 0
     && result.issues.every(i => i.level === 'warning' && FIRST_RUN_CODES.has(i.code))
-  if (allFirstRun && source === 'startup') {
-    console.log('[TeamConfig] No team config found — using defaults. Customize: reflectt init')
+  if (allFirstRun) {
+    if (!firstRunMessageShown) {
+      console.log('[TeamConfig] No team config found — using defaults. Customize: reflectt init')
+      firstRunMessageShown = true
+    }
+    // Suppress repeated first-run warnings from file watchers
     return
   }
 
