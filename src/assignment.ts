@@ -161,10 +161,7 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
     if (roles.length > 0) {
       loadedRoles = roles
       loadedFromPath = 'defaults/TEAM-ROLES.yaml'
-      console.log(`[Assignment] Loaded ${roles.length} agent roles from defaults/TEAM-ROLES.yaml`)
-      console.log(`[Assignment] ⚠️  Using default placeholder agents. Customize your team:`)
-      console.log(`[Assignment]    cp defaults/TEAM-ROLES.yaml ${REFLECTT_HOME}/TEAM-ROLES.yaml`)
-      console.log(`[Assignment]    # Then edit with your agent names and roles`)
+      console.log(`[Assignment] Using ${roles.length} default agent roles. Customize: cp defaults/TEAM-ROLES.yaml ${REFLECTT_HOME}/TEAM-ROLES.yaml`)
       return { roles, source: 'defaults/TEAM-ROLES.yaml' }
     }
   } catch { /* ignore */ }
@@ -200,7 +197,9 @@ export function startConfigWatch(): void {
         } catch { /* file removed */ }
       })
       watchActive = true
-      console.log(`[Assignment] Watching ${configPath} for changes`)
+      if (process.env.DEBUG || process.env.REFLECTT_DEBUG) {
+        console.log(`[Assignment] Watching ${configPath} for changes`)
+      }
     } catch { /* ignore */ }
   }
 }
