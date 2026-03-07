@@ -237,7 +237,10 @@ async function main() {
       const { initVectorSearch } = await import('./db.js')
       initVectorSearch()
     } catch {
-      console.warn('⚠️  Vector search not available (sqlite-vec not installed)')
+      // Vector search is optional — silent unless debug mode
+      if (process.env.DEBUG || process.env.REFLECTT_DEBUG) {
+        console.warn('⚠️  Vector search not available (sqlite-vec not installed)')
+      }
     }
 
     // Team config linter (TEAM.md + TEAM-ROLES.yaml + TEAM-STANDARDS.md)
