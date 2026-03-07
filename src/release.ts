@@ -60,6 +60,12 @@ function captureRepoSnapshot(): RepoSnapshot {
 }
 
 const startupSnapshot = captureRepoSnapshot()
+const SERVER_START_MS = Date.now()
+
+// Minimum time (ms) before commit-drift is reported as stale.
+// Prevents the badge from firing immediately after a deploy when a PR
+// lands within minutes of the server restart. Configurable via env.
+const DEPLOY_STALE_GRACE_MS = Number(process.env.DEPLOY_STALE_GRACE_MIN ?? 30) * 60_000
 
 function extractEndpointMentions(task: Task): string[] {
   const haystack = [task.title, task.description || '', ...(task.done_criteria || [])].join('\n')
@@ -154,8 +160,15 @@ export const releaseManager = {
     const deployMarker = await readDeployMarker()
 
     const reasons: string[] = []
+    const serverAgeMs = Date.now() - SERVER_START_MS
+    const withinGrace = serverAgeMs < DEPLOY_STALE_GRACE_MS
+
     if (startupSnapshot.commit !== current.commit) {
-      reasons.push('commit changed since server start')
+      // Suppress commit-drift during the grace window — a fresh deploy shouldn't
+      // be flagged stale just because another PR lands within minutes of restart.
+      if (!withinGrace) {
+        reasons.push('commit changed since server start')
+      }
     }
     if (!startupSnapshot.dirty && current.dirty) {
       reasons.push('working tree became dirty after server start')
@@ -167,6 +180,8 @@ export const releaseManager = {
     return {
       stale: reasons.length > 0,
       reasons,
+      withinGrace,
+      graceRemainingMs: withinGrace ? Math.max(0, DEPLOY_STALE_GRACE_MS - serverAgeMs) : 0,
       startup: startupSnapshot,
       current,
       lastDeploy: deployMarker,
