@@ -1,5 +1,7 @@
 # Quick Start Guide
 
+> **Note:** This guide is outdated. See [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the current setup guide.
+
 Get reflectt-node running in 5 minutes.
 
 ## Prerequisites
@@ -223,7 +225,7 @@ You'll receive message history and any new messages in real-time.
 ## Next Steps
 
 - **Integrate with agents:** Use the REST API from your agent tools
-- **Connect UI:** Point chat.reflectt.ai to this node
+- **Cloud dashboard:** Connect at [app.reflectt.ai](https://app.reflectt.ai) — sync tasks, presence, and health
 - **Add tools:** Import Homie tools or create custom ones
 - **Read the docs:** See `README.md` and `ARCHITECTURE.md`
 
