@@ -3522,7 +3522,7 @@ export async function createServer(): Promise<FastifyInstance> {
     // Auto-update presence: if you're posting, you're active
     if (data.from) {
       presenceManager.recordActivity(data.from, 'message')
-      presenceManager.updatePresence(data.from, 'working')
+      presenceManager.touchPresence(data.from)
 
       // Activation funnel: first team message
       emitActivationEvent('first_team_message_sent', data.from, {
@@ -5632,7 +5632,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       presenceManager.recordActivity(data.author, 'message')
-      presenceManager.updatePresence(data.author, 'working')
+      presenceManager.touchPresence(data.author)
 
       // Heartbeat discipline: compute gap since previous comment for doing tasks
       let heartbeatWarning: string | undefined
@@ -6220,7 +6220,7 @@ export async function createServer(): Promise<FastifyInstance> {
       
       // Auto-update presence: creating tasks = working
       if (data.createdBy) {
-        presenceManager.updatePresence(data.createdBy, 'working')
+        presenceManager.touchPresence(data.createdBy)
       }
 
       // Fire-and-forget: index task for semantic search
@@ -11431,7 +11431,7 @@ If your heartbeat shows **no active task** and **no next task**:
       // Update presence: publishing content = working
       if (body.publishedBy) {
         presenceManager.recordActivity(body.publishedBy, 'message')
-        presenceManager.updatePresence(body.publishedBy, 'working')
+        presenceManager.touchPresence(body.publishedBy)
       }
 
       return { success: true, publication }
@@ -11497,7 +11497,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
       // Update presence when adding content to calendar
       if (body.createdBy) {
-        presenceManager.updatePresence(body.createdBy, 'working')
+        presenceManager.touchPresence(body.createdBy)
       }
 
       return { success: true, item }

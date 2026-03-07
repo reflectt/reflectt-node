@@ -270,6 +270,29 @@ class PresenceManager {
   }
 
   /**
+   * Touch agent presence: bump lastUpdate without overriding status.
+   * Used for indirect activity signals (chat messages, reflections, task creation)
+   * that prove the agent is alive but shouldn't override task-derived status.
+   * If the agent is offline/idle/unknown, promotes to 'working'.
+   */
+  touchPresence(agent: string): AgentPresence {
+    const now = Date.now()
+    const existing = this.presence.get(agent)
+
+    if (!existing || existing.status === 'offline' || existing.status === 'idle') {
+      return this.updatePresence(agent, 'working')
+    }
+
+    const updated = { ...existing, lastUpdate: now, last_active: now }
+    this.presence.set(agent, updated)
+
+    const activity = this.getActivity(agent)
+    activity.last_active = now
+
+    return updated
+  }
+
+  /**
    * Update agent presence
    */
   updatePresence(agent: string, status: PresenceStatus, task?: string, since?: number, updateActivity = true): AgentPresence {
