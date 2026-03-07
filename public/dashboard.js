@@ -94,6 +94,45 @@ function updateOverviewEmptyState() {
   el.style.display = (hasTasks || hasMessages) ? 'none' : '';
 }
 
+function updateOverviewSummary() {
+  const panel = document.getElementById('overview-summary');
+  if (!panel) return;
+  const hasTasks = allTasks.length > 0;
+  const hasMessages = allMessages.length > 0;
+  panel.style.display = (hasTasks || hasMessages) ? '' : 'none';
+
+  // Stats
+  const statsEl = document.getElementById('overview-stats');
+  if (statsEl) {
+    const counts = { doing: 0, todo: 0, validating: 0, done: 0, blocked: 0 };
+    allTasks.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
+    const statStyle = 'text-align:center;padding:10px;background:var(--bg-secondary, rgba(255,255,255,0.03));border-radius:8px;border:1px solid var(--border)';
+    const numStyle = 'font-size:20px;font-weight:600;color:var(--text-bright)';
+    const labelStyle = 'font-size:11px;color:var(--text-muted);margin-top:2px';
+    statsEl.innerHTML = [
+      { label: 'In Progress', count: counts.doing, color: 'var(--accent, #3B57E8)' },
+      { label: 'To Do', count: counts.todo, color: 'var(--text-muted)' },
+      { label: 'Validating', count: counts.validating, color: '#E8A83B' },
+      { label: 'Done', count: counts.done, color: '#4CAF50' },
+      { label: 'Blocked', count: counts.blocked, color: '#E84C3B' },
+    ].map(s => `<div style="${statStyle}"><div style="${numStyle};color:${s.color}">${s.count}</div><div style="${labelStyle}">${s.label}</div></div>`).join('');
+  }
+
+  // Recent activity — last 8 messages
+  const actEl = document.getElementById('overview-activity-list');
+  if (actEl && allMessages.length > 0) {
+    const recent = allMessages.slice(-8).reverse();
+    actEl.innerHTML = recent.map(m => {
+      const time = new Date(m.timestamp || m.ts || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const from = m.from || m.author || 'system';
+      const text = (m.content || m.text || '').slice(0, 120);
+      return `<div style="padding:4px 0;border-bottom:1px solid var(--border)"><span style="color:var(--accent);font-weight:500">${from}</span> <span style="opacity:0.5">${time}</span><br>${text}${text.length >= 120 ? '…' : ''}</div>`;
+    }).join('');
+  } else if (actEl) {
+    actEl.innerHTML = '<div style="opacity:0.5">No recent messages</div>';
+  }
+}
+
 // Delta cursors for lower payload refreshes
 let lastTaskSync = 0;
 let lastChatSync = 0;
@@ -732,6 +771,7 @@ async function loadTasks(forceFull = false) {
   if (navTaskBadge) navTaskBadge.textContent = allTasks.length;
   updateFirstBootBanner();
   updateOverviewEmptyState();
+  updateOverviewSummary();
 }
 
 function renderProjectTabs() {
