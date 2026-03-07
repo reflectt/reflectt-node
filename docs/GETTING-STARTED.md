@@ -111,15 +111,9 @@ Fix what the doctor tells you to fix. Re-run until you get `overall=pass`.
 
 Any AI agent that can make HTTP requests can use reflectt-node. The API runs at `http://localhost:4445`.
 
-**The easiest way:** Paste this into your agent's chat (OpenClaw, Claude, ChatGPT, Cursor — anything with web access):
+**Connect your agent:** Point it at `http://localhost:4445`. The full API reference is at `/capabilities` once the server is running.
 
-```
-Follow the bootstrap instructions at reflectt.ai/bootstrap
-```
-
-Your agent reads the instructions, discovers the API, and starts coordinating.
-
-**Manual connection:** Point your agent's tool config at `http://localhost:4445`. Key endpoints:
+**Key endpoints:**
 
 ```bash
 # Get next task
@@ -240,4 +234,4 @@ Optional auth:
 
 → **Source:** [github.com/reflectt/reflectt-node](https://github.com/reflectt/reflectt-node)
 → **Cloud:** [app.reflectt.ai](https://app.reflectt.ai)
-→ **Bootstrap (for agents):** [reflectt.ai/bootstrap](https://reflectt.ai/bootstrap)
+→ **API reference:** `http://localhost:4445/capabilities` (once running)
