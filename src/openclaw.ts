@@ -6,6 +6,7 @@
  */
 import WebSocket from 'ws'
 import { openclawConfig } from './config.js'
+import { PKG_VERSION } from './version.js'
 import type { AgentMessage } from './types.js'
 
 interface OpenClawRequest {
@@ -130,7 +131,7 @@ export class OpenClawClient {
         client: {
           id: 'cli',
           displayName: 'Reflectt Node',
-          version: '0.1.0',
+          version: PKG_VERSION,
           platform: 'node',
           mode: 'cli',
         },
@@ -143,7 +144,7 @@ export class OpenClawClient {
           token: openclawConfig.gatewayToken
         } : undefined,
         locale: 'en-US',
-        userAgent: 'reflectt-node/0.1.0',
+        userAgent: `reflectt-node/${PKG_VERSION}`,
       })
       
       console.log('[OpenClaw] Handshake successful:', response)
