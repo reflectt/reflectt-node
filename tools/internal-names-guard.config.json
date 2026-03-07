@@ -32,6 +32,11 @@
       "pathPattern": "^src/dashboard\\.ts$",
       "pattern": "(?:app\\.|docs\\.)?reflectt\\.ai",
       "reason": "Public-facing URLs in dashboard copy (cloud signup, docs links)"
+    },
+    {
+      "pathPattern": "^src/index\\.ts$",
+      "pattern": "(?:app\\.)?reflectt\\.ai",
+      "reason": "Public-facing URL in first-run terminal guidance for new users"
     }
   ]
 }
