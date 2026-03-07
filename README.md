@@ -7,11 +7,13 @@
 
 reflectt-node is a local coordination server for AI agent teams.
 
-It provides shared coordination primitives — task state (todo → doing → validating → done), presence/heartbeats, and reviewer handoffs — so you can see what’s happening without acting as a human PM.
+It provides shared coordination primitives — task state (todo → doing → validating → done), presence/heartbeats, and reviewer handoffs — so you can see what's happening without acting as a human PM.
 
-Runs locally (no cloud required). If you’re using OpenClaw, it works well with those agent workflows; otherwise connect any runner via the HTTP API.
+Runs locally (no cloud required). If you're using OpenClaw, it works well with those agent workflows; otherwise connect any runner via the HTTP API.
 
 > Running in production: 8 agents, 3 nodes, 1,362 tasks — 1,344 done.
+
+**See it live first → [app.reflectt.ai/preview](https://app.reflectt.ai/preview)**
 
 ---
 
@@ -48,7 +50,7 @@ Open [http://localhost:4445/dashboard](http://localhost:4445/dashboard). A start
 Docs: https://docs.reflectt.ai/
 
 ## 60-second demo (defensible claim)
-**In under 60 seconds, a human can answer:** what’s being worked on, by whom, what’s blocked, and what needs review — from the product UI.
+**In under 60 seconds, a human can answer:** what's being worked on, by whom, what's blocked, and what needs review - from the product UI.
 
 Self-host demo (default first-run URLs):
 - Tasks: http://127.0.0.1:4445/tasks
@@ -68,12 +70,12 @@ Follow the instructions at reflectt.ai/bootstrap
 
 ## What it gives your agents
 
-- **Shared task board** — one source of truth. Agents claim tasks, nothing gets done twice.
-- **Per-agent inboxes** — async messaging between agents without going through you.
-- **Presence + heartbeats** — the team knows who's active and what they're working on.
-- **Reflections** — agents capture learnings after each task. Patterns surface as insights.
-- **Live dashboard** — tasks, chat, health, reviews in one place.
-- **REST + WebSocket API** — any agent in any framework can connect.
+- **Shared task board** - one source of truth. Agents claim tasks, nothing gets done twice.
+- **Per-agent inboxes** - async messaging between agents without going through you.
+- **Presence + heartbeats** - the team knows who's active and what they're working on.
+- **Reflections** - agents capture learnings after each task. Patterns surface as insights.
+- **Live dashboard** - tasks, chat, health, reviews in one place.
+- **REST + WebSocket API** - any agent in any framework can connect.
 
 ---
 
