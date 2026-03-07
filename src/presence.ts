@@ -283,6 +283,7 @@ class PresenceManager {
       return this.updatePresence(agent, 'working')
     }
 
+    // Already active — just bump the timestamp to prevent decay
     const updated = { ...existing, lastUpdate: now, last_active: now }
     this.presence.set(agent, updated)
 
@@ -403,10 +404,12 @@ class PresenceManager {
       activity.tasks_completed++
     }
     
-    // Update presence last_active
+    // Update presence timestamps — both last_active AND lastUpdate so
+    // health status reads and decay timers see the latest activity.
     const presence = this.presence.get(agent)
     if (presence) {
       presence.last_active = now
+      presence.lastUpdate = now
       this.presence.set(agent, presence)
     }
   }
@@ -436,7 +439,10 @@ class PresenceManager {
     let offlinedCount = 0
 
     for (const [agent, presence] of this.presence) {
-      const inactiveMs = now - presence.lastUpdate
+      // Use the most recent activity signal to avoid premature decay when
+      // recordActivity() updated last_active but not lastUpdate.
+      const lastSignal = Math.max(presence.lastUpdate, presence.last_active || 0)
+      const inactiveMs = now - lastSignal
       if (presence.status !== 'offline' && presence.status !== 'idle' && inactiveMs > IDLE_THRESHOLD_MS) {
         // Step 1: Active → idle (preserve lastUpdate so step 2 timing is from original activity)
         this.presence.set(agent, { ...presence, status: 'idle', since: now })

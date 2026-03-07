@@ -6218,7 +6218,8 @@ export async function createServer(): Promise<FastifyInstance> {
       })
 
       
-      // Auto-update presence: creating tasks = working
+      // Touch presence: creating tasks proves the agent is alive, but shouldn't
+      // override task-derived status (e.g. agent filing a task while reviewing)
       if (data.createdBy) {
         presenceManager.touchPresence(data.createdBy)
       }
@@ -11428,7 +11429,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
       const publication = await contentManager.logPublication(body)
 
-      // Update presence: publishing content = working
+      // Touch presence: publishing content proves agent is alive
       if (body.publishedBy) {
         presenceManager.recordActivity(body.publishedBy, 'message')
         presenceManager.touchPresence(body.publishedBy)
@@ -11495,7 +11496,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
       const item = await contentManager.upsertCalendarItem(body)
 
-      // Update presence when adding content to calendar
+      // Touch presence when adding content to calendar
       if (body.createdBy) {
         presenceManager.touchPresence(body.createdBy)
       }
