@@ -79,13 +79,19 @@ describe('extractClusterKey', () => {
       pain: 'OpenClaw channel-scoped sessions diverge between reflectt rooms',
     })
     const key = extractClusterKey(ref)
-    expect(key.impacted_unit).toBe('openclaw-topic-openclaw-channel-scoped-sessions')
+    expect(key.impacted_unit).toBe('openclaw-topic-openclaw-channel-scop-sess')
   })
 
   it('derives a topic signature from pain when unit is missing', () => {
     const ref = makeReflection({ tags: [], team_id: undefined })
     const key = extractClusterKey(ref)
-    expect(key.impacted_unit).toBe('topic-chat-messages-truncated')
+    expect(key.impacted_unit).toBe('topic-chat-message-truncat')
+  })
+
+  it('stemming normalizes word variants so deployment/deploy cluster together', () => {
+    const ref1 = makeReflection({ tags: [], pain: 'Deployment pipeline fails silently when env vars missing' })
+    const ref2 = makeReflection({ tags: [], pain: 'Deploy pipeline fails quietly when environment variables missing' })
+    expect(extractClusterKey(ref1).impacted_unit).toBe(extractClusterKey(ref2).impacted_unit)
   })
 
   it('uses team_id as impacted_unit fallback when no unit/tag hint exists', () => {

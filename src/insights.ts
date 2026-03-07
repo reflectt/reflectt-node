@@ -322,11 +322,38 @@ function _hasOnlyUmbrellaOrGenericUnitTags(tags: string[]): boolean {
   return candidates.every(t => generic.has(t.toLowerCase()))
 }
 
+/**
+ * Normalize a word to a canonical stem to reduce topic-key divergence.
+ * Handles common English derivational suffixes so "deployment"/"deploy",
+ * "failing"/"fail", "validation"/"validate" all map to the same stem.
+ *
+ * Intentionally simple — not a full stemmer. Covers the most common cases
+ * seen in agent pain descriptions.
+ */
+function _stemWord(word: string): string {
+  // Order matters: longest suffix first
+  if (word.endsWith('ation') && word.length > 8) return word.slice(0, -5)   // validation→valid
+  if (word.endsWith('ment') && word.length > 7)  return word.slice(0, -4)   // deployment→deploy
+  if (word.endsWith('tion') && word.length > 7)  return word.slice(0, -4)   // detection→detect
+  if (word.endsWith('ing') && word.length > 6)   return word.slice(0, -3)   // failing→fail
+  if (word.endsWith('ings') && word.length > 7)  return word.slice(0, -4)   // warnings→warn
+  if (word.endsWith('ions') && word.length > 7)  return word.slice(0, -4)   // errors→error (skip, handled below)
+  if (word.endsWith('ness') && word.length > 7)  return word.slice(0, -4)   // flakiness→flaky (approx)
+  if (word.endsWith('tion') && word.length > 7)  return word.slice(0, -4)
+  if (word.endsWith('ed') && word.length > 5)    return word.slice(0, -2)   // failed→fail
+  if (word.endsWith('ly') && word.length > 5)    return word.slice(0, -2)   // silently→silent
+  if (word.endsWith('er') && word.length > 5)    return word.slice(0, -2)   // router→rout (approx)
+  if (word.endsWith('ers') && word.length > 6)   return word.slice(0, -3)
+  if (word.endsWith('s') && word.length > 5)     return word.slice(0, -1)   // errors→error
+  return word
+}
+
 function _inferTopicFromPain(pain: string): string | null {
   const lower = (pain || '').toLowerCase()
   if (!lower.trim()) return null
 
-  // Simple, stable signature: first 3 meaningful words (len>=4), stopword-filtered.
+  // Simple, stable signature: first 3 meaningful words (len>=4), stopword-filtered,
+  // then stemmed to reduce divergence from phrasing variations.
   const stop = new Set(['this', 'that', 'with', 'from', 'into', 'onto', 'when', 'then', 'than', 'over', 'under', 'only', 'just', 'some', 'much', 'very', 'more', 'most', 'less', 'have', 'has', 'had', 'been', 'were', 'was', 'are', 'and', 'the', 'for', 'but', 'not', 'too', 'yet'])
   const words = lower
     .replace(/[^a-z0-9\s-]/g, ' ')
@@ -334,6 +361,7 @@ function _inferTopicFromPain(pain: string): string | null {
     .map(w => w.trim())
     .filter(w => w.length >= 4)
     .filter(w => !stop.has(w))
+    .map(w => _stemWord(w))   // normalize before building signature
 
   if (words.length === 0) return null
   const sig = words.slice(0, 3).join('-')
@@ -456,6 +484,52 @@ export function findByCluster(clusterKeyStr: string): Insight | null {
 }
 
 /**
+ * Find a near-duplicate insight when no exact cluster key match exists.
+ *
+ * "Near-duplicate" = same workflow_stage + failure_family, and the
+ * impacted_unit topic tokens overlap sufficiently (>= 2 shared tokens).
+ * This catches cases where stemming still diverges (e.g. different 3-word
+ * combos extracted from slightly different pain descriptions of the same issue).
+ *
+ * Only matches topic-* units (inferred, not explicit). Explicit unit tags
+ * are stable enough that we don't want to fuzzy-merge them.
+ */
+export function findNearDuplicate(clusterKeyStr: string): Insight | null {
+  const parts = clusterKeyStr.split('::')
+  if (parts.length !== 3) return null
+  const [stage, family, unit] = parts
+
+  // Only fuzzy-match inferred topic units — explicit units are stable
+  if (!unit.startsWith('topic-')) return null
+
+  const unitTokens = new Set(unit.replace(/^topic-/, '').split('-').filter(t => t.length >= 4))
+  if (unitTokens.size < 2) return null
+
+  const db = getDb()
+  const candidates = db.prepare(`
+    SELECT * FROM insights
+    WHERE workflow_stage = ?
+      AND failure_family = ?
+      AND impacted_unit LIKE 'topic-%'
+      AND status != 'closed'
+    ORDER BY score DESC, created_at DESC
+    LIMIT 20
+  `).all(stage, family) as InsightRow[]
+
+  for (const row of candidates) {
+    const candTokens = row.impacted_unit.replace(/^topic-/, '').split('-').filter((t: string) => t.length >= 4)
+    const shared = candTokens.filter((t: string) => unitTokens.has(t)).length
+    // Require >= 2 shared tokens AND at least half of the shorter set to match
+    const minLen = Math.min(unitTokens.size, candTokens.length)
+    if (shared >= 2 && shared / minLen >= 0.5) {
+      return rowToInsight(row)
+    }
+  }
+
+  return null
+}
+
+/**
  * Ingest a reflection into the insight engine.
  */
 export function ingestReflection(reflection: Reflection): Insight {
@@ -465,6 +539,7 @@ export function ingestReflection(reflection: Reflection): Insight {
   const clusterKeyStr = buildClusterKeyString(clusterKey)
 
   let existing = findByCluster(clusterKeyStr)
+    ?? findNearDuplicate(clusterKeyStr)  // fuzzy fallback: same family, overlapping topic tokens
 
   if (existing) {
     // Cooldown: if in cooldown and new reflection arrives, check reopen cap then reopen
