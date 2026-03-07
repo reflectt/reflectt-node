@@ -214,6 +214,46 @@ async function enrollHostWithApiKey(input: {
   throw new Error(`API key enrollment failed: ${payload?.error || `${response.status} ${response.statusText}`}`)
 }
 
+/**
+ * Try to reconnect using existing persisted credentials.
+ * Returns the existing registration if the host is still valid, null otherwise.
+ */
+async function tryReconnectExistingHost(cloudUrl: string): Promise<CloudRegisterResult | null> {
+  try {
+    const config = loadConfig()
+    const cloud = config.cloud
+    if (!cloud?.hostId || !cloud?.credential) return null
+
+    // Verify the host still exists by hitting the heartbeat endpoint
+    const cloudBase = cloudUrl.replace(/\/+$/, '')
+    const response = await fetch(`${cloudBase}/api/hosts/${cloud.hostId}/heartbeat`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${cloud.credential}`,
+      },
+      body: JSON.stringify({
+        contractVersion: 1,
+        status: 'online',
+        agents: [],
+        activeTasks: [],
+        timestamp: Date.now(),
+        source: {},
+      }),
+    })
+
+    if (response.ok) {
+      console.log(`   ♻️  Reusing existing host (${cloud.hostId})`)
+      return { hostId: cloud.hostId, credential: cloud.credential }
+    }
+
+    console.log(`   ⚠️  Existing host ${cloud.hostId} no longer valid (${response.status}), will register new`)
+    return null
+  } catch {
+    return null
+  }
+}
+
 async function registerHostWithCloud(input: {
   cloudUrl: string
   joinToken: string
@@ -1233,7 +1273,9 @@ program
       console.log('☁️  Step 2/3: Connecting to Reflectt Cloud...')
       const cloudUrl = String(options.cloudUrl || 'https://app.reflectt.ai').replace(/\/+$/, '')
 
-      const registered = options.apiKey
+      // Try to reconnect existing host first (preserves hostId across re-enrollments)
+      const existingHost = await tryReconnectExistingHost(cloudUrl)
+      const registered = existingHost || (options.apiKey
         ? await enrollHostWithApiKey({
             cloudUrl,
             apiKey: options.apiKey,
@@ -1245,7 +1287,7 @@ program
             joinToken: options.joinToken,
             hostName: options.name,
             hostType: options.type,
-          })
+          }))
 
       const config = loadConfig()
       const nextConfig: Config = {
@@ -1349,7 +1391,9 @@ host
       console.log(`   Host: ${options.name} (${options.type})`)
       console.log(`   Method: ${options.apiKey ? 'API key' : 'join token'}`)
 
-      const registered = options.apiKey
+      // Try to reconnect existing host first (preserves hostId across re-enrollments)
+      const existingHost = await tryReconnectExistingHost(cloudUrl)
+      const registered = existingHost || (options.apiKey
         ? await enrollHostWithApiKey({
             cloudUrl,
             apiKey: options.apiKey,
@@ -1362,7 +1406,7 @@ host
             hostName: options.name,
             hostType: options.type,
             authToken: options.authToken,
-          })
+          }))
 
       const nextConfig: Config = {
         ...config,
