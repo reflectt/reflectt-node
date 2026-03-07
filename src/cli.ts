@@ -671,6 +671,40 @@ program
     }
   })
 
+// ============ RESTART COMMAND ============
+program
+  .command('restart')
+  .description('Restart the reflectt server (stop + start)')
+  .action(async () => {
+    // Stop if running
+    if (existsSync(PID_FILE)) {
+      const pid = readFileSync(PID_FILE, 'utf-8').trim()
+      try {
+        process.kill(Number(pid), 'SIGTERM')
+        console.log('⏹️  Server stopped (PID ' + pid + ')')
+        unlinkSync(PID_FILE)
+        // Wait for port to free up
+        await new Promise(resolve => setTimeout(resolve, 1500))
+      } catch (err: any) {
+        if (err.code === 'ESRCH') {
+          console.log('⚠️  Previous process not found, cleaning up')
+          unlinkSync(PID_FILE)
+        }
+      }
+    } else {
+      console.log('ℹ️  No running server found, starting fresh')
+    }
+
+    // Start
+    const { spawn } = await import('child_process')
+    const child = spawn(process.execPath, [process.argv[1]!, 'start'], {
+      stdio: 'inherit',
+      detached: false,
+      cwd: process.cwd(),
+    })
+    child.on('exit', (code) => process.exit(code ?? 0))
+  })
+
 // ============ STATUS COMMAND ============
 program
   .command('status')
