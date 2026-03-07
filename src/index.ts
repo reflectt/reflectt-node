@@ -295,12 +295,8 @@ async function main() {
     // OpenClaw gateway status
     if (openclawConfig.gatewayToken) {
       console.log(`🔗 OpenClaw gateway: configured (${openclawConfig.gatewayUrl})`)
-    } else {
-      console.log('⚠️  OpenClaw gateway: not configured')
-      console.log('   To connect agents, set OPENCLAW_GATEWAY_URL and OPENCLAW_GATEWAY_TOKEN')
-      console.log('   Get your token: openclaw gateway token')
-      console.log('   Guide: https://reflectt.ai/bootstrap')
     }
+    // Note: OpenClaw gateway is optional — suppress the warning for users connecting via Reflectt Cloud
 
     // Cloud integration (checks env vars + config.json for credentials)
     if (isCloudConfigured()) {
@@ -309,7 +305,12 @@ async function main() {
         console.warn(`☁️  Cloud integration error: ${err?.message || err}`)
       })
     } else {
-      console.log('☁️  Cloud integration: disabled (run `reflectt host connect` to enable)')
+      console.log('')
+      console.log('☁️  Connect to Reflectt Cloud (optional but recommended):')
+      console.log('   1. Get a join token at: https://app.reflectt.ai → Hosts → Add Host')
+      console.log('   2. Run: npx reflectt host connect --join-token <token>')
+      console.log('   (or: reflectt host connect --join-token <token> if installed globally)')
+      console.log('')
       // Watch config.json so we auto-connect when agent enrolls
       watchConfigForCloudChanges()
     }
