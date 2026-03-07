@@ -156,7 +156,7 @@ function checkDockerBootstrap(): void {
     console.log('│  2. Restart: docker-compose up -d                        │')
     console.log('│                                                          │')
     console.log('│  Get your token: openclaw gateway token                  │')
-    console.log('│  Full guide: https://reflectt.ai/bootstrap               │')
+    console.log('│  Full guide: https://app.reflectt.ai                     │')
     console.log('└──────────────────────────────────────────────────────────┘')
     console.log('')
   } else if (hasGatewayUrl && !hasGatewayToken) {

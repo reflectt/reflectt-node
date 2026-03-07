@@ -2231,7 +2231,7 @@ export async function createServer(): Promise<FastifyInstance> {
         : {
             status: 'not configured',
             hint: 'Set OPENCLAW_GATEWAY_URL and OPENCLAW_GATEWAY_TOKEN environment variables, or run: openclaw gateway token',
-            docs: 'https://reflectt.ai/bootstrap',
+            docs: 'https://app.reflectt.ai',
           },
       chat: chatManager.getStats(),
       tasks: taskManager.getStats({ includeTest }),

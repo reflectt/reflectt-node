@@ -37,6 +37,11 @@
       "pathPattern": "^src/index\\.ts$",
       "pattern": "(?:app\\.)?reflectt\\.ai",
       "reason": "Public-facing URL in first-run terminal guidance for new users"
+    },
+    {
+      "pathPattern": "^src/server\\.ts$",
+      "pattern": "(?:app\\.)?reflectt\\.ai",
+      "reason": "Public-facing URL in /health openclaw.docs field for unconfigured nodes"
     }
   ]
 }
