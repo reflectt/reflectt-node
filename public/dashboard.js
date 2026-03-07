@@ -2979,7 +2979,7 @@ async function checkGettingStarted() {
     // Step 1 done: check if system health loops are ticking (not just uptime > 0)
     const hasHeartbeat = !!(health.system?.loops?.lastTickAt || (health.tasks?.total > 0));
     const hasTasks = (health.tasks?.total || 0) > 0;
-    const hasMessages = (health.chat?.total || 0) > 0;
+    const hasMessages = (health.chat?.totalMessages || health.chat?.total || 0) > 0;
 
     // Step 1: server running — always done if dashboard loads
     const step1 = document.getElementById('gs-preflight');
@@ -3007,7 +3007,7 @@ async function checkGettingStarted() {
 
     // Auto-hide if all steps done, OR if the system clearly isn't a fresh install
     const allDone = panel.querySelectorAll('.gs-step.done').length === 3;
-    const clearlyNotFresh = (health.tasks?.total || 0) > 5 || (health.chat?.total || 0) > 100;
+    const clearlyNotFresh = (health.tasks?.total || 0) > 5 || (health.chat?.totalMessages || health.chat?.total || 0) > 100;
     if (allDone || clearlyNotFresh) {
       panel.classList.add('hidden');
     }
