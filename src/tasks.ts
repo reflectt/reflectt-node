@@ -1170,7 +1170,8 @@ class TaskManager {
   private static readonly RECURRING_DEBOUNCE_MS = 60_000 // 1 minute
 
   listTasks(options?: {
-    status?: Task['status']
+    /** Filter by one or more statuses. Accepts a single value or an array. */
+    status?: Task['status'] | Task['status'][]
     /** Exact assignee match (legacy). Prefer assigneeIn when supporting aliases. */
     assignee?: string
     /** Assignee set match (case-insensitive) */
@@ -1207,8 +1208,14 @@ class TaskManager {
     const params: unknown[] = []
 
     if (options?.status) {
-      conditions.push('status = ?')
-      params.push(options.status)
+      const statuses = Array.isArray(options.status) ? options.status : [options.status]
+      if (statuses.length === 1) {
+        conditions.push('status = ?')
+        params.push(statuses[0])
+      } else if (statuses.length > 1) {
+        conditions.push(`status IN (${statuses.map(() => '?').join(', ')})`)
+        params.push(...statuses)
+      }
     }
 
     const assigneeFilter = options?.assignee || options?.assignedTo

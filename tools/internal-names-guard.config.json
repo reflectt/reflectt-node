@@ -40,8 +40,8 @@
     },
     {
       "pathPattern": "^src/server\\.ts$",
-      "pattern": "app\\.reflectt\\.ai",
-      "reason": "Public-facing URL in /health openclaw.docs field for unconfigured nodes"
+      "pattern": "(?:app\\.|docs\\.)?reflectt\\.ai",
+      "reason": "Public-facing URLs in /health openclaw.docs field and redirect guidance for unconfigured nodes"
     }
   ]
 }
