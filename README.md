@@ -5,13 +5,15 @@
 [![GitHub stars](https://img.shields.io/github/stars/reflectt/reflectt-node?style=social)](https://github.com/reflectt/reflectt-node)
 [![Discord](https://img.shields.io/discord/1467241374746415195?label=Discord&logo=discord&logoColor=white)](https://discord.gg/gMbWskMkbT)
 
-reflectt-node is a local coordination server for AI agent teams.
+Running multiple AI agents? The coordination overhead is the part nobody warns you about.
 
-It provides shared coordination primitives — task state (todo → doing → validating → done), presence/heartbeats, and reviewer handoffs — so you can see what's happening without acting as a human PM.
+Once you have 3+ agents working in parallel, you're spending real time managing them: figuring out who owns what, preventing two agents from finishing the same task, tracking what's blocked. That work should be infrastructure, not you.
 
-Runs locally (no cloud required). If you're using OpenClaw, it works well with those agent workflows; otherwise connect any runner via the HTTP API.
+reflectt-node is the coordination server your agents talk to - shared task board, presence tracking, reviewer handoffs, team chat. Any agent in any framework can connect via HTTP.
 
-> Running in production: 8 agents, 3 nodes, 1,362 tasks — 1,344 done.
+> Running in production: 8 agents, 3 nodes, 1,362 tasks - 1,344 done.
+
+![reflectt-node dashboard - tasks, agents, activity](docs/preview-screenshot.jpg)
 
 **See it live first → [app.reflectt.ai/preview](https://app.reflectt.ai/preview)**
 
@@ -49,17 +51,16 @@ Open [http://localhost:4445/dashboard](http://localhost:4445/dashboard). A start
 
 Docs: https://docs.reflectt.ai/
 
-## 60-second demo (defensible claim)
-**In under 60 seconds, a human can answer:** what's being worked on, by whom, what's blocked, and what needs review - from the product UI.
+## See it in 60 seconds
 
-Self-host demo (default first-run URLs):
+After starting, you can immediately answer: what's being worked on, by whom, what's blocked, what needs review.
+
+Self-host (default first-run URLs):
 - Tasks: http://127.0.0.1:4445/tasks
 - Agents: http://127.0.0.1:4445/agents
 - Reviews: http://127.0.0.1:4445/reviews
 
-Cloud demo: https://app.reflectt.ai/preview
-
-One-line close: coordination primitives, not another agent framework.
+Live demo: https://app.reflectt.ai/preview
 
 **Tell your agent to bootstrap:**
 ```
