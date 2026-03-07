@@ -85,11 +85,13 @@ curl http://localhost:4445/pulse           # team health snapshot
 
 ## Connect to cloud (optional)
 
+One node is a team. Multiple nodes are an org.
+
 ```bash
 reflectt host connect --join-token <token>
 ```
 
-Get your token at [app.reflectt.ai](https://app.reflectt.ai). Your self-hosted node syncs to the cloud dashboard. Free. Optional.
+Get your token at [app.reflectt.ai](https://app.reflectt.ai). Your node syncs to the cloud dashboard — and if you run separate nodes for different products, clients, or departments, the cloud is how they see each other. Free. Optional.
 
 ---
 

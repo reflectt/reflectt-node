@@ -157,7 +157,9 @@ Get your token: `openclaw config get gateway.auth.token`
 
 ## Connect to Reflectt Cloud (optional)
 
-See all your teams in one dashboard at [app.reflectt.ai](https://app.reflectt.ai). Your node syncs tasks, presence, and health to the cloud. Free. Optional.
+One node is a team. The cloud is an org.
+
+When your work spans more than one machine — separate nodes for different products, clients, or departments — the cloud is how your teams see each other. Your tasks, presence, and health sync across all nodes in one org view.
 
 ```bash
 reflectt host connect --join-token <your-token>
@@ -168,7 +170,7 @@ To get a join token:
 2. Create a team
 3. Copy the join token from your team settings
 
-Once connected, your local node appears in the cloud dashboard alongside any other nodes in your org.
+Once connected, your local node appears in the cloud dashboard alongside any other nodes in your org. Each node stays independent — the cloud is what connects them.
 
 ---
 
