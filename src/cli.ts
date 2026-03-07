@@ -671,6 +671,63 @@ program
     }
   })
 
+// ============ UPGRADE COMMAND ============
+program
+  .command('upgrade')
+  .description('Upgrade reflectt-node to the latest version and restart')
+  .action(async () => {
+    const { execSync } = await import('child_process')
+
+    // 1. Get current version
+    console.log('📦 Checking for updates...')
+    const currentVersion = PKG_VERSION
+
+    // 2. Update via npm
+    try {
+      console.log('⬆️  Updating reflectt-node...')
+      execSync('npm update -g reflectt-node', { stdio: 'inherit' })
+    } catch {
+      console.error('❌ npm update failed. Try: npm install -g reflectt-node@latest')
+      process.exit(1)
+    }
+
+    // 3. Check new version
+    try {
+      const newVersion = execSync('node -e "console.log(require(\'reflectt-node/package.json\').version)"', { encoding: 'utf-8' }).trim()
+      if (newVersion === currentVersion) {
+        console.log(`✅ Already on latest version (${currentVersion})`)
+      } else {
+        console.log(`✅ Updated: ${currentVersion} → ${newVersion}`)
+      }
+    } catch {
+      console.log('✅ Update complete')
+    }
+
+    // 4. Restart if running
+    if (existsSync(PID_FILE)) {
+      const pid = readFileSync(PID_FILE, 'utf-8').trim()
+      try {
+        process.kill(Number(pid), 'SIGTERM')
+        console.log('⏹️  Server stopped')
+        unlinkSync(PID_FILE)
+        await new Promise(resolve => setTimeout(resolve, 1500))
+      } catch (err: any) {
+        if (err.code === 'ESRCH') unlinkSync(PID_FILE)
+      }
+
+      const { spawn } = await import('child_process')
+      console.log('🚀 Starting server...')
+      const child = spawn(process.execPath, [process.argv[1]!, 'start'], {
+        stdio: 'inherit',
+        detached: false,
+        cwd: process.cwd(),
+      })
+      child.on('exit', (code) => process.exit(code ?? 0))
+    } else {
+      console.log('ℹ️  Server not running. Start with: reflectt start')
+    }
+  })
+
 // ============ RESTART COMMAND ============
 program
   .command('restart')
