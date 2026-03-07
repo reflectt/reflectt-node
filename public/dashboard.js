@@ -3011,6 +3011,13 @@ async function checkGettingStarted() {
     if (allDone || clearlyNotFresh) {
       panel.classList.add('hidden');
     }
+
+    // Pre-populate task badge from health before full task fetch completes
+    const taskTotal = health.tasks?.total || 0;
+    const navTaskBadge = document.getElementById('nav-task-count');
+    if (navTaskBadge && taskTotal > 0 && allTasks.length === 0) {
+      navTaskBadge.textContent = taskTotal;
+    }
   } catch {}
 }
 

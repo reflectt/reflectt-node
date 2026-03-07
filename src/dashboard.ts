@@ -2420,7 +2420,7 @@ ${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:non
 </div><!-- /.main -->
 </div><!-- /.app-layout -->
 
-<script src="/dashboard.js"></script>
+<script src="/dashboard.js?v=${Date.now()}"></script>
 
 <!-- Task Modal -->
 <div id="task-modal" class="modal-overlay" onclick="if(event.target===this) closeTaskModal()">
