@@ -43,7 +43,7 @@ npm test           # Run all tests
 npm run test:watch # Watch mode
 ```
 
-We have ~1500 tests. New code needs tests. PRs that drop coverage get asked to add them.
+We have ~1800 tests. New code needs tests. PRs that drop coverage get asked to add them.
 
 ## Making changes
 
@@ -73,8 +73,8 @@ src/
 ├── workers/        # Background workers (board health, task sweeper, etc.)
 └── ...
 
-dashboard/
-└── ...             # Browser dashboard (served from the API)
+public/
+└── ...             # Browser dashboard assets (served from the API)
 
 docs/
 └── ...             # User-facing documentation
