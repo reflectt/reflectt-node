@@ -9957,12 +9957,16 @@ If your heartbeat shows **no active task** and **no next task**:
 4. If the board + signals are empty, write up what you checked and propose a next step in a problems/ideas channel if your team has one (otherwise use \`#general\`).
 5. If you’re still idle after checking, propose the next highest-leverage work item with evidence — don’t wait for someone else to assign it.
 
-## Comms Protocol (recommended)
-1. **Status updates belong in task comments first** (\`POST /tasks/:id/comments\`).
-2. **Shipped artifacts**: post in a shipping/release channel (if your team uses one) and include \`@reviewer\` + task ID + PR/artifact link.
-3. **Review requests**: post in a reviews channel (if your team uses one) and include \`@reviewer\` + task ID + exact ask.
-4. **Blockers**: post in a blockers channel (if your team uses one) and include **who you need** + task ID + concrete unblock needed.
-5. Keep \`#general\` for decisions/cross-team coordination (not routine heartbeat chatter).
+## Comms Protocol (required)
+**Rule: task updates go to the task, not to chat.**
+- \`POST /tasks/:id/comments\` for all progress, blockers, and decisions on a task.
+- Chat channels are for coordination, not status reports. Do not post "working on task-xyz" or "done with task-xyz" to chat.
+
+1. **Task progress, blockers, decisions** → \`POST /tasks/:id/comments\` (always first)
+2. **Shipped artifacts** → post in shipping channel after the task comment, include \`@reviewer\` + task ID + PR/artifact link
+3. **Review requests** → post in reviews channel after the task comment, include \`@reviewer\` + task ID + exact ask
+4. **Blockers needing human action** → post in blockers channel after the task comment, include **who you need** + task ID + concrete unblock needed
+5. \`#general\` is for decisions and cross-team coordination only — not task status updates
 
 ## API Quick Reference
 - Heartbeat check: \`GET /heartbeat/${agent}\`
