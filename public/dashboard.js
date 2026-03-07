@@ -33,6 +33,8 @@ function activatePage(page) {
   document.querySelectorAll('.sidebar-link[data-page]').forEach(link => {
     link.classList.toggle('active', link.dataset.page === page);
   });
+  // Load doctor page data when shown
+  if (page === 'doctor' && typeof loadDoctorPage === 'function') loadDoctorPage();
 }
 
 function toggleSidebar() {
@@ -1658,12 +1660,7 @@ async function loadDoctorPage() {
   }
 }
 
-// Hook into page activation: load doctor data when the page is shown
-const _origActivatePage = activatePage;
-function activatePage(page) {
-  _origActivatePage(page);
-  if (page === 'doctor') loadDoctorPage();
-}
+// Doctor page activation handled in activatePage() above
 
 async function loadReleaseStatus(force = false) {
   const badge = document.getElementById('release-badge');
@@ -2670,7 +2667,7 @@ function openTaskModal(taskId) {
   loadPrReviewPanel(currentTask);
 }
 
-function formatDuration(sec) {
+function formatDurationSec(sec) {
   if (sec == null) return '';
   if (sec < 60) return sec + 's';
   return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
@@ -2763,7 +2760,7 @@ function renderPrReviewPanel(data) {
       html += '<div class="ci-check-row">';
       html += '<span class="check-icon">' + icon + '</span>';
       html += '<span class="check-name">' + esc(c.name) + '</span>';
-      if (c.durationSec != null) html += '<span class="check-duration">' + formatDuration(c.durationSec) + '</span>';
+      if (c.durationSec != null) html += '<span class="check-duration">' + formatDurationSec(c.durationSec) + '</span>';
       if (c.detailsUrl) html += '<a href="' + esc(c.detailsUrl) + '" target="_blank">logs</a>';
       html += '</div>';
     });
@@ -3415,14 +3412,7 @@ function formatFileSize(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
-function timeAgo(ts) {
-  const d = typeof ts === 'string' ? new Date(ts) : new Date(ts);
-  const s = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return Math.floor(s / 60) + 'm ago';
-  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-  return Math.floor(s / 86400) + 'd ago';
-}
+// timeAgo defined above (line ~3286)
 
 async function loadFiles() {
   try {
