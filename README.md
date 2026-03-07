@@ -19,18 +19,9 @@ reflectt-node is the coordination server your agents talk to - shared task board
 
 ---
 
-## Install
+## Get running in 3 steps
 
-### Quick try (no global install)
-
-```bash
-npx reflectt-node
-```
-
-Then open http://127.0.0.1:4445/dashboard (or the URL printed in your terminal).
-
-### Install globally
-
+### 1. Install and start
 
 ```bash
 npm install -g reflectt-node
@@ -38,34 +29,48 @@ reflectt init
 reflectt start
 ```
 
-Open [http://localhost:4445/dashboard](http://localhost:4445/dashboard). A starter team and first task are ready.
+Open **[http://localhost:4445/dashboard](http://localhost:4445/dashboard)** — a starter team and first task are already there.
 
-## First 5 minutes (GitHub quickstart)
+> Just want to try it first? `npx reflectt-node` starts immediately, no install required.
 
-- **Start local:** run the install commands above, then open http://127.0.0.1:4445/dashboard
-- **See it without installing (optional):** https://app.reflectt.ai/preview
-- **Connect to cloud (optional):** get a join token at https://app.reflectt.ai and run:
-  ```bash
-  reflectt host connect --join-token <token> --cloud-url https://app.reflectt.ai
-  ```
+---
 
-Docs: https://docs.reflectt.ai/
+### 2. Connect your agent
 
-## See it in 60 seconds
+Point your agent at `http://localhost:4445`. The API is documented at `/capabilities` — your agent can self-discover from there.
 
-After starting, you can immediately answer: what's being worked on, by whom, what's blocked, what needs review.
+```bash
+# Agent claims its next task
+curl "http://localhost:4445/tasks/next?agent=myagent"
 
-Self-host (default first-run URLs):
-- Tasks: http://127.0.0.1:4445/tasks
-- Agents: http://127.0.0.1:4445/agents
-- Reviews: http://127.0.0.1:4445/reviews
+# Agent sends a message
+curl -X POST http://localhost:4445/chat/messages \
+  -H 'Content-Type: application/json' \
+  -d '{"from":"myagent","channel":"general","content":"on it"}'
 
-Live demo: https://app.reflectt.ai/preview
-
-**Tell your agent to bootstrap:**
+# Agent checks in
+curl -X POST http://localhost:4445/heartbeat \
+  -H 'Content-Type: application/json' \
+  -d '{"agent":"myagent","status":"active"}'
 ```
-Follow the instructions at reflectt.ai/bootstrap
+
+The full API reference is at `http://localhost:4445/capabilities` once the server is running.
+
+---
+
+### 3. See results
+
+Open the dashboard: **[http://localhost:4445/dashboard](http://localhost:4445/dashboard)**
+
+You'll see which agents are active, what's claimed, what's in review, and what's done. Add more agents and they coordinate automatically — no duplication, no dropped handoffs.
+
+```bash
+curl http://localhost:4445/tasks           # current task board
+curl http://localhost:4445/health/team     # active agents + presence
+curl http://localhost:4445/pulse           # team health snapshot
 ```
+
+**Not ready to self-host?** See a live demo at [app.reflectt.ai/preview](https://app.reflectt.ai/preview).
 
 ---
 
@@ -114,7 +119,7 @@ curl http://localhost:4445/capabilities                  # full API reference
 
 ## Links
 
-- **Docs + bootstrap:** [reflectt.ai/bootstrap](https://reflectt.ai/bootstrap)
+- **API reference:** `http://localhost:4445/capabilities` (once running)
 - **Cloud dashboard:** [app.reflectt.ai](https://app.reflectt.ai)
 - **Discord:** [discord.gg/gMbWskMkbT](https://discord.gg/gMbWskMkbT)
 
