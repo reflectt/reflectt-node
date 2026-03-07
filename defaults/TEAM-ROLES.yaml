@@ -1,67 +1,242 @@
-# TEAM-ROLES.yaml — Agent role configuration
-#
-# This is the default starter config. Customize it for your team:
-#   cp defaults/TEAM-ROLES.yaml ~/.reflectt/TEAM-ROLES.yaml
-#   nano ~/.reflectt/TEAM-ROLES.yaml
-#
-# reflectt-node hot-reloads changes — no restart needed.
-# See docs/TEAM-ROLES.md for full reference.
-
 agents:
-  - name: agent-1
+  - name: link
     role: builder
-    description: General-purpose builder agent. Rename to match your team.
+    description: Core implementation owner for backend/api/integration work.
     affinityTags:
       - backend
       - api
       - integration
       - bug
       - test
+      - webhook
+      - server
+      - fastify
       - typescript
+      - task-lifecycle
+      - watchdog
+      - database
+    alwaysRoute:
+      - backend
+      - integration
+      - api
+    neverRoute:
+      - brand-copy
     wipCap: 2
-
-  - name: agent-2
+  - name: pixel
     role: designer
-    description: UI/UX agent. Rename to match your team.
+    description: UX and dashboard experience owner.
     affinityTags:
-      - design
+      - dashboard
       - ui
       - css
       - visual
+      - animation
       - frontend
+      - layout
+      - ux
+      - modal
+      - chart
     routingMode: opt-in
+    neverRouteUnlessLane: design
     alwaysRoute:
       - design
+      - user-facing
+      - reflectt-node
+      - reflectt-cloud-app
+      - reflectt.ai
+      - app.reflectt.ai
       - ui
       - ux
+      - dashboard
+      - a11y
       - css
       - visual
+      - copy
+      - brand
+      - marketing
     neverRoute:
-      - ops
       - infra
-      - ci
+      - ws-pairing
+      - pairing
+      - preflight
+      - auth
+      - provisioning
       - deploy
-      - compliance
-      - backend
-      - api
+      - ci
       - docker
-      - monitoring
-      - database
+      - ssh
+      - gateway
+      - token
+      - compliance
     wipCap: 1
-
-  - name: agent-3
+  - name: sage
     role: ops
-    description: Operations/infra agent. Rename to match your team.
+    description: Process/ops strategist focused on reliability and execution quality.
     affinityTags:
       - ci
       - deploy
       - ops
+      - merge
+      - infra
+      - github-actions
       - docker
-      - monitoring
+      - pipeline
+      - release
+      - codeowners
+    alwaysRoute:
+      - ops
+      - ci
+      - release
+    neverRoute:
+      - visual-polish
     protectedDomains:
       - deploy
       - ci
-    wipCap: 2
+      - release
+    wipCap: 1
+  - name: echo
+    role: voice
+    description: Content and messaging execution owner.
+    affinityTags:
+      - content
+      - docs
+      - landing
+      - copy
+      - brand
+      - marketing
+      - social
+      - blog
+      - readme
+      - onboarding
+    # Content is opt-in: Echo should not be auto-assigned engineering/UI work.
+    routingMode: opt-in
+    neverRouteUnlessLane: content
+    alwaysRoute:
+      - docs
+      - content
+      - standards
+      - copy
+      - brand
+      - marketing
+      - landing
+      - readme
+    neverRoute:
+      - db-migration
+      - backend
+      - api
+      - integration
+      - ui
+      - frontend
+      - dashboard
+      - css
+      - design
+      - deploy
+      - ci
+      - infra
+      - security-review
+      - code-review
+    wipCap: 1
+  - name: harmony
+    role: agent-health
+    description: Agent health and team culture owner (coordination quality, risk flags, role fit, communication hygiene).
+    affinityTags:
+      - agent-health
+      - team-health
+      - coordination
+      - communication
+      - culture
+      - conflict-prevention
+      - workload-balance
+      - burnout-risk
+      - operating-rhythm
+    # Health is opt-in: Harmony should not be auto-assigned product/engineering work.
+    routingMode: opt-in
+    neverRouteUnlessLane: health
+    alwaysRoute:
+      - agent-health
+      - team-health
+      - coordination
+      - comms-hygiene
+      - pulse
+    neverRoute:
+      - backend
+      - api
+      - integration
+      - security-review
+      - code-review
+      - frontend
+      - ui
+      - design
+      - growth
+      - marketing
+      - docs
+      - release
+      - deploy
+    protectedDomains:
+      - agent-health
+      - team-health
+    wipCap: 1
+  - name: scout
+    role: analyst
+    description: Analytics/research owner for insights and prioritization inputs.
+    affinityTags:
+      - research
+      - analysis
+      - metrics
+      - monitoring
+      - analytics
+      - data
+      - reporting
+      - benchmark
+    alwaysRoute:
+      - analytics
+      - research
+      - sla
+    neverRoute:
+      - frontend-polish
+    wipCap: 1
+  - name: spark
+    role: growth
+    description: Growth and activation — funnels, onboarding, experiments, distribution.
+    affinityTags:
+      - growth
+      - activation
+      - funnel
+      - onboarding
+      - distribution
+      - experiment
+      - telemetry
+      - dashboard
+      - conversion
+    alwaysRoute:
+      - growth
+      - activation
+      - experiment
+    neverRoute:
+      - security-review
+    wipCap: 1
+
+  # Rhythm: ops automation agent
+  - name: rhythm
+    role: ops-automation
+    description: Ops automation — board health, CI/CD, monitoring, SLA tracking.
+    affinityTags:
+      - ops
+      - automation
+      - ci
+      - monitoring
+      - board-health
+      - sla
+      - alerting
+    alwaysRoute:
+      - ops-automation
+      - board-health
+    neverRoute:
+      - visual-polish
+      - brand-copy
+    wipCap: 1
+
+  # Removed agent-1/2/3 fallback entries — were leaking into dashboard as ghost agents
 
 # Lane definitions for ready-queue engine.
 # Each lane groups agents into a work stream with floor + WIP controls.
@@ -69,16 +244,31 @@ agents:
 # wipLimit   — max simultaneous doing tasks per agent (/tasks/next enforces this)
 lanes:
   - name: engineering
-    agents: [agent-1]
+    agents: [link]
     readyFloor: 2
     wipLimit: 2
 
   - name: design
-    agents: [agent-2]
+    agents: [pixel]
     readyFloor: 1
     wipLimit: 1
 
   - name: operations
-    agents: [agent-3]
+    agents: [sage, rhythm]
     readyFloor: 1
-    wipLimit: 2
+    wipLimit: 1
+
+  - name: health
+    agents: [harmony]
+    readyFloor: 1
+    wipLimit: 1
+
+  - name: growth
+    agents: [spark]
+    readyFloor: 1
+    wipLimit: 1
+
+  - name: content
+    agents: [echo]
+    readyFloor: 1
+    wipLimit: 1
