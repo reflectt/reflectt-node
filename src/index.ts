@@ -474,6 +474,25 @@ async function main() {
           console.log('   Created welcome task')
         }
       }
+      // Print clear next-steps for first-time users
+      if (allTasks.length === 0) {
+        const cloudConfigured = isCloudConfigured()
+        console.log('')
+        console.log('┌──────────────────────────────────────────────┐')
+        console.log('│  🎉 reflectt-node is running!                │')
+        console.log('│                                              │')
+        console.log(`│  Dashboard: ${baseUrl}/dashboard`)
+        console.log(`│  API docs:  ${baseUrl}/docs`)
+        if (!cloudConfigured) {
+          console.log('│                                              │')
+          console.log('│  Connect to Reflectt Cloud:                  │')
+          console.log('│  npx reflectt host connect --join-token <t>  │')
+        }
+        console.log('│                                              │')
+        console.log('│  Your agents are ready. Send them a task!    │')
+        console.log('└──────────────────────────────────────────────┘')
+        console.log('')
+      }
     } catch (err) {
       // Non-blocking — don't prevent server from starting
       console.warn(`⚠️  First-boot seeding: ${(err as Error)?.message || err}`)
