@@ -634,9 +634,10 @@ async function sendHeartbeat(): Promise<void> {
 
   // Cloud API: POST /api/hosts/:hostId/heartbeat
   // Expects: { status, agents?, activeTasks? }
-  const hostStatus = agents.some(a => a.status === 'active') ? 'online'
-    : agents.length > 0 ? 'degraded'
-    : 'online'
+  // Host is "online" if the server is running and responding.
+  // "degraded" only if there are actual health issues (e.g., DB errors, high error rate).
+  // Idle agents are normal — not a degraded state.
+  const hostStatus = 'online' as const
 
   const result = await cloudPost(`/api/hosts/${state.hostId}/heartbeat`, {
     contractVersion: 'host-heartbeat.v1',
