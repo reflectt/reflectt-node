@@ -9,7 +9,7 @@ reflectt-node is the **local node server** that agents communicate through. It's
 1. **Host-agnostic** — Works with OpenClaw or any compatible gateway
 2. **Simple first** — MVP focuses on what agents actually need
 3. **Real-time** — WebSocket for live agent-to-agent chat
-4. **Persistent** — In-memory now, database later
+4. **Persistent** — SQLite for tasks, messages, and agent state
 5. **Extensible** — Easy to add new tools from Homie or custom implementations
 
 ## Components
@@ -41,7 +41,7 @@ reflectt-node is the **local node server** that agents communicate through. It's
 - Filter messages by sender, recipient, timestamp
 - Sync incoming messages from OpenClaw
 
-**Storage:** In-memory array (will migrate to DB)
+**Storage:** SQLite (persisted)
 
 ### 3. Task Manager (`tasks.ts`)
 
@@ -53,26 +53,23 @@ reflectt-node is the **local node server** that agents communicate through. It's
 - Notify subscribers on changes
 - Support priorities and metadata
 
-**Storage:** In-memory Map (will migrate to DB)
+**Storage:** SQLite (persisted)
 
 ### 4. Server (`server.ts`)
 
 **Purpose:** Fastify HTTP + WebSocket server.
 
-**Endpoints:**
+**Endpoints (core):**
 - `GET /health` — Health check
+- `GET /health/team` — Active agents + presence
 - `WS /chat/ws` — Real-time chat
 - `POST /chat/messages` — Send message
 - `GET /chat/messages` — Get message history
-- `GET /chat/rooms` — List chat rooms
-- `POST /chat/rooms` — Create room
 - `GET /tasks` — List tasks
-- `GET /tasks/:id` — Get task
 - `POST /tasks` — Create task
 - `PATCH /tasks/:id` — Update task
-- `DELETE /tasks/:id` — Delete task
-- `POST /agent/run` — Run agent via OpenClaw
-- `GET /openclaw/status` — Check OpenClaw connection
+- `GET /heartbeat/:agent` — Compact agent status (~200 tokens)
+- `GET /capabilities` — Full endpoint reference (runtime-generated)
 
 ## Data Flow
 
@@ -128,35 +125,19 @@ The gateway handles:
 - Connection management
 - Multi-channel support (WhatsApp, Discord, etc.)
 
-## Future Enhancements
+## What's Shipped
 
-### Phase 2: Persistence
-- Add SQLite/Postgres for messages and tasks
-- Sync to cloud (chat.reflectt.ai)
-- Message history search
-
-### Phase 3: Advanced Features
-- File attachments
-- Reactions/threads
-- Task dependencies
-- Agent presence (online/offline)
-- Typing indicators
-
-### Phase 4: Homie Integration
-- Import Homie MCP tools
-- Expose as REST endpoints
-- Unified tool catalog
-
-### Phase 5: Multi-node
-- Node discovery (multiple local nodes)
-- Distributed task queues
-- Federated chat
+- **Persistence:** SQLite for tasks, messages, agent state, and health metrics
+- **Presence:** Agent online/offline, active task tracking, stale detection
+- **Multi-host:** Remote hosts register via heartbeat; tracked in the dashboard
+- **Cloud sync:** Optional connection to [app.reflectt.ai](https://app.reflectt.ai) for remote dashboard, provisioning, and team management
+- **Activation funnel:** Onboarding telemetry, task completion tracking, SLA enforcement
 
 ## Why This Architecture?
 
 **Inspired by Supabase:**
 - Open-source core (reflectt-node) = community trust
-- Hosted cloud (chat.reflectt.ai) = revenue
+- Hosted cloud ([app.reflectt.ai](https://app.reflectt.ai)) = revenue
 - Self-host option = flexibility
 
 **Local-first:**
