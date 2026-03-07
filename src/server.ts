@@ -7369,6 +7369,26 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      // ── Reviewer notification: @mention reviewer when task enters validating ──
+      if (parsed.status === 'validating' && existing.status !== 'validating' && existing.reviewer) {
+        const taskMeta = task.metadata as Record<string, unknown> | undefined
+        const prUrl = (taskMeta?.review_handoff as Record<string, unknown> | undefined)?.pr_url
+          ?? (taskMeta?.qa_bundle as Record<string, unknown> | undefined)?.pr_url
+          ?? ''
+        const prLine = prUrl ? `\nPR: ${prUrl}` : ''
+        chatManager.sendMessage({
+          from: 'system',
+          content: `@${existing.reviewer} [reviewRequested:${task.id}] ${task.title} → validating${prLine}`,
+          channel: 'task-notifications',
+          metadata: {
+            kind: 'review_requested',
+            taskId: task.id,
+            reviewer: existing.reviewer,
+            prUrl: prUrl || undefined,
+          },
+        }).catch(() => {}) // Non-blocking
+      }
+
       // ── Activation funnel: track first_task_started / first_task_completed ──
       {
         const funnelUserId = (task.metadata as any)?.userId || task.assignee || ''
@@ -7467,6 +7487,25 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       if (parsed.status === 'validating' && task.reviewer) {
         statusNotifTargets.push({ agent: task.reviewer, type: 'reviewRequested' })
+
+        // ── Explicit reviewer routing: ping reviewer with PR link + ask ──
+        const prUrl = (task.metadata as Record<string, unknown>)?.pr_url
+          || ((task.metadata as Record<string, unknown>)?.qa_bundle as Record<string, unknown>)?.pr_url
+          || ((task.metadata as Record<string, unknown>)?.review_handoff as Record<string, unknown>)?.pr_url
+        const prLink = typeof prUrl === 'string' && prUrl ? ` — ${prUrl}` : ''
+        const reviewMsg = `@${task.reviewer} review requested: **${task.title}** (${task.id})${prLink}. Please approve or flag issues.`
+        chatManager.sendMessage({
+          from: 'system',
+          content: reviewMsg,
+          channel: 'reviews',
+          metadata: {
+            kind: 'review_routing',
+            taskId: task.id,
+            reviewer: task.reviewer,
+            assignee: task.assignee,
+            prUrl: prUrl || null,
+          },
+        }).catch(() => {}) // Non-blocking
       }
       if (parsed.status === 'done') {
         if (task.assignee) statusNotifTargets.push({ agent: task.assignee, type: 'taskCompleted' })
