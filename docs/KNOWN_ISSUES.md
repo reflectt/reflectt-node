@@ -53,11 +53,12 @@ curl -s -X PATCH "$BASE/tasks/$TASK_ID" \
 ```
 
 - **Owner:** platform/tasks API
-- **Status:** open
-- **Next fix PR:** _TBD_
+- **Status:** fixed (verified 2026-03-07 — PATCH to `doing` without `metadata.eta` works in v0.1.6)
+- **Next fix PR:** _resolved in runtime_
 
 ---
 
 ## Change log
 
 - 2026-02-14 — Created issue tracker page and added ISSUE-001.
+- 2026-03-07 — ISSUE-001 marked fixed: verified `PATCH /tasks/:id` with `{"status":"doing"}` succeeds without `metadata.eta` on v0.1.6.
