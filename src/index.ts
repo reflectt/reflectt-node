@@ -486,7 +486,7 @@ async function main() {
         if (!cloudConfigured) {
           console.log('│                                              │')
           console.log('│  Connect to Reflectt Cloud:                  │')
-          console.log('│  npx reflectt host connect --join-token <t>  │')
+          console.log('│  https://app.reflectt.ai/onboard             │')
         }
         console.log('│                                              │')
         console.log('│  Your agents are ready. Send them a task!    │')
