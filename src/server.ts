@@ -6093,7 +6093,12 @@ export async function createServer(): Promise<FastifyInstance> {
   // Create task
   app.post('/tasks', async (request, reply) => {
     try {
-      const data = CreateTaskSchema.parse(request.body)
+      // Normalize legacy "in-progress" → "doing" before schema validation
+      const rawPostBody = request.body as Record<string, unknown>
+      if (rawPostBody && typeof rawPostBody === 'object' && rawPostBody.status === 'in-progress') {
+        rawPostBody.status = 'doing'
+      }
+      const data = CreateTaskSchema.parse(rawPostBody)
 
       // Reject TEST: prefixed tasks in production to prevent CI pollution
       if (process.env.NODE_ENV === 'production' && typeof data.title === 'string' && data.title.startsWith('TEST:')) {
@@ -6812,7 +6817,13 @@ export async function createServer(): Promise<FastifyInstance> {
   // Update task
   app.patch<{ Params: { id: string } }>('/tasks/:id', async (request, reply) => {
     try {
-      const parsed = UpdateTaskSchema.parse(request.body)
+      // Normalize legacy "in-progress" → "doing" before schema validation.
+      // Some agents (and older MCP callers) use the deprecated status name.
+      const rawBody = request.body as Record<string, unknown>
+      if (rawBody && typeof rawBody === 'object' && rawBody.status === 'in-progress') {
+        rawBody.status = 'doing'
+      }
+      const parsed = UpdateTaskSchema.parse(rawBody)
       const lookup = taskManager.resolveTaskId(request.params.id)
       if (lookup.matchType === 'ambiguous') {
         reply.code(400)
