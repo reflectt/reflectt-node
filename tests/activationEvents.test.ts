@@ -239,6 +239,18 @@ describe('Onboarding Telemetry Dashboard', () => {
       expect(preflightDrop.reasons.some(r => r.reason === 'cloud-reachable')).toBe(true)
     })
 
+    it('buckets users with no preflight attempt as no_preflight_run (not unspecified)', async () => {
+      // u1 signs up but never runs preflight (no host_preflight_failed event emitted)
+      await emitActivationEvent('signup_completed', 'u1')
+
+      const dist = getFailureDistribution()
+      const preflightDrop = dist.find(s => s.step === 'host_preflight_passed')!
+      expect(preflightDrop.droppedCount).toBe(1)
+      // Should be no_preflight_run, not unspecified
+      expect(preflightDrop.reasons.some(r => r.reason === 'no_preflight_run')).toBe(true)
+      expect(preflightDrop.reasons.some(r => r.reason === 'unspecified')).toBe(false)
+    })
+
     it('provides a non-unspecified bucket for workspace_ready drops', async () => {
       await emitActivationEvent('signup_completed', 'u1')
       await emitActivationEvent('host_preflight_passed', 'u1')

@@ -162,6 +162,17 @@ export async function emitActivationEvent(
   // Idempotent: skip if already recorded
   if (userMap.has(type)) return false
 
+  // Warn at ingestion time if host_preflight_failed arrives without structured metadata.
+  // This means the caller is not providing failed_checks/first_blocker, which makes
+  // failure reason analysis impossible. The emitter (preflight.ts) always provides these,
+  // so a null here signals a non-standard code path.
+  if (type === 'host_preflight_failed' && (!metadata || (!metadata.failed_checks && !metadata.first_blocker))) {
+    console.warn(
+      `[ActivationFunnel] host_preflight_failed for userId=${userId} has no failed_checks or first_blocker metadata. ` +
+      `Failure reason will appear as "unspecified" in the funnel. Emit metadata.failed_checks=[...] and metadata.first_blocker=<checkId>.`
+    )
+  }
+
   const timestamp = Date.now()
   userMap.set(type, timestamp)
 
@@ -461,27 +472,35 @@ export function getFailureDistribution(): FailureDistribution[] {
       if (reachedPrev && !reachedThis) {
         droppedCount++
 
-        // Preflight failures: use host_preflight_failed metadata (failed_checks/first_blocker)
+        // Preflight failures: use host_preflight_failed metadata (failed_checks/first_blocker).
+        // If no host_preflight_failed event exists, the user never attempted preflight.
         if (step === 'host_preflight_passed') {
           const failEvent = eventLog.find(e => e.userId === u.userId && e.type === 'host_preflight_failed')
-          const meta = failEvent?.metadata
-          if (meta) {
-            const fc: unknown = (meta as any).failed_checks
-            if (Array.isArray(fc)) {
-              for (const check of fc) {
-                const reason = String(check)
+          if (!failEvent) {
+            // User reached signup but never ran preflight — distinct from a failed run
+            reasonCounts.set('no_preflight_run', (reasonCounts.get('no_preflight_run') || 0) + 1)
+          } else {
+            const meta = failEvent.metadata
+            if (meta) {
+              const fc: unknown = (meta as any).failed_checks
+              if (Array.isArray(fc) && fc.length > 0) {
+                for (const check of fc) {
+                  const reason = String(check)
+                  reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
+                }
+              } else if (typeof fc === 'string' && fc) {
+                const reason = fc
+                reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
+              } else if ((meta as any).first_blocker) {
+                const reason = String((meta as any).first_blocker)
+                reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
+              } else if ((meta as any).error) {
+                const reason = String((meta as any).error)
                 reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
               }
-            } else if (typeof fc === 'string' && fc) {
-              const reason = fc
-              reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
-            } else if ((meta as any).first_blocker) {
-              const reason = String((meta as any).first_blocker)
-              reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
-            } else if ((meta as any).error) {
-              const reason = String((meta as any).error)
-              reasonCounts.set(reason, (reasonCounts.get(reason) || 0) + 1)
+              // metadata present but no extractable reason: falls through to unspecified
             }
+            // metadata null/undefined: falls through to unspecified
           }
         }
 
