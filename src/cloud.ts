@@ -932,11 +932,12 @@ async function syncChat(): Promise<void> {
     return
   }
 
-  // Get recent messages since last sync
+  // Get recent messages since last sync, excluding cloud-relayed messages
+  // to prevent echo: cloud→node→cloud sync loop
   const recentMessages = chatManager.getMessages({
     since: chatSyncCursor,
     limit: 50,
-  })
+  }).filter(m => (m.metadata as any)?.source !== 'cloud-relay')
 
   // Send to cloud and get pending outbound messages
   const payload = recentMessages.map(m => ({
