@@ -6265,7 +6265,22 @@ export async function createServer(): Promise<FastifyInstance> {
           .then(({ indexTask }) => indexTask(task.id, task.title, undefined, data.done_criteria))
           .catch(() => {})
       }
-      
+
+      // Auto-link insight when task is manually created with source_insight metadata.
+      // Mirrors the bridge's updateInsightStatus call so insights don't stay pending_triage
+      // after an agent manually files a task addressing them.
+      const sourceInsightId = typeof newMetadata.source_insight === 'string' ? newMetadata.source_insight : null
+      if (sourceInsightId && !sourceInsightId.startsWith('ins-test-')) {
+        try {
+          const linkedInsight = getInsight(sourceInsightId)
+          if (linkedInsight && linkedInsight.status !== 'task_created' && linkedInsight.status !== 'closed') {
+            updateInsightStatus(sourceInsightId, 'task_created', task.id)
+          }
+        } catch {
+          // Non-fatal: insight link failure must not block task creation
+        }
+      }
+
       trackTaskEvent('created')
       return { success: true, task: enrichTaskWithComments(task), warnings: creationWarnings }
     } catch (err: any) {
