@@ -181,8 +181,6 @@ Once connected, your local node appears in the cloud dashboard alongside any oth
 
 ## Troubleshooting
 
-**Startup log noise on first boot:** You may see a vector search warning and several TeamConfig notices when the server first starts. These are expected — vector search is optional and initializes on demand, and TeamConfig builds itself from your first `reflectt init`. Nothing is broken. Once you have agents running and a team configured, these messages stop.
-
 **Server won't start:** Check that port 4445 isn't already in use. Run `reflectt doctor` for diagnostics.
 
 **Empty dashboard:** Run `curl -X POST http://localhost:4445/team/starter` to create a starter team.
