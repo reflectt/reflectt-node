@@ -2181,6 +2181,18 @@ ${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:non
     </div>
   </div>
 
+  <!-- Overview summary — always visible when tasks/messages exist -->
+  <div class="panel" id="overview-summary" style="display:none">
+    <div class="panel-header">📊 Team Overview</div>
+    <div class="panel-body" id="overview-summary-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin-bottom:16px" id="overview-stats"></div>
+      <div id="overview-recent">
+        <div style="font-size:13px;font-weight:500;color:var(--text-bright);margin-bottom:8px">Recent Activity</div>
+        <div id="overview-activity-list" style="font-size:12px;color:var(--text-muted);line-height:1.6"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="panel focus-only" style="display:none">
     <div class="panel-header">🧭 Runtime Truth Card <span class="count" id="truth-count">loading…</span></div>
     <div class="panel-body" id="truth-body"></div>
