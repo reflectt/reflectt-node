@@ -247,7 +247,23 @@ export function validateTeamConfig(): TeamConfigValidationResult {
   return result
 }
 
+// First-run codes: all warnings that fire on a clean install with no team files
+const FIRST_RUN_CODES = new Set([
+  'team_md_missing',
+  'team_md_missing_section',
+  'team_standards_missing',
+  'team_roles_missing',
+])
+
 function logValidation(result: TeamConfigValidationResult, source: string) {
+  // On first run (all issues are expected missing-file warnings), collapse to one friendly line
+  const allFirstRun = result.issues.length > 0
+    && result.issues.every(i => i.level === 'warning' && FIRST_RUN_CODES.has(i.code))
+  if (allFirstRun && source === 'startup') {
+    console.log('[TeamConfig] No team config found — using defaults. Customize: reflectt init')
+    return
+  }
+
   for (const issue of result.issues) {
     const prefix = issue.level === 'error' ? '[TeamConfig][ERROR]' : '[TeamConfig][WARN]'
     const loc = issue.path ? ` (${basename(issue.path)})` : ''
