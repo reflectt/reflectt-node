@@ -487,7 +487,7 @@ async function main() {
         if (!cloudConfigured) {
           console.log('│                                              │')
           console.log('│  Connect to Reflectt Cloud:                  │')
-          console.log('│  npx reflectt-node host connect              │')
+          console.log('│  npx reflectt host connect              │')
           console.log('│    --join-token <your-token>                 │')
         }
         console.log('│                                              │')
