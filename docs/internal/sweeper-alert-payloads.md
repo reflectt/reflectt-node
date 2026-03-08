@@ -64,8 +64,15 @@ Notes:
 
 All alerts use `@{agent_name}` format (e.g., `@link`, `@sage`, `@kai`). Falls back to `@unassigned` when no agent is set.
 
+## Digest suppression semantics
+
+- `DIGEST_SUPPRESSION_MS` is the cooldown for re-posting an unchanged sweeper digest. Current value: **2 hours**.
+- The digest fingerprint is based on the stable set of `type:taskId` pairs only. Changes to rendered copy, titles, or `age_minutes` do **not** create a new digest by themselves.
+- Scope is **process-local / in-memory**. The suppression window holds across repeated sweeps in the same runtime, but resets on process restart.
+- A genuinely changed finding set (added/removed violation, or a violation changes type) produces a new fingerprint and is emitted immediately.
+
 ## Live PR State Check
 
-Before emitting `orphan_pr` alerts, the sweeper checks live PR state via `gh pr view`. Only OPEN PRs trigger alerts. Merged and closed PRs are skipped with a dry-run log entry.
+Periodic sweeps do **not** call `gh pr view` for orphan detection; they rely on task metadata only to avoid blocking the event loop.
 
-Cache: 5-minute TTL per PR URL to avoid GitHub API rate limits.
+Use `/drift-report` when you need live PR-state confirmation. That path may check GitHub state and can distinguish open vs merged/closed PRs.
