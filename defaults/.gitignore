@@ -1,23 +1,20 @@
-# reflectt team ops — git-tracked config, excluded runtime data
-
-# Database files
-*.db
-*.db-journal
-*.db-wal
-*.db-shm
+# reflectt runtime data — do not commit
+.env
+.env.local
+.env.*.local
 
 # Secrets and credentials
-secrets/
+config.json
 *.key
 *.pem
-*.cert
 
-# Runtime
+# Logs
+*.log
 logs/
-cache/
-*.pid
-server.pid
 
-# OS artifacts
+# Node
+node_modules/
+
+# OS
 .DS_Store
 Thumbs.db
