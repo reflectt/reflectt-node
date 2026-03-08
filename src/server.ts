@@ -7705,6 +7705,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, agents: enriched, config: sourceInfo }
   }
 
+  app.get('/agents', async () => buildRoleRegistryPayload())
   app.get('/agents/roles', async () => buildRoleRegistryPayload())
 
   // Team-scoped alias for assignment-engine consumers
