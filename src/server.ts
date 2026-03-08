@@ -1058,6 +1058,13 @@ function isEchoOutOfLaneTask(task: Task): boolean {
   return true
 }
 
+const reviewHandoffValidationStats = {
+  failures: 0,
+  lastFailureAt: 0,
+  lastFailureTaskId: '',
+  lastFailureError: '',
+}
+
 async function enforceReviewHandoffGateForValidating(
   status: Task['status'] | undefined,
   taskId: string,
@@ -3234,6 +3241,9 @@ export async function createServer(): Promise<FastifyInstance> {
         mentionRescue: { registered: Boolean(mentionRescueTimer), lastTickAt: ticks.mention_rescue, lastTickAgeSec: ageSec(ticks.mention_rescue) },
         reflectionPipeline: { registered: Boolean(reflectionPipelineTimer), lastTickAt: ticks.reflection_pipeline, lastTickAgeSec: ageSec(ticks.reflection_pipeline) },
         boardHealthWorker: { registered: board.running, lastTickAt: ticks.board_health || board.lastTickAt, lastTickAgeSec: ageSec(ticks.board_health || board.lastTickAt) },
+      },
+      reviewHandoffValidation: {
+        ...reviewHandoffValidationStats,
       },
       reflectionPipelineHealth: {
         ...reflectionPipelineHealth,
@@ -7182,6 +7192,11 @@ export async function createServer(): Promise<FastifyInstance> {
 
       const handoffGate = await enforceReviewHandoffGateForValidating(effectiveStatus, lookup.resolvedId, mergedMeta)
       if (!handoffGate.ok) {
+        reviewHandoffValidationStats.failures += 1
+        reviewHandoffValidationStats.lastFailureAt = Date.now()
+        reviewHandoffValidationStats.lastFailureTaskId = lookup.resolvedId
+        reviewHandoffValidationStats.lastFailureError = handoffGate.error
+
         reply.code(400)
         return {
           success: false,
