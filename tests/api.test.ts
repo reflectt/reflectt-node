@@ -55,6 +55,16 @@ async function req(method: string, url: string, body?: unknown) {
   }
 }
 
+async function postReviewHandoffComment(taskId: string, author = 'test-agent') {
+  // A real validating transition requires a resolvable review_handoff.comment_id.
+  // The server will auto-fill it from the latest comment on validating transition.
+  await req('POST', `/tasks/${taskId}/comments`, {
+    author,
+    category: 'review_handoff',
+    content: 'handoff: shipped work summary\n\n- proof: tests pass\n- artifacts: process/TASK-test-proof.md\n',
+  })
+}
+
 /**
  * Walk a task from todo through valid transitions.
  * 'doing' = todo→doing
@@ -66,6 +76,8 @@ async function advanceTo(taskId: string, targetStatus: 'doing' | 'validating'): 
     metadata: { transition: { type: 'claim', reason: 'test advance' }, eta: '~1h' },
   })
   if (targetStatus === 'validating') {
+    await postReviewHandoffComment(taskId, 'test-agent')
+
     await req('PATCH', `/tasks/${taskId}`, {
       status: 'validating',
       metadata: {
@@ -836,6 +848,7 @@ describe('Artifact Path Canonicalization', () => {
     })
     taskId = body.task.id
     await advanceTo(taskId, 'doing')
+    await postReviewHandoffComment(taskId, 'test-agent')
   })
 
   afterAll(async () => {
