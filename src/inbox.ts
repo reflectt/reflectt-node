@@ -286,6 +286,11 @@ class InboxManager {
       return { priority: 'high', reason: 'dm' }
     }
     
+    // Targeted message for someone else — skip unless @mentioned
+    if (message.to && message.to !== agent && !this.isMentioned(message, agent)) {
+      return null
+    }
+    
     // High priority: @mention
     if (this.isMentioned(message, agent)) {
       return { priority: 'high', reason: 'mention' }
