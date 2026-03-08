@@ -721,6 +721,15 @@ export class BoardHealthWorker {
 
       // Check reviewer activity on this task using the review_last_activity_at metadata field
       const meta = (task.metadata || {}) as Record<string, unknown>
+
+      // ── Skip tasks where reviewer has already acted ──
+      // If review_state is 'needs_author', the ball is with the assignee, not the reviewer.
+      // If reviewer_decision exists, the reviewer has already made a decision (approved/rejected).
+      // In either case, SLA breach should not page the reviewer.
+      const reviewState = typeof meta.review_state === 'string' ? meta.review_state : ''
+      const reviewerDecision = meta.reviewer_decision
+      if (reviewState === 'needs_author' || reviewerDecision != null) continue
+
       const reviewEnteredAt = normalizeEpochMs((meta as any).entered_validating_at) || (task.updatedAt ?? task.createdAt)
       const reviewLastActivityAt = normalizeEpochMs((meta as any).review_last_activity_at) || reviewEnteredAt
 
