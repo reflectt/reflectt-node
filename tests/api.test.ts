@@ -923,6 +923,48 @@ describe('Artifact Path Canonicalization', () => {
   })
 })
 
+describe('Review handoff comment_id stripping', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: review_handoff comment_id stripping',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Caller-supplied comment_id is stripped'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+    await advanceTo(taskId, 'doing')
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('strips caller-supplied review_handoff.comment_id on PATCH /tasks/:id', async () => {
+    const attempted = 'tcomment-phantom-should-not-persist'
+
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      metadata: {
+        review_handoff: {
+          task_id: taskId,
+          artifact_path: 'process/TASK-test-proof.md',
+          comment_id: attempted,
+          non_code: true,
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.task.metadata.review_handoff.comment_id).toBeUndefined()
+    expect(body.task.metadata.review_handoff_comment_id_stripped.stripped).toBe(true)
+    expect(body.task.metadata.review_handoff_comment_id_stripped.attempted).toBe(attempted)
+  })
+})
+
 describe('Review packet gate', () => {
   let taskId: string
 
