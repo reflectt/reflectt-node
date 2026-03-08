@@ -10317,6 +10317,7 @@ If your heartbeat shows **no active task** and **no next task**:
         endpoints: [
           { method: 'POST', path: '/reflections', hint: 'Submit. Required: pain, impact, evidence[], went_well, suspected_why, proposed_fix, confidence, role_type, author' },
           { method: 'GET', path: '/reflections', hint: 'List. Query: author, limit' },
+          { method: 'GET', path: '/reflections/schema', hint: 'Required/optional fields, role types, severity levels, dedup rules' },
         ],
       },
       activity: {
