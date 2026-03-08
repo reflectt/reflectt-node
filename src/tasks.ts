@@ -755,33 +755,69 @@ class TaskManager {
     try {
       const db = getDb()
       const commentCount = this.getTaskCommentCount(task.id)
-      db.prepare(`
-        INSERT OR REPLACE INTO tasks (
-          id, title, description, status, assignee, reviewer, done_criteria,
-          created_by, created_at, updated_at, priority, blocked_by, epic_id,
-          tags, metadata, team_id, comment_count, due_at, scheduled_for
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        task.id,
-        task.title,
-        task.description ?? null,
-        task.status,
-        task.assignee ?? null,
-        task.reviewer ?? null,
-        safeJsonStringify(task.done_criteria),
-        task.createdBy,
-        task.createdAt,
-        task.updatedAt,
-        task.priority ?? null,
-        safeJsonStringify(task.blocked_by),
-        task.epic_id ?? null,
-        safeJsonStringify(task.tags),
-        safeJsonStringify(task.metadata),
-        task.teamId ?? null,
-        commentCount,
-        task.dueAt ?? null,
-        task.scheduledFor ?? null,
-      )
+
+      // Use UPDATE for existing tasks to avoid INSERT OR REPLACE which triggers
+      // ON DELETE CASCADE on foreign keys (task_comments, task_history), wiping
+      // all comments/history for the task. Only INSERT for genuinely new tasks.
+      const existing = db.prepare('SELECT 1 FROM tasks WHERE id = ?').get(task.id)
+      if (existing) {
+        db.prepare(`
+          UPDATE tasks SET
+            title = ?, description = ?, status = ?, assignee = ?, reviewer = ?,
+            done_criteria = ?, created_by = ?, created_at = ?, updated_at = ?,
+            priority = ?, blocked_by = ?, epic_id = ?, tags = ?, metadata = ?,
+            team_id = ?, comment_count = ?, due_at = ?, scheduled_for = ?
+          WHERE id = ?
+        `).run(
+          task.title,
+          task.description ?? null,
+          task.status,
+          task.assignee ?? null,
+          task.reviewer ?? null,
+          safeJsonStringify(task.done_criteria),
+          task.createdBy,
+          task.createdAt,
+          task.updatedAt,
+          task.priority ?? null,
+          safeJsonStringify(task.blocked_by),
+          task.epic_id ?? null,
+          safeJsonStringify(task.tags),
+          safeJsonStringify(task.metadata),
+          task.teamId ?? null,
+          commentCount,
+          task.dueAt ?? null,
+          task.scheduledFor ?? null,
+          task.id,
+        )
+      } else {
+        db.prepare(`
+          INSERT INTO tasks (
+            id, title, description, status, assignee, reviewer, done_criteria,
+            created_by, created_at, updated_at, priority, blocked_by, epic_id,
+            tags, metadata, team_id, comment_count, due_at, scheduled_for
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          task.id,
+          task.title,
+          task.description ?? null,
+          task.status,
+          task.assignee ?? null,
+          task.reviewer ?? null,
+          safeJsonStringify(task.done_criteria),
+          task.createdBy,
+          task.createdAt,
+          task.updatedAt,
+          task.priority ?? null,
+          safeJsonStringify(task.blocked_by),
+          task.epic_id ?? null,
+          safeJsonStringify(task.tags),
+          safeJsonStringify(task.metadata),
+          task.teamId ?? null,
+          commentCount,
+          task.dueAt ?? null,
+          task.scheduledFor ?? null,
+        )
+      }
     } catch (err) {
       console.error(`[Tasks] Failed to write task ${task.id} to SQLite:`, err)
     }
