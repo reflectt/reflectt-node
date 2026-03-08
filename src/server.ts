@@ -7457,6 +7457,7 @@ export async function createServer(): Promise<FastifyInstance> {
         const prLine = prUrl ? `\nPR: ${prUrl}` : ''
         chatManager.sendMessage({
           from: 'system',
+          to: existing.reviewer,
           content: `@${existing.reviewer} [reviewRequested:${task.id}] ${task.title} → validating${prLine}`,
           channel: 'task-notifications',
           metadata: {
@@ -7575,6 +7576,7 @@ export async function createServer(): Promise<FastifyInstance> {
         const reviewMsg = `@${task.reviewer} review requested: **${task.title}** (${task.id})${prLink}. Please approve or flag issues.`
         chatManager.sendMessage({
           from: 'system',
+          to: task.reviewer,
           content: reviewMsg,
           channel: 'reviews',
           metadata: {
