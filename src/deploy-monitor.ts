@@ -8,7 +8,7 @@
  *
  * v1 checks:
  * - Vercel Deployments API (latest production deploy state)
- * - HTTP health URL (default https://app.reflectt.ai/api/health)
+ * - HTTP health URL (optional)
  *
  * Config (env):
  * - REFLECTT_DEPLOY_MONITOR_ENABLED=1|true
@@ -51,7 +51,7 @@ function getConfig() {
   const token = process.env.REFLECTT_VERCEL_TOKEN || process.env.VERCEL_TOKEN || ''
   const projectId = process.env.REFLECTT_VERCEL_PROJECT_ID || process.env.VERCEL_PROJECT_ID || ''
   const teamId = process.env.REFLECTT_VERCEL_TEAM_ID || process.env.VERCEL_TEAM_ID || ''
-  const healthUrl = process.env.REFLECTT_DEPLOY_MONITOR_HEALTH_URL || 'https://app.reflectt.ai/api/health'
+  const healthUrl = process.env.REFLECTT_DEPLOY_MONITOR_HEALTH_URL || ''
   const intervalSec = parseIntSafe(process.env.REFLECTT_DEPLOY_MONITOR_INTERVAL_SEC) ?? 300
 
   return { enabled, token, projectId, teamId, healthUrl, intervalSec }
@@ -165,13 +165,15 @@ async function tick(): Promise<void> {
     }
   }
 
-  // 2) Health URL
-  const health = await checkHealthUrl(cfg.healthUrl)
-  if (!health.ok) {
-    await maybeAlert(
-      `deploy_monitor:health:down:${cfg.healthUrl}:${health.status}`,
-      `🚨 Cloud health check failed (${cfg.healthUrl} → ${health.error || `HTTP ${health.status}`}). Production may be down or misconfigured.`,
-    )
+  // 2) Health URL (optional)
+  if (cfg.healthUrl) {
+    const health = await checkHealthUrl(cfg.healthUrl)
+    if (!health.ok) {
+      await maybeAlert(
+        `deploy_monitor:health:down:${cfg.healthUrl}:${health.status}`,
+        `🚨 Cloud health check failed (${cfg.healthUrl} → ${health.error || `HTTP ${health.status}`}). Production may be down or misconfigured.`,
+      )
+    }
   }
 }
 
