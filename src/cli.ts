@@ -441,23 +441,24 @@ program
       { src: 'TEAM.md', desc: 'Team culture and principles' },
       { src: 'TEAM-ROLES.yaml', desc: 'Agent role registry' },
       { src: 'TEAM-STANDARDS.md', desc: 'Operational standards' },
-      { src: '.gitignore', desc: 'Git exclusions for runtime data' },
+      { src: 'gitignore.template', dest: '.gitignore', desc: 'Git exclusions for runtime data' },
     ]
 
     for (const file of teamFiles) {
-      const destPath = join(REFLECTT_HOME, file.src)
+      const destName = (file as { dest?: string }).dest || file.src
+      const destPath = join(REFLECTT_HOME, destName)
       const srcPath = join(defaultsDir, file.src)
 
       if (existsSync(destPath) && !opts.force) {
         filesSkipped++
-        console.log(`  ⏭️  ${file.src} (exists)`)
+        console.log(`  ⏭️  ${destName} (exists)`)
       } else if (existsSync(srcPath)) {
         const content = readFileSync(srcPath, 'utf-8')
         writeFileSync(destPath, content)
         filesCreated++
-        console.log(`  ✅ ${file.src} — ${file.desc}`)
+        console.log(`  ✅ ${destName} — ${file.desc}`)
       } else {
-        console.log(`  ⚠️  ${file.src} — default template not found`)
+        console.log(`  ⚠️  ${destName} — default template not found`)
       }
     }
 
