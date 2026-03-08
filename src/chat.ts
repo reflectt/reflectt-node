@@ -581,6 +581,10 @@ class ChatManager {
     since?: number
     before?: number
     after?: number
+    /** When true, return the oldest N messages matching the filter (ASC with LIMIT).
+     *  Default behavior returns the newest N (DESC then reversed to ASC).
+     *  Use oldestFirst for cursor-based sync to avoid skipping messages. */
+    oldestFirst?: boolean
   }): AgentMessage[] {
     const db = getDb()
     const conditions: string[] = []
@@ -620,9 +624,13 @@ class ChatManager {
     // without always hitting the cap (legacy JSONL imports often exceed 20).
     const limit = options?.limit !== undefined ? options.limit : 100
 
-    // Fetch newest-first for efficiency, then return ascending.
+    // Default: fetch newest-first for efficiency, then return ascending (shows latest N messages).
+    // oldestFirst: fetch oldest-first with limit (for cursor-based sync — ensures no messages skipped).
+    const oldestFirst = options?.oldestFirst === true
     const sql = limit > 0
-      ? `SELECT * FROM (SELECT * FROM chat_messages ${where} ORDER BY timestamp DESC LIMIT ?) ORDER BY timestamp ASC`
+      ? oldestFirst
+        ? `SELECT * FROM chat_messages ${where} ORDER BY timestamp ASC LIMIT ?`
+        : `SELECT * FROM (SELECT * FROM chat_messages ${where} ORDER BY timestamp DESC LIMIT ?) ORDER BY timestamp ASC`
       : `SELECT * FROM chat_messages ${where} ORDER BY timestamp ASC`
 
     if (limit > 0) params.push(limit)
