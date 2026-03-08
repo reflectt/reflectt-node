@@ -14,6 +14,7 @@
  */
 
 import { presenceManager } from './presence.js'
+import { getAgentRoles } from './assignment.js'
 import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import { slotManager } from './canvas-slots.js'
@@ -602,14 +603,43 @@ export function stopCloudIntegration(): void {
 
 function getAgents(): AgentInfo[] {
   const presences = presenceManager.getAllPresence()
-  return presences.map(p => ({
-    name: p.agent,
-    status: p.status === 'working' || p.status === 'reviewing' ? 'active' as const
-      : p.status === 'offline' ? 'offline' as const
-      : 'idle' as const,
-    currentTask: p.task,
-    lastSeen: p.lastUpdate,
-  }))
+  const presenceMap = new Map(presences.map(p => [p.agent, p]))
+
+  // Include ALL registered agents (from TEAM-ROLES.yaml), not just those with presence
+  const roles = getAgentRoles()
+  const agents: AgentInfo[] = []
+  const seen = new Set<string>()
+
+  for (const role of roles) {
+    seen.add(role.name)
+    const p = presenceMap.get(role.name)
+    agents.push({
+      name: role.name,
+      status: p
+        ? (p.status === 'working' || p.status === 'reviewing' ? 'active' as const
+          : p.status === 'offline' ? 'offline' as const
+          : 'idle' as const)
+        : 'offline' as const,
+      currentTask: p?.task,
+      lastSeen: p?.lastUpdate,
+    })
+  }
+
+  // Also include any presence entries not in TEAM-ROLES (shouldn't happen, but defensive)
+  for (const p of presences) {
+    if (!seen.has(p.agent)) {
+      agents.push({
+        name: p.agent,
+        status: p.status === 'working' || p.status === 'reviewing' ? 'active' as const
+          : p.status === 'offline' ? 'offline' as const
+          : 'idle' as const,
+        currentTask: p.task,
+        lastSeen: p.lastUpdate,
+      })
+    }
+  }
+
+  return agents
 }
 
 function getTasks(): TaskStateEntry[] {
