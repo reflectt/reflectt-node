@@ -303,8 +303,21 @@ class EventBus {
         return false
       }
       
-      if (event.type === 'message_posted' && data.to && data.to !== subscription.agent) {
-        return false
+      if (event.type === 'message_posted') {
+        // DM addressed to a different agent — suppress
+        if (data.to && data.to !== subscription.agent) {
+          return false
+        }
+        // Channel messages: only deliver if the agent is @mentioned in content
+        // (or it's a DM/direct to this agent, or there's no agent filter set)
+        // This prevents review notifications from broadcasting to all SSE subscribers.
+        if (!data.to && data.channel && data.channel !== 'general') {
+          const mentionPattern = new RegExp(`@${subscription.agent}\\b`, 'i')
+          const isMentioned = mentionPattern.test(data.content || '')
+          if (!isMentioned) {
+            return false
+          }
+        }
       }
 
       if (event.type === 'memory_written' && data.agent !== subscription.agent) {
