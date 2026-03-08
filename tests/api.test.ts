@@ -5176,3 +5176,44 @@ describe('Duplicate-closure validating evidence gate', () => {
     expect(body.task.status).toBe('validating')
   })
 })
+
+describe('ReviewHandoff hardening', () => {
+  it('strips caller-supplied review_handoff.comment_id on PATCH', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: review_handoff.comment_id strip',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['ok'],
+      eta: '1h',
+    })
+
+    const taskId = created.task.id
+    await advanceTo(taskId, 'doing')
+
+    const fakeId = 'tcomment-1111111111111-fakefake0'
+
+    const { status } = await req('PATCH', `/tasks/${taskId}`, {
+      metadata: {
+        review_handoff: {
+          task_id: taskId,
+          comment_id: fakeId,
+          artifact_path: 'process/TASK-test.md',
+          known_caveats: 'none',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/1',
+          commit_sha: 'abcd123',
+        },
+      },
+    })
+
+    expect(status).toBe(200)
+
+    const { body: fetched } = await req('GET', `/tasks/${taskId}`)
+    expect(fetched.task.metadata.review_handoff.comment_id).toBeUndefined()
+    expect(fetched.task.metadata.review_handoff_comment_id_stripped).toMatchObject({
+      stripped: true,
+      attempted: fakeId,
+    })
+  })
+})
