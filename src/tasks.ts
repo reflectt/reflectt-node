@@ -34,9 +34,16 @@ function importTasks(db: Database.Database, records: unknown[]): number {
       tags, metadata, team_id, comment_count, due_at, scheduled_for
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
+  const del = db.prepare('DELETE FROM tasks WHERE id = ?')
 
   const insertMany = db.transaction((tasks: unknown[]) => {
     for (const record of tasks) {
+      const tombstone = record as { id?: string; deleted?: boolean }
+      if (tombstone?.deleted === true && typeof tombstone.id === 'string' && tombstone.id.trim()) {
+        del.run(tombstone.id)
+        continue
+      }
+
       const task = record as Task
       insert.run(
         task.id,
@@ -482,12 +489,17 @@ class TaskManager {
         event.timestamp,
         safeJsonStringify(event.data)
       )
+    } catch (err) {
+      console.error('[Tasks] Failed to append task history (DB):', err)
+      throw err
+    }
 
+    try {
       // Append to JSONL (audit log)
       await fs.mkdir(DATA_DIR, { recursive: true })
       await fs.appendFile(TASK_HISTORY_FILE, `${JSON.stringify(event)}\n`, 'utf-8')
     } catch (err) {
-      console.error('[Tasks] Failed to append task history:', err)
+      console.error('[Tasks] Failed to append task history (JSONL):', err)
     }
   }
 
@@ -734,6 +746,20 @@ class TaskManager {
     }
 
     return { created, skipped }
+  }
+
+  private async appendTaskTombstone(task: Task, deletedBy: string, deletedAt: number): Promise<void> {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      await fs.appendFile(TASKS_FILE, `${JSON.stringify({
+        id: task.id,
+        deleted: true,
+        deletedAt,
+        deletedBy,
+      })}\n`, 'utf-8')
+    } catch (err) {
+      console.error('[Tasks] Failed to append task tombstone:', err)
+    }
   }
 
   /** Write a single task to SQLite + JSONL audit */
@@ -1490,20 +1516,59 @@ class TaskManager {
     return updated
   }
 
-  async deleteTask(id: string): Promise<boolean> {
+  async deleteTask(id: string, actor = 'system'): Promise<boolean> {
     const task = queryTask(id)
     if (!task) return false
 
-    // Delete from SQLite
-    try {
-      const db = getDb()
-      db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
-      db.prepare('DELETE FROM task_comments WHERE task_id = ?').run(id)
-      db.prepare('DELETE FROM task_history WHERE task_id = ?').run(id)
-    } catch (err) {
-      console.error(`[Tasks] SQLite delete failed for ${id}:`, err)
+    const deletedAt = Date.now()
+    const event: TaskHistoryEvent = {
+      id: `thevt-${deletedAt}-${Math.random().toString(36).substr(2, 9)}`,
+      taskId: id,
+      type: 'deleted',
+      actor,
+      timestamp: deletedAt,
+      data: {
+        deletedAt,
+        deletedBy: actor,
+        previousStatus: task.status,
+        title: task.title,
+      },
     }
 
+    // Make the live-row delete visible immediately, even if a caller forgets to await deleteTask().
+    // Keep history/comments as audit.
+    try {
+      const db = getDb()
+      const insertHistory = db.prepare(`
+        INSERT INTO task_history (id, task_id, type, actor, timestamp, data)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      const delTask = db.prepare('DELETE FROM tasks WHERE id = ?')
+      const tx = db.transaction(() => {
+        insertHistory.run(
+          event.id,
+          event.taskId,
+          event.type,
+          event.actor,
+          event.timestamp,
+          safeJsonStringify(event.data),
+        )
+        delTask.run(id)
+      })
+      tx()
+    } catch (err) {
+      console.error(`[Tasks] SQLite delete failed for ${id}:`, err)
+      throw err
+    }
+
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      await fs.appendFile(TASK_HISTORY_FILE, `${JSON.stringify(event)}\n`, 'utf-8')
+    } catch (err) {
+      console.error('[Tasks] Failed to append delete history (JSONL):', err)
+    }
+
+    await this.appendTaskTombstone(task, actor, deletedAt)
     await this.syncTaskDeleteToCloud(id)
     this.notifySubscribers(task, 'deleted')
     return true

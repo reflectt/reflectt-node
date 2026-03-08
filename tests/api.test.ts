@@ -743,6 +743,46 @@ describe('Task CRUD', () => {
     expect(body2.error).toBe('Task not found')
   })
 
+  it('DELETE /tasks/:id writes deleted history + tombstone audit records', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: delete tombstone audit',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Delete audit persists'],
+      eta: '1h',
+    })
+
+    const deleteTaskId = created.task.id
+
+    const del = await req('DELETE', `/tasks/${deleteTaskId}`)
+    expect(del.status).toBe(200)
+    expect(del.body.success).toBe(true)
+
+    const db = getDb()
+    const deletedEvents = db.prepare(`
+      SELECT * FROM task_history WHERE task_id = ? AND type = 'deleted' ORDER BY timestamp DESC
+    `).all(deleteTaskId) as Array<{ actor: string; data: string | null }>
+
+    expect(deletedEvents.length).toBeGreaterThan(0)
+    expect(deletedEvents[0].actor).toBe('system')
+    expect(JSON.parse(deletedEvents[0].data || '{}')).toMatchObject({
+      deletedBy: 'system',
+      previousStatus: 'todo',
+      title: 'TEST: delete tombstone audit',
+    })
+
+    const historyAudit = await fs.readFile(join(DATA_DIR, 'tasks.history.jsonl'), 'utf-8')
+    expect(historyAudit).toContain(`"taskId":"${deleteTaskId}"`)
+    expect(historyAudit).toContain('"type":"deleted"')
+
+    const taskAudit = await fs.readFile(join(DATA_DIR, 'tasks.jsonl'), 'utf-8')
+    expect(taskAudit).toContain(`"id":"${deleteTaskId}"`)
+    expect(taskAudit).toContain('"deleted":true')
+    expect(taskAudit).toContain('"deletedBy":"system"')
+  })
+
   it('GET /tasks/:id returns error for nonexistent', async () => {
     const { body } = await req('GET', '/tasks/nonexistent-id')
     expect(body.error).toBe('Task not found')
