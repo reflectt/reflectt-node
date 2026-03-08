@@ -586,8 +586,10 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   }
 
   // ── Orphan PR detection ──────────────────────────────────────────────
-  // Scan tasks with PR URLs where the task is cancelled (not done) but a PR
-  // was linked — these represent potential orphan open PRs.
+  // Scan cancelled tasks for orphan PRs, but SKIP tasks with an explicit
+  // cancel_reason (intentional cancellations — the PR was deliberately
+  // closed/abandoned). Only flag cancelled tasks with no explanation where
+  // a PR may have been left dangling unintentionally.
   //
   // Note: We intentionally DO NOT scan `status=done` here.
   // In practice, done tasks often have incomplete PR metadata (e.g. missing
@@ -597,6 +599,9 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   // Use /drift-report for deeper investigation.
   const cancelledTasks = taskManager.listTasks({ status: 'cancelled' })
   for (const task of cancelledTasks) {
+    const cancelMeta = (task.metadata || {}) as Record<string, unknown>
+    // Skip tasks with explicit cancel reason — PR was intentionally closed
+    if (cancelMeta.cancel_reason || cancelMeta.duplicate_of) continue
     const meta = (task.metadata || {}) as Record<string, unknown>
     const prUrl = extractPrUrl(meta)
     if (!prUrl || flaggedOrphanPRs.has(prUrl)) continue
