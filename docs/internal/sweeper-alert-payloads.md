@@ -18,6 +18,10 @@ All sweeper alerts include `@assignee`, `@reviewer`, and `task ID` for routing a
 ```
 
 ### `validating_sla` — Task stuck in validating past SLA (30m)
+
+Notes:
+- Tasks where the reviewer already acted (`review_state=needs_author` or `reviewer_decision` present) should **not** page reviewers. (See PR #806.)
+
 ```json
 {
   "taskId": "task-abc123",

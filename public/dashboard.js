@@ -1817,11 +1817,23 @@ function renderReviewQueue() {
   const validating = allTasks
     .filter(t => t.status === 'validating')
     .map(t => {
-      const rawEntered = t.metadata?.entered_validating_at || t.updatedAt || t.createdAt;
+      const meta = t.metadata || {};
+      const reviewState = typeof meta.review_state === 'string' ? meta.review_state : '';
+      const reviewerDecision = meta.reviewer_decision;
+
+      // If reviewer has acted (needs_author or reviewer_decision recorded), the ball is with the assignee.
+      // We still track an SLA timer, but it should page the assignee (author), not the reviewer.
+      const waitOn = (reviewState === 'needs_author' || reviewerDecision != null) ? 'author' : 'reviewer';
+
+      const rawEntered = waitOn === 'author'
+        ? (reviewerDecision && reviewerDecision.decidedAt) || meta.review_last_activity_at || meta.entered_validating_at || t.updatedAt || t.createdAt
+        : meta.entered_validating_at || t.updatedAt || t.createdAt;
+
       const enteredAt = normalizeEpochMs(rawEntered) || now;
       const timeInReview = Math.min(Math.max(0, now - enteredAt), MAX_REVIEW_MS);
       const slaState = getReviewSlaState(timeInReview);
-      return { ...t, timeInReview, slaState, enteredAt };
+
+      return { ...t, timeInReview, slaState, enteredAt, waitOn, reviewState, hasReviewerDecision: reviewerDecision != null };
     })
     .sort((a, b) => {
       // Breaches first, then by time descending
@@ -1830,6 +1842,9 @@ function renderReviewQueue() {
       if (diff !== 0) return diff;
       return b.timeInReview - a.timeInReview;
     });
+
+  const reviewerQueue = validating.filter(t => t.waitOn === 'reviewer');
+  const authorQueue = validating.filter(t => t.waitOn === 'author');
 
   if (validating.length === 0) {
     panel.style.display = '';
@@ -1846,16 +1861,29 @@ function renderReviewQueue() {
   }
 
   panel.style.display = '';
-  count.textContent = validating.length + ' awaiting review';
-  // Update sidebar badge
-  const navReviewBadge = document.getElementById('nav-review-count');
-  if (navReviewBadge) navReviewBadge.textContent = validating.length;
+  const reviewerBreachCount = reviewerQueue.filter(t => t.slaState === 'breach').length;
+  const authorBreachCount = authorQueue.filter(t => t.slaState === 'breach').length;
 
-  const breachCount = validating.filter(t => t.slaState === 'breach').length;
-  const headerExtra = breachCount > 0
-    ? ' <span style="color:var(--red);font-size:11px;font-weight:600">' + breachCount + ' breach' + (breachCount > 1 ? 'es' : '') + '</span>'
+  // Primary count is "awaiting reviewer" — author-wait tasks are tracked separately.
+  count.textContent = reviewerQueue.length + ' awaiting review';
+
+  // Update sidebar badge (reviewer queue only)
+  const navReviewBadge = document.getElementById('nav-review-count');
+  if (navReviewBadge) navReviewBadge.textContent = String(reviewerQueue.length);
+
+  const headerExtra = (reviewerBreachCount > 0 || authorBreachCount > 0)
+    ? ' <span style="color:var(--red);font-size:11px;font-weight:600">'
+        + (reviewerBreachCount > 0 ? (reviewerBreachCount + ' reviewer breach' + (reviewerBreachCount > 1 ? 'es' : '')) : '')
+        + (reviewerBreachCount > 0 && authorBreachCount > 0 ? ' · ' : '')
+        + (authorBreachCount > 0 ? (authorBreachCount + ' author breach' + (authorBreachCount > 1 ? 'es' : '')) : '')
+      + '</span>'
     : '';
-  count.innerHTML = validating.length + ' awaiting review' + headerExtra;
+
+  const authorExtra = authorQueue.length > 0
+    ? ' <span style="color:var(--text-muted);font-size:11px;font-weight:500">· ' + authorQueue.length + ' awaiting author</span>'
+    : '';
+
+  count.innerHTML = reviewerQueue.length + ' awaiting review' + authorExtra + headerExtra;
 
   body.innerHTML = validating.map(t => {
     const reviewer = t.reviewer || '<span style="color:var(--yellow)">unassigned</span>';
@@ -1884,26 +1912,32 @@ function renderReviewQueue() {
 
   bindTaskLinkHandlers(body);
 
-  // SLA breach escalation: post to watchdog if any breach found
-  if (breachCount > 0) {
-    escalateReviewBreaches(validating.filter(t => t.slaState === 'breach'));
+  // SLA breach escalation: split reviewer-wait vs author-wait so we page the right person.
+  if (reviewerBreachCount > 0) {
+    escalateReviewerBreaches(reviewerQueue.filter(t => t.slaState === 'breach'));
+  }
+  if (authorBreachCount > 0) {
+    escalateAuthorBreaches(authorQueue.filter(t => t.slaState === 'breach'));
   }
 }
 
-let lastReviewEscalationAt = 0;
+let lastReviewerEscalationAt = 0;
+let lastAuthorEscalationAt = 0;
 const REVIEW_ESCALATION_COOLDOWN = 20 * 60 * 1000; // 20m
 
-async function escalateReviewBreaches(breachedTasks) {
+async function escalateReviewerBreaches(breachedTasks) {
   const now = Date.now();
-  if (now - lastReviewEscalationAt < REVIEW_ESCALATION_COOLDOWN) return;
-  lastReviewEscalationAt = now;
+  if (now - lastReviewerEscalationAt < REVIEW_ESCALATION_COOLDOWN) return;
+  lastReviewerEscalationAt = now;
 
   const lines = breachedTasks.slice(0, 5).map(t => {
     const reviewer = t.reviewer || 'unassigned';
-    return '- ' + t.id + ' (' + (t.title || '').slice(0, 50) + ') — reviewer: @' + reviewer + ', waiting ' + formatDuration(t.timeInReview);
+    const prUrl = t.metadata?.review_handoff?.pr_url || t.metadata?.review_handoff?.prUrl || '';
+    const prPart = prUrl ? ' — ' + prUrl : '';
+    return '- ' + t.id + ' (' + (t.title || '').slice(0, 50) + ') — reviewer: @' + reviewer + ', waiting ' + formatDuration(t.timeInReview) + prPart;
   });
 
-  const content = '@owner Review SLA breach detected:\n' + lines.join('\n');
+  const content = 'Review overdue (reviewer SLA):\n' + lines.join('\n');
 
   try {
     await fetch(BASE + '/chat/messages', {
@@ -1918,6 +1952,36 @@ async function escalateReviewBreaches(breachedTasks) {
     });
   } catch (err) {
     console.error('Failed to escalate review breach:', err);
+  }
+}
+
+async function escalateAuthorBreaches(breachedTasks) {
+  const now = Date.now();
+  if (now - lastAuthorEscalationAt < REVIEW_ESCALATION_COOLDOWN) return;
+  lastAuthorEscalationAt = now;
+
+  const lines = breachedTasks.slice(0, 5).map(t => {
+    const assignee = t.assignee || 'unassigned';
+    const prUrl = t.metadata?.review_handoff?.pr_url || t.metadata?.review_handoff?.prUrl || '';
+    const prPart = prUrl ? ' — ' + prUrl : '';
+    return '- ' + t.id + ' (' + (t.title || '').slice(0, 50) + ') — assignee: @' + assignee + ', waiting ' + formatDuration(t.timeInReview) + prPart;
+  });
+
+  const content = 'Author action needed (post-review):\n' + lines.join('\n');
+
+  try {
+    await fetch(BASE + '/chat/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'system',
+        content,
+        channel: 'general',
+        timestamp: now
+      })
+    });
+  } catch (err) {
+    console.error('Failed to escalate author breach:', err);
   }
 }
 

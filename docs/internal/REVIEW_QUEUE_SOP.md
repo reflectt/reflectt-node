@@ -80,6 +80,9 @@ Recommended response target:
 
 When SLA breach alerts fire:
 - verify queue entry is real (not stale/closed lane)
+- check whether the alert is **waiting on reviewer** vs **waiting on author**:
+  - **Reviewer SLA**: reviewer has not acted yet (no `metadata.reviewer_decision`, not `review_state=needs_author`) → reviewer should approve/reject or request changes.
+  - **Author response SLA**: reviewer already acted (`review_state=needs_author` or `reviewer_decision` exists) → assignee/author should address feedback and re-request review.
 - if stale, close/reset task state before re-alerting
 
 ---
