@@ -7939,6 +7939,116 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // POST /agents — Add a single agent to the team
+  app.post('/agents', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const name = typeof body.name === 'string' ? body.name.trim().toLowerCase() : ''
+    const role = typeof body.role === 'string' ? body.role.trim() : ''
+    const description = typeof body.description === 'string' ? body.description.trim() : ''
+
+    if (!name) { reply.code(400); return { success: false, error: 'name is required' } }
+    if (!role) { reply.code(400); return { success: false, error: 'role is required' } }
+    if (/[^a-z0-9_-]/.test(name)) { reply.code(400); return { success: false, error: 'name must be lowercase alphanumeric (a-z, 0-9, -, _)' } }
+
+    // Check if agent already exists
+    const existing = getAgentRoles().find(r => r.name === name)
+    if (existing) { reply.code(409); return { success: false, error: `Agent "${name}" already exists (role: ${existing.role})` } }
+
+    // Read existing YAML and append new agent
+    const { readFileSync, writeFileSync, existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const filePath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
+
+    let yaml = ''
+    if (existsSync(filePath)) {
+      yaml = readFileSync(filePath, 'utf-8')
+    }
+    if (!yaml.includes('agents:')) {
+      yaml = 'agents:\n'
+    }
+
+    // Build agent YAML entry
+    const affinityTags = Array.isArray(body.affinityTags) ? body.affinityTags : [role]
+    const wipCap = typeof body.wipCap === 'number' ? body.wipCap : 2
+    const desc = description || `${role} agent.`
+
+    const entry = [
+      `  - name: ${name}`,
+      `    role: ${role}`,
+      `    description: ${desc}`,
+      `    affinityTags: [${affinityTags.join(', ')}]`,
+      `    wipCap: ${wipCap}`,
+    ].join('\n')
+
+    // Insert before lanes: section (if present), otherwise append
+    const lanesIdx = yaml.indexOf('\nlanes:')
+    if (lanesIdx >= 0) {
+      yaml = yaml.slice(0, lanesIdx) + '\n' + entry + yaml.slice(lanesIdx)
+    } else {
+      yaml = yaml.trimEnd() + '\n' + entry + '\n'
+    }
+
+    try {
+      writeFileSync(filePath, yaml, 'utf-8')
+      const { loadAgentRoles } = await import('./assignment.js')
+      const reloaded = loadAgentRoles()
+      return {
+        success: true,
+        agent: { name, role, description: desc, wipCap },
+        totalAgents: reloaded.roles.length,
+        hint: `Agent "${name}" added to team and hot-reloaded. Start heartbeating: GET /heartbeat/${name}`,
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to save agent'
+      reply.code(500)
+      return { success: false, error: msg }
+    }
+  })
+
+  // DELETE /agents/:name — Remove an agent from the team
+  app.delete<{ Params: { name: string } }>('/agents/:name', async (request, reply) => {
+    const name = request.params.name.toLowerCase()
+    const existing = getAgentRoles().find(r => r.name === name)
+    if (!existing) { reply.code(404); return { success: false, error: `Agent "${name}" not found` } }
+
+    const { readFileSync, writeFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const filePath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
+    let yaml = readFileSync(filePath, 'utf-8')
+
+    // Remove the agent block: from "  - name: <name>" to the next "  - name:" or top-level key or EOF
+    const lines = yaml.split('\n')
+    const filtered: string[] = []
+    let skipping = false
+    for (const line of lines) {
+      if (line.match(new RegExp(`^\\s+-\\s+name:\\s+${name}\\s*$`))) {
+        skipping = true
+        continue
+      }
+      if (skipping) {
+        // Stop skipping at next agent entry, top-level key, or blank line before top-level
+        if (line.match(/^\s+-\s+name:\s/) || line.match(/^[a-z]/)) {
+          skipping = false
+          filtered.push(line)
+        }
+        continue
+      }
+      filtered.push(line)
+    }
+    yaml = filtered.join('\n')
+
+    try {
+      writeFileSync(filePath, yaml, 'utf-8')
+      const { loadAgentRoles } = await import('./assignment.js')
+      const reloaded = loadAgentRoles()
+      return { success: true, removed: name, totalAgents: reloaded.roles.length }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to remove agent'
+      reply.code(500)
+      return { success: false, error: msg }
+    }
+  })
+
   // Resolve a mention string (name, displayName, or alias) to an agent ID
   app.get<{ Params: { mention: string } }>('/resolve/mention/:mention', async (request) => {
     const agentName = resolveAgentMention(request.params.mention)
