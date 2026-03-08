@@ -965,10 +965,16 @@ async function syncChat(): Promise<void> {
   }
 
   // Get recent messages since last sync, excluding cloud-relayed messages
-  // to prevent echo: cloud→node→cloud sync loop
+  // to prevent echo: cloud→node→cloud sync loop.
+  //
+  // CRITICAL: use oldestFirst=true so the cursor walks forward through ALL
+  // messages without skipping. Default getMessages returns newest-N (DESC
+  // then reversed), which drops older messages in high-traffic windows.
+  // This was the root cause of cloud chat sync gaps Ryan reported.
   const recentMessages = chatManager.getMessages({
-    since: chatSyncCursor,
-    limit: 50,
+    after: chatSyncCursor,
+    limit: 100,
+    oldestFirst: true,
   }).filter(m => (m.metadata as any)?.source !== 'cloud-relay')
 
   // Send to cloud and get pending outbound messages
