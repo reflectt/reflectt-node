@@ -3406,7 +3406,7 @@ function fileIcon(mimeType, name) {
 }
 
 function formatFileSize(bytes) {
-  if (!bytes) return '0 B';
+  if (typeof bytes !== 'number' || bytes <= 0) return '0 B';
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
   return (bytes / 1048576).toFixed(1) + ' MB';
@@ -3455,7 +3455,7 @@ function renderFiles(files) {
     return '<div class="file-card" tabindex="0" role="button" aria-label="' + (f.originalName || f.filename) + '">' +
       '<div class="thumb" style="display:flex;align-items:center;justify-content:center;height:80px;background:var(--surface-raised);border-radius:var(--radius-sm);overflow:hidden">' + thumb + '</div>' +
       '<div class="card-name">' + (f.originalName || f.filename) + '</div>' +
-      '<div class="card-meta">' + formatFileSize(f.size) + ' · ' + timeAgo(f.uploadedAt || f.createdAt) + '</div>' +
+      '<div class="card-meta">' + formatFileSize(f.sizeBytes) + ' · ' + timeAgo(f.uploadedAt || f.createdAt) + '</div>' +
       '<div class="card-actions">' +
         '<a href="/files/' + f.id + '" download="' + (f.originalName || f.filename) + '" class="action-btn" aria-label="Download" onclick="event.stopPropagation()">⬇</a>' +
         '<button class="action-btn delete" aria-label="Delete" onclick="event.stopPropagation();deleteFile(\'' + f.id + '\')">🗑</button>' +
@@ -3468,7 +3468,7 @@ function renderFiles(files) {
     return '<div class="file-list-item" tabindex="0" role="button">' +
       '<span class="list-icon">' + icon + '</span>' +
       '<span class="list-name">' + (f.originalName || f.filename) + '</span>' +
-      '<span class="list-meta">' + formatFileSize(f.size) + '</span>' +
+      '<span class="list-meta">' + formatFileSize(f.sizeBytes) + '</span>' +
       '<span class="list-meta">' + timeAgo(f.uploadedAt || f.createdAt) + '</span>' +
       '<div class="list-actions">' +
         '<a href="/files/' + f.id + '" download="' + (f.originalName || f.filename) + '" class="action-btn" aria-label="Download" onclick="event.stopPropagation()">⬇</a>' +
