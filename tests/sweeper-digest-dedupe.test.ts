@@ -50,12 +50,23 @@ vi.mock('child_process', () => ({
 }))
 
 import {
+  _computeDigestFingerprintForTest,
   _escalateViolationsForTest,
   _resetSweeperDigestSuppressionForTest,
   type SweepViolation,
 } from '../src/executionSweeper.js'
 
 describe('Sweeper Digest dedupe/suppression', () => {
+  const baseViolation = (): SweepViolation => ({
+    taskId: 'task-1',
+    title: 'Test task',
+    assignee: 'harmony',
+    reviewer: 'sage',
+    type: 'orphan_pr',
+    age_minutes: 120,
+    message: 'orphan',
+  })
+
   beforeEach(() => {
     _resetSweeperDigestSuppressionForTest()
     sendMessage.mockClear()
@@ -67,18 +78,57 @@ describe('Sweeper Digest dedupe/suppression', () => {
     vi.useRealTimers()
   })
 
-  it('suppresses repeated identical digests within suppression window', async () => {
-    const violations: SweepViolation[] = [
+  it('computes a stable fingerprint from violation identity only', () => {
+    const base = [baseViolation()]
+    const reorderedWithChurn: SweepViolation[] = [
       {
-        taskId: 'task-1',
-        title: 'Test task',
-        assignee: 'harmony',
+        ...baseViolation(),
+        title: 'Renamed task title should not matter',
+        age_minutes: 999,
+        message: 'different rendered copy should not matter',
+      },
+      {
+        taskId: 'task-2',
+        title: 'Second task',
+        assignee: 'echo',
         reviewer: 'sage',
-        type: 'orphan_pr',
-        age_minutes: 120,
-        message: 'orphan',
+        type: 'validating_sla',
+        age_minutes: 15,
+        message: 'warning',
       },
     ]
+    const canonical: SweepViolation[] = [
+      {
+        taskId: 'task-2',
+        title: 'Another title entirely',
+        assignee: 'echo',
+        reviewer: 'sage',
+        type: 'validating_sla',
+        age_minutes: 16,
+        message: 'same issue, different copy',
+      },
+      baseViolation(),
+    ]
+
+    expect(_computeDigestFingerprintForTest(reorderedWithChurn)).toBe(
+      _computeDigestFingerprintForTest(canonical),
+    )
+
+    expect(_computeDigestFingerprintForTest(canonical)).not.toBe(
+      _computeDigestFingerprintForTest([...canonical, {
+        taskId: 'task-3',
+        title: 'New issue',
+        assignee: 'link',
+        reviewer: 'sage',
+        type: 'pr_drift',
+        age_minutes: 200,
+        message: 'new violation changes fingerprint',
+      }]),
+    )
+  })
+
+  it('suppresses repeated identical digests within suppression window', async () => {
+    const violations: SweepViolation[] = [baseViolation()]
 
     await _escalateViolationsForTest(violations)
     await _escalateViolationsForTest(violations)
@@ -87,17 +137,7 @@ describe('Sweeper Digest dedupe/suppression', () => {
   })
 
   it('re-emits digest after suppression window elapses', async () => {
-    const violations: SweepViolation[] = [
-      {
-        taskId: 'task-1',
-        title: 'Test task',
-        assignee: 'harmony',
-        reviewer: 'sage',
-        type: 'orphan_pr',
-        age_minutes: 120,
-        message: 'orphan',
-      },
-    ]
+    const violations: SweepViolation[] = [baseViolation()]
 
     await _escalateViolationsForTest(violations)
 
@@ -110,17 +150,7 @@ describe('Sweeper Digest dedupe/suppression', () => {
   })
 
   it('does not suppress when violation set changes (new fingerprint)', async () => {
-    const v1: SweepViolation[] = [
-      {
-        taskId: 'task-1',
-        title: 'Test task',
-        assignee: 'harmony',
-        reviewer: 'sage',
-        type: 'orphan_pr',
-        age_minutes: 120,
-        message: 'orphan',
-      },
-    ]
+    const v1: SweepViolation[] = [baseViolation()]
 
     const v2: SweepViolation[] = [
       ...v1,

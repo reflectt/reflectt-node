@@ -619,11 +619,10 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
     )
     if (activeRef) continue
 
-    // PR on a done task with no active task referencing it
-    // Check metadata flags that indicate the PR was merged/resolved
+    // PR on a cancelled task with no active task referencing it.
+    // Check metadata flags that indicate the PR was merged/resolved.
     const prMerged = !!(meta.pr_merged)
     const reviewerApproved = !!(meta.reviewer_approved)
-    const taskDone = task.status === 'done'
 
     // If metadata says merged, skip
     if (prMerged) continue
@@ -643,11 +642,11 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
         reviewer: task.reviewer,
         type: 'orphan_pr',
         age_minutes: msToMinutes(completedAge),
-        message: `🔍 Orphan PR detected: ${prUrl} linked to done task "${task.title}" (${task.id}). PR may still be open — ${assigneeMention} close or merge it. ${reviewerMention} — confirm status.`,
+        message: `🔍 Orphan PR detected: ${prUrl} linked to cancelled task "${task.title}" (${task.id}). PR may still be open — ${assigneeMention} close or merge it. ${reviewerMention} — confirm status.`,
         remediation: generateRemediation({ taskId: task.id, issue: 'orphan_pr', prUrl }),
       })
       flaggedOrphanPRs.add(prUrl)
-      logDryRun('orphan_pr', `${prUrl} on ${task.id} — task done ${msToMinutes(completedAge)}m ago`)
+      logDryRun('orphan_pr', `${prUrl} on ${task.id} — task cancelled ${msToMinutes(completedAge)}m ago`)
     }
   }
 
@@ -780,6 +779,8 @@ async function escalateViolations(violations: SweepViolation[]): Promise<void> {
   if (violations.length === 0) return
 
   // Digest-level dedupe: don't re-emit the same digest repeatedly while unchanged.
+  // Scope: process-local/in-memory only. The suppression window survives repeated
+  // sweeps in the same runtime, but resets on process restart.
   const now = Date.now()
   pruneDigestFingerprints(now)
   const fingerprint = computeDigestFingerprint(violations)
@@ -845,6 +846,10 @@ async function escalateViolations(violations: SweepViolation[]): Promise<void> {
 
 export function _resetSweeperDigestSuppressionForTest(): void {
   recentDigestFingerprints.clear()
+}
+
+export function _computeDigestFingerprintForTest(violations: SweepViolation[]): string {
+  return computeDigestFingerprint(violations)
 }
 
 export async function _escalateViolationsForTest(violations: SweepViolation[]): Promise<void> {

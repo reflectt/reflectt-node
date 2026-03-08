@@ -223,6 +223,65 @@ describe('Orphan PR detection accuracy', () => {
     nowSpy.mockRestore()
   })
 
+  it('cancelled tasks with cancel_reason or duplicate_of are excluded from orphan PR scan', async () => {
+    const cancelledRes = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      payload: {
+        title: 'Cancelled task with explicit reason',
+        description: 'Intentional cancellation should not page the sweeper',
+        status: 'cancelled',
+        assignee: 'link',
+        reviewer: 'sage',
+        priority: 'P2',
+        createdBy: 'test',
+        eta: '1h',
+        done_criteria: ['N/A'],
+        metadata: {
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/99998',
+          cancel_reason: 'duplicate',
+        },
+      },
+    })
+    expect(cancelledRes.statusCode).toBe(200)
+    const cancelledTask = JSON.parse(cancelledRes.body).task
+
+    const duplicateRes = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      payload: {
+        title: 'Cancelled task linked to canonical duplicate',
+        description: 'Duplicate cancellation should also be ignored',
+        status: 'cancelled',
+        assignee: 'echo',
+        reviewer: 'sage',
+        priority: 'P2',
+        createdBy: 'test',
+        eta: '1h',
+        done_criteria: ['N/A'],
+        metadata: {
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/99997',
+          duplicate_of: 'task-1772973048702-xih4ypuy3',
+        },
+      },
+    })
+    expect(duplicateRes.statusCode).toBe(200)
+    const duplicateTask = JSON.parse(duplicateRes.body).task
+
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(cancelledTask.updatedAt + 3 * 60 * 60 * 1000)
+
+    const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
+    const result = await sweepValidatingQueue()
+    const orphanTaskIds = new Set(
+      result.violations.filter(v => v.type === 'orphan_pr').map(v => v.taskId),
+    )
+
+    expect(orphanTaskIds.has(cancelledTask.id)).toBe(false)
+    expect(orphanTaskIds.has(duplicateTask.id)).toBe(false)
+
+    nowSpy.mockRestore()
+  })
+
   it('orphan alert includes @assignee and @reviewer mentions', async () => {
     const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
     const result = await sweepValidatingQueue()
