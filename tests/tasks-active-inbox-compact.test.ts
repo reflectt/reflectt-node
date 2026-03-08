@@ -81,6 +81,30 @@ describe('GET /tasks/active', () => {
 })
 
 describe('GET /inbox/:agent compact mode', () => {
+  it('does not leak direct messages addressed to other agents (even if channel is subscribed)', async () => {
+    // DM to someone else in #reviews should NOT appear in this agent's inbox.
+    const post = await app.inject({
+      method: 'POST',
+      url: '/chat/messages',
+      payload: {
+        from: 'system',
+        to: 'some-other-agent',
+        content: '@some-other-agent review requested: task-xyz',
+        channel: 'reviews',
+        metadata: { kind: 'review_routing', reviewer: 'some-other-agent' },
+      },
+    })
+    const postedBody = JSON.parse(post.body)
+    const dmId = postedBody?.message?.id
+    expect(typeof dmId).toBe('string')
+
+    const res = await app.inject({ method: 'GET', url: `/inbox/${AGENT}?since=0` })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.body)
+    const leaked = (body.messages || []).find((m: any) => m.id === dmId)
+    expect(leaked).toBeUndefined()
+  })
+
   it('returns full messages by default', async () => {
     const res = await app.inject({ method: 'GET', url: `/inbox/${AGENT}` })
     expect(res.statusCode).toBe(200)

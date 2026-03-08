@@ -281,11 +281,16 @@ class InboxManager {
     agent: string, 
     state: InboxState
   ): { priority: 'high' | 'medium' | 'low'; reason: string } | null {
+    // Direct message not to you: never relevant (even if you subscribe to the channel)
+    if (message.to && message.to !== agent) {
+      return null
+    }
+
     // High priority: DM
     if (message.to === agent) {
       return { priority: 'high', reason: 'dm' }
     }
-    
+
     // High priority: @mention
     if (this.isMentioned(message, agent)) {
       return { priority: 'high', reason: 'mention' }
