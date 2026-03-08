@@ -1384,16 +1384,8 @@ async function loadSharedArtifacts() {
     const pinnedRows = pinned.map(p => {
       const found = files.find(f => (String(f.name || '')).toLowerCase() === p.name.toLowerCase());
       if (!found) {
-        return `<div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-            <div style="font-size:13px;color:var(--text-bright);font-weight:600">${esc(p.label)}</div>
-            <span class="assignee-tag" style="color:var(--yellow)">missing</span>
-          </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
-            To make this available here, create a symlink in the shared workspace:<br/>
-            <code>ln -s ../RYANS-THOUGHTS.md ~/.openclaw/workspace-shared/process/RYANS-THOUGHTS.md</code>
-          </div>
-        </div>`;
+        // Operator notes are optional. If not configured, do not show an operator-only instruction to end users.
+        return '';
       }
       const href = '/shared/view?path=' + encodeURIComponent(found.path);
       return `<div style="padding:10px 12px;border-bottom:1px solid var(--border-subtle)">
@@ -1422,9 +1414,13 @@ async function loadSharedArtifacts() {
       </div>`;
     }).join('');
 
+    const pinnedBox = pinnedRows
+      ? `<div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden">${pinnedRows}</div>
+         <div style="height:10px"></div>`
+      : '';
+
     body.innerHTML = `
-      <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden">${pinnedRows}</div>
-      <div style="height:10px"></div>
+      ${pinnedBox}
       <div style="font-size:11px;color:var(--text-muted);margin:0 0 8px">Shared workspace directory: <code>process/</code></div>
       <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden">${listRows}</div>
     `;
