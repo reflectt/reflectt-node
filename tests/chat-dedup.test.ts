@@ -15,6 +15,7 @@ async function sendMsg(from: string, content: string, channel = 'general', metad
   const res = await app.inject({
     method: 'POST',
     url: '/chat/messages',
+    headers: from === 'system' ? { 'x-reflectt-internal': 'true' } : undefined,
     payload: { from, content, channel, ...(metadata ? { metadata } : {}) },
   })
   const body = JSON.parse(res.body)

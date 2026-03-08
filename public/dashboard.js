@@ -1944,7 +1944,7 @@ async function escalateReviewerBreaches(breachedTasks) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: 'system',
+        from: 'dashboard',
         content,
         channel: 'general',
         timestamp: now
@@ -1974,7 +1974,7 @@ async function escalateAuthorBreaches(breachedTasks) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: 'system',
+        from: 'dashboard',
         content,
         channel: 'general',
         timestamp: now

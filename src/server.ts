@@ -3636,6 +3636,24 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const data = parsedBody.data
 
+    // Reserve system sender for server-internal control-plane messages.
+    // Prevent browser clients (dashboard.js) or external callers from spoofing system alerts.
+    //
+    // Allow explicit internal callers (tests/tools) via header:
+    //   x-reflectt-internal: true
+    if (data.from === 'system') {
+      const internal = String((request.headers as any)['x-reflectt-internal'] || '').toLowerCase() === 'true'
+      if (!internal) {
+        reply.code(403)
+        return {
+          success: false,
+          error: 'Sender "system" is reserved (use from="dashboard" or your agent name).',
+          code: 'SENDER_RESERVED',
+          hint: 'Only internal callers may emit system messages. Add header x-reflectt-internal:true for test/tooling.',
+        }
+      }
+    }
+
     // Require at least content or attachments
     if (!data.content && (!data.attachments || data.attachments.length === 0)) {
       reply.code(400)

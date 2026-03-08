@@ -18,6 +18,7 @@ async function post(content: string) {
   const res = await app.inject({
     method: 'POST',
     url: '/chat/messages',
+    headers: { 'x-reflectt-internal': 'true' },
     payload: { from: 'system', channel: 'task-notifications', content },
   })
   expect(res.statusCode).toBe(200)
