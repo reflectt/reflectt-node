@@ -1438,10 +1438,16 @@ describe('My Now cockpit', () => {
   })
 
   it('GET /me/:agent returns single-pane payload with assigned/review lanes + blockers + changelog', async () => {
-    await req('POST', '/chat/messages', {
-      from: 'system',
-      channel: 'general',
-      content: '@cockpit-agent build failed on CI check for PR #999',
+    // Internal system message for cockpit signal extraction
+    await app.inject({
+      method: 'POST',
+      url: '/chat/messages',
+      headers: { 'content-type': 'application/json', 'x-reflectt-internal': 'true' },
+      payload: {
+        from: 'system',
+        channel: 'general',
+        content: '@cockpit-agent build failed on CI check for PR #999',
+      },
     })
 
     const { status, body } = await req('GET', '/me/cockpit-agent')
@@ -2160,6 +2166,18 @@ describe('Chat Messages', () => {
     expect(body.message).toBeDefined()
     expect(body.message.id).toBeDefined()
     authorMessageId = body.message.id
+  })
+
+  it('POST /chat/messages rejects reserved sender "system"', async () => {
+    const { status, body } = await req('POST', '/chat/messages', {
+      from: 'system',
+      content: 'should not be allowed',
+      channel: 'general',
+    })
+
+    expect(status).toBe(403)
+    expect(body.success).toBe(false)
+    expect(body.code).toBe('SENDER_RESERVED')
   })
 
   it('POST /chat/messages returns no warnings when content has no @mentions', async () => {
