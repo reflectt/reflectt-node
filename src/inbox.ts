@@ -281,6 +281,26 @@ class InboxManager {
     agent: string, 
     state: InboxState
   ): { priority: 'high' | 'medium' | 'low'; reason: string } | null {
+    // Access constraint: a DM addressed to another agent is never relevant,
+    // even if the channel is subscribed (prevents review_routing leaks).
+    if (message.to && message.to !== agent) {
+      return null
+    }
+
+    const meta = (message.metadata ?? {}) as Record<string, unknown>
+    const kind = typeof meta.kind === 'string' ? meta.kind : ''
+
+    // review_routing messages are targeted; do not surface them in non-target inboxes
+    // just because the agent subscribes to the channel.
+    if (kind === 'review_routing') {
+      const reviewer = typeof meta.reviewer === 'string' ? meta.reviewer : ''
+      const assignee = typeof meta.assignee === 'string' ? meta.assignee : ''
+      const targeted = Boolean((reviewer && agent === reviewer) || (assignee && agent === assignee))
+      if (!targeted && !this.isMentioned(message, agent) && message.to !== agent) {
+        return null
+      }
+    }
+
     // High priority: DM
     if (message.to === agent) {
       return { priority: 'high', reason: 'dm' }

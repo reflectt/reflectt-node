@@ -2713,6 +2713,45 @@ describe('Inbox', () => {
     expect(getStatus).toBe(200)
     expect(getBody.subscriptions).toEqual(['reviews', 'blockers'])
   })
+
+  it('does not show review_routing messages in non-target inboxes (even if subscribed)', async () => {
+    const reviewer = 'revieweragent'
+    const nonTarget = 'nontargetagent'
+
+    // Ensure nonTarget is subscribed to reviews (isolation)
+    await req('POST', `/inbox/${nonTarget}/subscribe`, { channels: ['reviews'] })
+
+    const t0 = Date.now()
+    const token1 = `INBOX-REVIEW-ROUTING-DM-${t0}`
+
+    // DM-style review ping addressed to reviewer, posted in #reviews
+    const { status: ps, body: pb } = await req('POST', '/chat/messages', {
+      from: 'system',
+      to: reviewer,
+      channel: 'reviews',
+      content: `@${reviewer} task-1234567890123-abcdefg review requested: **${token1}**`,
+      metadata: { kind: 'review_routing', reviewer, assignee: 'builder' },
+    })
+    expect(ps).toBe(200)
+    expect(pb.message?.channel).toBe('reviews')
+
+    // Ensure the message exists in the channel stream (persisted)
+    const { status: cs, body: cb } = await req('GET', `/chat/messages?channel=reviews&since=${t0 - 1}&limit=50`)
+    expect(cs).toBe(200)
+    const channelHas = (cb.messages || []).some((m: any) => String(m.content || '').includes(token1))
+    expect(channelHas).toBe(true)
+
+    const { status: s1, body: b1 } = await req('GET', `/inbox/${nonTarget}?since=${t0 - 1}&limit=50`)
+    expect(s1).toBe(200)
+    const hasLeak1 = (b1.messages || []).some((m: any) => String(m.content || '').includes(token1))
+    expect(hasLeak1).toBe(false)
+
+    // Sanity: reviewer should see their own review ping
+    const { status: s2, body: b2 } = await req('GET', `/inbox/${reviewer}?since=${t0 - 1}&limit=50`)
+    expect(s2).toBe(200)
+    const reviewerSees = (b2.messages || []).some((m: any) => String(m.content || '').includes(token1))
+    expect(reviewerSees).toBe(true)
+  })
 })
 
 describe('Mention Ack', () => {
