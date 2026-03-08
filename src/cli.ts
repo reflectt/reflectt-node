@@ -586,9 +586,9 @@ program
         const deploy = await res.json().catch(() => ({})) as Record<string, unknown>
         const pid = deploy.pid ?? 'unknown'
         const sha = deploy.gitSha ?? 'unknown'
-        console.error(`❌ Server already running on port ${config.port} (PID: ${pid}, sha: ${sha})`)
-        console.error('   If managed by LaunchAgent: launchctl kickstart -k gui/$(id -u)/com.reflectt.node')
-        console.error('   Otherwise: reflectt stop && reflectt start')
+        console.error(`Server already running on port ${config.port} (v${deploy.version || 'unknown'})`)
+        console.error('   To restart: reflectt restart')
+        console.error('   To stop:    reflectt stop')
         process.exit(1)
       }
     } catch {
@@ -867,7 +867,7 @@ program
         }
       } catch (err) {
         if (health) {
-          console.log(`   Process: PID file stale, but server is responding on port ${activePort}`)
+          console.log(`   Process: Running on port ${activePort}`)
         } else {
           console.log(`   Process: Not found (stale PID file)`)
           return
@@ -875,7 +875,7 @@ program
       }
     } else {
       if (health) {
-        console.log(`   Process: No PID file, but server is responding on port ${activePort}`)
+        console.log(`   Process: Running on port ${activePort}`)
       } else {
         console.log(`   Process: Not running`)
         return
