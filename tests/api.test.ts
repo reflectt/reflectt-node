@@ -965,6 +965,57 @@ describe('Review handoff comment_id stripping', () => {
   })
 })
 
+describe('Review handoff stamping preserves comments (no cascade delete)', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: review_handoff stamping preserves comments',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P1',
+      done_criteria: ['Review handoff comment persists and remains retrievable after server stamping'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+
+    // Ensure review_handoff object exists so the server runs the stamping path.
+    await req('PATCH', `/tasks/${taskId}`, {
+      metadata: {
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/999',
+          commit_sha: 'abc1234',
+          changed_files: ['src/server.ts'],
+          artifact_path: 'process/TASK-test-proof.md',
+          test_proof: 'npm test',
+          known_caveats: 'none',
+        },
+      },
+    })
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('keeps the review_handoff comment in GET /tasks/:id/comments after stamping metadata.review_handoff.comment_id', async () => {
+    const { body: postBody } = await req('POST', `/tasks/${taskId}/comments`, {
+      author: 'test-agent',
+      category: 'review_handoff',
+      content: 'handoff anchor: this should persist',
+    })
+
+    const commentId = postBody.comment.id
+
+    const { status, body: listBody } = await req('GET', `/tasks/${taskId}/comments?includeSuppressed=1`)
+    expect(status).toBe(200)
+    expect(listBody.comments.map((c: any) => c.id)).toContain(commentId)
+  })
+})
+
 describe('Review packet gate', () => {
   let taskId: string
 
