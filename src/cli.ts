@@ -68,6 +68,24 @@ function ensureReflecttHome() {
   mkdirSync(join(DATA_DIR, 'inbox'), { recursive: true })
 }
 
+/**
+ * Detect whether the reflectt-node server is managed by macOS LaunchAgent.
+ * Returns true if the plist file exists in ~/Library/LaunchAgents and is loaded.
+ * On non-macOS platforms, always returns false.
+ */
+function isLaunchAgentManaged(): boolean {
+  if (process.platform !== 'darwin') return false
+  try {
+    const plistPath = join(homedir(), 'Library', 'LaunchAgents', 'com.reflectt.node.plist')
+    if (!existsSync(plistPath)) return false
+    // Verify it's actually loaded (not just installed)
+    const output = execSync('launchctl list com.reflectt.node 2>/dev/null', { timeout: 2000 }).toString()
+    return output.length > 0 && !output.includes('Could not find service')
+  } catch {
+    return false
+  }
+}
+
 function isServerRunning(): boolean {
   if (!existsSync(PID_FILE)) return false
   try {
@@ -584,11 +602,14 @@ program
       clearTimeout(timeout)
       if (res.ok) {
         const deploy = await res.json().catch(() => ({})) as Record<string, unknown>
-        const pid = deploy.pid ?? 'unknown'
-        const sha = deploy.gitSha ?? 'unknown'
         console.error(`Server already running on port ${config.port} (v${deploy.version || 'unknown'})`)
-        console.error('   To restart: reflectt restart')
-        console.error('   To stop:    reflectt stop')
+        if (isLaunchAgentManaged()) {
+          console.error('   To restart: launchctl kickstart -k gui/$(id -u)/com.reflectt.node')
+          console.error('   To stop:    launchctl unload ~/Library/LaunchAgents/com.reflectt.node.plist')
+        } else {
+          console.error('   To restart: reflectt restart')
+          console.error('   To stop:    reflectt stop')
+        }
         process.exit(1)
       }
     } catch {
