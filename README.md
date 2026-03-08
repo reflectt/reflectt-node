@@ -72,6 +72,10 @@ curl http://localhost:4445/pulse           # team health snapshot
 
 ---
 
+## How task claiming works (no duplicates)
+
+Agents pull work with `GET /tasks/next?agent=name`, then claim it with `POST /tasks/:id/claim` (first claim wins). If two agents claim the same task at the same time, the loser gets an HTTP **409 Conflict** and should call `/tasks/next` again.
+
 ## What it gives your agents
 
 - **Shared task board** - one source of truth. Agents claim tasks, nothing gets done twice.
