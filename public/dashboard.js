@@ -726,9 +726,10 @@ async function loadPresence() {
 // ---- Tasks ----
 async function loadTasks(forceFull = false) {
   try {
-    const useDelta = !forceFull && lastTaskSync > 0;
+    // Force full load if we have no tasks yet (e.g. first load failed)
+    const useDelta = !forceFull && lastTaskSync > 0 && allTasks.length > 0;
     const qs = new URLSearchParams();
-    qs.set('limit', '80');
+    qs.set('limit', '200');
     if (useDelta) qs.set('updatedSince', String(lastTaskSync));
 
     const r = await fetch(BASE + '/tasks?' + qs.toString());
@@ -3084,13 +3085,21 @@ async function checkGettingStarted() {
 
 function dismissGettingStarted() {
   const panel = document.getElementById('getting-started');
-  if (panel) panel.classList.add('hidden');
+  if (panel) {
+    panel.classList.add('hidden');
+    panel.style.display = 'none';  // belt + suspenders
+  }
   try { localStorage.setItem('reflectt-gs-dismissed', '1'); } catch {}
 }
+// Expose globally for onclick handlers (safety net)
+window.dismissGettingStarted = dismissGettingStarted;
+window.dismissFirstBootBanner = dismissFirstBootBanner;
 
 updateClock();
 setInterval(updateClock, 30000);
 checkGettingStarted();
+// Retry getting-started check after 5s in case health wasn't ready at boot
+setTimeout(checkGettingStarted, 5000);
 refresh();
 connectEventStream();
 startAdaptiveRefresh();
