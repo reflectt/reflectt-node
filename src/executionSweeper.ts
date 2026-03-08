@@ -654,6 +654,10 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   // Also check validating tasks for PR drift (merged but not advanced)
   for (const task of validating) {
     const meta = (task.metadata || {}) as Record<string, unknown>
+    // Skip tasks where reviewer already acted — ball is with author, not a drift issue
+    const driftReviewState = meta.review_state as string | undefined
+    if (driftReviewState === 'needs_author' || meta.reviewer_decision != null) continue
+
     if (meta.pr_merged && task.status === 'validating') {
       const mergedAt = (meta.pr_merged_at as number) || task.updatedAt
       const driftAge = now - mergedAt
