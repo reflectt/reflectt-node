@@ -437,6 +437,11 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
       continue
     }
 
+    // Skip tasks where reviewer has already acted — ball is with the author.
+    // If review_state is 'needs_author' or reviewer_decision exists, the reviewer
+    // has done their part. SLA alerts/reassignment should not target the reviewer.
+    if (reviewState === 'needs_author' || meta.reviewer_decision != null) continue
+
     const enteredAt = (meta.entered_validating_at as number) || task.updatedAt
     const lastActivity = (meta.review_last_activity_at as number) || enteredAt
     const ageSinceActivity = now - lastActivity
@@ -910,6 +915,24 @@ export function generateDriftReport(): DriftReport {
     const ageMinutes = msToMinutes(ageSinceActivity)
     const prUrl = extractPrUrl(meta)
     const prMerged = !!(meta.pr_merged)
+
+    // Skip tasks where reviewer has already acted — these are waiting on author, not reviewer.
+    const reviewState = meta.review_state as string | undefined
+    if (reviewState === 'needs_author' || meta.reviewer_decision != null) {
+      cleanCount++
+      validatingEntries.push({
+        taskId: task.id,
+        title: task.title,
+        status: task.status,
+        reviewer: task.reviewer ?? '',
+        assignee: task.assignee ?? '',
+        age_minutes: ageMinutes,
+        issue: 'clean',
+        detail: `Waiting on author (review_state: ${reviewState || 'n/a'}, reviewer acted)`,
+        prUrl: prUrl || undefined,
+      })
+      continue
+    }
 
     let issue: DriftReportEntry['issue'] = 'clean'
     let detail = 'On track'
