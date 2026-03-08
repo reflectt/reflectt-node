@@ -10335,8 +10335,18 @@ If your heartbeat shows **no active task** and **no next task**:
       reply.code(404)
       return { success: false, error: 'Task not found', input: id, suggestions: lookup.suggestions }
     }
-    if (task.assignee) {
-      return { success: false, error: `Task already assigned to ${task.assignee}` }
+    const assignee = String(task.assignee || '').trim()
+    const isUnassigned = assignee.length === 0 || assignee.toLowerCase() === 'unassigned'
+    if (!isUnassigned) {
+      reply.code(409)
+      return {
+        success: false,
+        error: `Task already assigned to ${assignee}`,
+        code: 'TASK_ALREADY_ASSIGNED',
+        status: 409,
+        assignee,
+        hint: 'Task claims are atomic: first claim wins. Pull another task via GET /tasks/next.',
+      }
     }
     const shortId = lookup.resolvedId.replace(/^task-\d+-/, '')
     const branch = `${body.agent}/task-${shortId}`
