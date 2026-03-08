@@ -1342,6 +1342,44 @@ class TaskManager {
 
     let transitionEvent: Record<string, unknown> | undefined
 
+    // ── Bounce gate: validating → doing ────────────────────────────────────
+    // A task bouncing from validating back to doing is a signal of rework.
+    // Track bounce_count in metadata. On the 3rd bounce (bounce_count >= 2),
+    // require a documented reason before allowing the regression.
+    if (task.status === 'validating' && nextStatus === 'doing') {
+      const meta = (task.metadata || {}) as Record<string, unknown>
+      const currentBounce = typeof meta.bounce_count === 'number' ? meta.bounce_count : 0
+      const newBounceCount = currentBounce + 1
+
+      if (currentBounce >= 2) {
+        // 3rd+ bounce: require documented reason
+        if (!transition || typeof transition !== 'object') {
+          throw new Error(
+            `Bounce gate: this task has bounced ${currentBounce} times. ` +
+            `Provide metadata.transition = { type: "bounce_back", reason: "..." } explaining the rework.`
+          )
+        }
+        const bounceReason = (transition as Record<string, unknown>).reason
+        if (typeof bounceReason !== 'string' || bounceReason.trim().length === 0) {
+          throw new Error(
+            `Bounce gate: metadata.transition.reason is required when re-opening a task that has bounced ${currentBounce} times.`
+          )
+        }
+      }
+
+      // Merge bounce_count into metadata, preserving existing task metadata
+      // (task.metadata has eta etc; updates.metadata may have transition or be empty)
+      const existingMeta = {
+        ...(task.metadata || {}),
+        ...((updates.metadata || {}) as Record<string, unknown>),
+      }
+      updates.metadata = {
+        ...existingMeta,
+        bounce_count: newBounceCount,
+        last_bounce_at: Date.now(),
+      }
+    }
+
     if (task.status === 'doing' && nextStatus === 'blocked') {
       const parsed = requireTransition('pause', ['reason'], 'doing->blocked transition')
       transitionEvent = {
