@@ -218,6 +218,8 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/board-health` | Board-level health metrics for backlog replenishment. Returns per-agent breakdown (doing, validating, todo, active counts), `needsWork`/`lowWatermark` flags, and `replenishNeeded` trigger (fires when 2+ agents idle or <3 backlog tasks). Query: `include_test=1` to include test-harness tasks. |
 | GET | `/agents` | Agent list — alias for /agents/roles. Returns all agents with roles, WIP status, affinity tags. |
 | GET | `/agents/roles` | Agent role registry with live WIP status. Returns all agents with `name`, `displayName`, `role`, `affinityTags`, `protectedDomains`, `wipCap`, `wipCount`, `overCap`. |
+| POST | `/agents` | Add agent to team. Body: `{ name, role, description?, affinityTags?, wipCap? }`. Hot-reloads TEAM-ROLES.yaml. |
+| DELETE | `/agents/:name` | Remove agent from team. Hot-reloads TEAM-ROLES.yaml. |
 | POST | `/config/identity` | Set an agent's display name. Body: `{ "agent": "agent-1", "displayName": "Juniper" }`. Persists to TEAM-ROLES.yaml, hot-reloads. Dashboard and mentions use display name. |
 | PUT | `/config/team-roles` | Write TEAM-ROLES.yaml. Body: `{ "yaml": "agents:\n  - name: link\n    role: engineer..." }`. Hot-reloads on save. Used by bootstrap agent to configure team from user intent. |
 | GET | `/resolve/mention/:mention` | Resolve a mention string (name, displayName, or alias) to canonical agent ID. Returns `{ agent, displayName, role }`. |
