@@ -156,6 +156,7 @@ import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buil
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
+import { startDeployMonitor, stopDeployMonitor } from './deploy-monitor.js'
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
 import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CATEGORIES, type CreateDocInput, type UpdateDocInput, type DocCategory } from './knowledge-docs.js'
 import { onTaskShipped, onProcessFileWritten, onDecisionComment, isDecisionComment } from './knowledge-auto-index.js'
@@ -2188,6 +2189,9 @@ export async function createServer(): Promise<FastifyInstance> {
   // Calendar reminder engine — polls for pending reminders every 30s
   startReminderEngine()
 
+  // Deploy monitor — alert within 5m when production deploys fail (Vercel + health URL)
+  startDeployMonitor()
+
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
     clearInterval(cadenceWatchdogTimer)
@@ -2197,6 +2201,7 @@ export async function createServer(): Promise<FastifyInstance> {
     stopShippedHeartbeat()
     stopTeamPulse()
     stopReminderEngine()
+    stopDeployMonitor()
     stopKeepalive()
     stopSelfKeepalive()
     wsHeartbeat.stop()
