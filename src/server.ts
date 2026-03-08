@@ -7992,10 +7992,27 @@ export async function createServer(): Promise<FastifyInstance> {
       writeFileSync(filePath, yaml, 'utf-8')
       const { loadAgentRoles } = await import('./assignment.js')
       const reloaded = loadAgentRoles()
+
+      // Scaffold agent workspace if it doesn't exist
+      let workspaceCreated = false
+      try {
+        const { mkdirSync, existsSync: dirExists } = await import('node:fs')
+        const workspaceDir = join(REFLECTT_HOME, `workspace-${name}`)
+        if (!dirExists(workspaceDir)) {
+          mkdirSync(workspaceDir, { recursive: true })
+          writeFileSync(join(workspaceDir, 'SOUL.md'), `# ${name}\n\n*${desc}*\n`, 'utf-8')
+          writeFileSync(join(workspaceDir, 'AGENTS.md'), `# ${name}\n\nRole: ${role}\n\n${desc}\n`, 'utf-8')
+          workspaceCreated = true
+        }
+      } catch (wsErr) {
+        console.warn(`[Agents] Workspace scaffold failed for ${name}:`, (wsErr as Error).message)
+      }
+
       return {
         success: true,
         agent: { name, role, description: desc, wipCap },
         totalAgents: reloaded.roles.length,
+        workspaceCreated,
         hint: `Agent "${name}" added to team and hot-reloaded. Start heartbeating: GET /heartbeat/${name}`,
       }
     } catch (err: unknown) {
