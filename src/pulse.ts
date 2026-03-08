@@ -35,6 +35,7 @@ export interface PulseSnapshot {
   agents: PulseAgent[]
   pendingReviews: Array<{ taskId: string; title: string; reviewer: string }>
   recentActivity?: { messagesLastHour: number; tasksCompletedToday: number }
+  highBounceTasks?: Array<{ taskId: string; title: string; bounceCount: number; assignee?: string }>
 }
 
 export interface CompactPulse {
@@ -45,6 +46,7 @@ export interface CompactPulse {
   board: string  // e.g. "T:3 D:2 V:1 ✓:5 B:0"
   agents: string[] // e.g. ["link:working→task-123(activity endpoint)", "pixel:working→task-456(UI scaffold)"]
   reviews: string[] // e.g. ["task-789→sage"]
+  highBounce?: string[] // e.g. ["abc123(bounces:3)→link"] — tasks that keep regressing
 }
 
 function getDeployInfo(): PulseSnapshot['deploy'] {
@@ -126,6 +128,19 @@ export function generatePulse(): PulseSnapshot {
     t.status === 'done' && (t.updatedAt || 0) >= todayStart.getTime()
   ).length
 
+  // High-bounce tasks: any non-done task with bounce_count >= 1
+  const highBounceTasks = allTasks
+    .filter(t => t.status !== 'done' && t.status !== 'cancelled')
+    .map(t => ({
+      taskId: t.id,
+      title: t.title,
+      bounceCount: typeof (t.metadata as any)?.bounce_count === 'number' ? (t.metadata as any).bounce_count as number : 0,
+      assignee: t.assignee,
+    }))
+    .filter(t => t.bounceCount >= 1)
+    .sort((a, b) => b.bounceCount - a.bounceCount)
+    .slice(0, 10)
+
   return {
     ts: Date.now(),
     deploy: getDeployInfo(),
@@ -138,6 +153,7 @@ export function generatePulse(): PulseSnapshot {
       messagesLastHour: recentMessages.length,
       tasksCompletedToday,
     },
+    highBounceTasks: highBounceTasks.length > 0 ? highBounceTasks : undefined,
   }
 }
 
@@ -177,6 +193,10 @@ export function generateCompactPulse(): CompactPulse {
     `${r.taskId.slice(-12)}→${r.reviewer}`
   )
 
+  const bounceWarnings = (pulse.highBounceTasks || []).map(t =>
+    `${t.taskId.slice(-12)}(bounces:${t.bounceCount})→${t.assignee || 'unassigned'}`
+  )
+
   return {
     ts: pulse.ts,
     deploy: deployStr,
@@ -185,5 +205,6 @@ export function generateCompactPulse(): CompactPulse {
     board: boardStr,
     agents: agentStrs,
     reviews: reviewStrs,
+    ...(bounceWarnings.length > 0 ? { highBounce: bounceWarnings } : {}),
   }
 }
