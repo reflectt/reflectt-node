@@ -17,6 +17,8 @@ import { generateRecurringCandidates } from './insight-promotion.js'
 import { tickReflectionNudges } from './reflection-automation.js'
 import { routeMessage } from './messageRouter.js'
 import { getDb, safeJsonStringify, safeJsonParse } from './db.js'
+import { presenceManager } from './presence.js'
+import { getAgentRolesSource } from './assignment.js'
 
 // ── Types ──
 
@@ -119,6 +121,31 @@ function getConfig(): ContinuityConfig {
   }
 }
 
+function resolveMonitoredAgents(configAgents: string[]): string[] {
+  const trimmed = (configAgents || []).map(a => String(a || '').trim()).filter(Boolean)
+
+  // If no agents explicitly configured, auto-discover from real runtime presence.
+  // This avoids creating tasks for placeholder agents (e.g. agent-1/2/3) on fresh installs.
+  if (trimmed.length === 0) {
+    return presenceManager
+      .getAllPresence()
+      .filter(p => p.status !== 'offline')
+      .map(p => p.agent)
+      .filter(Boolean)
+  }
+
+  // If we are running with built-in placeholder roles (no TEAM-ROLES.yaml found),
+  // only target agents that have actually checked in via presence.
+  const rolesSource = getAgentRolesSource().source
+  if (rolesSource === 'builtin') {
+    return trimmed.filter(a => Boolean(presenceManager.getPresence(a)))
+  }
+
+  // Otherwise, allow configured agents, but still prefer skipping totally unknown agents.
+  return trimmed
+}
+
+
 // ── Core loop ──
 
 /**
@@ -145,7 +172,9 @@ export async function tickContinuityLoop(): Promise<{
     stats.lastRunAt = now
   }
 
-  if (!config.enabled || config.agents.length === 0) {
+  const monitoredAgents = resolveMonitoredAgents(config.agents)
+
+  if (!config.enabled || monitoredAgents.length === 0) {
     return { actions: [], agentsChecked: 0, replenished: 0 }
   }
 
@@ -153,7 +182,7 @@ export async function tickContinuityLoop(): Promise<{
   const actions: ContinuityAction[] = []
   let replenished = 0
 
-  for (const agent of config.agents) {
+  for (const agent of monitoredAgents) {
     // Cooldown check
     if (lastReplenishAt[agent] && now - lastReplenishAt[agent] < cooldownMs) continue
 
@@ -223,7 +252,7 @@ export async function tickContinuityLoop(): Promise<{
     }
   }
 
-  return { actions, agentsChecked: config.agents.length, replenished }
+  return { actions, agentsChecked: monitoredAgents.length, replenished }
 }
 
 // ── Insight → Task replenishment ──
