@@ -524,52 +524,63 @@ class TaskManager {
   }
 
   private async appendTaskComment(comment: TaskComment): Promise<void> {
+    const db = getDb()
+
+    // DB writes must be atomic; otherwise callers may observe a "phantom" comment ID
+    // that never persisted (breaking review_handoff.comment_id).
+    const insert = db.prepare(`
+      INSERT INTO task_comments (
+        id, task_id, author, content, timestamp,
+        category, suppressed, suppressed_reason, suppressed_rule
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+
+    const updateTask = db.prepare(`
+      UPDATE tasks
+      SET
+        comment_count = (SELECT COUNT(*) FROM task_comments WHERE task_id = ?),
+        updated_at = ?
+      WHERE id = ?
+    `)
+
+    const touchUpdatedAt = db.prepare(`
+      UPDATE tasks
+      SET updated_at = MAX(updated_at, ?)
+      WHERE id = ?
+    `)
+
     try {
-      const db = getDb()
+      const tx = db.transaction(() => {
+        insert.run(
+          comment.id,
+          comment.taskId,
+          comment.author,
+          comment.content,
+          comment.timestamp,
+          comment.category ?? null,
+          comment.suppressed ? 1 : 0,
+          comment.suppressedReason ?? null,
+          comment.suppressedRule ?? null,
+        )
 
-      // Write to SQLite (primary)
-      const insert = db.prepare(`
-        INSERT INTO task_comments (
-          id, task_id, author, content, timestamp,
-          category, suppressed, suppressed_reason, suppressed_rule
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      insert.run(
-        comment.id,
-        comment.taskId,
-        comment.author,
-        comment.content,
-        comment.timestamp,
-        comment.category ?? null,
-        comment.suppressed ? 1 : 0,
-        comment.suppressedReason ?? null,
-        comment.suppressedRule ?? null,
-      )
+        // Comments are material activity and should advance updated_at to avoid autonomy/heartbeat false positives.
+        updateTask.run(comment.taskId, comment.timestamp, comment.taskId)
+        touchUpdatedAt.run(comment.timestamp, comment.taskId)
+      })
 
-      // Update comment count + updated_at for the task.
-      // Comments are material activity and should advance updated_at to avoid autonomy/heartbeat false positives.
-      const updateTask = db.prepare(`
-        UPDATE tasks
-        SET
-          comment_count = (SELECT COUNT(*) FROM task_comments WHERE task_id = ?),
-          updated_at = ?
-        WHERE id = ?
-      `)
-      updateTask.run(comment.taskId, comment.timestamp, comment.taskId)
+      tx()
+    } catch (err) {
+      // Critical: propagate failures so API callers don't record unresolvable comment IDs.
+      console.error('[Tasks] Failed to append task comment (DB):', err)
+      throw err
+    }
 
-      // Touch task updated_at so comment activity counts as task activity (autonomy, SLA, sorting)
-      const touchUpdatedAt = db.prepare(`
-        UPDATE tasks
-        SET updated_at = MAX(updated_at, ?)
-        WHERE id = ?
-      `)
-      touchUpdatedAt.run(comment.timestamp, comment.taskId)
-
-      // Append to JSONL (audit log)
+    // Audit log is best-effort; DB is the source of truth.
+    try {
       await fs.mkdir(DATA_DIR, { recursive: true })
       await fs.appendFile(TASK_COMMENTS_FILE, `${JSON.stringify(comment)}\n`, 'utf-8')
     } catch (err) {
-      console.error('[Tasks] Failed to append task comment:', err)
+      console.error('[Tasks] Failed to append task comment (JSONL):', err)
     }
   }
 

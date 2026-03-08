@@ -509,6 +509,9 @@ const QaBundleSchema = z.object({
 
 const ReviewHandoffSchema = z.object({
   task_id: z.string().trim().regex(/^task-[a-zA-Z0-9-]+$/),
+  // Stored transactionally (server-side) from POST /tasks/:id/comments.
+  // This must always resolve via GET /tasks/:id/comments.
+  comment_id: z.string().trim().regex(/^tcomment-\d+-[a-z0-9]+$/i).optional(),
   repo: z.string().trim().min(1).optional(),  // optional for config_only tasks
   artifact_path: z.string().trim().min(1),    // relaxed: accepts any path (process/, ~/.reflectt/, etc.)
   test_proof: z.string().trim().min(1).optional(),  // optional for non-code tasks
@@ -732,6 +735,32 @@ function enforceQaBundleGateForValidating(
     }
   }
 
+  // Canonical artifact reference (until central storage exists):
+  // For code tasks, artifact paths must be repo-relative under process/ (or a URL).
+  if (reviewPacket && !nonCodeLane) {
+    const packetArtifact = typeof reviewPacket.artifact_path === 'string' ? reviewPacket.artifact_path.trim() : ''
+    const packetIsUrl = /^https?:\/\//i.test(packetArtifact)
+    const packetIsProcess = packetArtifact.startsWith('process/')
+
+    if (packetArtifact && !packetIsUrl && !packetIsProcess) {
+      return {
+        ok: false,
+        error: 'Validating gate: metadata.qa_bundle.review_packet.artifact_path must be under process/ (repo-relative) or a URL',
+        hint: 'Set review_packet.artifact_path to process/TASK-...md (committed in the PR) or a PR/GitHub URL.',
+      }
+    }
+
+    const metaIsUrl = /^https?:\/\//i.test(artifactPath)
+    const metaIsProcess = artifactPath.startsWith('process/')
+    if (artifactPath && !metaIsUrl && !metaIsProcess) {
+      return {
+        ok: false,
+        error: 'Validating gate: metadata.artifact_path must be under process/ (repo-relative) or a URL',
+        hint: 'Set metadata.artifact_path to process/TASK-...md (committed in the PR) or a PR/GitHub URL.',
+      }
+    }
+  }
+
   // PR integrity: validate commit SHA + changed_files against live PR head
   if (!nonCodeLane && reviewPacket?.pr_url) {
     const overrideFlag = metadataObj.pr_integrity_override === true
@@ -879,6 +908,45 @@ function applyReviewStateMetadata(
       }
       console.log(`[ArtifactNormalize] task ${existing.id}: normalized`, normResult.warnings)
     }
+
+    // ── Review handoff comment pointer repair/fill ──
+    // If review_handoff exists, ensure comment_id points to a real comment.
+    // We do this *server-side* to avoid phantom/unresolvable pointers.
+    const rh = metadata.review_handoff as Record<string, unknown> | undefined
+    if (rh && typeof rh === 'object' && !Array.isArray(rh)) {
+      const rhAny = rh as any
+      const commentId = typeof rhAny.comment_id === 'string' ? rhAny.comment_id.trim() : ''
+      const all = taskManager.getTaskComments(existing.id, { includeSuppressed: true })
+      const resolves = commentId ? all.some(c => c.id === commentId) : false
+
+      if (!resolves) {
+        // Prefer an explicit category tag; fallback to most recent comment by assignee.
+        const assignee = (existing.assignee || '').trim().toLowerCase()
+        const byHandoffCategory = all
+          .filter(c => {
+            const cat = String(c.category || '').toLowerCase()
+            return cat === 'review_handoff' || cat === 'handoff'
+          })
+
+        const byAssignee = assignee
+          ? all.filter(c => String(c.author || '').trim().toLowerCase() === assignee)
+          : []
+
+        const candidate = (byHandoffCategory.length > 0
+          ? byHandoffCategory[byHandoffCategory.length - 1]
+          : (byAssignee.length > 0 ? byAssignee[byAssignee.length - 1] : (all.length > 0 ? all[all.length - 1] : null)))
+
+        if (candidate) {
+          metadata.review_handoff = { ...rhAny, comment_id: candidate.id }
+          metadata.review_handoff_comment_id_autofilled = {
+            previous: commentId || null,
+            next: candidate.id,
+            at: now,
+            strategy: byHandoffCategory.length > 0 ? 'category:review_handoff' : (byAssignee.length > 0 ? 'latest_assignee_comment' : 'latest_comment'),
+          }
+        }
+      }
+    }
   }
 
   if (previousStatus === 'validating' && nextStatus === 'doing' && !incomingReviewState) {
@@ -1009,11 +1077,11 @@ function isEchoOutOfLaneTask(task: Task): boolean {
   return true
 }
 
-function enforceReviewHandoffGateForValidating(
+async function enforceReviewHandoffGateForValidating(
   status: Task['status'] | undefined,
   taskId: string,
   metadata: unknown,
-): { ok: true } | { ok: false; error: string; hint: string } {
+): Promise<{ ok: true } | { ok: false; error: string; hint: string }> {
   if (status !== 'validating') return { ok: true }
   if (isTaskAutomatedRecurring(metadata)) return { ok: true }
 
@@ -1028,11 +1096,11 @@ function enforceReviewHandoffGateForValidating(
     return {
       ok: false,
       error: 'Review handoff required: metadata.review_handoff must include task_id, artifact_path, known_caveats (and pr_url + commit_sha unless doc_only=true, config_only=true, or non_code=true).',
-      hint: 'Example: { "review_handoff": { "task_id":"task-...", "artifact_path":"process/TASK-...md", "known_caveats":"none" } }. For non-code tasks (finance, legal, ops): set non_code=true. For config tasks: set config_only=true.',
+      hint: 'Example: { "review_handoff": { "task_id":"task-...", "artifact_path":"process/TASK-...md", "known_caveats":"none" } }. For non-code tasks: set non_code=true. Recommended: post the handoff comment with category="review_handoff" so the server stamps comment_id automatically.',
     }
   }
 
-  const handoff = parsed.data
+  const handoff = parsed.data as Record<string, any>
   if (handoff.task_id !== taskId) {
     return {
       ok: false,
@@ -1041,9 +1109,51 @@ function enforceReviewHandoffGateForValidating(
     }
   }
 
+  // Ensure review_handoff.comment_id resolves to a real comment.
+  // If missing (or stale), we repair it from existing comments; if none exist,
+  // we create a server-authored pointer comment so reviewers always have a stable anchor.
+  const commentsAll = taskManager.getTaskComments(taskId, { includeSuppressed: true })
+
+  let commentId = typeof handoff.comment_id === 'string' ? handoff.comment_id.trim() : ''
+  let handoffComment = commentId ? (commentsAll.find(c => c.id === commentId) || null) : null
+
+  if (!handoffComment) {
+    const byCategory = commentsAll.filter(c => {
+      const cat = String(c.category || '').toLowerCase()
+      return cat === 'review_handoff' || cat === 'handoff'
+    })
+
+    const candidate = byCategory.length > 0
+      ? byCategory[byCategory.length - 1]
+      : (commentsAll.length > 0 ? commentsAll[commentsAll.length - 1] : null)
+
+    if (candidate) {
+      commentId = candidate.id
+      handoffComment = candidate
+    } else {
+      // No comments exist — create a stable anchor comment.
+      const created = await taskManager.addTaskComment(
+        taskId,
+        'system',
+        'Auto-handoff: review_handoff is recorded in metadata.review_handoff (no explicit handoff comment was posted).',
+        { category: 'review_handoff', provenance: { kind: 'auto_review_handoff', source: 'validating_gate' } },
+      )
+      commentId = created.id
+      handoffComment = created
+    }
+
+    // Persist repaired comment_id into the handoff metadata (server-side).
+    ;(handoff as any).comment_id = commentId
+    const rhObj = (root.review_handoff as any)
+    if (rhObj && typeof rhObj === 'object' && !Array.isArray(rhObj)) {
+      rhObj.comment_id = commentId
+    }
+  }
+
   // config_only: artifacts live in ~/.reflectt/, no repo/PR required
   // doc_only/non_code/design/docs lanes: no PR/commit required
   const nonCodeLane = handoff.non_code === true || isDesignOrDocsLane(root)
+
   if (!handoff.doc_only && !handoff.config_only && !nonCodeLane) {
     if (!handoff.pr_url || !parseGitHubPrUrl(handoff.pr_url)) {
       return {
@@ -1061,7 +1171,44 @@ function enforceReviewHandoffGateForValidating(
     }
   }
 
-  return { ok: true }
+  // Artifact retrievability gate.
+  // If the artifact isn't accessible from this node (repo / shared-workspace / GitHub fallback),
+  // a reviewer on another host will almost certainly be blocked.
+  const artifactPath = typeof handoff.artifact_path === 'string' ? handoff.artifact_path.trim() : ''
+  const norm = normalizeArtifactPath(artifactPath)
+  if (norm.rejected || !norm.normalized) {
+    return {
+      ok: false,
+      error: `Validating gate: review_handoff.artifact_path is not a valid retrievable reference (${norm.rejectReason || 'invalid path'}).`,
+      hint: 'Use either (a) a PR/GitHub URL, or (b) a repo-relative path (e.g. process/TASK-...md) that exists on the referenced PR/commit, or (c) put the full spec in the handoff comment and point artifact_path at a stable URL.',
+    }
+  }
+
+  // URLs are assumed retrievable.
+  if (/^https?:\/\//i.test(norm.normalized)) return { ok: true }
+
+  // If the file is accessible locally (repo or shared-workspace), accept.
+  const repoRoot = resolve(import.meta.dirname || process.cwd(), '..')
+  const resolved = await resolveTaskArtifact(norm.normalized, repoRoot)
+  if (resolved.accessible) return { ok: true }
+
+  // GitHub fallback: if PR+commit are known and artifact is process/*, we can build a stable blob URL.
+  const prUrl = (root as any).pr_url || (root as any).qa_bundle?.review_packet?.pr_url || (root as any).review_handoff?.pr_url
+  const commitSha = (root as any).commit_sha || (root as any).commit || (root as any).qa_bundle?.review_packet?.commit || (root as any).review_handoff?.commit_sha
+  if (typeof prUrl === 'string' && typeof commitSha === 'string' && norm.normalized.startsWith('process/')) {
+    const blobUrl = buildGitHubBlobUrl(prUrl, commitSha, norm.normalized)
+    if (blobUrl) return { ok: true }
+  }
+
+  // For non-code tasks, the handoff comment itself is considered the primary artifact.
+  // We only require that comment_id resolves (handled above).
+  if (nonCodeLane) return { ok: true }
+
+  return {
+    ok: false,
+    error: 'Validating gate: review_handoff.artifact_path is not retrievable from repo/shared-workspace/GitHub fallback.',
+    hint: 'Move the artifact into shared-workspace process/, or reference a PR+commit so GitHub blob fallback can resolve it (process/* only).',
+  }
 }
 
 const DEFAULT_LIMITS = {
@@ -5612,6 +5759,25 @@ export async function createServer(): Promise<FastifyInstance> {
       // Notification routing respects per-agent preferences (quiet hours, mute, filters).
       const task = taskManager.getTask(resolved.resolvedId)
 
+      // ── Transactional review_handoff.comment_id stamping ──
+      // If the author tags this comment as the handoff entrypoint, the server stamps
+      // metadata.review_handoff.comment_id from the persisted comment ID.
+      // This prevents clients from supplying phantom IDs.
+      const category = typeof (data as any).category === 'string' ? String((data as any).category).trim().toLowerCase() : ''
+      if (task && (category === 'review_handoff' || category === 'handoff')) {
+        const meta = (task.metadata || {}) as Record<string, unknown>
+        const rh = meta.review_handoff as Record<string, unknown> | undefined
+        if (rh && typeof rh === 'object' && !Array.isArray(rh)) {
+          const rhAny = rh as any
+          if (rhAny.comment_id !== comment.id) {
+            taskManager.patchTaskMetadata(task.id, {
+              review_handoff: { ...rhAny, comment_id: comment.id },
+              review_handoff_comment_id_stamped_at: Date.now(),
+            })
+          }
+        }
+      }
+
       // Never fan out notifications for test-harness tasks.
       // Our repo contains a few "LIVE server" tests (BASE=127.0.0.1:4445) that create
       // tasks/comments with metadata.is_test=true. Without this guard, running `npm test`
@@ -6899,7 +7065,24 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // Merge incoming metadata with existing for gate checks + persistence.
       // Apply auto-defaults (ETA, artifact_path) when not explicitly provided.
-      const incomingMeta = parsed.metadata || {}
+      // Do not accept caller-supplied review_handoff.comment_id (it must be stamped server-side from POST /tasks/:id/comments).
+      // If a client tries to patch it directly, we strip it to prevent phantom pointers.
+      const incomingMetaRaw = (parsed.metadata || {}) as Record<string, unknown>
+      const incomingMeta: Record<string, unknown> = { ...incomingMetaRaw }
+      const incomingRh = incomingMeta.review_handoff as Record<string, unknown> | undefined
+      if (incomingRh && typeof incomingRh === 'object' && !Array.isArray(incomingRh)) {
+        const rhAny = incomingRh as any
+        if (typeof rhAny.comment_id === 'string') {
+          const { comment_id, ...rest } = rhAny
+          incomingMeta.review_handoff = rest
+          incomingMeta.review_handoff_comment_id_stripped = {
+            stripped: true,
+            attempted: comment_id,
+            at: Date.now(),
+          }
+        }
+      }
+
       const effectiveTargetStatus = parsed.status ?? existing.status
       const autoFilledMeta = applyAutoDefaults(lookup.resolvedId, effectiveTargetStatus, incomingMeta as Record<string, unknown>)
       const mergedRawMeta = { ...(existing.metadata || {}), ...autoFilledMeta }
@@ -7090,7 +7273,7 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
-      const handoffGate = enforceReviewHandoffGateForValidating(effectiveStatus, lookup.resolvedId, mergedMeta)
+      const handoffGate = await enforceReviewHandoffGateForValidating(effectiveStatus, lookup.resolvedId, mergedMeta)
       if (!handoffGate.ok) {
         reply.code(400)
         return {
