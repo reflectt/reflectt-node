@@ -11854,8 +11854,16 @@ If your heartbeat shows **no active task** and **no next task**:
       dailyTotals[row.date] = (dailyTotals[row.date] ?? 0) + row.total_cost_usd
     }
 
+    // Note: avg_cost_by_lane and avg_cost_by_agent use Math.max(days, 30) as their window.
+    // Lane/agent-level averages need task density to be meaningful — a 7-day window might
+    // have 0-1 closed tasks per agent/lane and produce misleading numbers. Using a 30-day
+    // floor is intentional. daily_by_model, daily_totals, and top_tasks_by_cost use the
+    // requested `days` window directly and will match the `window_days` field in the response.
+    const laneAgentWindow = Math.max(days, 30)
+
     return {
       window_days: days,
+      lane_agent_window_days: laneAgentWindow,
       summary: Array.isArray(summary) ? summary[0] ?? null : summary,
       daily_by_model: dailyByModel,
       daily_totals: Object.entries(dailyTotals)
