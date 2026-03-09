@@ -95,6 +95,7 @@ import { computeCiFromCheckRuns, computeCiFromCombinedStatus } from './github-ci
 import { createGitHubIdentityProvider } from './github-identity.js'
 import { getProvisioningManager } from './provisioning.js'
 import { getWebhookDeliveryManager } from './webhooks.js'
+import { enrichWebhookPayload } from './github-webhook-attribution.js'
 import { exportBundle, importBundle } from './portability.js'
 import { getNotificationManager } from './notifications.js'
 import { getConnectivityManager } from './connectivity.js'
@@ -12314,6 +12315,11 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const idempotencyKey = deliveryId ? `${provider}_${deliveryId}` : undefined
 
+    // Enrich GitHub webhook payloads with agent attribution
+    const enrichedBody = provider === 'github'
+      ? enrichWebhookPayload(body)
+      : body
+
     // Enqueue through delivery engine for each configured target
     const events = []
     for (const route of routes) {
@@ -12325,7 +12331,7 @@ If your heartbeat shows **no active task** and **no next task**:
       const event = webhookDelivery.enqueue({
         provider,
         eventType,
-        payload: body,
+        payload: enrichedBody,
         targetUrl: `http://localhost:${serverConfig.port}${route.path}`,
         idempotencyKey: idempotencyKey ? `${idempotencyKey}_${route.id}` : undefined,
         metadata: {
