@@ -60,6 +60,8 @@ export interface ContinuityStats {
 
 const auditLog: ContinuityAction[] = []
 const lastReplenishAt: Record<string, number> = {}
+const lastNudgeAt: Record<string, number> = {}
+const NUDGE_COOLDOWN_MS = 5 * 60_000 // 5 min — separate from task-replenish cooldown
 
 let stats: ContinuityStats = {
   cyclesRun: 0,
@@ -218,55 +220,72 @@ export async function tickContinuityLoop(): Promise<{
         })
       } catch { /* chat may not be available */ }
     } else {
-      // No insights to promote — fire reflection nudges to generate pipeline input
-      try {
-        const nudgeResult = await tickReflectionNudges()
-        if (nudgeResult.total > 0) {
-          stats.reflectionNudgesFired += nudgeResult.total
-          const action: ContinuityAction = {
-            id: `cl-nudge-${agent}-${now}`,
-            kind: 'reflection-nudge-triggered',
-            agent,
-            detail: `Queue below floor (${unblockedTodo.length}/${config.minReady}). No promotable insights. Fired ${nudgeResult.total} reflection nudge(s) to seed pipeline.`,
-            timestamp: now,
-          }
-          recordAction(action)
-          actions.push(action)
-        } else {
-          // Insights dry, nudges dry — generate scoped tasks directly from role
-          const scopedActions = await generateScopedTasksFromRole(agent, deficit, config, now)
-          if (scopedActions.length > 0) {
-            lastReplenishAt[agent] = now
-            replenished += scopedActions.length
-            actions.push(...scopedActions)
-            try {
-              const taskIds = scopedActions.map(a => a.taskId).filter(Boolean).join(', ')
-              await routeMessage({
-                from: 'system',
-                content: `🔄 Continuity loop: generated ${scopedActions.length} scoped task(s) for @${agent} from role context (insights pool was empty). Tasks: ${taskIds}`,
-                category: 'continuity-loop',
-                severity: 'info',
-                forceChannel: config.channel,
-              })
-            } catch { /* non-fatal */ }
-          } else {
-            stats.noCandidateCycles++
+      // No insights to promote.
+      // Run nudges and scoped-task generation in parallel — they serve different purposes:
+      //   nudges seed the future insights pipeline (async, future cycles)
+      //   scoped tasks fill the immediate queue (synchronous, this cycle)
+      // Previously, scoped tasks were gated behind nudgeResult.total === 0, which meant
+      // active teams (where nudges always fire) never reached the scoped fallback.
+      let createdTasks = false
+
+      // 1. Fire reflection nudges (respects its own 5-min cooldown to prevent spam)
+      const nudgeCooledDown = !lastNudgeAt[agent] || now - lastNudgeAt[agent] >= NUDGE_COOLDOWN_MS
+      if (nudgeCooledDown) {
+        try {
+          const nudgeResult = await tickReflectionNudges()
+          if (nudgeResult.total > 0) {
+            stats.reflectionNudgesFired += nudgeResult.total
+            lastNudgeAt[agent] = now
             const action: ContinuityAction = {
-              id: `cl-empty-${agent}-${now}`,
-              kind: 'no-candidates',
+              id: `cl-nudge-${agent}-${now}`,
+              kind: 'reflection-nudge-triggered',
               agent,
-              detail: `Queue below floor (${unblockedTodo.length}/${config.minReady}). No promotable insights, no nudges, and no scoped tasks could be generated. Manual task creation needed.`,
+              detail: `Queue below floor (${unblockedTodo.length}/${config.minReady}). No promotable insights. Fired ${nudgeResult.total} reflection nudge(s) to seed pipeline.`,
               timestamp: now,
             }
             recordAction(action)
             actions.push(action)
           }
+        } catch { /* non-fatal */ }
+      }
+
+      // 2. Independently attempt scoped task generation from role config
+      try {
+        const scopedActions = await generateScopedTasksFromRole(agent, deficit, config, now)
+        if (scopedActions.length > 0) {
+          lastReplenishAt[agent] = now
+          replenished += scopedActions.length
+          createdTasks = true
+          actions.push(...scopedActions)
+          try {
+            const taskIds = scopedActions.map(a => a.taskId).filter(Boolean).join(', ')
+            await routeMessage({
+              from: 'system',
+              content: `🔄 Continuity loop: generated ${scopedActions.length} scoped task(s) for @${agent} from role context (insights pool was empty). Tasks: ${taskIds}`,
+              category: 'continuity-loop',
+              severity: 'info',
+              forceChannel: config.channel,
+            })
+          } catch { /* non-fatal */ }
         }
       } catch {
         stats.noCandidateCycles++
       }
 
-      lastReplenishAt[agent] = now // Still set cooldown to avoid spam
+      if (!createdTasks) {
+        stats.noCandidateCycles++
+        const action: ContinuityAction = {
+          id: `cl-empty-${agent}-${now}`,
+          kind: 'no-candidates',
+          agent,
+          detail: `Queue below floor (${unblockedTodo.length}/${config.minReady}). No promotable insights and no scoped tasks could be generated. Nudges fired to seed pipeline.`,
+          timestamp: now,
+        }
+        recordAction(action)
+        actions.push(action)
+        // No full cooldown when nothing was created — allow retry on next tick.
+        // Nudge spam is handled by the separate lastNudgeAt cooldown above.
+      }
     }
   }
 
@@ -488,6 +507,7 @@ export function getContinuityAuditFromDb(opts: { agent?: string; limit?: number;
 export function _resetContinuityState(): void {
   auditLog.length = 0
   for (const key of Object.keys(lastReplenishAt)) delete lastReplenishAt[key]
+  for (const key of Object.keys(lastNudgeAt)) delete lastNudgeAt[key]
   stats = {
     cyclesRun: 0,
     insightsPromoted: 0,
