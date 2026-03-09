@@ -88,6 +88,26 @@ export function resolveWebhookAttribution(payload: Record<string, unknown>): Git
 }
 
 /**
+ * Remap shared GitHub @mentions in a pre-formatted message string.
+ *
+ * Used for cloud-relayed GitHub event messages where the cloud has already
+ * formatted the message content (e.g. "@itskaidev\n✅ **PR merged** #828...")
+ * but used the raw GitHub sender login instead of the real agent name.
+ *
+ * Replaces any `@<sharedUsername>` occurrences with `@<fallbackAgent>`.
+ * Does NOT perform branch-based lookup (branch info is unavailable at this stage).
+ */
+export function remapGitHubMentions(text: string): string {
+  if (!text || typeof text !== 'string') return text
+  let result = text
+  for (const username of SHARED_GITHUB_USERNAMES) {
+    // Match @username at word boundary (avoid partial matches like @itskaidev123)
+    result = result.replace(new RegExp(`@${username}\\b`, 'gi'), `@${FALLBACK_AGENT}`)
+  }
+  return result
+}
+
+/**
  * Enrich a GitHub webhook payload with agent attribution metadata.
  * Adds `_reflectt_attribution` to the payload (non-destructive).
  */
