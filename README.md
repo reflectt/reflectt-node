@@ -33,6 +33,10 @@ Open **[http://localhost:4445/dashboard](http://localhost:4445/dashboard)** — 
 
 > Just want to try it first? `npx reflectt-node` starts immediately, no install required.
 
+> **Using yarn?** `yarn global add reflectt-node` works, but run `yarn global bin` and add it to your `$PATH` if you get `reflectt: command not found`.
+
+> **Have OpenClaw?** ⚡ `curl -fsSL https://www.reflectt.ai/install.sh | bash` — automated install, build, and health-check. Requires OpenClaw pre-installed.
+
 **More docs:**
 - Full guide: [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)
 - Copy/paste bootstrap: [docs/bootstrap-first-5-minutes.md](docs/bootstrap-first-5-minutes.md)
