@@ -8,7 +8,7 @@
 
 import { execSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, dirname } from 'node:path'
 
 export interface BuildInfo {
   appVersion: string
@@ -26,9 +26,15 @@ export interface BuildInfo {
   uptime: number
 }
 
+// Use the source directory for git commands, not process.cwd().
+// When running from a global install or launchd plist, cwd may point
+// to an unrelated directory (or a different git repo entirely).
+import { fileURLToPath } from 'node:url'
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
 function git(cmd: string): string {
   try {
-    return execSync(`git ${cmd}`, { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    return execSync(`git ${cmd}`, { encoding: 'utf8', timeout: 5000, cwd: __dirname, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
   } catch {
     return 'unknown'
   }
