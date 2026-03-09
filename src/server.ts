@@ -12440,10 +12440,12 @@ If your heartbeat shows **no active task** and **no next task**:
       events.push(event)
     }
 
-    // Post GitHub events to the 'github' chat channel with remapped mentions
+    // Post GitHub events to the 'github' chat channel with remapped mentions.
+    // Pass enrichedBody (not body) so formatGitHubEvent has access to
+    // _reflectt_attribution and can mention the correct agent (@link not @kai).
     if (provider === 'github') {
       const ghEventType = (request.headers['x-github-event'] as string) || eventType
-      const chatMessage = formatGitHubEvent(ghEventType, body)
+      const chatMessage = formatGitHubEvent(ghEventType, enrichedBody as any)
       if (chatMessage) {
         chatManager.sendMessage({
           from: 'github',
