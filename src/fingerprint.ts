@@ -7,7 +7,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { execSync } from 'node:child_process'
+import { getBuildInfo } from './buildInfo.js'
 
 const STARTED_AT = Date.now()
 const WINDOW_MS = 5 * 60 * 1000 // 5 minutes
@@ -155,15 +155,11 @@ export function getDeployTransition(hostId: string, deploy: DeployInfo): DeployT
 }
 
 export function getDeployInfo(): DeployInfo {
-  let commit = 'unknown'
-  try {
-    commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim()
-  } catch {
-    // not a git repo or git unavailable — use fallback
-  }
+  // Use baked build info — avoids ambient git repo traversal (see PR #836)
+  const build = getBuildInfo()
   return {
-    commit,
-    version: process.env.npm_package_version ?? '0.0.0',
+    commit: build.gitShortSha,
+    version: build.appVersion,
     deployed_at: STARTED_AT,
   }
 }
