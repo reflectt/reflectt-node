@@ -238,6 +238,35 @@ agents:
 
   # Removed agent-1/2/3 fallback entries — were leaking into dashboard as ghost agents
 
+# Decision authority — what the team owns vs. what requires a human
+# This section survives cold-start and new installs.
+# Agents reading this on first boot should NOT default to Ryan for decisions in the team-decides list.
+decision_authority:
+  team_decides:
+    - Product feature scope and prioritization (P0/P1/P2/P3 assignment)
+    - Architecture and technical decisions (API shape, data model, infra choices)
+    - Pricing tier structure and copy
+    - PR merges within approved feature scope
+    - Task creation, assignment, reassignment, and cancellation
+    - Agent role definitions and team composition changes
+    - API spend thresholds and monitoring rules
+    - Design, UX, and content decisions
+    - Marketing copy, social posts, and community messaging
+    - Internal process decisions (SOUL.md patches, PROGRAM.md updates, TEAM-STANDARDS.md)
+    - Review approvals and rejections
+    - Budget allocation between work streams (within overall investment context)
+    - Continuity loop configuration and agent protocols
+  escalate_to_human:
+    - External credentials and secrets (Apple Developer enrollment, Play Console, API keys, OAuth tokens)
+    - Legal agreements, terms of service, and compliance sign-offs
+    - Founder vision conflicts or major strategic pivots (e.g., changing the core product direction)
+    - Privacy policy content and publication (requires human approval before going live)
+    - External service account creation requiring identity verification (app store developer accounts)
+    - Any decision where a mistake could cause irreversible public harm or legal liability
+  escalation_channel: cloud app task assignment or email — never #general chat @mention
+  note: When in doubt, make the call. A reversible decision made by the team beats a correct decision that
+        waits for Ryan. Escalate only when the decision is genuinely irreversible or legally significant.
+
 # Lane definitions for ready-queue engine.
 # Each lane groups agents into a work stream with floor + WIP controls.
 # readyFloor — minimum unblocked todo tasks per agent before sweeper fires
