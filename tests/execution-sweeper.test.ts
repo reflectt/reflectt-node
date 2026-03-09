@@ -282,6 +282,81 @@ describe('Orphan PR detection accuracy', () => {
     nowSpy.mockRestore()
   })
 
+  it('does not emit validating_sla when reviewer_decision exists, even if review_state is missing', async () => {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/tasks',
+      payload: {
+        title: 'Reviewer acted already',
+        description: 'Regression: reviewer_decision must suppress reviewer SLA paging',
+        status: 'todo',
+        assignee: 'link',
+        reviewer: 'sage',
+        priority: 'P2',
+        createdBy: 'test',
+        eta: '1h',
+        done_criteria: ['Done'],
+      },
+    })
+    expect(createRes.statusCode).toBe(200)
+    const task = JSON.parse(createRes.body).task
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: { status: 'doing', metadata: { eta: '1h', wip_override: 'test isolation' } },
+    })
+
+    await app.inject({
+      method: 'PATCH',
+      url: `/tasks/${task.id}`,
+      payload: {
+        status: 'validating',
+        metadata: {
+          artifact_path: 'process/test-reviewer-decision.md',
+          review_handoff: {
+            task_id: task.id,
+            artifact_path: 'process/test-reviewer-decision.md',
+            test_proof: 'pass',
+            known_caveats: 'test only',
+            doc_only: true,
+          },
+          qa_bundle: {
+            lane: 'test',
+            summary: 'Regression test',
+            changed_files: ['process/test-reviewer-decision.md'],
+            artifact_links: ['process/test-reviewer-decision.md'],
+            checks: ['lint:pass'],
+            screenshot_proof: ['n/a'],
+            review_packet: {
+              task_id: task.id,
+              artifact_path: 'process/test-reviewer-decision.md',
+            },
+          },
+        },
+      },
+    })
+
+    const { taskManager } = await import('../src/tasks.js')
+    const staleAt = Date.now() - 3 * 60 * 60 * 1000
+    taskManager.patchTaskMetadata(task.id, {
+      entered_validating_at: staleAt,
+      review_last_activity_at: staleAt,
+      reviewer_decision: {
+        decision: 'rejected',
+        reviewer: 'sage',
+        decidedAt: staleAt,
+        comment: 'Missing proof',
+      },
+      review_state: undefined,
+    })
+
+    const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
+    const result = await sweepValidatingQueue()
+    const violations = result.violations.filter(v => v.taskId === task.id && v.type === 'validating_sla')
+    expect(violations).toHaveLength(0)
+  })
+
   it('orphan alert includes @assignee and @reviewer mentions', async () => {
     const { sweepValidatingQueue } = await import('../src/executionSweeper.js')
     const result = await sweepValidatingQueue()
