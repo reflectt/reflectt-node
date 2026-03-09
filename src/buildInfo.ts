@@ -4,11 +4,18 @@
 /**
  * Build Info — captures git SHA, branch, and build metadata at startup.
  * Exposed via GET /health/build so the team knows what code is live.
+ *
+ * IMPORTANT: git commands MUST only run when the package root contains
+ * its own .git directory.  When installed globally (e.g. under
+ * /opt/homebrew/lib/node_modules), `git rev-parse` would otherwise
+ * traverse parent directories and pick up an unrelated repo (Homebrew,
+ * nvm, etc.), causing the branch guard to kill the server.
  */
 
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export interface BuildInfo {
   appVersion: string
@@ -26,23 +33,32 @@ export interface BuildInfo {
   uptime: number
 }
 
-// Use the source directory for git commands, not process.cwd().
-// When running from a global install or launchd plist, cwd may point
-// to an unrelated directory (or a different git repo entirely).
-import { fileURLToPath } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
+const pkgRoot = resolve(__dirname, '..')
+
+// Only run git when the package itself is a git repo.
+// Without this check, git traverses parent directories and may find
+// an unrelated .git (e.g. Homebrew at /opt/homebrew).
+const hasOwnGit = existsSync(resolve(pkgRoot, '.git'))
 
 function git(cmd: string): string {
+  if (!hasOwnGit) return ''
   try {
-    return execSync(`git ${cmd}`, { encoding: 'utf8', timeout: 5000, cwd: __dirname, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    return execSync(`git ${cmd}`, {
+      encoding: 'utf8',
+      timeout: 5000,
+      cwd: pkgRoot,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim()
   } catch {
-    return 'unknown'
+    return ''
   }
 }
 
 function readPackageVersion(): string {
   try {
-    const pkgPath = resolve(process.cwd(), 'package.json')
+    // Read from package root, not cwd — works for both dev and global install
+    const pkgPath = resolve(pkgRoot, 'package.json')
     const raw = readFileSync(pkgPath, 'utf8')
     const pkg = JSON.parse(raw)
     return typeof pkg.version === 'string' ? pkg.version : 'unknown'
