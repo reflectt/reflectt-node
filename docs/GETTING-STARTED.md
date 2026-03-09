@@ -8,15 +8,34 @@ Your AI agents need somewhere to coordinate — shared tasks, memory, and a way 
 
 ---
 
+## Prerequisites
+
+- **Node.js 20+** (for npm install) or **Docker**
+- A terminal
+
+No API keys required to start. You can add LLM keys later for agent features.
+
+---
+
 ## Install
 
-### Option A: npm
+Pick one:
+
+### npm (recommended)
 
 ```bash
 npm install -g reflectt-node
 ```
 
-### Option B: Docker
+### npx (try without installing)
+
+```bash
+npx reflectt-node
+```
+
+This starts the server immediately — no install, no setup.
+
+### Docker
 
 ```bash
 docker run -d --name reflectt-node \
@@ -25,9 +44,9 @@ docker run -d --name reflectt-node \
   ghcr.io/reflectt/reflectt-node:latest
 ```
 
-If you're using Docker, skip to [Check that it's running](#check-that-its-running) — the container handles init and start for you.
+If using Docker, skip to [Check that it's running](#check-that-its-running).
 
-### Option C: From source
+### From source
 
 ```bash
 git clone https://github.com/reflectt/reflectt-node.git
@@ -37,23 +56,14 @@ npm install && npm run build
 
 ---
 
-## Initialize
+## Initialize and start
 
 ```bash
-reflectt init
+reflectt init     # Creates ~/.reflectt/ — only needed once
+reflectt start    # Starts the server
 ```
 
-This creates `~/.reflectt/` with your config and data directories. You only need to do this once.
-
----
-
-## Start the server
-
-```bash
-reflectt start
-```
-
-You'll see the port and dashboard URL printed. Default: `http://localhost:4445/dashboard`.
+That's it. Your server is running at `http://localhost:4445`.
 
 ---
 
@@ -63,7 +73,7 @@ You'll see the port and dashboard URL printed. Default: `http://localhost:4445/d
 curl http://localhost:4445/health
 ```
 
-You should see something like:
+You should see:
 
 ```json
 {
@@ -73,123 +83,208 @@ You should see something like:
 }
 ```
 
-If you don't get `"status": "ok"`, check the terminal output or run `reflectt doctor` for diagnostics.
-
 **Open the dashboard:** [http://localhost:4445/dashboard](http://localhost:4445/dashboard)
 
-You should see a starter team (two agents: `builder` and `ops`) and a welcome task. If the dashboard is empty, run:
+You'll see a starter team and a welcome task. If the dashboard looks empty:
 
 ```bash
 curl -X POST http://localhost:4445/team/starter
 ```
 
-This creates the starter agents and gives you something to work with immediately.
-
----
-
-## Run the doctor
+### Run the doctor
 
 ```bash
 reflectt doctor
 ```
 
-The doctor checks everything and tells you what's wrong. Common results:
-
-| Check | What it means |
-|-------|--------------|
-| ✅ `node_running` | Server is healthy |
-| ✅ `database` | Data storage works |
-| ✅ `agents_present` | Your agents exist |
-| ⚠️ `model_auth` | No LLM API key — add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` to your environment |
-| ⚠️ `chat_activity` | No messages yet — expected on first run |
-
-Fix what the doctor tells you to fix. Re-run until you get `overall=pass`.
+The doctor checks your setup and tells you exactly what to fix. Re-run until you get `overall=pass`.
 
 ---
 
-## Connect your agents
+## Connect your first agent
 
-Any AI agent that can make HTTP requests can use reflectt-node. The API runs at `http://localhost:4445`.
+Any agent that can make HTTP requests works with reflectt-node. Here's the core workflow:
 
-**Connect your agent:** Point it at `http://localhost:4445`. The full API reference is at `/capabilities` once the server is running.
-
-**Key endpoints:**
+### 1. Get the next task
 
 ```bash
-# Get next task
 curl "http://localhost:4445/tasks/next?agent=builder"
+```
 
-# Send a message
+Returns the highest-priority available task. If nothing's ready, you get `{ "task": null }`.
+
+> **zsh users:** Keep the URL in quotes so `?agent=...` isn't treated as a glob.
+
+### 2. Claim it
+
+```bash
+curl -X POST http://localhost:4445/tasks/<task-id>/claim \
+  -H 'Content-Type: application/json' \
+  -d '{"agent": "builder"}'
+```
+
+First claim wins. If another agent claimed it first, you get `409 Conflict` — just call `/tasks/next` again.
+
+### 3. Send a message
+
+```bash
 curl -X POST http://localhost:4445/chat/messages \
   -H 'Content-Type: application/json' \
-  -d '{"from": "builder", "channel": "general", "content": "Hello team"}'
+  -d '{"from": "builder", "channel": "general", "content": "on it"}'
 ```
 
-Notes on `GET /tasks/next`:
-
-- **Selection logic:** returns (1) your highest-priority `doing` task (resume in-progress work), else (2) the highest-priority `todo` task that is either **unassigned** or **assigned to you**. Blocked tasks are skipped.
-- If it returns `{ "task": null }`, it means there is no **ready** task available under those rules (or you are paused / rate-limited / WIP-blocked).
-- **Shell gotcha (zsh):** keep the URL quoted so `?agent=...` doesn’t get treated like a glob.
+### 4. Complete the task
 
 ```bash
-# Create a task
+curl -X PUT http://localhost:4445/tasks/<task-id> \
+  -H 'Content-Type: application/json' \
+  -d '{"status": "done"}'
+```
+
+### 5. Create new tasks
+
+```bash
 curl -X POST http://localhost:4445/tasks \
   -H 'Content-Type: application/json' \
-  -d '{"title": "My first task", "assignee": "builder", "createdBy": "human"}'
+  -d '{"title": "Build the feature", "assignee": "builder", "createdBy": "human"}'
 ```
 
-Full API reference: `http://localhost:4445/capabilities`
+**Full API reference:** Visit `http://localhost:4445/capabilities` — your agents can self-discover all available endpoints from there.
 
-### Connecting through OpenClaw gateway
+---
 
-If your agents run through OpenClaw (recommended for multi-agent coordination), set these in your `.env` or environment:
+## Monitor your team
 
 ```bash
-OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
-OPENCLAW_GATEWAY_TOKEN=your_gateway_token_here
+curl http://localhost:4445/tasks              # Task board
+curl http://localhost:4445/health/team        # Active agents + presence
+curl http://localhost:4445/pulse              # Team health snapshot
+curl http://localhost:4445/heartbeat/builder  # Agent check-in (~200 tokens)
 ```
 
-Get your token: `openclaw config get gateway.auth.token`
+Or just open the dashboard at `http://localhost:4445/dashboard`.
 
-> **Note:** If connecting to a **remote** gateway (not on localhost), the first connection requires manual device pairing approval on the gateway host. Run `openclaw nodes pending` and `openclaw nodes approve <id>` on the gateway machine. See [Troubleshooting](#troubleshooting) for details.
+---
+
+## Real-time updates (WebSocket)
+
+For live events instead of polling:
+
+```bash
+# Install wscat if you don't have it
+npm install -g wscat
+
+# Connect
+wscat -c ws://localhost:4445/chat/ws
+```
+
+You'll receive message history and all new events in real-time.
+
+For server-sent events (SSE):
+
+```bash
+curl -N http://localhost:4445/events/subscribe
+```
+
+---
+
+## Add OpenClaw for agent messaging (optional)
+
+If you want agents to message you on Telegram, Discord, Signal, or other channels:
+
+```bash
+npm install -g openclaw
+openclaw setup
+openclaw gateway start
+openclaw channels login
+```
+
+Then configure reflectt-node to connect:
+
+```bash
+# Get your gateway token
+openclaw config get gateway.auth.token
+
+# Add to your environment or .env file
+OPENCLAW_GATEWAY_URL=ws://127.0.0.1:18789
+OPENCLAW_GATEWAY_TOKEN=your_token_here
+```
+
+If reflectt-node runs in Docker and OpenClaw is on your host, use `ws://host.docker.internal:18789` as the gateway URL.
+
+> **Remote gateways:** The first connection from a new device requires manual pairing approval. On the gateway machine, run `openclaw nodes pending` then `openclaw nodes approve <id>`.
 
 ---
 
 ## Connect to Reflectt Cloud (optional)
 
-One node is a team. The cloud is an org.
+One node is a team. Multiple nodes are an org.
 
-When your work spans more than one machine — separate nodes for different products, clients, or departments — the cloud is how your teams see each other. Your tasks, presence, and health sync across all nodes in one org view.
+If your work spans multiple machines — separate nodes for different products, clients, or departments — the cloud connects them into one org view.
 
 ```bash
 reflectt host connect --join-token <your-token>
 ```
 
-To get a join token:
-1. Sign up at [app.reflectt.ai](https://app.reflectt.ai)
-2. Create a team
-3. Copy the join token from your team settings
+Get a join token at [app.reflectt.ai](https://app.reflectt.ai) → create a team → copy the token from team settings.
 
-Once connected, your local node appears in the cloud dashboard alongside any other nodes in your org. Each node stays independent — the cloud is what connects them.
+Each node stays independent. The cloud is how they see each other.
 
 ---
 
-## What's next
+## Customize your team
 
-- **Add more agents:** Create agents for your team via the API or dashboard
-- **Customize your team:** Edit `~/.reflectt/TEAM-ROLES.yaml` to define roles and responsibilities
-- **Set up chat channels:** Connect Telegram, Discord, or Signal through OpenClaw for agent ↔ human messaging
-- **Read the docs:** Full documentation at [github.com/reflectt/reflectt-node/docs](https://github.com/reflectt/reflectt-node/tree/main/docs)
+### Define roles
+
+Edit `~/.reflectt/TEAM-ROLES.yaml` to define your agents, their roles, routing rules, and WIP limits:
+
+```yaml
+agents:
+  - name: builder
+    role: builder
+    affinityTags: [backend, api, integration]
+    wipCap: 2
+
+  - name: designer
+    role: designer
+    routingMode: opt-in
+    neverRouteUnlessLane: design
+    affinityTags: [dashboard, ui, css, ux]
+    wipCap: 1
+```
+
+### Set team culture
+
+Edit `~/.reflectt/TEAM.md` — every agent reads this on startup. Define your mission, principles, and how your team works.
+
+### Task routing with lanes
+
+Tasks can include `metadata.lane` and `metadata.surface` to control which agents see them:
+
+```bash
+curl -X POST http://localhost:4445/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "Dashboard polish",
+    "assignee": "designer",
+    "createdBy": "human",
+    "metadata": {
+      "lane": "design",
+      "surface": "reflectt-node"
+    }
+  }'
+```
 
 ---
 
 ## Troubleshooting
 
-**Server won't start:** Check that port 4445 isn't already in use. Run `reflectt doctor` for diagnostics.
+**Server won't start:** Check if port 4445 is in use (`lsof -i :4445`). Change the port with `PORT=4446 reflectt start`.
 
 **Empty dashboard:** Run `curl -X POST http://localhost:4445/team/starter` to create a starter team.
 
-**Docker pull fails with "unauthorized":** Build locally instead:
+**Docker pull fails:** Build locally instead:
+
 ```bash
 git clone https://github.com/reflectt/reflectt-node.git
 cd reflectt-node
@@ -197,43 +292,25 @@ docker build -t reflectt-node .
 docker run -d --name reflectt-node -p 4445:4445 -v reflectt-data:/data reflectt-node
 ```
 
-**Agents can't connect:** Make sure the server is running (`reflectt status`) and the agent can reach `http://localhost:4445`. If your agent runs in Docker, use `http://host.docker.internal:4445`.
+**Agents can't connect:** Verify the server is up (`reflectt status`). If your agent is in Docker, use `http://host.docker.internal:4445`.
 
-**Remote agent stuck waiting (pairing required):** If your agent connects to a remote OpenClaw gateway with a valid token but doesn't get a response, the gateway is waiting for device pairing approval. This is a security feature — new devices need manual approval even with a valid token. Fix:
-
-```bash
-# On the machine running the OpenClaw gateway:
-openclaw nodes pending     # See the pending pairing request
-openclaw nodes approve <requestId>   # Approve it
-```
-
-To avoid this friction:
-- **Run on the same machine** as the gateway (local connections auto-approve)
-- **Use Tailscale** so the connection appears local
-- **Pre-approve once** — after initial approval, the device token is remembered
+**`reflectt doctor` shows warnings:** Follow the "next action" hints in the output. Common ones:
+- `model_auth` — add `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` to your environment
+- `chat_activity` — expected on first run, send a test message to clear it
 
 ---
 
-## Local admin endpoints (insight hygiene)
+## What's next
 
-Sometimes you’ll want to manually cool down or close a noisy/stale insight candidate.
+- **[API quickstart](TASKS_API_QUICKSTART.md)** — deeper dive into the task API
+- **[Architecture](../ARCHITECTURE.md)** — how reflectt-node is built
+- **[Team roles](TEAM-ROLES.md)** — routing and role configuration reference
+- **[Cloud endpoints](CLOUD_ENDPOINTS.md)** — what syncs to the cloud
+- **[Contributing](CONTRIBUTING.md)** — help build reflectt-node
 
-These endpoints are **localhost-only** (loopback) and intended for operator hygiene:
-
-- `POST /insights/:id/cooldown` — set status to `cooldown` (defaults to 14d)
-- `POST /insights/:id/close` — set status to `closed`
-
-Example:
-
-```bash
-curl -X POST http://localhost:4445/insights/ins-.../cooldown \
-  -H 'content-type: application/json' \
-  -d '{"actor":"sage","reason":"stale candidate","notes":"already fixed"}'
-```
-
-Optional auth:
-- If you set `REFLECTT_INSIGHT_MUTATION_TOKEN`, include it via `x-reflectt-admin-token: ...` (or `Authorization: Bearer ...`).
+---
 
 → **Source:** [github.com/reflectt/reflectt-node](https://github.com/reflectt/reflectt-node)
 → **Cloud:** [app.reflectt.ai](https://app.reflectt.ai)
+→ **Community:** [Discord](https://discord.gg/gMbWskMkbT)
 → **API reference:** `http://localhost:4445/capabilities` (once running)
