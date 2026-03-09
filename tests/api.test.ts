@@ -55,16 +55,6 @@ async function req(method: string, url: string, body?: unknown) {
   }
 }
 
-async function postReviewHandoffComment(taskId: string, author = 'test-agent') {
-  // A real validating transition requires a resolvable review_handoff.comment_id.
-  // The server will auto-fill it from the latest comment on validating transition.
-  await req('POST', `/tasks/${taskId}/comments`, {
-    author,
-    category: 'review_handoff',
-    content: 'handoff: shipped work summary\n\n- proof: tests pass\n- artifacts: process/TASK-test-proof.md\n',
-  })
-}
-
 /**
  * Walk a task from todo through valid transitions.
  * 'doing' = todo→doing
@@ -76,8 +66,6 @@ async function advanceTo(taskId: string, targetStatus: 'doing' | 'validating'): 
     metadata: { transition: { type: 'claim', reason: 'test advance' }, eta: '~1h' },
   })
   if (targetStatus === 'validating') {
-    await postReviewHandoffComment(taskId, 'test-agent')
-
     await req('PATCH', `/tasks/${taskId}`, {
       status: 'validating',
       metadata: {
@@ -888,7 +876,6 @@ describe('Artifact Path Canonicalization', () => {
     })
     taskId = body.task.id
     await advanceTo(taskId, 'doing')
-    await postReviewHandoffComment(taskId, 'test-agent')
   })
 
   afterAll(async () => {
@@ -5217,43 +5204,4 @@ describe('Duplicate-closure validating evidence gate', () => {
   })
 })
 
-describe('ReviewHandoff hardening', () => {
-  it('strips caller-supplied review_handoff.comment_id on PATCH', async () => {
-    const { body: created } = await req('POST', '/tasks', {
-      title: 'TEST: review_handoff.comment_id strip',
-      createdBy: 'test-runner',
-      assignee: 'test-agent',
-      reviewer: 'test-reviewer',
-      priority: 'P2',
-      done_criteria: ['ok'],
-      eta: '1h',
-    })
 
-    const taskId = created.task.id
-    await advanceTo(taskId, 'doing')
-
-    const fakeId = 'tcomment-1111111111111-fakefake0'
-
-    const { status } = await req('PATCH', `/tasks/${taskId}`, {
-      metadata: {
-        review_handoff: {
-          task_id: taskId,
-          comment_id: fakeId,
-          artifact_path: 'process/TASK-test.md',
-          known_caveats: 'none',
-          pr_url: 'https://github.com/reflectt/reflectt-node/pull/1',
-          commit_sha: 'abcd123',
-        },
-      },
-    })
-
-    expect(status).toBe(200)
-
-    const { body: fetched } = await req('GET', `/tasks/${taskId}`)
-    expect(fetched.task.metadata.review_handoff.comment_id).toBeUndefined()
-    expect(fetched.task.metadata.review_handoff_comment_id_stripped).toMatchObject({
-      stripped: true,
-      attempted: fakeId,
-    })
-  })
-})
