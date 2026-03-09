@@ -972,12 +972,12 @@ async function syncChat(): Promise<void> {
 
   chatSyncInFlight = true
 
-  // Enforce minimum sync interval + active backoff window
-  const now = Date.now()
-  if (now < chatSyncNextAllowedAt) {
-    chatSyncInFlight = false
-    return
-  }
+  try {
+    // Enforce minimum sync interval + active backoff window
+    const now = Date.now()
+    if (now < chatSyncNextAllowedAt) {
+      return
+    }
 
   // Get recent messages since last sync, excluding cloud-relayed messages
   // to prevent echo: cloud→node→cloud sync loop.
@@ -1057,8 +1057,17 @@ async function syncChat(): Promise<void> {
       console.warn(`☁️  [Chat] Sync failed (${chatSyncErrors}): ${result.error}; next attempt in ~${chatSyncBackoffMs}ms`)
     }
   }
-
-  chatSyncInFlight = false
+  } catch (err: any) {
+    // Ensure token expiry / network errors never wedge the sync loop
+    chatSyncErrors++
+    chatSyncBackoffMs = computeBackoffWithJitter(chatSyncBackoffMs)
+    chatSyncNextAllowedAt = Date.now() + Math.max(chatSyncBackoffMs, chatSyncMinIntervalMs)
+    if (chatSyncErrors <= 3 || chatSyncErrors % 20 === 0) {
+      console.warn(`☁️  [Chat] Sync threw (${chatSyncErrors}): ${err?.message || err}; next attempt in ~${chatSyncBackoffMs}ms`)
+    }
+  } finally {
+    chatSyncInFlight = false
+  }
 }
 
 // ---- Canvas sync ----
