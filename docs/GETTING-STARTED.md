@@ -300,6 +300,16 @@ curl -X POST http://localhost:4445/tasks \
 
 ## Troubleshooting
 
+**Something not working? Run this first:**
+
+```bash
+reflectt doctor
+```
+
+The doctor checks server health, config, agent presence, and model auth — and prints a "next action" hint. Re-run until you get `overall=pass`. Most issues are self-diagnosable this way.
+
+---
+
 **Port 4445 is already in use:**
 
 ```bash

@@ -130,6 +130,26 @@ curl http://localhost:4445/capabilities                  # full API reference
 
 ---
 
+## Troubleshooting
+
+Something not working? Start here:
+
+```bash
+reflectt doctor
+```
+
+The doctor checks your setup (server health, config, agent presence, model auth) and prints a "next action" hint for whatever's wrong. Re-run until you get `overall=pass`.
+
+Common issues:
+- **Port 4445 in use:** `PORT=4446 reflectt start` (or `kill $(lsof -t -i :4445)`)
+- **`reflectt: command not found`** after npm install: restart your shell or run `npm bin -g` and add it to your `$PATH`
+- **`reflectt: command not found`** after yarn: run `yarn global bin` and add that path to `$PATH`
+- **Agents can't connect from Docker:** use `http://host.docker.internal:4445` (Linux: add `--add-host host.docker.internal:host-gateway`)
+
+Full troubleshooting guide: [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md#troubleshooting)
+
+---
+
 ## Links
 
 - **API reference:** `http://localhost:4445/capabilities` (once running)
