@@ -159,6 +159,7 @@ import { calendarEvents, type CreateEventInput, type UpdateEventInput, type Atte
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
 import { startDeployMonitor, stopDeployMonitor } from './deploy-monitor.js'
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
+import { createScheduleEntry, getScheduleEntry, updateScheduleEntry, deleteScheduleEntry, getScheduleFeed, type ScheduleKind } from './schedule.js'
 import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CATEGORIES, type CreateDocInput, type UpdateDocInput, type DocCategory } from './knowledge-docs.js'
 import { onTaskShipped, onProcessFileWritten, onDecisionComment, isDecisionComment } from './knowledge-auto-index.js'
 import { upsertHostHeartbeat, getHost, listHosts, removeHost } from './host-registry.js'
@@ -13162,6 +13163,63 @@ If your heartbeat shows **no active task** and **no next task**:
   // Reminder engine stats
   app.get('/calendar/reminders/stats', async () => {
     return getReminderEngineStats()
+  })
+
+  // ── Schedule feed — team-wide time-awareness ──────────────────────────────
+  //
+  // Provides canonical records for deploy windows, focus blocks, and
+  // scheduled task work so agents can coordinate timing without chat.
+  //
+  // MVP scope: one-off windows only. No iCal/RRULE, no reminders.
+  // See src/schedule.ts for what is intentionally NOT included.
+
+  // GET /schedule/feed — upcoming entries in chronological order
+  app.get('/schedule/feed', async (request) => {
+    const q = request.query as Record<string, string>
+    const kinds = q.kinds ? (q.kinds.split(',') as ScheduleKind[]) : undefined
+    const entries = getScheduleFeed({
+      after: q.after ? parseInt(q.after, 10) : undefined,
+      before: q.before ? parseInt(q.before, 10) : undefined,
+      kinds,
+      owner: q.owner,
+      limit: q.limit ? parseInt(q.limit, 10) : undefined,
+    })
+    return { entries, count: entries.length }
+  })
+
+  // POST /schedule/entries — create a new schedule entry
+  app.post('/schedule/entries', async (request, reply) => {
+    try {
+      const entry = createScheduleEntry(request.body as any)
+      return reply.status(201).send({ entry })
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message })
+    }
+  })
+
+  // GET /schedule/entries/:id
+  app.get<{ Params: { id: string } }>('/schedule/entries/:id', async (request, reply) => {
+    const entry = getScheduleEntry(request.params.id)
+    if (!entry) return reply.status(404).send({ error: 'Not found' })
+    return { entry }
+  })
+
+  // PATCH /schedule/entries/:id
+  app.patch<{ Params: { id: string } }>('/schedule/entries/:id', async (request, reply) => {
+    try {
+      const entry = updateScheduleEntry(request.params.id, request.body as any)
+      if (!entry) return reply.status(404).send({ error: 'Not found' })
+      return { entry }
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message })
+    }
+  })
+
+  // DELETE /schedule/entries/:id
+  app.delete<{ Params: { id: string } }>('/schedule/entries/:id', async (request, reply) => {
+    const deleted = deleteScheduleEntry(request.params.id)
+    if (!deleted) return reply.status(404).send({ error: 'Not found' })
+    return reply.status(204).send()
   })
 
   // ── iCal Import/Export ───────────────────────────────────────────────────
