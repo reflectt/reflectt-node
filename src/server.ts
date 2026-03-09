@@ -85,7 +85,7 @@ import { getBuildInfo } from './buildInfo.js'
 import { appendStoredLog, readStoredLogs, getStoredLogPath } from './logStore.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases, setAgentDisplayName, resolveAgentMention } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
-import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, getDailySpendByModel, getAvgCostByLane, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
+import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, getDailySpendByModel, getAvgCostByLane, getAvgCostByAgent, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import { initGitHubActorAuth, resolveGitHubTokenForActor } from './github-actor-auth.js'
@@ -11844,6 +11844,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const dailyByModel = getDailySpendByModel({ days })
     const byLane = getAvgCostByLane({ days: Math.max(days, 30) }) // lane data needs more window
+    const byAgent = getAvgCostByAgent({ days: Math.max(days, 30) })
     const topTasks = getUsageByTask({ since, limit: 20 })
     const summary = getUsageSummary({ since })
 
@@ -11861,6 +11862,7 @@ If your heartbeat shows **no active task** and **no next task**:
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([date, total_cost_usd]) => ({ date, total_cost_usd })),
       avg_cost_by_lane: byLane,
+      avg_cost_by_agent: byAgent,
       top_tasks_by_cost: topTasks,
       generated_at: Date.now(),
     }

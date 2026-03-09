@@ -330,6 +330,38 @@ export function getAvgCostByLane(options: { days?: number } = {}): Array<{
   `).all(since) as any[]
 }
 
+export function getAvgCostByAgent(options: { days?: number } = {}): Array<{
+  agent: string; avg_cost_usd: number; total_cost_usd: number; task_count: number; top_model: string
+}> {
+  ensureUsageTables()
+  const db = getDb()
+  const days = options.days ?? 30
+  const since = Date.now() - days * 24 * 60 * 60 * 1000
+  // Per-agent avg cost across closed tasks they worked on
+  return db.prepare(`
+    SELECT
+      u.agent,
+      AVG(u.task_total) as avg_cost_usd,
+      SUM(u.task_total) as total_cost_usd,
+      COUNT(DISTINCT u.task_id) as task_count,
+      (
+        SELECT model FROM model_usage
+        WHERE agent = u.agent AND task_id IS NOT NULL AND timestamp >= ?
+        GROUP BY model ORDER BY SUM(estimated_cost_usd) DESC LIMIT 1
+      ) as top_model
+    FROM (
+      SELECT agent, task_id, SUM(estimated_cost_usd) as task_total
+      FROM model_usage
+      WHERE task_id IS NOT NULL AND timestamp >= ?
+      GROUP BY agent, task_id
+    ) u
+    JOIN tasks t ON t.id = u.task_id
+    WHERE t.status = 'done'
+    GROUP BY u.agent
+    ORDER BY avg_cost_usd DESC
+  `).all(since, since) as any[]
+}
+
 // ── Spend Caps ──
 
 export function setCap(cap: Omit<SpendCap, 'id' | 'created_at' | 'updated_at'>): SpendCap {
