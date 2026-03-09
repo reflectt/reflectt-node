@@ -7,7 +7,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { execSync } from 'node:child_process'
+// execSync removed — use buildInfo instead of shelling out (PR #836 pattern)
 
 const STARTED_AT = Date.now()
 const WINDOW_MS = 5 * 60 * 1000 // 5 minutes
@@ -155,15 +155,11 @@ export function getDeployTransition(hostId: string, deploy: DeployInfo): DeployT
 }
 
 export function getDeployInfo(): DeployInfo {
-  let commit = 'unknown'
-  try {
-    commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim()
-  } catch {
-    // not a git repo or git unavailable — use fallback
-  }
+  // Use baked buildInfo instead of shelling out to git (fixes ambient-repo bug, same as PR #836)
+  const { buildInfo } = require('./buildInfo.js') as { buildInfo: { shortSha: string; version: string } }
   return {
-    commit,
-    version: process.env.npm_package_version ?? '0.0.0',
+    commit: buildInfo.shortSha || 'unknown',
+    version: buildInfo.version || process.env.npm_package_version || '0.0.0',
     deployed_at: STARTED_AT,
   }
 }
