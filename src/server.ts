@@ -1984,6 +1984,7 @@ export async function createServer(): Promise<FastifyInstance> {
     if (body.details !== undefined) envelope.details = body.details
     if (body.gate !== undefined) envelope.gate = body.gate
     if (body.problems !== undefined) envelope.problems = body.problems
+    if (body.tombstone !== undefined) envelope.tombstone = body.tombstone
     if (alreadyEnvelope && body.data !== undefined) envelope.data = body.data
 
     // Minimal persisted error log: enables /logs to return real entries.
@@ -5068,6 +5069,24 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     if (!resolved.task || !resolved.resolvedId) {
+      // Check if this task was deleted — return 410 Gone with tombstone metadata instead of 404.
+      const tombstone = taskManager.getTaskDeletionTombstone(request.params.id)
+      if (tombstone) {
+        reply.code(410)
+        return {
+          success: false,
+          error: 'Task has been deleted',
+          code: 'TASK_DELETED',
+          status: 410,
+          tombstone: {
+            taskId: tombstone.taskId,
+            deletedAt: tombstone.deletedAt,
+            deletedBy: tombstone.deletedBy,
+            previousStatus: tombstone.previousStatus,
+            title: tombstone.title,
+          },
+        }
+      }
       reply.code(404)
       return {
         error: 'Task not found',

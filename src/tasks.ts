@@ -1106,6 +1106,50 @@ class TaskManager {
     return true
   }
 
+  getTaskDeletionTombstone(inputId: string): { taskId: string; deletedAt: number; deletedBy: string; previousStatus: string; title: string } | null {
+    const db = getDb()
+    const raw = String(inputId || '').trim()
+    if (!raw) return null
+
+    // Try exact match first, then prefix match against task_history task_ids.
+    let taskId = raw
+    const exactRow = db.prepare(
+      `SELECT task_id, data FROM task_history WHERE task_id = ? AND type = 'deleted' ORDER BY timestamp DESC LIMIT 1`
+    ).get(raw) as { task_id: string; data: string | null } | undefined
+
+    if (!exactRow) {
+      // Prefix match: find task_ids in history that start with the input.
+      const prefixRows = db.prepare(
+        `SELECT task_id FROM task_history WHERE task_id LIKE ? AND type = 'deleted' LIMIT 2`
+      ).all(raw + '%') as Array<{ task_id: string }>
+      if (prefixRows.length !== 1) return null
+      taskId = prefixRows[0].task_id
+      const prefixRow = db.prepare(
+        `SELECT data FROM task_history WHERE task_id = ? AND type = 'deleted' ORDER BY timestamp DESC LIMIT 1`
+      ).get(taskId) as { data: string | null } | undefined
+      if (!prefixRow) return null
+      const prefixData = safeJsonParse<Record<string, unknown>>(prefixRow.data)
+      if (!prefixData) return null
+      return {
+        taskId,
+        deletedAt: typeof prefixData.deletedAt === 'number' ? prefixData.deletedAt : 0,
+        deletedBy: typeof prefixData.deletedBy === 'string' ? prefixData.deletedBy : 'unknown',
+        previousStatus: typeof prefixData.previousStatus === 'string' ? prefixData.previousStatus : 'unknown',
+        title: typeof prefixData.title === 'string' ? prefixData.title : '',
+      }
+    }
+
+    const data = safeJsonParse<Record<string, unknown>>(exactRow.data)
+    if (!data) return null
+    return {
+      taskId,
+      deletedAt: typeof data.deletedAt === 'number' ? data.deletedAt : 0,
+      deletedBy: typeof data.deletedBy === 'string' ? data.deletedBy : 'unknown',
+      previousStatus: typeof data.previousStatus === 'string' ? data.previousStatus : 'unknown',
+      title: typeof data.title === 'string' ? data.title : '',
+    }
+  }
+
   getTaskHistory(id: string): TaskHistoryEvent[] {
     const db = getDb()
     const rows = db.prepare(
