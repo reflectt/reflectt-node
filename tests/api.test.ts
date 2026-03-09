@@ -738,9 +738,10 @@ describe('Task CRUD', () => {
     expect(status).toBe(200)
     expect(body.success).toBe(true)
 
-    // Verify deleted
-    const { body: body2 } = await req('GET', `/tasks/${taskId}`)
-    expect(body2.error).toBe('Task not found')
+    // Verify deleted — now returns 410 Gone with tombstone, not 404
+    const { body: body2, status: status2 } = await req('GET', `/tasks/${taskId}`)
+    expect(status2).toBe(410)
+    expect(body2.code).toBe('TASK_DELETED')
   })
 
   it('DELETE /tasks/:id writes deleted history + tombstone audit records', async () => {
@@ -786,6 +787,33 @@ describe('Task CRUD', () => {
   it('GET /tasks/:id returns error for nonexistent', async () => {
     const { body } = await req('GET', '/tasks/nonexistent-id')
     expect(body.error).toBe('Task not found')
+  })
+
+  it('GET /tasks/:id returns 410 Gone with tombstone after task is deleted', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: 410 tombstone check',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      priority: 'P2',
+      done_criteria: ['Verify 410 on deleted task'],
+      eta: '1h',
+    })
+
+    const taskId = created.task.id
+
+    const del = await req('DELETE', `/tasks/${taskId}`)
+    expect(del.status).toBe(200)
+
+    const get = await req('GET', `/tasks/${taskId}`)
+    expect(get.status).toBe(410)
+    expect(get.body.code).toBe('TASK_DELETED')
+    expect(get.body.tombstone).toMatchObject({
+      taskId,
+      deletedBy: 'system',
+      previousStatus: 'todo',
+      title: 'TEST: 410 tombstone check',
+    })
+    expect(get.body.tombstone.deletedAt).toBeGreaterThan(0)
   })
 })
 
