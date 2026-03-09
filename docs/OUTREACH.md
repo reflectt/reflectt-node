@@ -5,8 +5,9 @@ This doc is for sharing reflectt-node without link-spam.
 ## Canonical links
 
 - **One-link default (lowest friction):** https://github.com/reflectt/reflectt-node
+- **Non-dev / "just show me" option:** https://app.reflectt.ai/bootstrap
 - **Builder deep link:** https://github.com/reflectt/reflectt-node/blob/main/docs/GETTING-STARTED.md
-- **Fast copy/paste (5 minutes):** https://github.com/reflectt/reflectt-node/blob/main/docs/bootstrap-first-5-minutes.md
+- **Fast copy/paste (5 minutes):** https://github.com/reflectt/reflectt-node/blob/main/docs/bootstrap-first-5-minutes.md *(includes /health + /tasks/next checkpoints)*
 
 ## One-liner
 
