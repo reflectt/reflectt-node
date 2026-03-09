@@ -7672,6 +7672,10 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       // ── Reviewer notification: @mention reviewer when task enters validating ──
+      // NOTE: A dedup_key is set here so the inline chat dedup guard suppresses
+      // any duplicate reviewRequested send that may arrive via the statusNotifTargets
+      // loop below for the same task+transition. Without it, two messages fire for
+      // every todo→validating transition (this direct send + the loop send).
       if (parsed.status === 'validating' && existing.status !== 'validating' && existing.reviewer) {
         const taskMeta = task.metadata as Record<string, unknown> | undefined
         const prUrl = (taskMeta?.review_handoff as Record<string, unknown> | undefined)?.pr_url
@@ -7688,6 +7692,7 @@ export async function createServer(): Promise<FastifyInstance> {
             taskId: task.id,
             reviewer: existing.reviewer,
             prUrl: prUrl || undefined,
+            dedup_key: `review-requested:${task.id}:${task.updatedAt}`,
           },
         }).catch(() => {}) // Non-blocking
       }
@@ -7820,13 +7825,17 @@ export async function createServer(): Promise<FastifyInstance> {
       const { shouldEmitNotification } = await import('./notificationDedupeGuard.js')
 
       for (const target of statusNotifTargets) {
-        // Check dedupe guard before emitting
+        // Check dedupe guard before emitting.
+        // Pass targetAgent so each recipient gets an independent cursor — prevents
+        // the first recipient's cursor update from suppressing later recipients for
+        // the same event (e.g. assignee + reviewer both getting taskCompleted on 'done').
         const dedupeCheck = shouldEmitNotification({
           taskId: task.id,
           eventUpdatedAt: task.updatedAt,
           eventStatus: parsed.status!,
           currentTaskStatus: task.status,
           currentTaskUpdatedAt: task.updatedAt,
+          targetAgent: target.agent,
         })
 
         if (!dedupeCheck.emit) {
@@ -7841,7 +7850,13 @@ export async function createServer(): Promise<FastifyInstance> {
           message: `Task ${task.id} → ${parsed.status}`,
         })
         if (routing.shouldNotify) {
-          // Route through inbox/chat based on delivery method preference
+          // Route through inbox/chat based on delivery method preference.
+          // For reviewRequested, set a dedup_key matching the direct send above so the
+          // inline chat dedup suppresses this copy (the direct send fires first with a
+          // richer payload including PR URL and `to:` routing).
+          const dedupKey = target.type === 'reviewRequested'
+            ? `review-requested:${task.id}:${task.updatedAt}`
+            : undefined
           chatManager.sendMessage({
             from: 'system',
             content: `@${target.agent} [${target.type}:${task.id}] ${task.title} → ${parsed.status}`,
@@ -7852,6 +7867,7 @@ export async function createServer(): Promise<FastifyInstance> {
               status: parsed.status,
               updatedAt: task.updatedAt,
               deliveryMethod: routing.deliveryMethod,
+              ...(dedupKey ? { dedup_key: dedupKey } : {}),
             },
           }).catch(() => {}) // Non-blocking
         }
