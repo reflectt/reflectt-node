@@ -227,6 +227,22 @@ async function main() {
     console.log(`   Resolved ${lockResult.portConflictPids.length} port conflict(s)`)
   }
 
+  // Crash hard on unhandled errors so supervisors (launchd/systemd) can restart cleanly
+  // Prevents the "listener died but process tree lives" zombie state.
+  let shuttingDown = false
+  const fatal = (label: string, err: any) => {
+    try {
+      console.error(`\n🚨 [FATAL] ${label}:`, err)
+    } catch {}
+    try {
+      releasePidLock(pidPath)
+    } catch {}
+    // Exit non-zero so launchd restarts
+    process.exit(1)
+  }
+  process.on('uncaughtException', err => fatal('uncaughtException', err))
+  process.on('unhandledRejection', err => fatal('unhandledRejection', err))
+
   try {
     // Initialize SQLite database (WAL mode, auto-migration from JSONL)
     const db = getDb()
@@ -253,6 +269,22 @@ async function main() {
       port: serverConfig.port,
       host: serverConfig.host,
     })
+
+    // If the underlying HTTP server closes unexpectedly, crash so the supervisor restarts us.
+    // NOTE: shutdown() sets shuttingDown=true so intentional closes don't trigger fatal exit.
+    try {
+      const srv: any = (app as any).server
+      if (srv && typeof srv.on === 'function') {
+        srv.on('close', () => {
+          if (shuttingDown) return
+          fatal('http_server_close', new Error('HTTP listener closed unexpectedly'))
+        })
+        srv.on('error', (err: any) => {
+          if (shuttingDown) return
+          fatal('http_server_error', err)
+        })
+      }
+    } catch {}
 
     const baseUrl = `http://${serverConfig.host}:${serverConfig.port}`
 
@@ -528,6 +560,7 @@ async function main() {
 
     // Graceful shutdown
     const shutdown = async (signal: string) => {
+      shuttingDown = true
       console.log(`\n${signal} received, shutting down...`)
       stopConfigWatch()
       stopConfigWatcher()
