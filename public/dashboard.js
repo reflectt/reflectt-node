@@ -1803,6 +1803,18 @@ function normalizeEpochMs(v) {
   return v;
 }
 
+function hasReviewerDecision(task) {
+  const meta = task && task.metadata && typeof task.metadata === 'object' ? task.metadata : null;
+  const decision = meta && meta.reviewer_decision && typeof meta.reviewer_decision === 'object'
+    ? meta.reviewer_decision
+    : null;
+  return !!decision;
+}
+
+function shouldEscalateReviewerSla(task) {
+  return task && task.slaState === 'breach' && !hasReviewerDecision(task);
+}
+
 function renderReviewQueue() {
   const panel = document.getElementById('review-queue-panel');
   const body = document.getElementById('review-queue-body');
@@ -1910,8 +1922,9 @@ function renderReviewQueue() {
   bindTaskLinkHandlers(body);
 
   // SLA breach escalation: split reviewer-wait vs author-wait so we page the right person.
+  // shouldEscalateReviewerSla() suppresses escalation when reviewer_decision already exists.
   if (reviewerBreachCount > 0) {
-    escalateReviewerBreaches(reviewerQueue.filter(t => t.slaState === 'breach'));
+    escalateReviewerBreaches(reviewerQueue.filter(shouldEscalateReviewerSla));
   }
   if (authorBreachCount > 0) {
     escalateAuthorBreaches(authorQueue.filter(t => t.slaState === 'breach'));
