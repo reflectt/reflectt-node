@@ -65,10 +65,13 @@ export interface CapStatus {
 // ── Model Pricing (estimated, per 1M tokens) ──
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  // Anthropic
   'claude-opus-4': { input: 15.0, output: 75.0 },
   'claude-opus-4-6': { input: 15.0, output: 75.0 },
   'claude-sonnet-4': { input: 3.0, output: 15.0 },
   'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
+  // OpenAI
+  'gpt-5.4': { input: 2.5, output: 10.0 },
   'gpt-5.3': { input: 2.0, output: 8.0 },
   'gpt-5.3-codex': { input: 2.0, output: 8.0 },
   'gpt-4o-mini': { input: 0.15, output: 0.60 },
@@ -76,9 +79,15 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
 }
 
 export function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
-  // Try exact match, then prefix match
+  // Try exact match first
   let pricing = MODEL_PRICING[model]
   if (!pricing) {
+    // Strip provider prefix (e.g., "openai-codex/gpt-5.4" → "gpt-5.4")
+    const stripped = model.includes('/') ? model.split('/').pop()! : model
+    pricing = MODEL_PRICING[stripped]
+  }
+  if (!pricing) {
+    // Fuzzy: check if any pricing key is contained in the model string
     const key = Object.keys(MODEL_PRICING).find(k => model.includes(k))
     pricing = key ? MODEL_PRICING[key] : { input: 5.0, output: 20.0 } // conservative default
   }

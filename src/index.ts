@@ -185,7 +185,7 @@ async function main() {
     const { getBuildInfo } = await import('./buildInfo.js')
     const build = getBuildInfo()
     const branch = build.gitBranch || ''
-    const isMainBranch = branch === 'main' || branch === 'master' || branch === ''
+    const isMainBranch = branch === 'main' || branch === 'master' || branch === '' || branch === 'unknown'
     const isProdDb = DATA_DIR === join(homedir(), '.reflectt', 'data')
     const allowOverride = process.env.REFLECTT_ALLOW_BRANCH_DB === '1'
 
