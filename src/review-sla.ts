@@ -19,7 +19,12 @@ function getMetadataString(metadata: Record<string, unknown> | undefined, key: s
 
 function hasReviewerDecision(metadata: Record<string, unknown> | undefined): boolean {
   const reviewerDecision = metadata?.reviewer_decision
-  return typeof reviewerDecision === 'string' && reviewerDecision.trim().length > 0
+  if (reviewerDecision == null) return false
+  // Production shape: { decision: "approved"|"changes_requested", reviewer: string, decidedAt: number }
+  if (typeof reviewerDecision === 'object') return true
+  // Legacy/test shape: plain string
+  if (typeof reviewerDecision === 'string') return reviewerDecision.trim().length > 0
+  return false
 }
 
 export function classifyReviewSla(task: Pick<Task, 'status' | 'metadata'>): ReviewSlaClassification {
