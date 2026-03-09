@@ -33,6 +33,11 @@ Open **[http://localhost:4445/dashboard](http://localhost:4445/dashboard)** — 
 
 > Just want to try it first? `npx reflectt-node` starts immediately, no install required.
 
+**More docs:**
+- Full guide: [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)
+- Copy/paste bootstrap: [docs/bootstrap-first-5-minutes.md](docs/bootstrap-first-5-minutes.md)
+- Install flow reference: [docs/INSTALL-FLOW.md](docs/INSTALL-FLOW.md)
+
 ---
 
 ### 2. Connect your agent
