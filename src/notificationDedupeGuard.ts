@@ -39,6 +39,10 @@ export interface DedupeCheckInput {
   eventStatus: string          // status the event is announcing (e.g., 'doing')
   currentTaskStatus?: string   // live task status from DB (if available)
   currentTaskUpdatedAt?: number // live task updatedAt from DB (if available)
+  /** Target agent receiving this notification. Scopes the cursor per-agent so
+   *  two recipients of the same event (e.g. assignee + reviewer on 'done')
+   *  are not mutually suppressed by each other's cursor update. */
+  targetAgent?: string
 }
 
 export interface DedupeCheckResult {
@@ -53,14 +57,19 @@ export interface DedupeCheckResult {
  * Returns { emit: true } if it should proceed, or { emit: false, reason } if suppressed.
  */
 export function shouldEmitNotification(input: DedupeCheckInput): DedupeCheckResult {
-  const { taskId, eventUpdatedAt, eventStatus, currentTaskStatus, currentTaskUpdatedAt } = input
+  const { taskId, eventUpdatedAt, eventStatus, currentTaskStatus, currentTaskUpdatedAt, targetAgent } = input
+
+  // Cursor key is scoped per (taskId, targetAgent) so two different recipients of the
+  // same event (e.g. assignee + reviewer both getting taskCompleted on 'done') are not
+  // mutually suppressed by each other's cursor update.
+  const cursorKey = targetAgent ? `${taskId}:${targetAgent}` : taskId
 
   // Guard 1: Monotonic cursor — drop events with updatedAt <= lastSeen
-  const lastSeen = lastSeenByTaskId.get(taskId)
+  const lastSeen = lastSeenByTaskId.get(cursorKey)
   if (lastSeen !== undefined && eventUpdatedAt <= lastSeen) {
     return {
       emit: false,
-      reason: `Stale event: updatedAt ${eventUpdatedAt} <= lastSeen ${lastSeen} for ${taskId}`,
+      reason: `Stale event: updatedAt ${eventUpdatedAt} <= lastSeen ${lastSeen} for ${cursorKey}`,
     }
   }
 
@@ -79,7 +88,7 @@ export function shouldEmitNotification(input: DedupeCheckInput): DedupeCheckResu
   }
 
   // Update cursor
-  lastSeenByTaskId.set(taskId, eventUpdatedAt)
+  lastSeenByTaskId.set(cursorKey, eventUpdatedAt)
 
   return { emit: true }
 }
