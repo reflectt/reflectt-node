@@ -51,13 +51,24 @@ export class SuppressionLedger {
    * Content is normalized: timestamps, task IDs, and message IDs stripped.
    */
   computeDedupKey(category: string, channel: string, content: string): string {
-    const normalized = content
+    let normalized = content
       .trim()
       .toLowerCase()
       .replace(/\b(msg-|task-|tcomment-|ins-|ref-)\S+/g, '')
       .replace(/\d{13,}/g, '')
       .replace(/\s+/g, ' ')
-      .slice(0, 300)
+
+    // For digest messages, aggressively strip volatile counts so that
+    // "32 todo · 2 doing" vs "31 todo · 3 doing" hashes identically.
+    // This prevents process restarts from re-emitting the same digest
+    // just because task counts shifted by 1-2.
+    if (category === 'digest') {
+      normalized = normalized
+        .replace(/\d+/g, 'N')          // normalize all remaining numbers
+        .replace(/\bN+\b/g, 'N')       // collapse repeated N
+    }
+
+    normalized = normalized.slice(0, 300)
     const raw = `${category}:${channel}:${normalized}`
     return createHash('sha256').update(raw).digest('hex').substring(0, 20)
   }
