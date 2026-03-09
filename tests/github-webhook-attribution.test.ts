@@ -176,3 +176,69 @@ describe('github-webhook-attribution', () => {
     })
   })
 })
+
+import { formatGitHubEvent } from '../src/github-webhook-chat.js'
+
+describe('formatGitHubEvent — branch-based agent attribution', () => {
+  beforeEach(() => {
+    setupRoles()
+  })
+
+  it('mentions branch-resolved agent, not GitHub sender, for PR opened', () => {
+    const payload = {
+      action: 'opened',
+      sender: { login: 'itskaidev' },
+      repository: { name: 'reflectt-node' },
+      pull_request: {
+        number: 847,
+        title: 'fix: watchdog restart',
+        html_url: 'https://github.com/reflectt/reflectt-node/pull/847',
+        head: { ref: 'link/c8-coverage' },
+      },
+      _reflectt_attribution: { agent: 'link', githubUser: 'itskaidev', remapped: true, source: 'branch' },
+    }
+    const msg = formatGitHubEvent('pull_request', payload as any)
+    expect(msg).not.toBeNull()
+    expect(msg).toContain('@link')
+    expect(msg).not.toContain('@kai')
+    expect(msg).not.toContain('@itskaidev')
+  })
+
+  it('mentions @kai when attribution falls back (no branch info)', () => {
+    const payload = {
+      action: 'closed',
+      sender: { login: 'itskaidev' },
+      repository: { name: 'reflectt-node' },
+      pull_request: {
+        number: 123,
+        title: 'some PR',
+        html_url: 'https://github.com/reflectt/reflectt-node/pull/123',
+        merged: true,
+      },
+      _reflectt_attribution: { agent: 'kai', githubUser: 'itskaidev', remapped: true, source: 'fallback' },
+    }
+    const msg = formatGitHubEvent('pull_request', payload as any)
+    expect(msg).not.toBeNull()
+    expect(msg).toContain('@kai')
+    expect(msg).not.toContain('@itskaidev')
+  })
+
+  it('mentions agent directly when no attribution field (unenriched payload fallback)', () => {
+    // Without _reflectt_attribution, falls back to remapGitHubMentions(rawSender)
+    const payload = {
+      action: 'opened',
+      sender: { login: 'itskaidev' },
+      repository: { name: 'reflectt-node' },
+      pull_request: {
+        number: 10,
+        title: 'legacy payload',
+        html_url: 'https://github.com/reflectt/reflectt-node/pull/10',
+      },
+    }
+    const msg = formatGitHubEvent('pull_request', payload as any)
+    expect(msg).not.toBeNull()
+    // itskaidev remapped to kai by remapGitHubMentions
+    expect(msg).not.toContain('@itskaidev')
+    expect(msg).toContain('@kai')
+  })
+})

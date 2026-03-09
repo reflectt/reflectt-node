@@ -12,7 +12,16 @@
 
 import { remapGitHubMentions } from './github-webhook-attribution.js'
 
-interface GitHubEvent {
+// Extended interface to support enriched payloads with _reflectt_attribution
+interface ReflecttAttribution {
+  agent: string | null
+  githubUser: string | null
+  remapped: boolean
+  source: string
+}
+
+interface GitHubEvent extends Record<string, unknown> {
+  _reflectt_attribution?: ReflecttAttribution
   action?: string
   sender?: { login?: string }
   repository?: { full_name?: string; name?: string }
@@ -65,7 +74,13 @@ interface GitHubEvent {
  */
 export function formatGitHubEvent(eventType: string, payload: GitHubEvent): string | null {
   const repo = payload.repository?.name || payload.repository?.full_name || 'unknown'
-  const sender = payload.sender?.login || 'unknown'
+  const rawSender = payload.sender?.login || 'unknown'
+
+  // Prefer branch-resolved agent name from enriched payload attribution.
+  // Falls back to remapped GitHub username (e.g. @itskaidev → @kai).
+  // This ensures PR events from `link/feature-x` mention @link, not @kai.
+  const resolvedAgent = payload._reflectt_attribution?.agent
+  const sender = resolvedAgent ?? remapGitHubMentions(rawSender) ?? rawSender
 
   let message: string | null = null
 
