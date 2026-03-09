@@ -24,6 +24,7 @@ import type { Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
 import { recordSystemLoopTick } from './system-loop-state.js'
 import { isWaitingOnAuthor } from './review-state.js'
+import { getDb } from './db.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -112,10 +113,32 @@ const DEFAULT_CONFIG: BoardHealthWorkerConfig = {
 
 // ── Worker ─────────────────────────────────────────────────────────────────
 
+const KV_DIGEST_KEY = 'board_health_last_digest_at'
+
+/** Read persisted lastDigestAt from the kv table (survives process restarts). */
+export function readPersistedDigestAt(): number {
+  try {
+    const row = getDb().prepare('SELECT value FROM kv WHERE key = ?').get(KV_DIGEST_KEY) as { value: string } | undefined
+    const parsed = row ? parseInt(row.value, 10) : 0
+    return isNaN(parsed) ? 0 : parsed
+  } catch {
+    return 0
+  }
+}
+
+/** Persist lastDigestAt so it survives process restarts. */
+export function writePersistedDigestAt(ts: number): void {
+  try {
+    getDb().prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(KV_DIGEST_KEY, String(ts))
+  } catch {
+    // Non-fatal — fall back to in-memory only
+  }
+}
+
 export class BoardHealthWorker {
   private config: BoardHealthWorkerConfig
   private auditLog: PolicyAction[] = []
-  private lastDigestAt = 0
+  private lastDigestAt = readPersistedDigestAt()
   private lastTickAt = 0
   private tickCount = 0
   private timer: ReturnType<typeof setInterval> | null = null
@@ -278,11 +301,17 @@ export class BoardHealthWorker {
     }
 
     // 4. Emit digest if interval elapsed
+    // Re-read persisted value each tick in case another process updated it.
+    if (!dryRun) {
+      const persisted = readPersistedDigestAt()
+      if (persisted > this.lastDigestAt) this.lastDigestAt = persisted
+    }
     let digest: BoardHealthDigest | null = null
     if (force || now - this.lastDigestAt >= this.config.digestIntervalMs) {
       digest = await this.emitDigest(now, actions, dryRun)
       if (!dryRun) {
         this.lastDigestAt = now
+        writePersistedDigestAt(now)
       }
     }
 

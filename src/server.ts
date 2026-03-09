@@ -2310,6 +2310,11 @@ export async function createServer(): Promise<FastifyInstance> {
   boardHealthWorker.updateConfig(policy.boardHealth)
   boardHealthWorker.start()
 
+  // Activate noise budget enforcement — the 24h canary period is complete.
+  // Canary mode (log-only) is still the default in case of fresh installs,
+  // but on a running server we want real duplicate suppression.
+  noiseBudgetManager.activateEnforcement()
+
   // Noise budget: wire digest flush handler to send batched messages to #ops
   noiseBudgetManager.setDigestFlushHandler(async (channel, entries) => {
     if (entries.length === 0) return
