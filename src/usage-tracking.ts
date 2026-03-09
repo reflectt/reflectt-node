@@ -22,6 +22,7 @@ export interface UsageEvent {
   category: 'task_work' | 'heartbeat' | 'reflection' | 'chat' | 'review' | 'other'
   timestamp: number
   team_id?: string
+  api_source?: string         // e.g. 'anthropic_direct', 'anthropic_sub', 'openai_direct', 'openai_codex'
   metadata?: Record<string, unknown>
 }
 
@@ -110,6 +111,7 @@ export function ensureUsageTables(): void {
       estimated_cost_usd REAL NOT NULL DEFAULT 0,
       category TEXT NOT NULL DEFAULT 'other',
       team_id TEXT,
+      api_source TEXT,
       metadata TEXT,
       timestamp INTEGER NOT NULL
     );
@@ -130,6 +132,9 @@ export function ensureUsageTables(): void {
       updated_at INTEGER NOT NULL
     );
   `)
+
+  // Idempotent column migrations
+  try { db.exec(`ALTER TABLE model_usage ADD COLUMN api_source TEXT`) } catch { /* already exists */ }
 }
 
 // ── Usage Recording ──
@@ -153,16 +158,17 @@ export function recordUsage(event: Omit<UsageEvent, 'id' | 'estimated_cost_usd'>
     category: event.category,
     timestamp: event.timestamp || Date.now(),
     team_id: event.team_id,
+    api_source: event.api_source,
     metadata: event.metadata,
   }
 
   db.prepare(`
-    INSERT INTO model_usage (id, agent, task_id, model, provider, input_tokens, output_tokens, estimated_cost_usd, category, team_id, metadata, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO model_usage (id, agent, task_id, model, provider, input_tokens, output_tokens, estimated_cost_usd, category, team_id, api_source, metadata, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     record.id, record.agent, record.task_id || null, record.model, record.provider,
     record.input_tokens, record.output_tokens, record.estimated_cost_usd,
-    record.category, record.team_id || null,
+    record.category, record.team_id || null, record.api_source || null,
     record.metadata ? JSON.stringify(record.metadata) : null,
     record.timestamp,
   )
@@ -274,6 +280,86 @@ export function getUsageByTask(options: { since?: number; until?: number; limit?
     FROM model_usage ${where}
     GROUP BY task_id ORDER BY total_cost_usd DESC LIMIT ?
   `).all(...params, limit) as any[]
+}
+
+export function getDailySpendByModel(options: { days?: number } = {}): Array<{
+  date: string; model: string; total_cost_usd: number; event_count: number
+}> {
+  ensureUsageTables()
+  const db = getDb()
+  const days = options.days ?? 7
+  const since = Date.now() - days * 24 * 60 * 60 * 1000
+  return db.prepare(`
+    SELECT
+      strftime('%Y-%m-%d', timestamp / 1000, 'unixepoch') as date,
+      model,
+      SUM(estimated_cost_usd) as total_cost_usd,
+      COUNT(*) as event_count
+    FROM model_usage
+    WHERE timestamp >= ?
+    GROUP BY date, model
+    ORDER BY date DESC, total_cost_usd DESC
+  `).all(since) as any[]
+}
+
+export function getAvgCostByLane(options: { days?: number } = {}): Array<{
+  lane: string; avg_cost_usd: number; total_cost_usd: number; task_count: number
+}> {
+  ensureUsageTables()
+  const db = getDb()
+  const days = options.days ?? 30
+  const since = Date.now() - days * 24 * 60 * 60 * 1000
+  // Join usage events with tasks using task_id; extract lane from metadata JSON
+  return db.prepare(`
+    SELECT
+      json_extract(t.metadata, '$.qa_bundle.lane') as lane,
+      AVG(u.task_total) as avg_cost_usd,
+      SUM(u.task_total) as total_cost_usd,
+      COUNT(*) as task_count
+    FROM (
+      SELECT task_id, SUM(estimated_cost_usd) as task_total
+      FROM model_usage
+      WHERE task_id IS NOT NULL AND timestamp >= ?
+      GROUP BY task_id
+    ) u
+    JOIN tasks t ON t.id = u.task_id
+    WHERE json_extract(t.metadata, '$.qa_bundle.lane') IS NOT NULL
+      AND t.status = 'done'
+    GROUP BY lane
+    ORDER BY avg_cost_usd DESC
+  `).all(since) as any[]
+}
+
+export function getAvgCostByAgent(options: { days?: number } = {}): Array<{
+  agent: string; avg_cost_usd: number; total_cost_usd: number; task_count: number; top_model: string
+}> {
+  ensureUsageTables()
+  const db = getDb()
+  const days = options.days ?? 30
+  const since = Date.now() - days * 24 * 60 * 60 * 1000
+  // Per-agent avg cost across closed tasks they worked on
+  return db.prepare(`
+    SELECT
+      u.agent,
+      AVG(u.task_total) as avg_cost_usd,
+      SUM(u.task_total) as total_cost_usd,
+      COUNT(DISTINCT u.task_id) as task_count,
+      (
+        SELECT model FROM model_usage
+        WHERE agent = u.agent AND task_id IS NOT NULL AND timestamp >= ?
+        GROUP BY model ORDER BY SUM(estimated_cost_usd) DESC LIMIT 1
+      ) as top_model
+    FROM (
+      SELECT agent, task_id, SUM(estimated_cost_usd) as task_total
+      FROM model_usage
+      WHERE task_id IS NOT NULL AND timestamp >= ?
+      GROUP BY agent, task_id
+    ) u
+    JOIN tasks t ON t.id = u.task_id
+    WHERE t.status = 'done'
+    GROUP BY u.agent
+    ORDER BY avg_cost_usd DESC
+  `).all(since, since) as any[]
 }
 
 // ── Spend Caps ──
