@@ -997,7 +997,9 @@ async function syncChat(): Promise<void> {
   const payload = recentMessages.map(m => ({
     id: m.id,
     from: m.from,
-    content: m.content,
+    content: m.channel === 'github' || m.from === 'github'
+      ? remapGitHubMentions(m.content)
+      : m.content,
     timestamp: m.timestamp,
     channel: m.channel || 'general',
   }))
