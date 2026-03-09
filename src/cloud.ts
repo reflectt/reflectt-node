@@ -25,6 +25,7 @@ import { listInsights } from './insights.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
+import { getRequestMetrics } from './request-tracker.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -689,6 +690,20 @@ async function sendHeartbeat(): Promise<void> {
       priority: t.priority || undefined,
       updatedAt: t.updatedAt || Date.now(),
     })),
+    metrics: (() => {
+      const m = getRequestMetrics()
+      return {
+        totalRequests: m.total,
+        totalErrors: m.errors,
+        rps: m.rps,
+        rolling: {
+          requests: m.rolling.requests,
+          errors: m.rolling.errors,
+          errorRate: m.rolling.errorRate,
+          windowMinutes: m.rolling.windowMinutes,
+        },
+      }
+    })(),
     source: {
       hostId: state.hostId,
       hostName: config.hostName,
