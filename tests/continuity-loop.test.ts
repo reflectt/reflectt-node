@@ -5,7 +5,7 @@ import Fastify from 'fastify'
 import { createReflection } from '../src/reflections.js'
 import { ingestReflection, _clearInsightStore } from '../src/insights.js'
 import { _clearPromotionAudits } from '../src/insight-promotion.js'
-import { _resetContinuityState, tickContinuityLoop, getContinuityStats, getContinuityAuditLog } from '../src/continuity-loop.js'
+import { _resetContinuityState, tickContinuityLoop, getContinuityStats, getContinuityAuditLog, getContinuityAuditFromDb } from '../src/continuity-loop.js'
 import { taskManager } from '../src/tasks.js'
 
 describe('Continuity Loop', () => {
@@ -109,5 +109,93 @@ describe('Continuity Loop', () => {
     const log = getContinuityAuditLog()
     // Log may be empty if no agents need replenishment, but it should be an array
     expect(Array.isArray(log)).toBe(true)
+  })
+
+  describe('Cold-start bootstrap', () => {
+    it('bootstrap creates tasks when agent has no prior tasks and no insights', async () => {
+      const coldAgent = `cold-start-test-${Date.now()}`
+      // Ensure no existing tasks or audit entries for this agent
+      const priorTasks = taskManager.listTasks({ assignee: coldAgent })
+      expect(priorTasks).toHaveLength(0)
+      const priorAudit = getContinuityAuditFromDb({ agent: coldAgent })
+      expect(priorAudit).toHaveLength(0)
+
+      // Configure continuity to monitor this cold agent
+      const policyManager = (await import('../src/policy.js')).policyManager
+      const original = policyManager.get()
+      policyManager.patch({
+        continuityLoop: { enabled: true, agents: [coldAgent], minReady: 2, maxPromotePerCycle: 2, cooldownMin: 0, defaultReviewer: 'sage', channel: 'general' },
+      } as any)
+
+      try {
+        _clearInsightStore()
+        _resetContinuityState()
+
+        const result = await tickContinuityLoop()
+
+        // Bootstrap should have created tasks
+        expect(result.replenished).toBeGreaterThan(0)
+        const bootstrapActions = result.actions.filter(a => a.agent === coldAgent && a.kind === 'queue-replenish')
+        expect(bootstrapActions.length).toBeGreaterThan(0)
+
+        // Tasks should now exist for the agent
+        const newTasks = taskManager.listTasks({ assignee: coldAgent })
+        expect(newTasks.length).toBeGreaterThan(0)
+        expect(newTasks[0].metadata?.bootstrap).toBe(true)
+
+        // Running again should NOT bootstrap again (idempotent — audit guard)
+        const result2 = await tickContinuityLoop()
+        const coldAgentTasksBefore = taskManager.listTasks({ assignee: coldAgent }).length
+        const result2Bootstrap = result2.actions.filter(a => a.agent === coldAgent && a.taskId && (taskManager.getTask(a.taskId)?.metadata as any)?.bootstrap)
+        expect(result2Bootstrap).toHaveLength(0)
+        expect(taskManager.listTasks({ assignee: coldAgent }).length).toBe(coldAgentTasksBefore)
+      } finally {
+        policyManager.patch({ continuityLoop: (original as any).continuityLoop ?? {} } as any)
+        // Cleanup
+        for (const t of taskManager.listTasks({ assignee: coldAgent })) {
+          try { taskManager.deleteTask(t.id) } catch {}
+        }
+      }
+    })
+
+    it('bootstrap does NOT fire when agent already has tasks', async () => {
+      // Agent already has tasks on the board
+      const agentWithTasks = `agent-with-tasks-${Date.now()}`
+      const task = await taskManager.createTask({
+        title: 'Pre-existing task',
+        description: 'This agent is not cold',
+        status: 'todo',
+        assignee: agentWithTasks,
+        reviewer: 'sage',
+        priority: 'P2',
+        createdBy: 'test',
+        eta: '1h',
+        done_criteria: ['done'],
+        metadata: {},
+      } as any)
+
+      const policyManager = (await import('../src/policy.js')).policyManager
+      const original = policyManager.get()
+      policyManager.patch({
+        continuityLoop: { enabled: true, agents: [agentWithTasks], minReady: 5, maxPromotePerCycle: 2, cooldownMin: 0, defaultReviewer: 'sage', channel: 'general' },
+      } as any)
+
+      try {
+        _clearInsightStore()
+        _resetContinuityState()
+
+        const result = await tickContinuityLoop()
+        const bootstrapActions = result.actions.filter(
+          a => a.agent === agentWithTasks && a.kind === 'queue-replenish' && (taskManager.getTask(a.taskId ?? '')?.metadata as any)?.bootstrap
+        )
+        expect(bootstrapActions).toHaveLength(0)
+      } finally {
+        policyManager.patch({ continuityLoop: (original as any).continuityLoop ?? {} } as any)
+        try { taskManager.deleteTask(task.id) } catch {}
+        for (const t of taskManager.listTasks({ assignee: agentWithTasks })) {
+          try { taskManager.deleteTask(t.id) } catch {}
+        }
+      }
+    })
   })
 })

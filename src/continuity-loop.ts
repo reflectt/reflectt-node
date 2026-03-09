@@ -201,6 +201,17 @@ export async function tickContinuityLoop(): Promise<{
 
     // Queue is below floor — attempt replenishment
     const deficit = config.minReady - unblockedTodo.length
+
+    // Cold-start path: if no insights exist at all and agent has never had tasks,
+    // bootstrap with scoped onboarding tasks so the loop has something to build from.
+    const bootstrap = await bootstrapColdStart(agent, deficit, config, now)
+    if (bootstrap.length > 0) {
+      lastReplenishAt[agent] = now
+      replenished += bootstrap.length
+      actions.push(...bootstrap)
+      continue
+    }
+
     const promoted = await replenishFromInsights(agent, Math.min(deficit, config.maxPromotePerCycle), config, now)
 
     if (promoted.length > 0) {
@@ -290,6 +301,114 @@ export async function tickContinuityLoop(): Promise<{
   }
 
   return { actions, agentsChecked: monitoredAgents.length, replenished }
+}
+
+// ── Cold-start bootstrap ──────────────────────────────────────────────────
+//
+// When an agent has no promoted insights AND has never had a continuity task
+// created for them before, the replenishment loop would silently produce nothing.
+// This breaks onboarding for new teams (agents repeat status forever).
+//
+// Bootstrap fires exactly once per agent: when the continuity audit has zero
+// prior entries for the agent AND there are no promotable insights.
+// It creates scoped starter tasks so the loop has something to build from.
+
+const BOOTSTRAP_TASKS: Array<{ title: string; description: string; done_criteria: string[] }> = [
+  {
+    title: 'Orient to your role and team',
+    description: 'Read your SOUL.md / AGENTS.md, explore the task board, and write a short note in your workspace about what you own and what your first real deliverable is.',
+    done_criteria: [
+      'SOUL.md / AGENTS.md reviewed',
+      'First real deliverable identified and written in workspace notes',
+      'At least one existing task or PR reviewed to understand current team state',
+    ],
+  },
+  {
+    title: 'Run a smoke test against the running server',
+    description: 'Verify the local server is healthy: hit /health, /tasks, and any endpoint relevant to your lane. Document what you find.',
+    done_criteria: [
+      'GET /health returns 200',
+      'GET /tasks returns a valid list',
+      'Any lane-specific endpoints verified or flagged if missing',
+      'Findings noted in a task comment',
+    ],
+  },
+  {
+    title: 'File your first real task from a concrete observation',
+    description: 'Find one real problem, gap, or improvement opportunity you can own. File it as a properly scoped task with done criteria, assignee, reviewer, and eta.',
+    done_criteria: [
+      'One real task filed (not a placeholder)',
+      'Task has explicit done criteria',
+      'Task is in todo status with assignee and reviewer set',
+    ],
+  },
+]
+
+async function bootstrapColdStart(
+  agent: string,
+  count: number,
+  config: ContinuityConfig,
+  now: number,
+): Promise<ContinuityAction[]> {
+  // Guard: only bootstrap if this agent has zero continuity audit entries ever
+  const existing = getContinuityAuditFromDb({ agent, limit: 1 })
+  if (existing.length > 0) return []
+
+  // Guard: also check if agent already has any tasks on the board (not truly cold)
+  const existingTasks = taskManager.listTasks({ assignee: agent })
+  if (existingTasks.length > 0) return []
+
+  const actions: ContinuityAction[] = []
+  const toCreate = BOOTSTRAP_TASKS.slice(0, Math.min(count, BOOTSTRAP_TASKS.length))
+
+  for (const template of toCreate) {
+    try {
+      const task = await taskManager.createTask({
+        title: template.title,
+        description: template.description,
+        status: 'todo',
+        assignee: agent,
+        reviewer: config.defaultReviewer,
+        priority: 'P2',
+        createdBy: 'continuity-loop',
+        eta: '1 day',
+        done_criteria: template.done_criteria,
+        metadata: {
+          lane: 'onboarding',
+          bootstrap: true,
+          bootstrap_reason: 'cold_start_no_insights',
+          bootstrap_at: now,
+        },
+      } as any)
+
+      if (task?.id) {
+        stats.insightsPromoted++ // reuse counter as "tasks created"
+        const action: ContinuityAction = {
+          id: `cl-bootstrap-${agent}-${now}-${task.id}`,
+          kind: 'queue-replenish',
+          agent,
+          detail: `Cold-start bootstrap: created onboarding task "${template.title}" (${task.id}) for agent with no prior insights or tasks.`,
+          taskId: task.id,
+          timestamp: now,
+        }
+        recordAction(action)
+        actions.push(action)
+      }
+    } catch (err) {
+      console.warn(`[ContinuityLoop] Bootstrap task creation failed for ${agent}:`, err)
+    }
+  }
+
+  if (actions.length > 0) {
+    routeMessage({
+      from: 'system',
+      forceChannel: config.channel,
+      content: `🚀 Continuity bootstrap: @${agent} has no prior tasks or insights. Created ${actions.length} onboarding task(s) to get the queue started.`,
+      category: 'continuity-loop',
+    }).catch(() => {})
+  }
+
+  return actions
 }
 
 // ── Insight → Task replenishment ──
