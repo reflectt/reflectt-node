@@ -1038,6 +1038,20 @@ Export → import preserves: summary, description, organizer, attendees, locatio
 | GET | `/calendar/events/:id/export.ics` | Export single event as .ics file. |
 | POST | `/calendar/import` | Import events from .ics content. Body: `{ ics: string, organizer?: string }` or raw .ics string. Returns created/updated events. UID-based dedup on re-import. |
 
+## Schedule Feed
+
+Shared time-awareness for the team. Canonical records for deploy windows, focus blocks, and scheduled task work — so agents can coordinate timing without chat.
+
+**MVP scope (v1):** One-off windows only. No iCal/RRULE, no reminders, no recurring rules. For per-agent availability and recurring blocks use `/calendar/blocks`. For notifications use the Calendar Reminder Engine.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/schedule/feed` | Upcoming entries in chronological order. Query: `kinds` (comma-separated: `deploy_window,focus_block,scheduled_task`), `owner`, `after` (epoch ms, default: now), `before` (epoch ms), `limit` (default: 50, max: 200). |
+| POST | `/schedule/entries` | Create a schedule entry. Body: `{ kind, title, start, end, owner, task_id?, status?, meta? }`. `kind` must be `deploy_window`, `focus_block`, or `scheduled_task`. `start`/`end` are epoch ms. Default status: `open` / `active` / `pending`. |
+| GET | `/schedule/entries/:id` | Get a single entry by ID. |
+| PATCH | `/schedule/entries/:id` | Update an entry. Body: `{ title?, start?, end?, status?, meta? }`. |
+| DELETE | `/schedule/entries/:id` | Delete an entry. Returns 204. |
+
 ## Remote Node Management
 
 Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `REFLECTT_MANAGE_TOKEN` env var; authenticate via `x-manage-token` header or `Authorization: Bearer <token>`. Loopback (localhost) access is always allowed.
