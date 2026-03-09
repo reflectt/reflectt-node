@@ -30,25 +30,55 @@ export interface BuildInfo {
 // When running from a global install or launchd plist, cwd may point
 // to an unrelated directory (or a different git repo entirely).
 import { fileURLToPath } from 'node:url'
+import { existsSync } from 'node:fs'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+// Check if we're inside a reflectt-node repo (not an ancestor .git like Homebrew's).
+// Walk up from __dirname looking for a .git dir that also has a package.json
+// with name "reflectt-node". If not found, skip all git commands.
+function findRepoRoot(): string | null {
+  let dir = __dirname
+  const root = resolve('/')
+  while (dir !== root) {
+    if (existsSync(resolve(dir, '.git'))) {
+      try {
+        const pkgPath = resolve(dir, 'package.json')
+        const raw = readFileSync(pkgPath, 'utf8')
+        const pkg = JSON.parse(raw)
+        if (pkg.name === 'reflectt-node') return dir
+      } catch { /* no package.json or not ours — keep searching */ }
+      // Found a .git but it's not our repo (e.g., Homebrew).
+      // Don't traverse further — this .git would capture all git commands.
+      return null
+    }
+    dir = dirname(dir)
+  }
+  return null
+}
+
+const repoRoot = findRepoRoot()
+
 function git(cmd: string): string {
+  if (!repoRoot) return 'unknown'
   try {
-    return execSync(`git ${cmd}`, { encoding: 'utf8', timeout: 5000, cwd: __dirname, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    return execSync(`git ${cmd}`, { encoding: 'utf8', timeout: 5000, cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
   } catch {
     return 'unknown'
   }
 }
 
 function readPackageVersion(): string {
-  try {
-    const pkgPath = resolve(process.cwd(), 'package.json')
-    const raw = readFileSync(pkgPath, 'utf8')
-    const pkg = JSON.parse(raw)
-    return typeof pkg.version === 'string' ? pkg.version : 'unknown'
-  } catch {
-    return 'unknown'
+  // Try repo root first, then __dirname, then cwd as last resort
+  const candidates = [repoRoot, __dirname, process.cwd()].filter(Boolean) as string[]
+  for (const dir of candidates) {
+    try {
+      const pkgPath = resolve(dir, 'package.json')
+      const raw = readFileSync(pkgPath, 'utf8')
+      const pkg = JSON.parse(raw)
+      if (typeof pkg.version === 'string') return pkg.version
+    } catch { /* try next */ }
   }
+  return 'unknown'
 }
 
 // Capture at module load (startup) time
