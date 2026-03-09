@@ -11,6 +11,7 @@ data/
 
 # Task artifacts
 process/*
+!process/TASK-7xyi88v7x.md
 # Allow committing specific task artifacts needed for review/proof
 !process/TASK-47sxe374r.md
 !process/TASK-iwphjvsrl.md
