@@ -1936,7 +1936,8 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Multipart file uploads (50MB limit)
   const fastifyMultipart = await import('@fastify/multipart')
-  await app.register(fastifyMultipart.default, { limits: { fileSize: 50 * 1024 * 1024 } })
+  const { MAX_SIZE_BYTES: _multipartMax } = await import('./files.js')
+  await app.register(fastifyMultipart.default, { limits: { fileSize: _multipartMax } })
 
   // Normalize error responses to a consistent envelope
   app.addHook('preSerialization', async (request, reply, payload) => {
@@ -7943,6 +7944,15 @@ export async function createServer(): Promise<FastifyInstance> {
   // ── File upload/download ──
   app.post('/files', async (request, reply) => {
     try {
+      const { MAX_SIZE_BYTES: maxBytes } = await import('./files.js')
+
+      // Early rejection via Content-Length before reading body
+      const declaredLength = parseInt(String(request.headers['content-length'] || ''), 10)
+      if (!Number.isNaN(declaredLength) && declaredLength > maxBytes) {
+        reply.code(413)
+        return { success: false, error: `File exceeds ${maxBytes / (1024 * 1024)}MB limit (Content-Length: ${declaredLength} bytes)` }
+      }
+
       const data = await request.file()
       if (!data) { reply.code(400); return { success: false, error: 'No file in request' } }
 
@@ -7950,10 +7960,10 @@ export async function createServer(): Promise<FastifyInstance> {
       for await (const chunk of data.file) chunks.push(chunk)
       const buffer = Buffer.concat(chunks)
 
-      // Check if stream was truncated (exceeds limit)
+      // Check if stream was truncated (exceeds multipart limit)
       if (data.file.truncated) {
         reply.code(413)
-        return { success: false, error: 'File exceeds 50MB limit' }
+        return { success: false, error: `File exceeds ${maxBytes / (1024 * 1024)}MB limit` }
       }
 
       const fields = data.fields as Record<string, { value?: string } | undefined>
@@ -7968,8 +7978,9 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.code(201)
       return result
     } catch (err: unknown) {
+      const { MAX_SIZE_BYTES: maxBytes } = await import('./files.js')
       const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('Request file too large')) { reply.code(413); return { success: false, error: 'File exceeds 50MB limit' } }
+      if (msg.includes('Request file too large')) { reply.code(413); return { success: false, error: `File exceeds ${maxBytes / (1024 * 1024)}MB limit` } }
       reply.code(500); return { success: false, error: 'Upload failed' }
     }
   })

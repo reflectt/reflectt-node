@@ -27,7 +27,11 @@ export interface FileMeta {
 // ── Constants ──
 
 const FILES_DIR = join(REFLECTT_HOME, 'files')
-const MAX_SIZE_BYTES = 50 * 1024 * 1024 // 50MB
+
+// Configurable upload limit: REFLECTT_MAX_FILE_SIZE_MB env (default 10MB)
+const _envMax = parseInt(process.env.REFLECTT_MAX_FILE_SIZE_MB || '', 10)
+const MAX_SIZE_MB = Number.isFinite(_envMax) && _envMax > 0 ? _envMax : 10
+const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
 
 // Extension → MIME type mapping (allowlist)
 const ALLOWED_EXTENSIONS: Record<string, string> = {
@@ -209,12 +213,18 @@ export function isImage(mimeType: string): boolean {
 function rowToMeta(row: Record<string, unknown>): FileMeta {
   let tags: string[] = []
   try { tags = JSON.parse(String(row.tags || '[]')) } catch { tags = [] }
+  // Prefer DB value; if missing/zero fall back to actual file size on disk
+  let sizeBytes = Number(row.size_bytes)
+  if (!sizeBytes || sizeBytes <= 0) {
+    const storedPath = String(row.stored_path)
+    try { sizeBytes = statSync(storedPath).size } catch { sizeBytes = 0 }
+  }
   return {
     id: String(row.id),
     originalName: String(row.original_name),
     storedPath: String(row.stored_path),
     mimeType: String(row.mime_type),
-    sizeBytes: Number(row.size_bytes) || 0,
+    sizeBytes,
     uploadedBy: String(row.uploaded_by || 'anonymous'),
     tags,
     createdAt: Number(row.created_at) || 0,
