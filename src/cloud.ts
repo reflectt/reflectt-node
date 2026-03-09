@@ -17,6 +17,7 @@ import { presenceManager } from './presence.js'
 import { getAgentRoles } from './assignment.js'
 import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
+import { remapGitHubMentions } from './github-webhook-attribution.js'
 import { slotManager } from './canvas-slots.js'
 import { getDb } from './db.js'
 import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions } from './usage-tracking.js'
@@ -1033,9 +1034,16 @@ async function syncChat(): Promise<void> {
       for (const msg of result.data.pending) {
         // Inject into local chat as if the user posted it
         try {
+          // GitHub relay messages from the cloud use raw GitHub sender logins (e.g. @itskaidev)
+          // instead of agent names. Remap shared GitHub accounts to their agent equivalents
+          // before injecting so @mentions resolve correctly.
+          const content = msg.from === 'github'
+            ? remapGitHubMentions(msg.content)
+            : msg.content
+
           await chatManager.sendMessage({
             from: msg.from,
-            content: msg.content,
+            content,
             channel: msg.channel || 'general',
             metadata: { source: 'cloud-relay', cloudMessageId: msg.id },
           })

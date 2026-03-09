@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { extractAgentFromBranch, resolveWebhookAttribution, enrichWebhookPayload } from '../src/github-webhook-attribution.js'
+import { extractAgentFromBranch, resolveWebhookAttribution, enrichWebhookPayload, remapGitHubMentions } from '../src/github-webhook-attribution.js'
 import { loadAgentRoles } from '../src/assignment.js'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -134,6 +134,45 @@ describe('github-webhook-attribution', () => {
       const enriched = enrichWebhookPayload(payload)
       expect(enriched.action).toBe('closed')
       expect(enriched.number).toBe(42)
+    })
+  })
+
+  describe('remapGitHubMentions', () => {
+    it('remaps @itskaidev to @kai at start of message', () => {
+      const input = '@itskaidev\n✅ **PR merged** #828: [fix: branch guard crash]'
+      expect(remapGitHubMentions(input)).toBe('@kai\n✅ **PR merged** #828: [fix: branch guard crash]')
+    })
+
+    it('remaps @itskaidev inline in message body', () => {
+      const input = '💬 **Comment by @supabase[bot]** on PR #686 — review by @itskaidev requested'
+      expect(remapGitHubMentions(input)).toContain('@kai')
+      expect(remapGitHubMentions(input)).not.toContain('@itskaidev')
+    })
+
+    it('remaps multiple occurrences', () => {
+      const input = '@itskaidev opened PR and @itskaidev requested review'
+      const result = remapGitHubMentions(input)
+      expect(result).toBe('@kai opened PR and @kai requested review')
+    })
+
+    it('is case-insensitive for the GitHub username', () => {
+      const input = '@ITSKAIDEV merged the PR'
+      expect(remapGitHubMentions(input)).toBe('@kai merged the PR')
+    })
+
+    it('does not remap non-shared GitHub usernames', () => {
+      const input = '@ryancampbell requested a review'
+      expect(remapGitHubMentions(input)).toBe('@ryancampbell requested a review')
+    })
+
+    it('does not partial-match (e.g. @itskaidev123 is left alone)', () => {
+      const input = 'mentioned @itskaidev123 in a comment'
+      expect(remapGitHubMentions(input)).toBe('mentioned @itskaidev123 in a comment')
+    })
+
+    it('handles empty or non-string input gracefully', () => {
+      expect(remapGitHubMentions('')).toBe('')
+      expect(remapGitHubMentions(null as any)).toBeNull()
     })
   })
 })
