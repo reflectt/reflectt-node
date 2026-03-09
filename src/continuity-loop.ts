@@ -365,7 +365,7 @@ async function bootstrapColdStart(
   if (actions.length > 0) {
     routeMessage({
       from: 'system',
-      channel: config.channel,
+      forceChannel: config.channel,
       content: `🚀 Continuity bootstrap: @${agent} has no prior tasks or insights. Created ${actions.length} onboarding task(s) to get the queue started.`,
       category: 'continuity-loop',
     }).catch(() => {})
