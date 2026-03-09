@@ -85,7 +85,7 @@ import { getBuildInfo } from './buildInfo.js'
 import { appendStoredLog, readStoredLogs, getStoredLogPath } from './logStore.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases, setAgentDisplayName, resolveAgentMention } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
-import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
+import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, getDailySpendByModel, getAvgCostByLane, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import { initGitHubActorAuth, resolveGitHubTokenForActor } from './github-actor-auth.js'
@@ -11833,6 +11833,37 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get('/usage/routing-suggestions', async (request) => {
     const q = request.query as Record<string, string>
     return { suggestions: getRoutingSuggestions({ since: q.since ? Number(q.since) : undefined }) }
+  })
+
+  // ── Cost Dashboard ──
+  // GET /costs — aggregated spend: daily by model, avg per lane, top tasks
+  app.get('/costs', async (request) => {
+    const q = request.query as Record<string, string>
+    const days = q.days ? Math.min(Number(q.days), 90) : 7
+    const since = Date.now() - days * 24 * 60 * 60 * 1000
+
+    const dailyByModel = getDailySpendByModel({ days })
+    const byLane = getAvgCostByLane({ days: Math.max(days, 30) }) // lane data needs more window
+    const topTasks = getUsageByTask({ since, limit: 20 })
+    const summary = getUsageSummary({ since })
+
+    // Roll up daily totals per day for the sparkline
+    const dailyTotals: Record<string, number> = {}
+    for (const row of dailyByModel) {
+      dailyTotals[row.date] = (dailyTotals[row.date] ?? 0) + row.total_cost_usd
+    }
+
+    return {
+      window_days: days,
+      summary: Array.isArray(summary) ? summary[0] ?? null : summary,
+      daily_by_model: dailyByModel,
+      daily_totals: Object.entries(dailyTotals)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, total_cost_usd]) => ({ date, total_cost_usd })),
+      avg_cost_by_lane: byLane,
+      top_tasks_by_cost: topTasks,
+      generated_at: Date.now(),
+    }
   })
 
   // Operational metrics endpoint (lightweight dashboard contract)
