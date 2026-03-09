@@ -77,6 +77,8 @@ reflectt start    # Starts the server
 
 That's it. Your server is running at `http://localhost:4445`.
 
+> **Port conflict?** If 4445 is in use: `PORT=4446 reflectt start`. See [Troubleshooting](#troubleshooting) for more.
+
 ---
 
 ## Check that it's running
@@ -291,7 +293,25 @@ curl -X POST http://localhost:4445/tasks \
 
 ## Troubleshooting
 
-**Server won't start:** Check if port 4445 is in use (`lsof -i :4445`). Change the port with `PORT=4446 reflectt start`.
+**Port 4445 is already in use:**
+
+```bash
+# Find what's using the port
+lsof -i :4445
+
+# Option 1: kill the old reflectt-node process
+reflectt stop          # graceful stop
+# or: kill $(lsof -t -i :4445)
+
+# Option 2: start on a different port (PORT env var)
+PORT=4446 reflectt start
+# Agents and curl commands should then use http://localhost:4446
+
+# Docker: map a different external port (container always uses 4445 internally)
+docker run -d --name reflectt-node -p 4446:4445 -v reflectt-data:/data ghcr.io/reflectt/reflectt-node:latest
+```
+
+**Server won't start (other reasons):** Run `reflectt doctor` — it prints a "next action" hint for the most common issues.
 
 **Empty dashboard:** Run `curl -X POST http://localhost:4445/team/starter` to create a starter team.
 
