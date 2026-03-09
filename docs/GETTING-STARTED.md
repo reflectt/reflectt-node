@@ -27,6 +27,18 @@ Pick one:
 npm install -g reflectt-node
 ```
 
+> **Using yarn?** `yarn global add reflectt-node` works, but yarn's global bin is often not in your PATH by default. If you get `reflectt: command not found`, run `yarn global bin` and add that path to your `$PATH`. For simplicity, npm global install is recommended.
+
+### curl installer (automated, requires OpenClaw)
+
+> ⚡ **Requires [OpenClaw](https://openclaw.ai) to be installed first.** The installer will exit with an error if OpenClaw is missing — install it before running this.
+
+```bash
+curl -fsSL https://www.reflectt.ai/install.sh | bash
+```
+
+This clones the repo, builds it, starts the server, and verifies `/health` automatically.
+
 ### npx (try without installing)
 
 ```bash
