@@ -18,7 +18,7 @@ import { tickReflectionNudges } from './reflection-automation.js'
 import { routeMessage } from './messageRouter.js'
 import { getDb, safeJsonStringify, safeJsonParse } from './db.js'
 import { presenceManager } from './presence.js'
-import { getAgentRolesSource } from './assignment.js'
+import { getAgentRolesSource, getAgentRole } from './assignment.js'
 
 // ── Types ──
 
@@ -233,16 +233,34 @@ export async function tickContinuityLoop(): Promise<{
           recordAction(action)
           actions.push(action)
         } else {
-          stats.noCandidateCycles++
-          const action: ContinuityAction = {
-            id: `cl-empty-${agent}-${now}`,
-            kind: 'no-candidates',
-            agent,
-            detail: `Queue below floor (${unblockedTodo.length}/${config.minReady}). No promotable insights and no reflection nudges to fire. Manual task creation needed.`,
-            timestamp: now,
+          // Insights dry, nudges dry — generate scoped tasks directly from role
+          const scopedActions = await generateScopedTasksFromRole(agent, deficit, config, now)
+          if (scopedActions.length > 0) {
+            lastReplenishAt[agent] = now
+            replenished += scopedActions.length
+            actions.push(...scopedActions)
+            try {
+              const taskIds = scopedActions.map(a => a.taskId).filter(Boolean).join(', ')
+              await routeMessage({
+                from: 'system',
+                content: `🔄 Continuity loop: generated ${scopedActions.length} scoped task(s) for @${agent} from role context (insights pool was empty). Tasks: ${taskIds}`,
+                category: 'continuity-loop',
+                severity: 'info',
+                forceChannel: config.channel,
+              })
+            } catch { /* non-fatal */ }
+          } else {
+            stats.noCandidateCycles++
+            const action: ContinuityAction = {
+              id: `cl-empty-${agent}-${now}`,
+              kind: 'no-candidates',
+              agent,
+              detail: `Queue below floor (${unblockedTodo.length}/${config.minReady}). No promotable insights, no nudges, and no scoped tasks could be generated. Manual task creation needed.`,
+              timestamp: now,
+            }
+            recordAction(action)
+            actions.push(action)
           }
-          recordAction(action)
-          actions.push(action)
         }
       } catch {
         stats.noCandidateCycles++
@@ -316,6 +334,118 @@ async function replenishFromInsights(
     } catch (err) {
       // Non-fatal — try next candidate
       console.warn(`[ContinuityLoop] Failed to promote insight ${insight.id}:`, err)
+    }
+  }
+
+  return actions
+}
+
+// ── Role-derived task generation (fallback when insights pool is dry) ──
+
+/**
+ * Generates scoped placeholder tasks for an agent based on their role and
+ * the current state of the task board. Used when the insights pool is empty
+ * and reflection nudges have nothing to fire.
+ *
+ * Tasks are lightweight but actionable — enough context to start work.
+ * Deduplication guard: skips creation if a near-identical task already exists.
+ */
+async function generateScopedTasksFromRole(
+  agent: string,
+  count: number,
+  config: ContinuityConfig,
+  now: number,
+): Promise<ContinuityAction[]> {
+  const actions: ContinuityAction[] = []
+  const role = getAgentRole(agent)
+  if (!role) return actions
+
+  // Build candidate tasks from:
+  //   1. Stalled doing tasks assigned to this agent (been doing for >24h, no recent activity)
+  //   2. Done tasks from this agent that may need follow-up (done_criteria partially met)
+  //   3. Role affinity tags → look for open work in those tags that's unassigned
+  const candidates: Array<{ title: string; description: string; priority: string; tags: string[] }> = []
+
+  // 1. Stalled doing tasks → generate "unblock / continue" tasks
+  const stalledDoing = taskManager.listTasks({ status: 'doing', assignee: agent })
+  for (const t of stalledDoing.slice(0, 2)) {
+    const ageH = (now - new Date(t.updatedAt).getTime()) / 3_600_000
+    if (ageH > 24) {
+      candidates.push({
+        title: `Follow up on stalled task: ${t.title.slice(0, 60)}`,
+        description: `Task ${t.id} has been in "doing" for ${Math.round(ageH)}h with no updates. Review blockers, update status, or split into smaller steps.`,
+        priority: t.priority ?? 'P2',
+        tags: [...(role.affinityTags ?? []), 'continuity-generated'],
+      })
+    }
+  }
+
+  // 2. Role affinity tags → find unassigned todo tasks that match this agent's domain
+  if (candidates.length < count && role.affinityTags?.length > 0) {
+    const allTodo = taskManager.listTasks({ status: 'todo' })
+    const unassigned = allTodo.filter(t => !t.assignee || t.assignee === '')
+    for (const t of unassigned) {
+      const taskTags: string[] = (t.metadata as any)?.tags ?? []
+      const match = role.affinityTags.some(tag => taskTags.includes(tag))
+      if (match) {
+        candidates.push({
+          title: `Claim and start: ${t.title.slice(0, 60)}`,
+          description: `Unassigned task ${t.id} matches your role (${role.role}). Claim it, set up context, and begin work.`,
+          priority: t.priority ?? 'P2',
+          tags: [...(role.affinityTags ?? []), 'continuity-generated'],
+        })
+        if (candidates.length >= count) break
+      }
+    }
+  }
+
+  // 3. Generic role-based maintenance task if still short
+  if (candidates.length < count) {
+    candidates.push({
+      title: `${role.role} maintenance cycle — review open work and update task board`,
+      description: `Your queue is empty. As ${role.role}: review any open issues, check for unreported blockers, update stale task statuses, and identify next highest-value work in your domain (${(role.affinityTags ?? []).join(', ')}).`,
+      priority: 'P2',
+      tags: [...(role.affinityTags ?? []), 'continuity-generated', 'maintenance'],
+    })
+  }
+
+  // Create tasks, dedup by title prefix
+  const existingTitles = taskManager.listTasks({ assignee: agent, status: 'todo' }).map(t => t.title.slice(0, 40).toLowerCase())
+
+  for (const candidate of candidates.slice(0, count)) {
+    const titleKey = candidate.title.slice(0, 40).toLowerCase()
+    if (existingTitles.includes(titleKey)) continue // dedup guard
+
+    try {
+      const task = await taskManager.createTask({
+        title: candidate.title,
+        description: candidate.description,
+        assignee: agent,
+        reviewer: config.defaultReviewer,
+        status: 'todo',
+        priority: candidate.priority as 'P0' | 'P1' | 'P2' | 'P3',
+        done_criteria: ['Task reviewed and either completed, re-scoped, or handed off with clear next steps'],
+        createdBy: 'continuity-loop',
+        metadata: {
+          source: 'continuity-loop',
+          generated_at: now,
+          generated_reason: 'role-scoped-fallback',
+          tags: candidate.tags,
+        },
+      })
+      stats.insightsPromoted++ // reuse counter — represents "auto-generated" broadly
+      const action: ContinuityAction = {
+        id: `cl-scoped-${agent}-${task.id}-${now}`,
+        kind: 'queue-replenish',
+        agent,
+        detail: `Generated scoped task from role "${role.role}" (affinity: ${(role.affinityTags ?? []).join(', ')}): "${task.title}"`,
+        taskId: task.id,
+        timestamp: now,
+      }
+      recordAction(action)
+      actions.push(action)
+    } catch (err) {
+      console.warn(`[ContinuityLoop] Failed to generate scoped task for ${agent}:`, err)
     }
   }
 
