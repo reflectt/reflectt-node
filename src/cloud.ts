@@ -26,6 +26,7 @@ import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
+import { getPendingFingerprints, getDeployTransition, getDeployInfo } from './fingerprint.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -710,6 +711,10 @@ async function sendHeartbeat(): Promise<void> {
       hostType: config.hostType,
       uptimeMs: Date.now() - state.startedAt,
     },
+    // Called unconditionally every heartbeat cycle (not conditionally) to ensure
+    // predictable window reset. Cloud ingestion live via PR #722 (reflectt-cloud).
+    errorFingerprints: getPendingFingerprints(state.hostId, getDeployInfo()),
+    deployTransition: getDeployTransition(state.hostId, getDeployInfo()),
   })
 
   if (result.success || result.data) {
