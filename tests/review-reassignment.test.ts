@@ -12,6 +12,7 @@ function seedTask(overrides: {
   assignee?: string
   reviewer?: string
   entered_validating_at?: number
+  metadata?: Record<string, unknown>
 } = {}) {
   const db = getDb()
   const id = overrides.id || uid()
@@ -21,6 +22,7 @@ function seedTask(overrides: {
     entered_validating_at: enteredAt,
     artifact_path: 'process/test-artifact.md', // required by validating lifecycle gate
     eta: '~1h',
+    ...(overrides.metadata || {}),
   })
   const doneCriteria = JSON.stringify(['Test criteria'])
 
@@ -72,6 +74,32 @@ describe('Review SLA auto-reassignment', () => {
 
     const after = taskManager.getTask(taskId)
     expect(after?.reviewer).not.toBe('sage')
+    cleanupTask(taskId)
+  })
+
+  it('does not reassign when reviewer_decision exists, even if review_state is missing', async () => {
+    const taskId = seedTask({
+      reviewer: 'sage',
+      assignee: 'link',
+      metadata: {
+        reviewer_decision: {
+          decision: 'rejected',
+          reviewer: 'sage',
+          decidedAt: Date.now() - 9 * 60 * 60 * 1000,
+          comment: 'Needs changes',
+        },
+      },
+    })
+    createdIds.push(taskId)
+
+    presenceManager.updatePresence('agent-3', 'idle')
+
+    const result = await worker.tick({ dryRun: false, force: true })
+    const actions = result.actions.filter(a => a.kind === 'review-reassign' && a.taskId === taskId)
+    expect(actions.length).toBe(0)
+
+    const after = taskManager.getTask(taskId)
+    expect(after?.reviewer).toBe('sage')
     cleanupTask(taskId)
   })
 

@@ -23,6 +23,7 @@ import { suggestReviewer, getAgentRoles } from './assignment.js'
 import type { Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
 import { recordSystemLoopTick } from './system-loop-state.js'
+import { isWaitingOnAuthor } from './review-state.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -723,12 +724,9 @@ export class BoardHealthWorker {
       const meta = (task.metadata || {}) as Record<string, unknown>
 
       // ── Skip tasks where reviewer has already acted ──
-      // If review_state is 'needs_author', the ball is with the assignee, not the reviewer.
-      // If reviewer_decision exists, the reviewer has already made a decision (approved/rejected).
-      // In either case, SLA breach should not page the reviewer.
-      const reviewState = typeof meta.review_state === 'string' ? meta.review_state : ''
-      const reviewerDecision = meta.reviewer_decision
-      if (reviewState === 'needs_author' || reviewerDecision != null) continue
+      // Canonical precedence rule: reviewer_decision suppresses reviewer-facing
+      // SLA paging even when review_state was not populated.
+      if (isWaitingOnAuthor(meta)) continue
 
       const reviewEnteredAt = normalizeEpochMs((meta as any).entered_validating_at) || (task.updatedAt ?? task.createdAt)
       const reviewLastActivityAt = normalizeEpochMs((meta as any).review_last_activity_at) || reviewEnteredAt

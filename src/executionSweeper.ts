@@ -43,6 +43,7 @@ async function sendAlertWithPreflight(
 }
 import { msToMinutes, formatDuration } from './format-duration.js'
 import { suggestReviewer } from './assignment.js'
+import { isWaitingOnAuthor } from './review-state.js'
 import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 
 // ── Live PR State Check ────────────────────────────────────────────────────
@@ -438,9 +439,9 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
     }
 
     // Skip tasks where reviewer has already acted — ball is with the author.
-    // If review_state is 'needs_author' or reviewer_decision exists, the reviewer
-    // has done their part. SLA alerts/reassignment should not target the reviewer.
-    if (reviewState === 'needs_author' || meta.reviewer_decision != null) continue
+    // Once reviewer_decision exists, reviewer-facing SLA paging stops even if
+    // review_state was not set by the caller.
+    if (isWaitingOnAuthor(meta)) continue
 
     const enteredAt = (meta.entered_validating_at as number) || task.updatedAt
     const lastActivity = (meta.review_last_activity_at as number) || enteredAt
@@ -654,8 +655,7 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
   for (const task of validating) {
     const meta = (task.metadata || {}) as Record<string, unknown>
     // Skip tasks where reviewer already acted — ball is with author, not a drift issue
-    const driftReviewState = meta.review_state as string | undefined
-    if (driftReviewState === 'needs_author' || meta.reviewer_decision != null) continue
+    if (isWaitingOnAuthor(meta)) continue
 
     if (meta.pr_merged && task.status === 'validating') {
       const mergedAt = (meta.pr_merged_at as number) || task.updatedAt
@@ -927,7 +927,7 @@ export function generateDriftReport(): DriftReport {
 
     // Skip tasks where reviewer has already acted — these are waiting on author, not reviewer.
     const reviewState = meta.review_state as string | undefined
-    if (reviewState === 'needs_author' || meta.reviewer_decision != null) {
+    if (isWaitingOnAuthor(meta)) {
       cleanCount++
       validatingEntries.push({
         taskId: task.id,
