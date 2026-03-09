@@ -1,6 +1,38 @@
 // Tests for usage tracking + cost guardrails
 import { describe, it, expect, beforeAll } from 'vitest'
 import Fastify from 'fastify'
+import { estimateCost } from '../src/usage-tracking.js'
+
+describe('estimateCost', () => {
+  it('prices gpt-5.4 correctly', () => {
+    const cost = estimateCost('gpt-5.4', 1_000_000, 1_000_000)
+    expect(cost).toBeCloseTo(2.5 + 10.0, 2)
+  })
+
+  it('prices provider-prefixed gpt-5.4', () => {
+    const cost = estimateCost('openai-codex/gpt-5.4', 1_000_000, 0)
+    expect(cost).toBeCloseTo(2.5, 2)
+  })
+
+  it('prices claude-sonnet-4-6 correctly', () => {
+    const cost = estimateCost('claude-sonnet-4-6', 1_000_000, 1_000_000)
+    expect(cost).toBeCloseTo(3.0 + 15.0, 2)
+  })
+
+  it('prices provider-prefixed anthropic model', () => {
+    const cost = estimateCost('anthropic/claude-opus-4-6', 1_000_000, 0)
+    expect(cost).toBeCloseTo(15.0, 2)
+  })
+
+  it('uses conservative default for unknown model', () => {
+    const cost = estimateCost('totally-unknown-model', 1_000_000, 1_000_000)
+    expect(cost).toBeCloseTo(5.0 + 20.0, 2)
+  })
+
+  it('returns 0 for zero tokens', () => {
+    expect(estimateCost('gpt-5.4', 0, 0)).toBe(0)
+  })
+})
 
 describe('Usage Tracking API', () => {
   let app: ReturnType<typeof Fastify>
