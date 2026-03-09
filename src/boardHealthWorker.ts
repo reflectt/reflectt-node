@@ -92,6 +92,13 @@ export interface BoardHealthWorkerConfig {
   reviewSlaThresholdMin: number
   /** Fallback reviewer when no active agent is available (default: 'ryan') */
   reviewEscalationTarget: string
+  /**
+   * Post-restart quiet window in milliseconds (default: 5 min).
+   * Ready-queue alerts are suppressed for this duration after process start
+   * to give the continuity loop time to replenish queues before watchdog fires.
+   * Set to 0 in tests that need immediate breach detection.
+   */
+  restartQuietWindowMs: number
 }
 
 const DEFAULT_CONFIG: BoardHealthWorkerConfig = {
@@ -109,6 +116,7 @@ const DEFAULT_CONFIG: BoardHealthWorkerConfig = {
   inactiveAgentThresholdMin: 1440,   // 24 hours
   reviewSlaThresholdMin: 480,        // 8 hours
   reviewEscalationTarget: 'ryan',
+  restartQuietWindowMs: 5 * 60_000, // 5 minutes — suppress post-restart thundering herd
 }
 
 // ── Worker ─────────────────────────────────────────────────────────────────
@@ -486,6 +494,18 @@ export class BoardHealthWorker {
   /** Track when each agent's queue first went empty (for idle escalation) */
   private idleQueueSince: Record<string, number> = {}
 
+  /**
+   * Process start timestamp — used to enforce a post-restart quiet window.
+   * For the first `restartQuietWindowMs` after startup, ready-queue alerts are
+   * suppressed so the continuity loop has time to replenish queues before any
+   * watchdog fires. Prevents thundering-herd: without this, all agents with
+   * expired cooldowns (lastAlertAt = 0) fire simultaneously on the first sweep.
+   *
+   * Tests that need immediate breach detection should set restartQuietWindowMs: 0
+   * in the constructor config.
+   */
+  private readonly startedAt = Date.now()
+
   private async checkReadyQueueFloor(now: number, dryRun: boolean): Promise<PolicyAction[]> {
     const policy = policyManager.get()
     const rqf = policy.readyQueueFloor
@@ -530,7 +550,13 @@ export class BoardHealthWorker {
       const cooldownMs = (rqf.cooldownMin || 30) * 60_000
 
       // Ready-queue floor check (breach vs info)
-      if (belowFloor && now - lastAlert > cooldownMs) {
+      // Post-restart quiet window: suppress alerts for restartQuietWindowMs after startup.
+      // Prevents thundering-herd — all agents with no prior alert record (lastAlertAt=0)
+      // would otherwise fire simultaneously on the first post-restart sweep.
+      // restartQuietWindowMs can be set to 0 in tests for immediate breach detection.
+      const inStartupQuiet = lastAlert === 0 && (now - this.startedAt) < this.config.restartQuietWindowMs
+
+      if (belowFloor && now - lastAlert > cooldownMs && !inStartupQuiet) {
         const deficit = rqf.minReady - readyCount
 
         // State fingerprint: suppress if identical to last alert
