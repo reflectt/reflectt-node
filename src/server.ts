@@ -96,6 +96,7 @@ import { createGitHubIdentityProvider } from './github-identity.js'
 import { getProvisioningManager } from './provisioning.js'
 import { getWebhookDeliveryManager } from './webhooks.js'
 import { enrichWebhookPayload } from './github-webhook-attribution.js'
+import { formatGitHubEvent } from './github-webhook-chat.js'
 import { exportBundle, importBundle } from './portability.js'
 import { getNotificationManager } from './notifications.js'
 import { getConnectivityManager } from './connectivity.js'
@@ -12360,6 +12361,20 @@ If your heartbeat shows **no active task** and **no next task**:
         },
       })
       events.push(event)
+    }
+
+    // Post GitHub events to the 'github' chat channel with remapped mentions
+    if (provider === 'github') {
+      const ghEventType = (request.headers['x-github-event'] as string) || eventType
+      const chatMessage = formatGitHubEvent(ghEventType, body)
+      if (chatMessage) {
+        chatManager.sendMessage({
+          from: 'github',
+          content: chatMessage,
+          channel: 'github',
+          metadata: { source: 'github-webhook', eventType: ghEventType, delivery: request.headers['x-github-delivery'] },
+        }).catch(() => {}) // non-blocking
+      }
     }
 
     reply.code(202)
