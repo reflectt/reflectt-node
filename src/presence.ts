@@ -60,7 +60,7 @@ interface DailyActivity {
   session_ends: number[]
 }
 
-class PresenceManager {
+export class PresenceManager {
   private presence = new Map<string, AgentPresence>()
   private activity = new Map<string, DailyActivity>() // agent -> today's activity
   private expiryCheckInterval?: NodeJS.Timeout
@@ -140,10 +140,47 @@ class PresenceManager {
     }
   }
 
+  private lookupTaskForStatus(agent: string, status: PresenceStatus): { id: string; activityAt: number } | null {
+    if (!agent) return null
+
+    const taskStatus = status === 'blocked'
+      ? 'blocked'
+      : status === 'reviewing'
+        ? 'validating'
+        : status === 'working'
+          ? 'doing'
+          : null
+
+    if (!taskStatus) return null
+
+    try {
+      const db = getDb()
+      const row = db.prepare(
+        `SELECT id, updated_at, created_at
+         FROM tasks
+         WHERE assignee = ? AND status = ?
+         ORDER BY COALESCE(updated_at, created_at, 0) DESC
+         LIMIT 1`
+      ).get(agent, taskStatus) as { id: string; updated_at?: number | null; created_at?: number | null } | undefined
+
+      if (!row?.id) return null
+      return {
+        id: row.id,
+        activityAt: Number(row.updated_at || row.created_at || Date.now()),
+      }
+    } catch {
+      return null
+    }
+  }
+
   /**
    * Seed presence from recent chat/task activity on startup.
    * Prevents the cold-start problem where heartbeat sends empty agents
    * to cloud, making the sidebar show "No agents online".
+   *
+   * Important: if an agent already has a doing task in SQLite, hydrate that
+   * task into presence immediately so restart does not make active work look
+   * dropped/idle before the agent posts again.
    */
   private seedPresenceFromRecentActivity(): void {
     try {
@@ -156,37 +193,72 @@ class PresenceManager {
         'SELECT DISTINCT "from" as agent FROM chat_messages WHERE timestamp > ? AND "from" NOT IN (\'system\', \'user\')'
       ).all(now - recentWindow) as Array<{ agent: string }>
 
-      // Agents with recent task updates (assignees of doing tasks)
-      const taskAgents = db.prepare(
-        'SELECT DISTINCT assignee as agent FROM tasks WHERE status = \'doing\' AND assignee IS NOT NULL AND assignee != \'\''
-      ).all() as Array<{ agent: string }>
+      // Latest doing task per assignee — source of truth for active work continuity.
+      const doingTaskRows = db.prepare(
+        `SELECT assignee as agent, id, updated_at, created_at
+         FROM tasks
+         WHERE status = 'doing' AND assignee IS NOT NULL AND assignee != ''
+         ORDER BY COALESCE(updated_at, created_at, 0) DESC`
+      ).all() as Array<{ agent: string; id: string; updated_at?: number | null; created_at?: number | null }>
 
       // Build set of known agents from TEAM-ROLES registry to prevent cross-node leakage
       const knownAgents = new Set(getAgentRoles().map(r => r.name.toLowerCase()))
 
-      const agents = new Set<string>()
-      for (const row of [...chatAgents, ...taskAgents]) {
+      const hasKnownAgent = (name: string): boolean => {
+        return knownAgents.size === 0 || knownAgents.has(name)
+      }
+
+      const taskSeedByAgent = new Map<string, { id: string; activityAt: number }>()
+      for (const row of doingTaskRows) {
         const name = (row.agent || '').toLowerCase().trim()
-        // Skip system/email senders, empty names, and agents not in registry
-        if (name && !name.startsWith('email:') && name !== 'system' && name !== 'user') {
-          // Only seed agents known to this node's TEAM-ROLES registry
-          if (knownAgents.size === 0 || knownAgents.has(name)) {
-            agents.add(name)
-          }
+        // Active task rows are already local node state. Keep the system/email
+        // guards, but do not require TEAM-ROLES membership here or restart
+        // continuity breaks for valid assignees before roster sync catches up.
+        if (!name || name.startsWith('email:') || name === 'system' || name === 'user') {
+          continue
         }
+        if (!taskSeedByAgent.has(name)) {
+          taskSeedByAgent.set(name, {
+            id: row.id,
+            activityAt: Number(row.updated_at || row.created_at || now),
+          })
+        }
+      }
+
+      const agents = new Set<string>()
+      for (const row of chatAgents) {
+        const name = (row.agent || '').toLowerCase().trim()
+        if (name && !name.startsWith('email:') && name !== 'system' && name !== 'user' && hasKnownAgent(name)) {
+          agents.add(name)
+        }
+      }
+      for (const agent of taskSeedByAgent.keys()) {
+        agents.add(agent)
       }
 
       let seeded = 0
       for (const agent of agents) {
-        if (!this.presence.has(agent)) {
+        if (this.presence.has(agent)) continue
+
+        const activeTask = taskSeedByAgent.get(agent)
+        if (activeTask) {
+          this.presence.set(agent, {
+            agent,
+            status: 'working',
+            task: activeTask.id,
+            since: activeTask.activityAt,
+            lastUpdate: activeTask.activityAt,
+            last_active: activeTask.activityAt,
+          })
+        } else {
           this.presence.set(agent, {
             agent,
             status: 'idle',
             since: now,
             lastUpdate: now,
           })
-          seeded++
         }
+        seeded++
       }
 
       if (seeded > 0) {
@@ -294,19 +366,35 @@ class PresenceManager {
   }
 
   /**
-   * Update agent presence
+   * Update agent presence.
+   *
+   * task semantics:
+   * - string => set explicit task pointer
+   * - null   => clear task pointer
+   * - undefined => preserve existing task pointer; if none exists and the new
+   *   status implies active work, hydrate from the current board row
    */
-  updatePresence(agent: string, status: PresenceStatus, task?: string, since?: number, updateActivity = true): AgentPresence {
+  updatePresence(agent: string, status: PresenceStatus, task?: string | null, since?: number, updateActivity = true): AgentPresence {
     const now = Date.now()
     const existing = this.presence.get(agent)
-    
+    const explicitTask = typeof task === 'string' ? task.trim() : task
+    const hydratedTask = explicitTask === undefined && !existing?.task
+      ? this.lookupTaskForStatus(agent, status)
+      : null
+
+    const resolvedTask = explicitTask === null
+      ? undefined
+      : explicitTask && explicitTask.length > 0
+        ? explicitTask
+        : existing?.task || hydratedTask?.id
+
     const presence: AgentPresence = {
       agent,
       status,
-      task,
-      since: since || now,
+      task: resolvedTask,
+      since: since || existing?.since || hydratedTask?.activityAt || now,
       lastUpdate: now,
-      last_active: existing?.last_active || now,
+      last_active: existing?.last_active || hydratedTask?.activityAt || now,
     }
 
     this.presence.set(agent, presence)
@@ -527,6 +615,11 @@ class PresenceManager {
     }
     
     return activities.sort((a, b) => b.last_active - a.last_active)
+  }
+
+  clearAll(): void {
+    this.presence.clear()
+    this.activity.clear()
   }
 
   /**
