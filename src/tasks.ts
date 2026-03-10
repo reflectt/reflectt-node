@@ -14,6 +14,7 @@ import { getDb, importJsonlIfNeeded, safeJsonStringify, safeJsonParse } from './
 import { isTestHarnessTask, TEST_TASK_EXCLUDE_SQL } from './test-task-filter.js'
 import { assertDuplicateClosureHasCanonicalRefs } from './duplicateClosureGuard.js'
 import { getAgentAliases } from './assignment.js'
+import { getAgentLane } from './lane-config.js'
 import type Database from 'better-sqlite3'
 
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
@@ -1826,6 +1827,53 @@ class TaskManager {
       "SELECT * FROM tasks WHERE status = ? AND (assignee IS NULL OR TRIM(assignee) = '' OR LOWER(assignee) = 'unassigned')"
     ).all('todo') as TaskRow[]
     let tasks = todoUnassignedRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t))
+
+    // Filter out tasks with a recent handoff to another agent.
+    // If metadata.last_transition.handoff_to exists and points to a different agent,
+    // this task was explicitly routed away and should not be pulled by someone else.
+    if (agent) {
+      const requestingNames = new Set(getAgentAliases(agent))
+      tasks = tasks.filter(t => {
+        const meta = t.metadata as Record<string, any> | undefined
+        const handoffTo = meta?.last_transition?.handoff_to || meta?.transition?.handoff_to
+        if (!handoffTo || typeof handoffTo !== 'string') return true // no handoff — anyone can pull
+        return requestingNames.has(handoffTo.toLowerCase()) // only the handoff target can pull
+      })
+    }
+
+    // Lane-aware filtering: prevent cross-lane task pulling.
+    // If the requesting agent is in a lane, filter out unassigned tasks that have
+    // a previous assignee in a DIFFERENT lane. This prevents idle agents from
+    // pulling work that belongs to another lane's domain.
+    if (agent) {
+      // getAgentLane imported at top of file
+      const requestingLane = getAgentLane(agent)
+      if (requestingLane) {
+        // Lane-neutral creators: system processes that create tasks for any lane
+        const laneNeutralCreators = new Set(['system', 'insight-bridge', 'insight-task-bridge', 'sweeper', 'ryan'])
+
+        tasks = tasks.filter(t => {
+          const meta = t.metadata as Record<string, any> | undefined
+
+          // Signal 1: explicit previous assignee (strongest — task was actively worked by someone)
+          const prevAssignee = meta?.previous_assignee || meta?.last_transition?.from_assignee
+          if (prevAssignee && typeof prevAssignee === 'string') {
+            const prevLane = getAgentLane(prevAssignee.toLowerCase())
+            if (prevLane && prevLane.name !== requestingLane.name) return false
+          }
+
+          // Signal 2: createdBy agent in another lane (tasks created by an agent
+          // are usually intended for their lane, unless created by system processes)
+          const createdBy = t.createdBy ? t.createdBy.toLowerCase() : null
+          if (createdBy && !laneNeutralCreators.has(createdBy)) {
+            const creatorLane = getAgentLane(createdBy)
+            if (creatorLane && creatorLane.name !== requestingLane.name) return false
+          }
+
+          return true // no lane conflict — anyone can pull
+        })
+      }
+    }
 
     if (agent) {
       const agentNames = getAgentAliases(agent)
