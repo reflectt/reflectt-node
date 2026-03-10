@@ -540,19 +540,44 @@ async function main() {
       const { getAgentRoles } = await import('./assignment.js')
       const { chatManager } = await import('./chat.js')
       const { presenceManager } = await import('./presence.js')
+      const { getDb } = await import('./db.js')
       const agents = getAgentRoles()
       if (agents.length > 0) {
-        // Seed presence so idle-nudge system has agents to evaluate
-        for (const agent of agents) {
-          presenceManager.updatePresence(agent.name, 'idle')
+        // 60-second dedup guard: skip if a broadcast was sent within the last 60s
+        const BROADCAST_DEDUP_WINDOW_MS = 60_000
+        const db = getDb()
+        const recentBroadcast = db.prepare(
+          "SELECT 1 FROM chat_messages WHERE sender = 'system' AND content LIKE '%Server restarted%' AND timestamp > ? LIMIT 1",
+        ).get(Date.now() - BROADCAST_DEDUP_WINDOW_MS)
+        if (recentBroadcast) {
+          console.log('🔔 Auto-wake: skipped (duplicate within 60s)')
+        } else {
+          // Seed presence so idle-nudge system has agents to evaluate
+          for (const agent of agents) {
+            presenceManager.updatePresence(agent.name, 'idle')
+          }
+
+          // Read node identity for the broadcast
+          const pkg = await import('../package.json', { assert: { type: 'json' } }).catch(() => ({ default: { version: 'unknown' } }))
+          const version = pkg.default.version
+          let nodeName = process.env.REFLECTT_HOST_NAME || 'unknown'
+          try {
+            const cfgPath = join(REFLECTT_HOME, 'config.json')
+            if (existsSync(cfgPath)) {
+              const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'))
+              nodeName = cfg?.cloud?.hostName || nodeName
+            }
+          } catch { /* non-blocking */ }
+
+          const ts = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+          const mentions = agents.map(a => `@${a.name}`).join(' ')
+          await chatManager.sendMessage({
+            from: 'system',
+            content: `${mentions} Server restarted. Resume your work.\n📍 ${nodeName} · v${version} · ${ts}`,
+            channel: 'general',
+          })
+          console.log(`🔔 Auto-wake: seeded presence + pinged ${agents.length} agents (${nodeName} v${version})`)
         }
-        const mentions = agents.map(a => `@${a.name}`).join(' ')
-        await chatManager.sendMessage({
-          from: 'system',
-          content: `${mentions} Server restarted. Resume your work.`,
-          channel: 'general',
-        })
-        console.log(`🔔 Auto-wake: seeded presence + pinged ${agents.length} agents`)
       }
     } catch (err) {
       console.warn(`⚠️  Auto-wake failed: ${(err as Error)?.message || err}`)
