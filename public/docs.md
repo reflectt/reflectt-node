@@ -205,6 +205,16 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/manage/logs` | Remote management: bounded log tail. Query: `level`, `since`, `limit`, `format=text`. Auth required. |
 | POST | `/manage/restart` | Remote management: graceful restart (Docker/systemd/CLI). Auth required. |
 | GET | `/manage/disk` | Remote management: data directory sizes. Auth required. |
+| GET | `/browser/config` | Browser capability configuration (max sessions, rate limits, viewport). |
+| POST | `/browser/sessions` | Create a new isolated browser session. Body: `{ agent, url?, headless?, viewport? }`. Returns session object. |
+| GET | `/browser/sessions` | List all browser sessions (active and recent). |
+| GET | `/browser/sessions/:id` | Get browser session by ID. |
+| DELETE | `/browser/sessions/:id` | Close and cleanup a browser session. |
+| POST | `/browser/sessions/:id/act` | Execute a natural language browser action. Body: `{ instruction }`. |
+| POST | `/browser/sessions/:id/extract` | Extract structured data from current page. Body: `{ instruction, schema? }`. |
+| POST | `/browser/sessions/:id/observe` | Discover available actions on current page. Body: `{ instruction }`. |
+| POST | `/browser/sessions/:id/navigate` | Navigate to a URL. Body: `{ url }`. |
+| GET | `/browser/sessions/:id/screenshot` | Take a screenshot of the current page. Returns `{ base64, mimeType }`. |
 | GET | `/capabilities` | Agent-facing endpoint discovery. Lists all endpoints grouped by purpose, compact support flags, and usage recommendations. |
 | GET | `/version` | Current version + latest available from GitHub releases. Includes `update_available` boolean. Caches GitHub check for 15 minutes. |
 | GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action. Supports `compact`. |
@@ -1064,6 +1074,45 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/manage/logs` | Bounded log tail. Query: `level` (error/warn/info), `since` (epoch ms), `limit` (max 200), `format=text` for plain text |
 | POST | `/manage/restart` | Graceful restart. Works with Docker, systemd, and reflectt CLI (PID file). Returns 501 if unsupported. |
 | GET | `/manage/disk` | Data directory sizes for capacity monitoring |
+
+### Browser Capability
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/browser/config` | Browser capability config (limits, viewport, idle timeout) |
+| POST | `/browser/sessions` | Create isolated browser session. Body: `{ agent, url?, headless?, viewport? }` |
+| GET | `/browser/sessions` | List all sessions |
+| GET | `/browser/sessions/:id` | Get session details |
+| DELETE | `/browser/sessions/:id` | Close session |
+| POST | `/browser/sessions/:id/act` | Natural language action. Body: `{ instruction }` |
+| POST | `/browser/sessions/:id/extract` | Extract data. Body: `{ instruction, schema? }` |
+| POST | `/browser/sessions/:id/observe` | Discover actions. Body: `{ instruction }` |
+| POST | `/browser/sessions/:id/navigate` | Go to URL. Body: `{ url }` |
+| GET | `/browser/sessions/:id/screenshot` | Screenshot as base64 PNG |
+
+**Example: Create session and act**
+
+```bash
+# Create a session
+SESSION=$(curl -s -X POST http://127.0.0.1:4445/browser/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"agent":"link","url":"https://example.com"}' | jq -r .id)
+
+# Act on the page
+curl -s -X POST "http://127.0.0.1:4445/browser/sessions/$SESSION/act" \
+  -H 'Content-Type: application/json' \
+  -d '{"instruction":"click the More Information link"}'
+
+# Extract data
+curl -s -X POST "http://127.0.0.1:4445/browser/sessions/$SESSION/extract" \
+  -H 'Content-Type: application/json' \
+  -d '{"instruction":"extract the main heading text"}'
+
+# Close when done
+curl -s -X DELETE "http://127.0.0.1:4445/browser/sessions/$SESSION"
+```
+
+Sessions auto-close after 5 minutes of inactivity. Max 3 concurrent sessions, 10 per agent per hour.
 
 ### Example: Check Remote Node Status
 
