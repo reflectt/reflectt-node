@@ -591,6 +591,11 @@ async function main() {
       stopConfigWatcher()
       stopCloudIntegration()
       stopTeamConfigLinter()
+      // Close any active browser sessions
+      try {
+        const { closeAllSessions } = await import('./capabilities/browser.js')
+        await closeAllSessions()
+      } catch { /* non-blocking */ }
       closeDb()
       releasePidLock(pidPath)
       await app.close()
