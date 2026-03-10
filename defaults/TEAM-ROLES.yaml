@@ -559,6 +559,31 @@ agents:
       - design
     wipCap: 1
 
+  - name: legal-counsel
+    role: legal-compliance
+    description: Legal review — privacy policies, terms of service, GDPR/CCPA, data retention, compliance PRs. Owns legal/compliance decisions autonomously; escalates to Kai only for major liability or vision conflicts. Never escalated to Ryan (investor, not approver).
+    affinityTags:
+      - legal
+      - compliance
+      - privacy
+      - terms
+      - gdpr
+      - ccpa
+      - data-retention
+    routingMode: opt-in
+    neverRouteUnlessLane: backoffice
+    alwaysRoute:
+      - legal
+      - privacy-policy
+      - terms-of-service
+      - compliance
+    neverRoute:
+      - backend
+      - frontend
+      - design
+      - security-review
+    wipCap: 1
+
   # EVI-Fly agents (enjoyvancouverisland.com)
   - name: evi-scout
     role: site-health
@@ -694,7 +719,7 @@ lanes:
     wipLimit: 1
 
   - name: backoffice
-    agents: [bookkeeper, taxwatch]
+    agents: [bookkeeper, taxwatch, legal-counsel]
     readyFloor: 1
     wipLimit: 1
 
