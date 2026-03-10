@@ -6373,7 +6373,9 @@ export async function createServer(): Promise<FastifyInstance> {
         || (data.metadata as Record<string, unknown> | undefined)?.skip_dedup === true
         || (data.metadata as Record<string, unknown> | undefined)?.is_test === true
       if (!skipDedup && data.assignee) {
-        const TASK_DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000 // 4 hours
+        // 60-second window targets gateway reconnect double-fire (typical gap: <10s)
+        // without blocking legitimate same-title task creation later in the day.
+        const TASK_DEDUP_WINDOW_MS = 60_000 // 60 seconds
         const cutoff = Date.now() - TASK_DEDUP_WINDOW_MS
         const normalizedTitle = data.title.trim().toLowerCase()
         const activeTasks = taskManager.listTasks({ includeTest: true }).filter(t =>
@@ -6383,16 +6385,15 @@ export async function createServer(): Promise<FastifyInstance> {
           && t.title.trim().toLowerCase() === normalizedTitle
         )
         if (activeTasks.length > 0) {
-          const existing = activeTasks[0]
-          reply.code(409)
+          // Return 200 with the existing task (collapse, not reject).
+          // Agents that create-on-reconnect receive a success response identical
+          // to what they'd get from a new creation — no retry loop triggered.
+          const existing = activeTasks[0]!
           return {
-            success: false,
-            error: 'Duplicate task',
-            code: 'DUPLICATE_TASK',
-            status: 409,
-            existing_id: existing.id,
-            existing_status: existing.status,
-            hint: `Task "${existing.title}" already exists for ${data.assignee} (${existing.id}, status: ${existing.status}). Created ${Math.round((Date.now() - existing.createdAt) / 60000)}m ago.`,
+            success: true,
+            task: existing,
+            deduplicated: true,
+            hint: `Duplicate suppressed — task "${existing.title}" already exists for ${data.assignee} (${existing.id}, status: ${existing.status}, created ${Math.round((Date.now() - existing.createdAt) / 1000)}s ago).`,
           }
         }
       }

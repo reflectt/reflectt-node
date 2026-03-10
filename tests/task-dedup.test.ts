@@ -37,15 +37,16 @@ describe('Task creation dedup', () => {
     expect(body.task.id).toBeTruthy()
   })
 
-  it('rejects identical task from same assignee within dedup window', async () => {
+  it('collapses identical task from same assignee within dedup window — returns 200 deduplicated', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/tasks',
       payload: BASE_TASK,
     })
-    expect(res.statusCode).toBe(409)
+    expect(res.statusCode).toBe(200)
     const body = JSON.parse(res.body)
-    expect(body.code).toBe('DUPLICATE_TASK')
+    expect(body.success).toBe(true)
+    expect(body.deduplicated).toBe(true)
     expect(body.hint).toContain('dedup-test-agent')
   })
 
@@ -80,6 +81,7 @@ describe('Task creation dedup', () => {
       url: '/tasks',
       payload: { ...BASE_TASK, assignee: 'case-agent', title: 'case test task' },
     })
-    expect(res2.statusCode).toBe(409)
+    expect(res2.statusCode).toBe(200)
+    expect(JSON.parse(res2.body).deduplicated).toBe(true)
   })
 })
