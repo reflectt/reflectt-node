@@ -31,6 +31,11 @@ const SSE_MAX_RETRY_MS = 30_000;        // cap at 30s
 const SSE_SOCKET_TIMEOUT_MS = 30_000;   // detect dead TCP after 30s silence
 const SSE_HEALTH_INTERVAL_MS = 15_000;  // health-check ping every 15s
 
+// Gateway restart notification: dedup window to prevent duplicate
+// system broadcasts when SSE reconnects rapidly (e.g. server flap).
+const RESTART_NOTIFY_DEDUP_MS = 60_000; // 60s
+let lastRestartNotifyAt = 0;
+
 const lastUpdateByAgent = new Map<string, number>();
 const lastEscalationAt = new Map<string, number>();
 const hasActiveTaskByAgent = new Map<string, { value: boolean; checkedAt: number }>();
@@ -245,6 +250,47 @@ async function hasActiveTask(url: string, agent: string, now = Date.now()): Prom
   }
 }
 
+// --- Gateway restart notification ---
+
+/**
+ * Notify agents and suppress alerts after SSE (re)connect.
+ *
+ * 1. POST /board-health/quiet-window — suppress ready-queue alerts during reconnect
+ * 2. POST system message to #general @mentioning all registered agents
+ * 3. Dedup: skip if last notification was <60s ago (rapid reconnects)
+ */
+async function notifyGatewayRestart(url: string, log?: any): Promise<void> {
+  const now = Date.now();
+  if (now - lastRestartNotifyAt < RESTART_NOTIFY_DEDUP_MS) {
+    log?.info?.("[reflectt] Skipping restart notification — within dedup window");
+    return;
+  }
+  lastRestartNotifyAt = now;
+
+  // 1. Activate quiet window to suppress false-positive board health alerts
+  try {
+    await fetch(`${url}/board-health/quiet-window`, { method: "POST", signal: AbortSignal.timeout(5000) });
+    log?.info?.("[reflectt] Board health quiet window activated");
+  } catch (err) {
+    log?.warn?.(`[reflectt] Failed to activate quiet window: ${err}`);
+  }
+
+  // 2. Broadcast system notification to all registered agents
+  if (WATCHED_AGENTS.length === 0) {
+    log?.warn?.("[reflectt] No agents in roster — skipping restart broadcast");
+    return;
+  }
+
+  const mentions = WATCHED_AGENTS.map(a => `@${a}`).join(" ");
+  const content = `🔗 [Gateway Restart] OpenClaw gateway reconnected to reflectt-node. ${mentions} — check your boards.`;
+  try {
+    await postMessage(url, "system", "general", content);
+    log?.info?.(`[reflectt] Restart notification sent to ${WATCHED_AGENTS.length} agents`);
+  } catch (err) {
+    log?.warn?.(`[reflectt] Failed to send restart notification: ${err}`);
+  }
+}
+
 // --- Dedup ---
 const seen = new Set<string>();
 function dedup(id: string): boolean {
@@ -316,6 +362,11 @@ function connectSSE(url: string, account: ReflecttAccount, ctx: any) {
     // Re-seed agent activity after reconnect
     seedAgentActivity(url, ctx.log).catch((err) => {
       ctx.log?.warn?.(`[reflectt] post-reconnect seed failed: ${err}`);
+    });
+
+    // Notify agents and activate quiet window on gateway (re)connect
+    notifyGatewayRestart(url, ctx.log).catch((err) => {
+      ctx.log?.warn?.(`[reflectt] restart notification failed: ${err}`);
     });
 
     // NOTE: No socket timeout here — SSE streams are idle by nature.
