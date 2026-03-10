@@ -181,6 +181,20 @@ describe('Health', () => {
     expect(Array.isArray(body.assignmentRoleNames)).toBe(true)
   })
 
+  it('GET /health/team includes host-local scope metadata', async () => {
+    const { status, body } = await req('GET', '/health/team')
+    expect(status).toBe(200)
+    expect(body.scope).toBeDefined()
+    expect(body.scope.kind).toBe('host-local')
+    expect(typeof body.scope.hostName).toBe('string')
+    expect(body.scope.hostName.length).toBeGreaterThan(0)
+    expect(typeof body.scope.label).toBe('string')
+    expect(body.scope.label).toContain(body.scope.hostName)
+    expect(typeof body.scope.message).toBe('string')
+    expect(body.scope.message).toContain('host-local')
+    expect(body.scope.orgHealthUrl === null || typeof body.scope.orgHealthUrl === 'string').toBe(true)
+  })
+
   it('GET /health/team includes active task title + PR link for each agent when available', async () => {
     const prLink = 'https://github.com/reflectt/reflectt-node/pull/59'
     const agentName = `health-agent-${Date.now()}`
