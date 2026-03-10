@@ -12,6 +12,7 @@
  */
 
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { hostname } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
@@ -22,6 +23,7 @@ import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNu
 import { getDb } from './db.js'
 import { policyManager } from './policy.js'
 import { recordSystemLoopTick } from './system-loop-state.js'
+import { isCloudConfigured } from './cloud.js'
 
 /**
  * Validate a task timestamp is within reasonable bounds.
@@ -64,6 +66,7 @@ export interface StaleDoingTask {
 
 export interface TeamHealthMetrics {
   timestamp: number
+  scope: TeamHealthScope
   agents: AgentHealthStatus[]
   blockers: BlockerAlert[]
   overlaps: OverlapAlert[]
@@ -75,6 +78,14 @@ export interface TeamHealthMetrics {
     count: number
     tasks: StaleDoingTask[]
   }
+}
+
+export interface TeamHealthScope {
+  kind: 'host-local'
+  hostName: string
+  label: string
+  message: string
+  orgHealthUrl: string | null
 }
 
 export type ActiveLane = 'doing' | 'blocked' | 'validating' | 'queue-clear' | 'offline'
@@ -103,6 +114,23 @@ export function computeActiveLane(
   if (lastSeenMs !== undefined && lastSeenMs > 0 && (now - lastSeenMs) >= offlineThresholdMs) return 'offline'
 
   return 'queue-clear'
+}
+
+export function getTeamHealthScope(): TeamHealthScope {
+  const hostName = process.env.REFLECTT_HOST_NAME || hostname()
+  const cloudConfigured = isCloudConfigured()
+  const cloudBaseUrl = (process.env.REFLECTT_CLOUD_URL || 'https://app.reflectt.ai').replace(/\/+$/, '')
+  const orgHealthUrl = cloudConfigured ? `${cloudBaseUrl}/org-health` : null
+
+  return {
+    kind: 'host-local',
+    hostName,
+    label: `Host-local health (${hostName})`,
+    message: orgHealthUrl
+      ? `This /health/team snapshot is host-local for ${hostName}. Use Reflectt Cloud org-health for cross-host truth.`
+      : `This /health/team snapshot is host-local for ${hostName}. Cross-host org-health lives in Reflectt Cloud when configured.`,
+    orgHealthUrl,
+  }
 }
 
 export interface AgentHealthSummaryRow {
@@ -359,6 +387,7 @@ class TeamHealthMonitor {
 
     return {
       timestamp: now,
+      scope: getTeamHealthScope(),
       agents,
       blockers,
       overlaps,

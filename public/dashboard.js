@@ -1457,6 +1457,7 @@ async function loadHealth() {
     const team = health.team || { blockers: [], overlaps: [], compliance: null, agents: [] };
     const agentsSummary = health.agentsSummary || { agents: [] };
     const idleNudgeDebug = health.idleNudgeDebug || null;
+    const scope = team.scope || null;
 
     healthAgentMap = new Map((team.agents || []).map(a => [String(a.agent || '').toLowerCase(), a]));
     const workflow = health.workflow || { agents: [] };
@@ -1524,6 +1525,16 @@ async function loadHealth() {
 
     const body = document.getElementById('health-body');
     let html = '';
+
+    if (scope) {
+      const orgHealthLink = scope.orgHealthUrl
+        ? ` <a href="${esc(scope.orgHealthUrl)}" target="_blank" rel="noopener">Open org-health</a>`
+        : '';
+      html += `<div class="blocker-item" style="border-left:4px solid var(--yellow);margin-bottom:12px">
+        <div class="blocker-agent">${esc(scope.label || 'Host-local health')}</div>
+        <div class="blocker-text">${esc(scope.message || '')}${orgHealthLink}</div>
+      </div>`;
+    }
 
     // Agent Health Grid
     if (displayAgents.length > 0) {
