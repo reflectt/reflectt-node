@@ -13496,5 +13496,99 @@ If your heartbeat shows **no active task** and **no next task**:
   // Start hourly auto-snapshot for alert-preflight daily metrics
   startAutoSnapshot()
 
+  // ─── Browser capability routes ───────────────────────────────────────────────
+  const browser = await import('./capabilities/browser.js')
+
+  app.get('/browser/config', async () => {
+    return browser.getBrowserConfig()
+  })
+
+  app.post('/browser/sessions', async (request, reply) => {
+    try {
+      const body = request.body as { agent?: string; url?: string; headless?: boolean; viewport?: { width: number; height: number } }
+      if (!body?.agent) return reply.code(400).send({ error: 'agent is required' })
+      const session = await browser.createSession({
+        agent: body.agent,
+        url: body.url,
+        headless: body.headless,
+        viewport: body.viewport,
+      })
+      const { _stagehand, _page, _idleTimer, ...safe } = session
+      return reply.code(201).send(safe)
+    } catch (err: any) {
+      const status = err.message?.includes('Max concurrent') || err.message?.includes('exceeded max') ? 429 : 500
+      return reply.code(status).send({ error: err.message })
+    }
+  })
+
+  app.get('/browser/sessions', async () => {
+    return { sessions: browser.listSessions() }
+  })
+
+  app.get<{ Params: { id: string } }>('/browser/sessions/:id', async (request, reply) => {
+    const session = browser.getSession(request.params.id)
+    if (!session) return reply.code(404).send({ error: 'Session not found' })
+    const { _stagehand, _page, _idleTimer, ...safe } = session
+    return safe
+  })
+
+  app.delete<{ Params: { id: string } }>('/browser/sessions/:id', async (request, reply) => {
+    await browser.closeSession(request.params.id)
+    return { ok: true }
+  })
+
+  app.post<{ Params: { id: string } }>('/browser/sessions/:id/act', async (request, reply) => {
+    try {
+      const body = request.body as { instruction?: string }
+      if (!body?.instruction) return reply.code(400).send({ error: 'instruction is required' })
+      const result = await browser.act(request.params.id, body.instruction)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
+  app.post<{ Params: { id: string } }>('/browser/sessions/:id/extract', async (request, reply) => {
+    try {
+      const body = request.body as { instruction?: string; schema?: unknown }
+      if (!body?.instruction) return reply.code(400).send({ error: 'instruction is required' })
+      const result = await browser.extract(request.params.id, body.instruction, body.schema)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
+  app.post<{ Params: { id: string } }>('/browser/sessions/:id/observe', async (request, reply) => {
+    try {
+      const body = request.body as { instruction?: string }
+      if (!body?.instruction) return reply.code(400).send({ error: 'instruction is required' })
+      const result = await browser.observe(request.params.id, body.instruction)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
+  app.post<{ Params: { id: string } }>('/browser/sessions/:id/navigate', async (request, reply) => {
+    try {
+      const body = request.body as { url?: string }
+      if (!body?.url) return reply.code(400).send({ error: 'url is required' })
+      const result = await browser.navigate(request.params.id, body.url)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
+  app.get<{ Params: { id: string } }>('/browser/sessions/:id/screenshot', async (request, reply) => {
+    try {
+      const result = await browser.screenshot(request.params.id)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
   return app
 }
