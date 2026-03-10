@@ -709,6 +709,20 @@ async function sendHeartbeat(): Promise<void> {
         },
       }
     })(),
+    // requestCounts maps to HostRequestCountsV1 contract (PR #716, reflectt-cloud)
+    requestCounts: (() => {
+      const m = getRequestMetrics()
+      const windowMs = m.rolling.windowMinutes * 60 * 1000
+      const errorRatePct = m.rolling.requests > 0
+        ? (m.rolling.errors / m.rolling.requests) * 100
+        : 0
+      return {
+        total: m.rolling.requests,
+        errors: m.rolling.errors,
+        windowMs,
+        errorRatePct: Math.round(errorRatePct * 100) / 100,
+      }
+    })(),
     source: {
       hostId: state.hostId,
       hostName: config.hostName,
