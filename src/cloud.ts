@@ -100,6 +100,7 @@ interface CloudState {
   lastTaskSync: number | null
   lastChatSync: number | null
   lastCanvasSync: number | null
+  lastUsageSync: number | null
   errors: number
   running: boolean
   startedAt: number
@@ -200,6 +201,7 @@ let state: CloudState = {
   lastTaskSync: null,
   lastChatSync: null,
   lastCanvasSync: null,
+  lastUsageSync: null,
   errors: 0,
   running: false,
   startedAt: Date.now(),
@@ -277,6 +279,8 @@ export function getCloudStatus() {
     lastTaskSync: state.lastTaskSync,
     lastChatSync: state.lastChatSync,
     lastCanvasSync: state.lastCanvasSync,
+    lastUsageSync: state.lastUsageSync,
+    usageSyncErrors,
     errors: state.errors,
     uptimeMs: state.running ? Date.now() - state.startedAt : 0,
     syncHealth: {
@@ -1133,6 +1137,7 @@ async function syncUsage(): Promise<void> {
     )
 
     if (result.success) {
+      state.lastUsageSync = Date.now()
       if (usageSyncErrors > 0) {
         console.log(`☁️  [Usage] Sync recovered after ${usageSyncErrors} errors`)
         usageSyncErrors = 0
