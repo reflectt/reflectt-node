@@ -66,6 +66,13 @@ cd reflectt-node
 npm install && npm run build
 ```
 
+Copy `.env.example` to `.env` to configure the server (port, directories, API keys, OpenClaw integration). All variables have defaults — you only need to set what you want to change.
+
+```bash
+cp .env.example .env
+# Edit .env as needed, then:
+```
+
 ---
 
 ## Initialize and start
