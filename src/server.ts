@@ -6843,6 +6843,15 @@ export async function createServer(): Promise<FastifyInstance> {
     },
   )
 
+  app.post('/board-health/quiet-window', async () => {
+    boardHealthWorker.resetQuietWindow()
+    return {
+      success: true,
+      quietUntil: Date.now() + (boardHealthWorker.getStatus().config?.restartQuietWindowMs ?? 300_000),
+      message: 'Quiet window reset — ready-queue alerts suppressed for restart window',
+    }
+  })
+
   // ── Agent change feed ─────────────────────────────────────────────────
 
   app.get<{ Params: { agent: string }; Querystring: { since?: string; limit?: string; kinds?: string; includeGlobal?: string } }>(

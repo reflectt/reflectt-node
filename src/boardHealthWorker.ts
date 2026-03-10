@@ -174,6 +174,16 @@ export class BoardHealthWorker {
     }
   }
 
+  /**
+   * Reset the quiet window — suppresses ready-queue alerts for
+   * `restartQuietWindowMs` from now. Call when a gateway restart or
+   * reconnection is detected so agents have time to re-establish presence
+   * before idle alerts fire.
+   */
+  resetQuietWindow(): void {
+    this.lastQuietReset = Date.now()
+  }
+
   updateConfig(patch: Partial<BoardHealthWorkerConfig>): void {
     const wasEnabled = this.config.enabled
     this.config = { ...this.config, ...patch }
@@ -495,16 +505,19 @@ export class BoardHealthWorker {
   private idleQueueSince: Record<string, number> = {}
 
   /**
-   * Process start timestamp — used to enforce a post-restart quiet window.
-   * For the first `restartQuietWindowMs` after startup, ready-queue alerts are
-   * suppressed so the continuity loop has time to replenish queues before any
-   * watchdog fires. Prevents thundering-herd: without this, all agents with
-   * expired cooldowns (lastAlertAt = 0) fire simultaneously on the first sweep.
+   * Quiet-window anchor — used to enforce a post-restart quiet window.
+   * For the first `restartQuietWindowMs` after this timestamp, ready-queue
+   * alerts are suppressed so agents have time to reconnect and replenish queues.
+   *
+   * Initially set to process start (node restart). Also reset by
+   * `resetQuietWindow()` when an external event (e.g. gateway restart)
+   * warrants a fresh suppression window.
    *
    * Tests that need immediate breach detection should set restartQuietWindowMs: 0
    * in the constructor config.
    */
   private readonly startedAt = Date.now()
+  private lastQuietReset = Date.now()
 
   private async checkReadyQueueFloor(now: number, dryRun: boolean): Promise<PolicyAction[]> {
     const policy = policyManager.get()
@@ -554,7 +567,10 @@ export class BoardHealthWorker {
       // Prevents thundering-herd — all agents with no prior alert record (lastAlertAt=0)
       // would otherwise fire simultaneously on the first post-restart sweep.
       // restartQuietWindowMs can be set to 0 in tests for immediate breach detection.
-      const inStartupQuiet = lastAlert === 0 && (now - this.startedAt) < this.config.restartQuietWindowMs
+      // Quiet window: suppress alerts shortly after any restart (node start OR gateway reconnect).
+      // Uses the most recent of startedAt and lastQuietReset as the anchor.
+      const quietAnchor = Math.max(this.startedAt, this.lastQuietReset)
+      const inStartupQuiet = lastAlert === 0 && (now - quietAnchor) < this.config.restartQuietWindowMs
 
       if (belowFloor && now - lastAlert > cooldownMs && !inStartupQuiet) {
         const deficit = rqf.minReady - readyCount
