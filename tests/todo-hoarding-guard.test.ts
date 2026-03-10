@@ -5,6 +5,7 @@ import {
   claimTask,
   TODO_CAP,
   IDLE_THRESHOLD_MS,
+  STARTUP_GRACE_MS,
 } from '../src/todoHoardingGuard.js'
 import { taskManager } from '../src/tasks.js'
 
@@ -124,6 +125,90 @@ describe('todoHoardingGuard', () => {
         t.assignee?.toLowerCase() === 'dryagent',
       )
       expect(tasks).toHaveLength(5)
+    })
+  })
+
+  describe('Startup grace period', () => {
+    it('suppresses auto-unassign during grace period even when agent appears idle', async () => {
+      const now = Date.now()
+      // Create 5 todos with old updatedAt (agent appears idle for >30m)
+      for (let i = 0; i < 5; i++) {
+        const task = await taskManager.createTask({
+          title: `Grace task ${i}`,
+          assignee: 'graceAgent',
+          status: 'todo',
+          priority: 'P2',
+          done_criteria: ['test'],
+          createdBy: 'test',
+        })
+        // Force old updatedAt via direct DB
+        const { getDb } = await import('../src/db.js')
+        const db = getDb()
+        db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?')
+          .run(now - IDLE_THRESHOLD_MS - 60_000, task.id)
+      }
+
+      // Simulate: server just started (moduleLoadedAt = now), so we're in grace period
+      const result = await sweepTodoHoarding({
+        _nowOverride: now,
+        _moduleLoadedAtOverride: now - 1000, // 1s uptime — well within grace
+      })
+
+      // Rule A should NOT fire during grace period
+      expect(result.unassigned).toHaveLength(0)
+    })
+
+    it('allows auto-unassign after grace period expires', async () => {
+      const now = Date.now()
+      for (let i = 0; i < 5; i++) {
+        const task = await taskManager.createTask({
+          title: `Post-grace task ${i}`,
+          assignee: 'postGraceAgent',
+          status: 'todo',
+          priority: 'P2',
+          done_criteria: ['test'],
+          createdBy: 'test',
+        })
+        const { getDb } = await import('../src/db.js')
+        const db = getDb()
+        db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?')
+          .run(now - IDLE_THRESHOLD_MS - 60_000, task.id)
+      }
+
+      // Simulate: server started long ago (moduleLoadedAt = 20m ago), grace expired
+      const result = await sweepTodoHoarding({
+        _nowOverride: now,
+        _moduleLoadedAtOverride: now - STARTUP_GRACE_MS - 60_000, // well past grace
+      })
+
+      // Rule A SHOULD fire now — 5 todos, 0 doing, idle, past grace
+      expect(result.unassigned.length).toBeGreaterThan(0)
+      expect(result.unassigned.length).toBe(5 - TODO_CAP) // unassign overflow
+    })
+
+    it('still detects orphans during grace period (Rule B is read-only)', async () => {
+      const now = Date.now()
+      const task = await taskManager.createTask({
+        title: 'Orphan during grace',
+        assignee: 'orphanAgent',
+        status: 'todo',
+        priority: 'P2',
+        done_criteria: ['test'],
+        createdBy: 'test',
+      })
+      const { getDb } = await import('../src/db.js')
+      const db = getDb()
+      db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?')
+        .run(now - IDLE_THRESHOLD_MS - 60_000, task.id)
+
+      const result = await sweepTodoHoarding({
+        _nowOverride: now,
+        _moduleLoadedAtOverride: now - 1000, // in grace period
+      })
+
+      // Rule B (orphan detection) should still fire
+      const orphans = result.orphaned.filter(o => o.assignee === 'orphanagent')
+      expect(orphans).toHaveLength(1)
     })
   })
 
