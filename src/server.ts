@@ -7691,14 +7691,14 @@ export async function createServer(): Promise<FastifyInstance> {
       if (task.assignee) {
         if (parsed.status === 'done') {
           presenceManager.recordActivity(task.assignee, 'task_completed')
-          presenceManager.updatePresence(task.assignee, 'working')
+          presenceManager.updatePresence(task.assignee, 'working', null)
           trackTaskEvent('completed')
         } else if (parsed.status === 'doing') {
-          presenceManager.updatePresence(task.assignee, 'working')
+          presenceManager.updatePresence(task.assignee, 'working', task.id)
         } else if (parsed.status === 'blocked') {
-          presenceManager.updatePresence(task.assignee, 'blocked')
+          presenceManager.updatePresence(task.assignee, 'blocked', task.id)
         } else if (parsed.status === 'validating') {
-          presenceManager.updatePresence(task.assignee, 'reviewing')
+          presenceManager.updatePresence(task.assignee, 'reviewing', task.id)
         }
       }
 
@@ -11101,7 +11101,7 @@ If your heartbeat shows **no active task** and **no next task**:
   // Update agent presence
   app.post<{ Params: { agent: string } }>('/presence/:agent', async (request) => {
     try {
-      const body = request.body as { status: PresenceStatus; task?: string; since?: number }
+      const body = request.body as { status: PresenceStatus; task?: string | null; since?: number }
       
       if (!body.status) {
         return { success: false, error: 'status is required' }
