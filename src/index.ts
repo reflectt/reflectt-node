@@ -542,9 +542,13 @@ async function main() {
       const { presenceManager } = await import('./presence.js')
       const agents = getAgentRoles()
       if (agents.length > 0) {
-        // Seed presence so idle-nudge system has agents to evaluate
+        // Seed only agents with no restored presence. Do not clobber task-bound
+        // working/reviewing/blocked state that presence startup hydration restored.
         for (const agent of agents) {
-          presenceManager.updatePresence(agent.name, 'idle')
+          const existing = presenceManager.getPresence(agent.name)
+          if (!existing || existing.status === 'offline') {
+            presenceManager.updatePresence(agent.name, 'idle')
+          }
         }
         const mentions = agents.map(a => `@${a.name}`).join(' ')
         await chatManager.sendMessage({
@@ -552,7 +556,7 @@ async function main() {
           content: `${mentions} Server restarted. Resume your work.`,
           channel: 'general',
         })
-        console.log(`🔔 Auto-wake: seeded presence + pinged ${agents.length} agents`)
+        console.log(`🔔 Auto-wake: preserved active presence + pinged ${agents.length} agents`)
       }
     } catch (err) {
       console.warn(`⚠️  Auto-wake failed: ${(err as Error)?.message || err}`)

@@ -156,41 +156,85 @@ class PresenceManager {
         'SELECT DISTINCT "from" as agent FROM chat_messages WHERE timestamp > ? AND "from" NOT IN (\'system\', \'user\')'
       ).all(now - recentWindow) as Array<{ agent: string }>
 
-      // Agents with recent task updates (assignees of doing tasks)
-      const taskAgents = db.prepare(
-        'SELECT DISTINCT assignee as agent FROM tasks WHERE status = \'doing\' AND assignee IS NOT NULL AND assignee != \'\''
-      ).all() as Array<{ agent: string }>
+      // Active task holders should be restored into a task-bound presence state on startup.
+      // This prevents restart cold starts from looking like an empty queue / idle agent.
+      const activeTaskRows = db.prepare(`
+        SELECT assignee as agent, id as task_id, status, updated_at
+        FROM tasks
+        WHERE status IN ('doing', 'blocked', 'validating')
+          AND assignee IS NOT NULL
+          AND TRIM(assignee) != ''
+        ORDER BY updated_at DESC
+      `).all() as Array<{ agent: string; task_id: string; status: string; updated_at: number }>
 
       // Build set of known agents from TEAM-ROLES registry to prevent cross-node leakage
       const knownAgents = new Set(getAgentRoles().map(r => r.name.toLowerCase()))
+      const isKnownAgent = (name: string): boolean => knownAgents.size === 0 || knownAgents.has(name)
+
+      const activeTaskByAgent = new Map<string, { taskId: string; status: PresenceStatus; updatedAt: number }>()
+      const mapTaskStatusToPresence = (status: string): PresenceStatus => {
+        if (status === 'blocked') return 'blocked'
+        if (status === 'validating') return 'reviewing'
+        return 'working'
+      }
+
+      for (const row of activeTaskRows) {
+        const name = (row.agent || '').toLowerCase().trim()
+        if (!name || name.startsWith('email:') || name === 'system' || name === 'user') continue
+        if (!isKnownAgent(name)) continue
+        if (activeTaskByAgent.has(name)) continue
+
+        activeTaskByAgent.set(name, {
+          taskId: row.task_id,
+          status: mapTaskStatusToPresence(row.status),
+          updatedAt: row.updated_at,
+        })
+      }
 
       const agents = new Set<string>()
-      for (const row of [...chatAgents, ...taskAgents]) {
+      for (const row of chatAgents) {
         const name = (row.agent || '').toLowerCase().trim()
         // Skip system/email senders, empty names, and agents not in registry
-        if (name && !name.startsWith('email:') && name !== 'system' && name !== 'user') {
-          // Only seed agents known to this node's TEAM-ROLES registry
-          if (knownAgents.size === 0 || knownAgents.has(name)) {
-            agents.add(name)
-          }
+        if (name && !name.startsWith('email:') && name !== 'system' && name !== 'user' && isKnownAgent(name)) {
+          agents.add(name)
         }
+      }
+      for (const agent of activeTaskByAgent.keys()) {
+        agents.add(agent)
       }
 
       let seeded = 0
       for (const agent of agents) {
-        if (!this.presence.has(agent)) {
+        if (this.presence.has(agent)) continue
+
+        const activeTask = activeTaskByAgent.get(agent)
+        if (activeTask) {
+          this.presence.set(agent, {
+            agent,
+            status: activeTask.status,
+            task: activeTask.taskId,
+            since: activeTask.updatedAt,
+            // Treat restart hydration as fresh activity so watchdogs don't immediately
+            // decay or misclassify agents with surviving doing tasks.
+            lastUpdate: now,
+            last_active: now,
+          })
+        } else {
           this.presence.set(agent, {
             agent,
             status: 'idle',
             since: now,
             lastUpdate: now,
+            last_active: now,
           })
-          seeded++
         }
+        seeded++
       }
 
       if (seeded > 0) {
-        console.log(`[Presence] Seeded ${seeded} agent(s) from recent activity: ${[...agents].join(', ')}`)
+        const restoredTasks = Array.from(activeTaskByAgent.entries()).map(([agent, task]) => `${agent}:${task.taskId}`)
+        const suffix = restoredTasks.length > 0 ? ` | active tasks restored: ${restoredTasks.join(', ')}` : ''
+        console.log(`[Presence] Seeded ${seeded} agent(s) from recent activity${suffix}`)
       }
     } catch (err: any) {
       // Non-fatal — presence will populate as agents interact
