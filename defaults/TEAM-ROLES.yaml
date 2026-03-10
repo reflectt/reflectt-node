@@ -514,6 +514,114 @@ agents:
       - brand-copy
     wipCap: 1
 
+  # BackOffice agents
+  - name: bookkeeper
+    role: financial-analyst
+    description: Revenue tracking, invoice reconciliation, financial baseline reporting. Pulls from Stripe API (read-only), CSV statements. Reports MRR, churn, burn rate weekly.
+    affinityTags:
+      - finance
+      - stripe
+      - revenue
+      - reporting
+      - bookkeeping
+      - mrr
+      - invoices
+    routingMode: opt-in
+    neverRouteUnlessLane: backoffice
+    alwaysRoute:
+      - finance
+      - revenue
+      - invoicing
+    neverRoute:
+      - backend
+      - frontend
+      - design
+      - security-review
+    wipCap: 2
+
+  - name: taxwatch
+    role: tax-compliance
+    description: Tax compliance, quarterly estimate tracking, jurisdiction mapping, audit trail.
+    affinityTags:
+      - tax
+      - compliance
+      - audit
+      - quarterly
+      - jurisdiction
+    routingMode: opt-in
+    neverRouteUnlessLane: backoffice
+    alwaysRoute:
+      - tax
+      - compliance
+    neverRoute:
+      - backend
+      - frontend
+      - design
+    wipCap: 1
+
+  # EVI-Fly agents (enjoyvancouverisland.com)
+  - name: evi-scout
+    role: site-health
+    description: EnjoyVancouverIsland.com site health, crawler monitoring, Supabase DB state. First agent on EVI-Fly team.
+    affinityTags:
+      - site-health
+      - crawler
+      - supabase
+      - vercel
+      - evi
+      - vancouver-island
+      - monitoring
+    routingMode: opt-in
+    neverRouteUnlessLane: evi-fly
+    alwaysRoute:
+      - evi
+      - site-health
+    neverRoute:
+      - backend
+      - frontend
+      - design
+    wipCap: 2
+
+  - name: evi-content
+    role: content-quality
+    description: EVI-Fly content quality — venue/event descriptions, SEO, stale content cleanup.
+    affinityTags:
+      - content
+      - seo
+      - evi
+      - venues
+      - events
+      - vancouver-island
+    routingMode: opt-in
+    neverRouteUnlessLane: evi-fly
+    alwaysRoute:
+      - evi
+      - content-quality
+    neverRoute:
+      - backend
+      - design
+    wipCap: 1
+
+  - name: evi-growth
+    role: growth-analytics
+    description: EVI-Fly traffic, analytics, distribution, and SEO performance.
+    affinityTags:
+      - analytics
+      - growth
+      - traffic
+      - seo
+      - evi
+      - vancouver-island
+    routingMode: opt-in
+    neverRouteUnlessLane: evi-fly
+    alwaysRoute:
+      - evi
+      - growth
+    neverRoute:
+      - backend
+      - design
+    wipCap: 1
+
   # Removed agent-1/2/3 fallback entries — were leaking into dashboard as ghost agents
 
 # Decision authority — what the team owns vs. what requires a human
@@ -582,5 +690,15 @@ lanes:
 
   - name: security
     agents: [shield]
+    readyFloor: 1
+    wipLimit: 1
+
+  - name: backoffice
+    agents: [bookkeeper, taxwatch]
+    readyFloor: 1
+    wipLimit: 1
+
+  - name: evi-fly
+    agents: [evi-scout, evi-content, evi-growth]
     readyFloor: 1
     wipLimit: 1
