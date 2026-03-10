@@ -554,6 +554,7 @@ Multi-host management: remote hosts register via heartbeat and are tracked by st
 | POST | `/board-health/rollback/:actionId` | Rollback an automated action within the rollback window. Body: `{ by? }`. |
 | PATCH | `/board-health/config` | Update worker config at runtime. Fields: enabled, intervalMs, staleDoingThresholdMin, suggestCloseThresholdMin, rollbackWindowMs, digestIntervalMs, digestChannel, quietHoursStart, quietHoursEnd, dryRun, maxActionsPerTick. |
 | POST | `/board-health/prune` | Prune old audit log entries. Query: `?maxAgeDays=7`. |
+| POST | `/board-health/quiet-window` | Reset the quiet window — suppresses ready-queue alerts for `restartQuietWindowMs` (default 5 min). Call after gateway restart/reconnect. |
 | GET | `/feed/:agent` | Since-last-seen change feed. Query: `?since=timestamp&limit=100&kinds=task_status_changed,mention&includeGlobal=true`. Returns unified timeline of task changes, comments, mentions, PRs, deploys relevant to agent. |
 | GET | `/policy` | Get unified policy config (quiet hours, idle nudge, cadence watchdog, board health, escalation thresholds). |
 | PATCH | `/policy` | Update policy config at runtime (deep-merged, persisted to ~/.reflectt/policy.json). Propagates to running workers. |
