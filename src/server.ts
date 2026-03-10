@@ -10505,7 +10505,7 @@ If your heartbeat shows **no active task** and **no next task**:
 - Do not load full chat history.
 - Do not post plan-only updates.
 - If nothing changed and no direct action is required, reply \`HEARTBEAT_OK\`.
-- **Decision authority:** Team owns product/arch/process decisions. Escalate credentials, legal, and vision to Ryan. See \`decision_authority\` block in \`defaults/TEAM-ROLES.yaml\` for the full list.
+- **Decision authority:** Team owns product/arch/process decisions. Escalate credentials, legal, and vision decisions to the admin/owner. See \`decision_authority\` block in \`defaults/TEAM-ROLES.yaml\` for the full list.
 `
 
     // Stable hash for change detection (agents can cache and compare)
