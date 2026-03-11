@@ -1089,6 +1089,8 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/agents/:agentId/events` | List events. Query: `?runId=&type=&since=&limit=` |
 | GET | `/approvals/pending` | List pending approvals (review_requested events needing action). Query: `?agentId=&limit=` |
 | POST | `/approvals/:eventId/decide` | Submit approval decision. Body: `{ decision: "approve"|"reject", reviewer (required), comment? }`. Auto-unblocks run on approve. |
+| POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
+| POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 
 **Run statuses**: `idle`, `working`, `blocked`, `waiting_review`, `completed`, `failed`, `cancelled`
 

@@ -13820,6 +13820,83 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ── Email / SMS relay ──────────────────────────────────────────────────
+
+  async function cloudRelay(
+    path: string,
+    body: Record<string, unknown>,
+    reply: { code: (n: number) => typeof reply; send: (b: unknown) => void },
+  ): Promise<unknown> {
+    const cloudUrl = process.env.REFLECTT_CLOUD_URL
+    const hostToken = process.env.REFLECTT_HOST_TOKEN
+    if (!cloudUrl || !hostToken) {
+      reply.code(503)
+      return { error: 'Not connected to cloud. Configure REFLECTT_CLOUD_URL and REFLECTT_HOST_TOKEN.' }
+    }
+    try {
+      const res = await fetch(`${cloudUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${hostToken}`,
+        },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        reply.code(res.status)
+        return data
+      }
+      return data
+    } catch (err: any) {
+      reply.code(502)
+      return { error: `Cloud relay failed: ${err.message}` }
+    }
+  }
+
+  // Send email via cloud relay
+  app.post('/email/send', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const from = typeof body.from === 'string' ? body.from.trim() : ''
+    const to = body.to
+    const subject = typeof body.subject === 'string' ? body.subject.trim() : ''
+    if (!from) return reply.code(400).send({ error: 'from is required' })
+    if (!to) return reply.code(400).send({ error: 'to is required' })
+    if (!subject) return reply.code(400).send({ error: 'subject is required' })
+    if (!body.html && !body.text) return reply.code(400).send({ error: 'html or text body is required' })
+
+    // Get team from cloud config
+    const teamId = (body.teamId as string) || 'default'
+    return cloudRelay(`/api/teams/${encodeURIComponent(teamId)}/email/send`, {
+      from,
+      to,
+      subject,
+      html: body.html,
+      text: body.text,
+      replyTo: body.replyTo,
+      cc: body.cc,
+      bcc: body.bcc,
+      agent: body.agentId || body.agent || 'unknown',
+    }, reply)
+  })
+
+  // Send SMS via cloud relay
+  app.post('/sms/send', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const to = typeof body.to === 'string' ? body.to.trim() : ''
+    const msgBody = typeof body.body === 'string' ? body.body.trim() : ''
+    if (!to) return reply.code(400).send({ error: 'to is required (phone number)' })
+    if (!msgBody) return reply.code(400).send({ error: 'body is required' })
+
+    const teamId = (body.teamId as string) || 'default'
+    return cloudRelay(`/api/teams/${encodeURIComponent(teamId)}/sms/send`, {
+      to,
+      body: msgBody,
+      from: body.from,
+      agent: body.agentId || body.agent || 'unknown',
+    }, reply)
+  })
+
   // ── Agent Memories ─────────────────────────────────────────────────────
 
   const {
