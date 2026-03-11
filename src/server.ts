@@ -8047,6 +8047,30 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/agents', async () => buildRoleRegistryPayload())
   app.get('/agents/roles', async () => buildRoleRegistryPayload())
 
+  // Host-native identity resolution — resolves agent by name, alias, or display name
+  // without requiring the OpenClaw gateway. Merges YAML roles + agent_config table.
+  app.get<{ Params: { name: string } }>('/agents/:name/identity', async (request) => {
+    const { name } = request.params
+    const resolved = resolveAgentMention(name)
+    const role = resolved ? getAgentRole(resolved) : getAgentRole(name)
+
+    if (!role) {
+      return { found: false, query: name, hint: 'Agent not found in YAML roles or config' }
+    }
+
+    return {
+      found: true,
+      agentId: role.name,
+      displayName: role.displayName ?? role.name,
+      role: role.role,
+      description: role.description ?? null,
+      aliases: role.aliases ?? [],
+      affinityTags: role.affinityTags ?? [],
+      wipCap: role.wipCap,
+      source: 'yaml',
+    }
+  })
+
   // Team-scoped alias for assignment-engine consumers
   app.get('/team/roles', async () => {
     const payload = buildRoleRegistryPayload()
