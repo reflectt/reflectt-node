@@ -14268,6 +14268,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
   const {
     listPendingApprovals,
+    listApprovalQueue,
     submitApprovalDecision,
   } = await import('./agent-runs.js')
 
@@ -14278,6 +14279,65 @@ If your heartbeat shows **no active task** and **no next task**:
       agentId: query.agentId,
       limit: query.limit ? parseInt(query.limit, 10) : undefined,
     })
+  })
+
+  // Dedicated approval queue — unified view of everything needing human decision.
+  // Answers: what needs decision, who owns it, when it expires, what happens if ignored.
+  app.get('/approval-queue', async (request) => {
+    const query = request.query as {
+      agentId?: string
+      category?: string
+      includeExpired?: string
+      limit?: string
+    }
+    const items = listApprovalQueue({
+      agentId: query.agentId,
+      category: query.category === 'review' || query.category === 'agent_action' ? query.category : undefined,
+      includeExpired: query.includeExpired === 'true',
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+    })
+    return {
+      items,
+      count: items.length,
+      hasExpired: items.some(i => i.isExpired),
+    }
+  })
+
+  // Submit agent-action approval (approve_requested events)
+  app.post<{ Params: { approvalId: string } }>('/approval-queue/:approvalId/decide', async (request, reply) => {
+    const { approvalId } = request.params
+    const body = request.body as { decision?: string; actor?: string; comment?: string }
+    if (!body?.decision || !['approve', 'reject', 'defer'].includes(body.decision)) {
+      return reply.code(400).send({ error: 'decision must be "approve", "reject", or "defer"' })
+    }
+    if (!body?.actor) {
+      return reply.code(400).send({ error: 'actor is required' })
+    }
+    try {
+      const result = submitApprovalDecision({
+        eventId: approvalId,
+        decision: body.decision as 'approve' | 'reject',
+        reviewer: body.actor,
+        comment: body.comment,
+      })
+
+      // Emit canvas_input event so Presence Layer updates
+      eventBus.emit({
+        id: `aq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_input' as const,
+        timestamp: Date.now(),
+        data: {
+          action: 'decision',
+          approvalId,
+          decision: body.decision,
+          actor: body.actor,
+        },
+      })
+
+      return result
+    } catch (err: any) {
+      return reply.code(err.message.includes('not found') ? 404 : 400).send({ error: err.message })
+    }
   })
 
   // Submit approval decision
