@@ -13693,5 +13693,93 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
+  // ── Agent Memories ─────────────────────────────────────────────────────
+
+  const {
+    setMemory,
+    getMemory,
+    listMemories,
+    deleteMemory,
+    deleteMemoryById,
+    purgeExpiredMemories,
+    countMemories,
+  } = await import('./agent-memories.js')
+
+  // Set (create or update) a memory
+  app.put<{ Params: { agentId: string } }>('/agents/:agentId/memories', async (request, reply) => {
+    const { agentId } = request.params
+    const body = request.body as {
+      key?: string
+      content?: string
+      namespace?: string
+      tags?: string[]
+      expiresAt?: number | null
+    }
+    if (!body?.key) return reply.code(400).send({ error: 'key is required' })
+    if (body.content === undefined || body.content === null) return reply.code(400).send({ error: 'content is required' })
+    try {
+      const memory = setMemory({
+        agentId,
+        namespace: body.namespace,
+        key: body.key,
+        content: body.content,
+        tags: body.tags,
+        expiresAt: body.expiresAt,
+      })
+      return reply.code(200).send(memory)
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // Get a specific memory by key
+  app.get<{ Params: { agentId: string; key: string } }>('/agents/:agentId/memories/:key', async (request, reply) => {
+    const { agentId, key } = request.params
+    const query = request.query as { namespace?: string }
+    const memory = getMemory(agentId, key, query.namespace)
+    if (!memory) return reply.code(404).send({ error: 'Memory not found' })
+    return memory
+  })
+
+  // List memories for an agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/memories', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as {
+      namespace?: string
+      tag?: string
+      search?: string
+      limit?: string
+    }
+    return listMemories({
+      agentId,
+      namespace: query.namespace,
+      tag: query.tag,
+      search: query.search,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+    })
+  })
+
+  // Delete a memory by key
+  app.delete<{ Params: { agentId: string; key: string } }>('/agents/:agentId/memories/:key', async (request, reply) => {
+    const { agentId, key } = request.params
+    const query = request.query as { namespace?: string }
+    const deleted = deleteMemory(agentId, key, query.namespace)
+    if (!deleted) return reply.code(404).send({ error: 'Memory not found' })
+    return { deleted: true }
+  })
+
+  // Count memories
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/memories/count', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { namespace?: string }
+    return { count: countMemories(agentId, query.namespace) }
+  })
+
+  // Purge expired memories (housekeeping)
+  app.post('/agents/memories/purge', async (_request, reply) => {
+    const purged = purgeExpiredMemories()
+    return { purged }
+  })
+
   return app
 }

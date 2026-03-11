@@ -1090,6 +1090,19 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 
 **Event types**: `run_created`, `task_attached`, `tool_invoked`, `artifact_produced`, `review_requested`, `review_approved`, `review_rejected`, `blocked`, `handed_off`, `completed`, `failed`
 
+### Agent Memories
+
+Persistent key-value store with tags, namespaces, and expiration. Survives node restarts.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| PUT | `/agents/:agentId/memories` | Set (upsert) a memory. Body: `{ key, content, namespace?, tags?, expiresAt? }` |
+| GET | `/agents/:agentId/memories/:key` | Get a memory by key. Query: `?namespace=` |
+| GET | `/agents/:agentId/memories` | List memories. Query: `?namespace=&tag=&search=&limit=` |
+| DELETE | `/agents/:agentId/memories/:key` | Delete a memory by key. Query: `?namespace=` |
+| GET | `/agents/:agentId/memories/count` | Count memories. Query: `?namespace=` |
+| POST | `/agents/memories/purge` | Purge all expired memories (housekeeping) |
+
 Events are **append-only** — no updates, no deletes.
 
 ### Browser Capability
