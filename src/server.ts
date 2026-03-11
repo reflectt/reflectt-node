@@ -343,6 +343,14 @@ function normalizeConfiguredModel(value: unknown): { ok: boolean; value?: string
   }
 }
 
+// ── Handoff state schema (max 3 columns per COO rule) ─────────────
+const VALID_HANDOFF_DECISIONS = ['approved', 'rejected', 'needs_changes', 'escalated'] as const
+const HandoffStateSchema = z.object({
+  reviewed_by: z.string().min(1),
+  decision: z.enum(VALID_HANDOFF_DECISIONS),
+  next_owner: z.string().min(1).optional(),
+}).strict()
+
 const UpdateTaskSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
@@ -5106,6 +5114,48 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Task handoff state ─────────────────────────────────────────────
+  app.get<{ Params: { id: string } }>('/tasks/:id/handoff', async (request, reply) => {
+    const resolved = taskManager.resolveTaskId(request.params.id)
+    if (!resolved.task) {
+      reply.code(404)
+      return { error: 'Task not found' }
+    }
+    const meta = resolved.task.metadata as Record<string, unknown> | null
+    const handoff = meta?.handoff_state ?? null
+    return {
+      taskId: resolved.resolvedId,
+      status: resolved.task.status,
+      handoff_state: handoff,
+    }
+  })
+
+  app.put<{ Params: { id: string } }>('/tasks/:id/handoff', async (request, reply) => {
+    const resolved = taskManager.resolveTaskId(request.params.id)
+    if (!resolved.task || !resolved.resolvedId) {
+      reply.code(404)
+      return { error: 'Task not found' }
+    }
+    const body = request.body as Record<string, unknown>
+    const result = HandoffStateSchema.safeParse(body)
+    if (!result.success) {
+      reply.code(422)
+      return {
+        error: `Invalid handoff_state: ${result.error.issues.map(i => i.message).join(', ')}`,
+        hint: 'Required: reviewed_by (string), decision (approved|rejected|needs_changes|escalated). Optional: next_owner (string).',
+      }
+    }
+    const existingMeta = (resolved.task.metadata || {}) as Record<string, unknown>
+    taskManager.updateTask(resolved.resolvedId, {
+      metadata: { ...existingMeta, handoff_state: result.data },
+    })
+    return {
+      success: true,
+      taskId: resolved.resolvedId,
+      handoff_state: result.data,
+    }
+  })
+
   // Task artifact visibility — resolves artifact paths and checks accessibility
   app.get<{ Params: { id: string } }>('/tasks/:id/artifacts', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
@@ -7189,6 +7239,23 @@ export async function createServer(): Promise<FastifyInstance> {
           mergedMeta.reopened_at = Date.now()
           mergedMeta.reopened_from = existing.status
         }
+      }
+
+      // ── Handoff state validation ──
+      if (mergedMeta.handoff_state && typeof mergedMeta.handoff_state === 'object') {
+        const handoffResult = HandoffStateSchema.safeParse(mergedMeta.handoff_state)
+        if (!handoffResult.success) {
+          reply.code(422)
+          return {
+            success: false,
+            error: `Invalid handoff_state: ${handoffResult.error.issues.map(i => i.message).join(', ')}`,
+            code: 'INVALID_HANDOFF_STATE',
+            hint: 'handoff_state must have: reviewed_by (string), decision (approved|rejected|needs_changes|escalated), optional next_owner (string). Max 3 fields per COO rule.',
+            gate: 'handoff_state',
+          }
+        }
+        // Stamp validated handoff
+        mergedMeta.handoff_state = handoffResult.data
       }
 
       // ── Cancel reason gate: require cancel_reason when transitioning to cancelled ──
