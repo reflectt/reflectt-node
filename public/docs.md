@@ -1085,6 +1085,8 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | PATCH | `/agents/:agentId/runs/:runId` | Update run. Body: `{ status?, contextSnapshot?, artifacts? }` |
 | POST | `/agents/:agentId/events` | Append an event (immutable). Body: `{ eventType, runId?, payload? }` |
 | GET | `/agents/:agentId/events` | List events. Query: `?runId=&type=&since=&limit=` |
+| GET | `/approvals/pending` | List pending approvals (review_requested events needing action). Query: `?agentId=&limit=` |
+| POST | `/approvals/:eventId/decide` | Submit approval decision. Body: `{ decision: "approve"|"reject", reviewer (required), comment? }`. Auto-unblocks run on approve. |
 
 **Run statuses**: `idle`, `working`, `blocked`, `waiting_review`, `completed`, `failed`, `cancelled`
 

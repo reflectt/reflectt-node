@@ -294,3 +294,176 @@ describe('PR review handoff workflow (release gate)', () => {
     assert.ok(completedRuns[0].completed_at)
   })
 })
+
+describe('approval routing', () => {
+  let db: Database.Database
+
+  beforeEach(() => {
+    db = createTestDb()
+  })
+
+  it('pending approvals: finds review_requested with action_required', () => {
+    const now = Date.now()
+    // Create a review_requested event with action_required
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-req-1', 'arun-1', 'link', 'review_requested',
+      JSON.stringify({ action_required: 'approve', urgency: 'high', owner: 'ryan' }), now,
+    )
+    // Create a regular event (should NOT appear)
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-other', 'arun-1', 'link', 'tool_invoked', '{}', now + 1,
+    )
+
+    const pending = db.prepare(`
+      SELECT e.* FROM agent_events e
+      WHERE e.event_type = 'review_requested'
+      AND json_extract(e.payload, '$.action_required') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_events r
+        WHERE r.run_id = e.run_id
+        AND r.event_type IN ('review_approved', 'review_rejected')
+        AND r.created_at > e.created_at
+      )
+      ORDER BY e.created_at DESC
+    `).all() as any[]
+
+    assert.equal(pending.length, 1)
+    assert.equal(pending[0].id, 'aevt-req-1')
+    const payload = JSON.parse(pending[0].payload)
+    assert.equal(payload.action_required, 'approve')
+    assert.equal(payload.urgency, 'high')
+  })
+
+  it('resolved approvals are excluded from pending', () => {
+    const now = Date.now()
+    // Create request
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-req-2', 'arun-2', 'link', 'review_requested',
+      JSON.stringify({ action_required: 'approve' }), now,
+    )
+    // Approve it
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-approve-2', 'arun-2', 'ryan', 'review_approved',
+      JSON.stringify({ original_event_id: 'aevt-req-2', reviewer: 'ryan' }), now + 1,
+    )
+
+    const pending = db.prepare(`
+      SELECT e.* FROM agent_events e
+      WHERE e.event_type = 'review_requested'
+      AND json_extract(e.payload, '$.action_required') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_events r
+        WHERE r.run_id = e.run_id
+        AND r.event_type IN ('review_approved', 'review_rejected')
+        AND r.created_at > e.created_at
+      )
+    `).all() as any[]
+
+    assert.equal(pending.length, 0)
+  })
+
+  it('approval decision records event and can unblock run', () => {
+    const now = Date.now()
+    // Create a run in waiting_review
+    db.prepare(`INSERT INTO agent_runs (id, agent_id, team_id, objective, status, started_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+      'arun-3', 'link', 'default', 'PR review', 'waiting_review', now, now,
+    )
+    // Create review_requested
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-req-3', 'arun-3', 'link', 'review_requested',
+      JSON.stringify({ action_required: 'approve' }), now,
+    )
+
+    // Simulate approval: record event + update run
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-approve-3', 'arun-3', 'link', 'review_approved',
+      JSON.stringify({ original_event_id: 'aevt-req-3', reviewer: 'ryan' }), now + 1,
+    )
+    db.prepare(`UPDATE agent_runs SET status = 'working', updated_at = ? WHERE id = ? AND status = 'waiting_review'`).run(now + 1, 'arun-3')
+
+    // Verify run is unblocked
+    const run = db.prepare('SELECT * FROM agent_runs WHERE id = ?').get('arun-3') as any
+    assert.equal(run.status, 'working')
+
+    // Verify approval event recorded
+    const events = db.prepare(`SELECT * FROM agent_events WHERE event_type = 'review_approved' AND run_id = ?`).all('arun-3') as any[]
+    assert.equal(events.length, 1)
+    const payload = JSON.parse(events[0].payload)
+    assert.equal(payload.reviewer, 'ryan')
+  })
+
+  it('rejection does not unblock run', () => {
+    const now = Date.now()
+    db.prepare(`INSERT INTO agent_runs (id, agent_id, team_id, objective, status, started_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+      'arun-4', 'link', 'default', 'Feature PR', 'waiting_review', now, now,
+    )
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-req-4', 'arun-4', 'link', 'review_requested',
+      JSON.stringify({ action_required: 'approve' }), now,
+    )
+
+    // Reject
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-reject-4', 'arun-4', 'link', 'review_rejected',
+      JSON.stringify({ original_event_id: 'aevt-req-4', reviewer: 'ryan', comment: 'needs changes' }), now + 1,
+    )
+    // Don't update run status for rejection
+
+    const run = db.prepare('SELECT * FROM agent_runs WHERE id = ?').get('arun-4') as any
+    assert.equal(run.status, 'waiting_review') // Still blocked
+  })
+
+  it('multiple agents can have independent pending approvals', () => {
+    const now = Date.now()
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-req-5', 'arun-5', 'link', 'review_requested',
+      JSON.stringify({ action_required: 'approve' }), now,
+    )
+    db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`).run(
+      'aevt-req-6', 'arun-6', 'rhythm', 'review_requested',
+      JSON.stringify({ action_required: 'approve' }), now + 1,
+    )
+
+    // All pending
+    const allPending = db.prepare(`
+      SELECT e.* FROM agent_events e
+      WHERE e.event_type = 'review_requested'
+      AND json_extract(e.payload, '$.action_required') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_events r
+        WHERE r.run_id = e.run_id
+        AND r.event_type IN ('review_approved', 'review_rejected')
+        AND r.created_at > e.created_at
+      )
+    `).all() as any[]
+    assert.equal(allPending.length, 2)
+
+    // Filter by agent
+    const linkOnly = db.prepare(`
+      SELECT e.* FROM agent_events e
+      WHERE e.event_type = 'review_requested'
+      AND e.agent_id = 'link'
+      AND json_extract(e.payload, '$.action_required') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_events r
+        WHERE r.run_id = e.run_id
+        AND r.event_type IN ('review_approved', 'review_rejected')
+        AND r.created_at > e.created_at
+      )
+    `).all() as any[]
+    assert.equal(linkOnly.length, 1)
+    assert.equal(linkOnly[0].agent_id, 'link')
+  })
+})
