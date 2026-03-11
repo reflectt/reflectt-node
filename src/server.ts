@@ -14242,6 +14242,60 @@ If your heartbeat shows **no active task** and **no next task**:
     }, reply)
   })
 
+  // ── Agent Config ──────────────────────────────────────────────────────
+  // Per-agent model preference, cost cap, and settings.
+  // This is the policy anchor for cost enforcement.
+
+  const { getAgentConfig, listAgentConfigs, setAgentConfig, deleteAgentConfig, checkCostCap } = await import('./agent-config.js')
+
+  // GET /agents/:agentId/config — get config for an agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/config', async (request) => {
+    const config = getAgentConfig(request.params.agentId)
+    return config ?? { agentId: request.params.agentId, configured: false }
+  })
+
+  // PUT /agents/:agentId/config — upsert config for an agent
+  app.put<{ Params: { agentId: string } }>('/agents/:agentId/config', async (request, reply) => {
+    const body = request.body as Record<string, unknown> ?? {}
+    try {
+      const config = setAgentConfig(request.params.agentId, {
+        teamId: typeof body.teamId === 'string' ? body.teamId : undefined,
+        model: body.model !== undefined ? (body.model as string | null) : undefined,
+        fallbackModel: body.fallbackModel !== undefined ? (body.fallbackModel as string | null) : undefined,
+        costCapDaily: body.costCapDaily !== undefined ? (body.costCapDaily as number | null) : undefined,
+        costCapMonthly: body.costCapMonthly !== undefined ? (body.costCapMonthly as number | null) : undefined,
+        maxTokensPerCall: body.maxTokensPerCall !== undefined ? (body.maxTokensPerCall as number | null) : undefined,
+        settings: body.settings !== undefined ? (body.settings as Record<string, unknown>) : undefined,
+      })
+      return config
+    } catch (err: any) {
+      reply.code(400)
+      return { error: err.message }
+    }
+  })
+
+  // DELETE /agents/:agentId/config — remove config for an agent
+  app.delete<{ Params: { agentId: string } }>('/agents/:agentId/config', async (request, reply) => {
+    const deleted = deleteAgentConfig(request.params.agentId)
+    if (!deleted) { reply.code(404); return { error: 'Config not found' } }
+    return { success: true }
+  })
+
+  // GET /agent-configs — list all agent configs
+  app.get('/agent-configs', async (request) => {
+    const query = request.query as { teamId?: string }
+    return { configs: listAgentConfigs({ teamId: query.teamId }) }
+  })
+
+  // GET /agents/:agentId/cost-check — runtime cost enforcement check
+  // Used by the runtime before making model calls.
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/cost-check', async (request) => {
+    const query = request.query as { dailySpend?: string; monthlySpend?: string }
+    const dailySpend = query.dailySpend ? parseFloat(query.dailySpend) : 0
+    const monthlySpend = query.monthlySpend ? parseFloat(query.monthlySpend) : 0
+    return checkCostCap(request.params.agentId, dailySpend, monthlySpend)
+  })
+
   // ── Agent Memories ─────────────────────────────────────────────────────
 
   const {
