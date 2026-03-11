@@ -330,3 +330,107 @@ export function listAgentEvents(opts: {
   const rows = db.prepare(sql).all(...params) as EventRow[]
   return rows.map(rowToEvent)
 }
+
+// ── Approval routing ───────────────────────────────────────────────────────
+
+export interface PendingApproval {
+  event: AgentEvent
+  agentId: string
+  runId: string | null
+  urgency: string | null
+  owner: string | null
+  expiresAt: number | null
+}
+
+/**
+ * List pending approvals: review_requested events with action_required
+ * that don't yet have a matching review_approved or review_rejected.
+ */
+export function listPendingApprovals(opts?: {
+  agentId?: string
+  limit?: number
+}): PendingApproval[] {
+  const db = getDb()
+  const limit = opts?.limit ?? 50
+  const conditions = ["e.event_type = 'review_requested'", "json_extract(e.payload, '$.action_required') IS NOT NULL"]
+  const params: unknown[] = []
+
+  if (opts?.agentId) {
+    conditions.push('e.agent_id = ?')
+    params.push(opts.agentId)
+  }
+
+  // Exclude events that already have a resolution (approved/rejected) for the same run
+  const sql = `
+    SELECT e.* FROM agent_events e
+    WHERE ${conditions.join(' AND ')}
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_events r
+      WHERE r.run_id = e.run_id
+      AND r.event_type IN ('review_approved', 'review_rejected')
+      AND r.created_at > e.created_at
+    )
+    ORDER BY e.created_at DESC
+    LIMIT ?
+  `
+  params.push(limit)
+
+  const rows = db.prepare(sql).all(...params) as EventRow[]
+  return rows.map(row => {
+    const event = rowToEvent(row)
+    return {
+      event,
+      agentId: event.agentId,
+      runId: event.runId,
+      urgency: (event.payload.urgency as string) ?? null,
+      owner: (event.payload.owner as string) ?? null,
+      expiresAt: (event.payload.expires_at as number) ?? null,
+    }
+  })
+}
+
+/**
+ * Submit an approval decision. Records a review_approved or review_rejected event
+ * and optionally unblocks the associated run.
+ */
+export function submitApprovalDecision(opts: {
+  eventId: string
+  decision: 'approve' | 'reject'
+  reviewer: string
+  comment?: string
+}): { event: AgentEvent; runUnblocked: boolean } {
+  const db = getDb()
+
+  // Find the original review_requested event
+  const originalRow = db.prepare('SELECT * FROM agent_events WHERE id = ?').get(opts.eventId) as EventRow | undefined
+  if (!originalRow) throw new Error(`Event ${opts.eventId} not found`)
+  const original = rowToEvent(originalRow)
+  if (original.eventType !== 'review_requested') {
+    throw new Error(`Event ${opts.eventId} is not a review_requested event`)
+  }
+
+  // Record the decision
+  const eventType = opts.decision === 'approve' ? 'review_approved' : 'review_rejected'
+  const decisionEvent = appendAgentEvent({
+    agentId: original.agentId,
+    runId: original.runId,
+    eventType,
+    payload: {
+      original_event_id: opts.eventId,
+      reviewer: opts.reviewer,
+      ...(opts.comment ? { comment: opts.comment } : {}),
+    },
+  })
+
+  // Auto-unblock: if approved and run exists in waiting_review, move to working
+  let runUnblocked = false
+  if (opts.decision === 'approve' && original.runId) {
+    const run = getAgentRun(original.runId)
+    if (run && run.status === 'waiting_review') {
+      updateAgentRun(original.runId, { status: 'working' })
+      runUnblocked = true
+    }
+  }
+
+  return { event: decisionEvent, runUnblocked }
+}

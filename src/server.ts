@@ -13693,6 +13693,45 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
+  // ── Approval Routing ────────────────────────────────────────────────────
+
+  const {
+    listPendingApprovals,
+    submitApprovalDecision,
+  } = await import('./agent-runs.js')
+
+  // List pending approvals (review_requested events needing action)
+  app.get('/approvals/pending', async (request) => {
+    const query = request.query as { agentId?: string; limit?: string }
+    return listPendingApprovals({
+      agentId: query.agentId,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+    })
+  })
+
+  // Submit approval decision
+  app.post<{ Params: { eventId: string } }>('/approvals/:eventId/decide', async (request, reply) => {
+    const { eventId } = request.params
+    const body = request.body as { decision?: string; reviewer?: string; comment?: string }
+    if (!body?.decision || !['approve', 'reject'].includes(body.decision)) {
+      return reply.code(400).send({ error: 'decision must be "approve" or "reject"' })
+    }
+    if (!body?.reviewer) {
+      return reply.code(400).send({ error: 'reviewer is required' })
+    }
+    try {
+      const result = submitApprovalDecision({
+        eventId,
+        decision: body.decision as 'approve' | 'reject',
+        reviewer: body.reviewer,
+        comment: body.comment,
+      })
+      return result
+    } catch (err: any) {
+      return reply.code(err.message.includes('not found') ? 404 : 400).send({ error: err.message })
+    }
+  })
+
   // ── Agent Memories ─────────────────────────────────────────────────────
 
   const {
