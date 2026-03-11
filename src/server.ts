@@ -13781,6 +13781,96 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
+  // ── Run Event Stream (SSE) ─────────────────────────────────────────────
+  // Real-time SSE stream for run events. Canvas subscribes here instead of polling.
+  // GET /agents/:agentId/runs/:runId/stream — stream events for a specific run
+  // GET /agents/:agentId/stream — stream all events for an agent
+
+  app.get<{ Params: { agentId: string; runId: string } }>('/agents/:agentId/runs/:runId/stream', async (request, reply) => {
+    const { agentId, runId } = request.params
+    const run = getAgentRun(runId)
+    if (!run) { reply.code(404); return { error: 'Run not found' } }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Send current run state as initial snapshot
+    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ run, events: listAgentEvents({ runId, limit: 20 }) })}\n\n`)
+
+    // Subscribe to eventBus for this run's events
+    const listenerId = `run-stream-${runId}-${Date.now()}`
+    let closed = false
+
+    eventBus.on(listenerId, (event) => {
+      if (closed) return
+      const data = event.data as Record<string, unknown> | undefined
+      // Forward events that match this agent or run
+      if (data && (data.runId === runId || data.agentId === agentId)) {
+        try {
+          reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+        } catch { /* connection closed */ }
+      }
+    })
+
+    // Heartbeat
+    const heartbeat = setInterval(() => {
+      if (closed) { clearInterval(heartbeat); return }
+      try { reply.raw.write(`:heartbeat\n\n`) } catch { clearInterval(heartbeat) }
+    }, 15_000)
+
+    // Cleanup
+    request.raw.on('close', () => {
+      closed = true
+      eventBus.off(listenerId)
+      clearInterval(heartbeat)
+    })
+  })
+
+  // Stream all events for an agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/stream', async (request, reply) => {
+    const { agentId } = request.params
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Send recent events as snapshot
+    const recentEvents = listAgentEvents({ agentId, limit: 20 })
+    const activeRun = getActiveAgentRun(agentId, 'default')
+    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ activeRun, events: recentEvents })}\n\n`)
+
+    const listenerId = `agent-stream-${agentId}-${Date.now()}`
+    let closed = false
+
+    eventBus.on(listenerId, (event) => {
+      if (closed) return
+      const data = event.data as Record<string, unknown> | undefined
+      if (data && data.agentId === agentId) {
+        try {
+          reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+        } catch { /* connection closed */ }
+      }
+    })
+
+    const heartbeat = setInterval(() => {
+      if (closed) { clearInterval(heartbeat); return }
+      try { reply.raw.write(`:heartbeat\n\n`) } catch { clearInterval(heartbeat) }
+    }, 15_000)
+
+    request.raw.on('close', () => {
+      closed = true
+      eventBus.off(listenerId)
+      clearInterval(heartbeat)
+    })
+  })
+
   // ── Approval Routing ────────────────────────────────────────────────────
 
   const {
