@@ -13944,6 +13944,131 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ── Canvas Input ──────────────────────────────────────────────────────
+  // Human → agent control seam for the Presence Layer.
+  // Payload is intentionally small per COO spec: action + target + actor.
+
+  const CANVAS_INPUT_ACTIONS = ['decision', 'interrupt', 'pause', 'resume', 'mute', 'unmute'] as const
+  type CanvasInputAction = typeof CANVAS_INPUT_ACTIONS[number]
+
+  const CanvasInputSchema = z.object({
+    action: z.enum(CANVAS_INPUT_ACTIONS),
+    targetRunId: z.string().optional(),        // which run to act on
+    decisionId: z.string().optional(),         // for decision actions
+    choice: z.enum(['approve', 'deny', 'defer']).optional(),  // for decision actions
+    actor: z.string().min(1),                  // who made this input
+    comment: z.string().optional(),            // optional rationale
+  })
+
+  app.post('/canvas/input', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const result = CanvasInputSchema.safeParse(body)
+    if (!result.success) {
+      reply.code(422)
+      return {
+        error: `Invalid canvas input: ${result.error.issues.map(i => i.message).join(', ')}`,
+        hint: 'Required: action (decision|interrupt|pause|resume|mute|unmute), actor. Optional: targetRunId, decisionId, choice, comment.',
+      }
+    }
+
+    const input = result.data
+    const now = Date.now()
+
+    // Route by action type
+    if (input.action === 'decision') {
+      if (!input.decisionId || !input.choice) {
+        reply.code(422)
+        return { error: 'Decision action requires decisionId and choice (approve|deny|defer)' }
+      }
+
+      // Emit canvas_input event for SSE subscribers
+      eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
+        action: input.action,
+        decisionId: input.decisionId,
+        choice: input.choice,
+        actor: input.actor,
+        comment: input.comment,
+        timestamp: now,
+      } })
+
+      return {
+        success: true,
+        action: 'decision',
+        decisionId: input.decisionId,
+        choice: input.choice,
+        actor: input.actor,
+        timestamp: now,
+      }
+    }
+
+    if (input.action === 'interrupt' || input.action === 'pause') {
+      // Update active run if specified
+      const runId = input.targetRunId
+      if (runId) {
+        try {
+          updateAgentRun(runId, {
+            status: input.action === 'interrupt' ? 'cancelled' : 'blocked',
+          })
+        } catch { /* run may not exist — still emit event */ }
+      }
+
+      eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
+        action: input.action,
+        targetRunId: runId || null,
+        actor: input.actor,
+        timestamp: now,
+      } })
+
+      return {
+        success: true,
+        action: input.action,
+        targetRunId: runId || null,
+        actor: input.actor,
+        timestamp: now,
+      }
+    }
+
+    if (input.action === 'resume') {
+      const runId = input.targetRunId
+      if (runId) {
+        try {
+          updateAgentRun(runId, { status: 'working' })
+        } catch { /* run may not exist */ }
+      }
+
+      eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
+        action: 'resume',
+        targetRunId: runId || null,
+        actor: input.actor,
+        timestamp: now,
+      } })
+
+      return { success: true, action: 'resume', targetRunId: runId || null, actor: input.actor, timestamp: now }
+    }
+
+    // Mute/unmute — emit event only, no state change needed
+    eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
+      action: input.action,
+      actor: input.actor,
+      timestamp: now,
+    } })
+
+    return { success: true, action: input.action, actor: input.actor, timestamp: now }
+  })
+
+  // GET /canvas/input/schema — discovery endpoint
+  app.get('/canvas/input/schema', async () => ({
+    actions: CANVAS_INPUT_ACTIONS,
+    schema: {
+      action: 'decision | interrupt | pause | resume | mute | unmute',
+      targetRunId: 'optional — which run to act on',
+      decisionId: 'required for decision action — approval event ID',
+      choice: 'required for decision — approve | deny | defer',
+      actor: 'required — who made this input',
+      comment: 'optional — rationale',
+    },
+  }))
+
   // ── Email / SMS relay ──────────────────────────────────────────────────
 
   async function cloudRelay(

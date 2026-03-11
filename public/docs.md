@@ -1094,6 +1094,8 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/workflows` | List available workflow templates. |
 | GET | `/workflows/:id` | Get template details (name, description, steps). |
 | POST | `/workflows/:id/run` | Execute a workflow. Body: `{ agentId?, teamId?, objective?, taskId?, reviewer?, prUrl?, title?, urgency?, nextOwner?, summary? }`. Returns step-by-step results with timing. Currently available: `pr-review` (6 steps: create → work → review → approve → handoff → complete). |
+| POST | `/canvas/input` | Human→agent control seam for Presence Layer. Body: `{ action: "decision"\|"interrupt"\|"pause"\|"resume"\|"mute"\|"unmute", actor (required), targetRunId?, decisionId?, choice?: "approve"\|"deny"\|"defer", comment? }`. Emits canvas_input SSE event. |
+| GET | `/canvas/input/schema` | Discovery: lists valid actions and field descriptions for canvas input. |
 | POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
 | POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 
