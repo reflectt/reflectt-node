@@ -13871,6 +13871,40 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
+  // ── Workflow Templates ─────────────────────────────────────────────────
+
+  const { listWorkflowTemplates, getWorkflowTemplate, runWorkflow } = await import('./workflow-templates.js')
+
+  // GET /workflows — list available workflow templates
+  app.get('/workflows', async () => ({ templates: listWorkflowTemplates() }))
+
+  // GET /workflows/:id — get template details
+  app.get<{ Params: { id: string } }>('/workflows/:id', async (request, reply) => {
+    const template = getWorkflowTemplate(request.params.id)
+    if (!template) { reply.code(404); return { error: 'Template not found' } }
+    return {
+      id: template.id,
+      name: template.name,
+      description: template.description,
+      steps: template.steps.map(s => ({ name: s.name, description: s.description })),
+    }
+  })
+
+  // POST /workflows/:id/run — execute a workflow
+  app.post<{ Params: { id: string } }>('/workflows/:id/run', async (request, reply) => {
+    const template = getWorkflowTemplate(request.params.id)
+    if (!template) { reply.code(404); return { error: 'Template not found' } }
+    const body = request.body as {
+      agentId?: string; teamId?: string; objective?: string; taskId?: string
+      reviewer?: string; prUrl?: string; title?: string; urgency?: string
+      nextOwner?: string; summary?: string
+    } ?? {}
+    const agentId = body.agentId ?? 'link'
+    const teamId = body.teamId ?? 'default'
+    const result = await runWorkflow(template, agentId, teamId, body)
+    return result
+  })
+
   // ── Approval Routing ────────────────────────────────────────────────────
 
   const {
