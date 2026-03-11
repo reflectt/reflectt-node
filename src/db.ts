@@ -575,6 +575,25 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_agent_memories_expires ON agent_memories(expires_at) WHERE expires_at IS NOT NULL;
       `,
     },
+    {
+      version: 23,
+      sql: `
+        -- Agent config: per-agent model preference, cost cap, and settings
+        CREATE TABLE IF NOT EXISTS agent_config (
+          agent_id        TEXT PRIMARY KEY,
+          team_id         TEXT NOT NULL DEFAULT 'default',
+          model           TEXT,
+          fallback_model  TEXT,
+          cost_cap_daily  REAL,
+          cost_cap_monthly REAL,
+          max_tokens_per_call INTEGER,
+          settings        TEXT NOT NULL DEFAULT '{}',
+          created_at      INTEGER NOT NULL,
+          updated_at      INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_config_team ON agent_config(team_id);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
@@ -611,6 +630,7 @@ export function runMigrations(db: Database.Database): void {
     { version: 19, tables: ['kv'] },
     { version: 21, tables: ['agent_runs', 'agent_events'] },
     { version: 22, tables: ['agent_memories'] },
+    { version: 23, tables: ['agent_config'] },
   ]
 
   const existingTables = new Set(
