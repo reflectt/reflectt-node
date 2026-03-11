@@ -8691,6 +8691,100 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Presence Layer canvas state ─────────────────────────────────────
+  // Agent emits canvas_render state transitions for the Presence Layer.
+  // Deterministic event types. No "AI can emit anything" protocol.
+
+  const CANVAS_STATES = ['floor', 'listening', 'thinking', 'rendering', 'ambient', 'decision', 'urgent', 'handoff'] as const
+  type CanvasState = typeof CANVAS_STATES[number]
+  const SENSOR_VALUES = [null, 'mic', 'camera', 'mic+camera'] as const
+
+  const CanvasRenderSchema = z.object({
+    state: z.enum(CANVAS_STATES),
+    sensors: z.enum(['mic', 'camera', 'mic+camera']).nullable().default(null),
+    agentId: z.string().min(1),
+    payload: z.object({
+      text: z.string().optional(),
+      media: z.unknown().optional(),
+      decision: z.object({
+        question: z.string(),
+        context: z.string().optional(),
+        decisionId: z.string(),
+        expiresAt: z.number().optional(),
+        autoAction: z.string().optional(),
+      }).optional(),
+      agents: z.array(z.object({
+        name: z.string(),
+        state: z.string(),
+        task: z.string().optional(),
+      })).optional(),
+      summary: z.object({
+        headline: z.string(),
+        items: z.array(z.string()).optional(),
+        cost: z.string().optional(),
+        duration: z.string().optional(),
+      }).optional(),
+    }).default({}),
+  })
+
+  // Current state per agent — in-memory, not persisted
+  const canvasStateMap = new Map<string, { state: CanvasState; sensors: string | null; payload: unknown; updatedAt: number }>()
+
+  // POST /canvas/state — agent emits a state transition
+  app.post('/canvas/state', async (request, reply) => {
+    const result = CanvasRenderSchema.safeParse(request.body)
+    if (!result.success) {
+      reply.code(422)
+      return {
+        error: `Invalid canvas state: ${result.error.issues.map(i => i.message).join(', ')}`,
+        hint: `state must be one of: ${CANVAS_STATES.join(', ')}`,
+        validStates: CANVAS_STATES,
+      }
+    }
+
+    const { state, sensors, agentId, payload } = result.data
+    const now = Date.now()
+
+    // Store current state
+    canvasStateMap.set(agentId, { state, sensors, payload, updatedAt: now })
+
+    // Emit canvas_render event over SSE
+    eventBus.emit({
+      id: `crender-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_render' as const,
+      timestamp: now,
+      data: { state, sensors, agentId, payload },
+    })
+
+    return { success: true, state, agentId, timestamp: now }
+  })
+
+  // GET /canvas/state — current state for all agents (or one)
+  app.get('/canvas/state', async (request) => {
+    const query = request.query as { agentId?: string }
+    if (query.agentId) {
+      const entry = canvasStateMap.get(query.agentId)
+      return entry ?? { state: 'floor', sensors: null, payload: {}, updatedAt: null }
+    }
+    const all: Record<string, unknown> = {}
+    for (const [id, entry] of canvasStateMap) {
+      all[id] = entry
+    }
+    return { agents: all, count: canvasStateMap.size }
+  })
+
+  // GET /canvas/states — valid state + sensor values (discovery)
+  app.get('/canvas/states', async () => ({
+    states: CANVAS_STATES,
+    sensors: SENSOR_VALUES,
+    schema: {
+      state: 'floor | listening | thinking | rendering | ambient | decision | urgent | handoff',
+      sensors: 'null | mic | camera | mic+camera (non-dismissable trust indicator)',
+      agentId: 'required — which agent is driving the canvas',
+      payload: 'optional — text, media, decision, agents, summary',
+    },
+  }))
+
   // GET /canvas/slots — current active slots
   app.get('/canvas/slots', async () => {
     return {
