@@ -13917,7 +13917,11 @@ If your heartbeat shows **no active task** and **no next task**:
         return reply.code(422).send({ error: err.message, hint: 'Actionable events require: action_required (string), urgency (low|normal|high|critical), owner (string). Optional: expires_at (number).' })
       }
       return reply.code(500).send({ error: err.message })
-    }
+      const message = String(err?.message || err)
+      if (message.includes('rationale')) {
+        return reply.code(400).send({ error: message })
+      }
+      return reply.code(500).send({ error: message })    }
   })
 
   // List agent events
@@ -14279,7 +14283,12 @@ If your heartbeat shows **no active task** and **no next task**:
   // Submit approval decision
   app.post<{ Params: { eventId: string } }>('/approvals/:eventId/decide', async (request, reply) => {
     const { eventId } = request.params
-    const body = request.body as { decision?: string; reviewer?: string; comment?: string }
+    const body = request.body as {
+      decision?: string
+      reviewer?: string
+      comment?: string
+      rationale?: { choice?: string; considered?: string[]; constraint?: string }
+    }
     if (!body?.decision || !['approve', 'reject'].includes(body.decision)) {
       return reply.code(400).send({ error: 'decision must be "approve" or "reject"' })
     }
@@ -14292,6 +14301,7 @@ If your heartbeat shows **no active task** and **no next task**:
         decision: body.decision as 'approve' | 'reject',
         reviewer: body.reviewer,
         comment: body.comment,
+        rationale: body.rationale as any,
       })
       return result
     } catch (err: any) {

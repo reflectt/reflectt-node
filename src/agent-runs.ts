@@ -58,6 +58,12 @@ export interface AgentRun {
   completedAt: number | null
 }
 
+export interface EventRationale {
+  choice: string
+  considered?: string[]
+  constraint?: string
+}
+
 export interface AgentEvent {
   id: string
   runId: string | null
@@ -126,6 +132,33 @@ function rowToEvent(row: EventRow): AgentEvent {
     eventType: row.event_type as AgentEventType,
     payload: safeJsonParse<Record<string, unknown>>(row.payload) ?? {},
     createdAt: row.created_at,
+  }
+}
+
+function isDecisionEventType(eventType: string): boolean {
+  return ['review_requested', 'review_approved', 'review_rejected', 'handed_off'].includes(eventType)
+}
+
+export function validateRationale(rationale: unknown): EventRationale {
+  if (!rationale || typeof rationale !== 'object' || Array.isArray(rationale)) {
+    throw new Error('rationale must be an object with choice, considered[], constraint')
+  }
+  const r = rationale as Record<string, unknown>
+  if (typeof r.choice !== 'string' || r.choice.trim().length === 0) {
+    throw new Error('rationale.choice is required')
+  }
+  if (r.considered !== undefined) {
+    if (!Array.isArray(r.considered) || !r.considered.every(v => typeof v === 'string' && v.trim().length > 0)) {
+      throw new Error('rationale.considered must be an array of non-empty strings')
+    }
+  }
+  if (r.constraint !== undefined && typeof r.constraint !== 'string') {
+    throw new Error('rationale.constraint must be a string')
+  }
+  return {
+    choice: r.choice.trim(),
+    ...(r.considered ? { considered: (r.considered as string[]).map(v => v.trim()) } : {}),
+    ...(typeof r.constraint === 'string' ? { constraint: r.constraint.trim() } : {}),
   }
 }
 
@@ -328,7 +361,16 @@ export function appendAgentEvent(event: {
   const db = getDb()
   const id = generateEventId()
   const now = Date.now()
-  const payload = event.payload ?? {}
+  const payload = { ...(event.payload ?? {}) }
+
+  if (isDecisionEventType(event.eventType)) {
+    if (payload.rationale === undefined) {
+      throw new Error(`rationale is required for ${event.eventType}`)
+    }
+    payload.rationale = validateRationale(payload.rationale)
+  } else if (payload.rationale !== undefined) {
+    payload.rationale = validateRationale(payload.rationale)
+  }
 
   // Enforce routing semantics for actionable events
   const enforce = event.enforceRouting !== false
@@ -590,6 +632,7 @@ export function submitApprovalDecision(opts: {
   decision: 'approve' | 'reject'
   reviewer: string
   comment?: string
+  rationale?: EventRationale
 }): { event: AgentEvent; runUnblocked: boolean } {
   const db = getDb()
 
@@ -611,6 +654,7 @@ export function submitApprovalDecision(opts: {
       original_event_id: opts.eventId,
       reviewer: opts.reviewer,
       ...(opts.comment ? { comment: opts.comment } : {}),
+      rationale: opts.rationale,
     },
   })
 
