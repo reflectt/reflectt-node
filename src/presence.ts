@@ -12,7 +12,7 @@ import { eventBus } from './events.js'
 import { getDb } from './db.js'
 import { getAgentRoles } from './assignment.js'
 
-export type PresenceStatus = 'idle' | 'working' | 'reviewing' | 'blocked' | 'offline'
+export type PresenceStatus = 'idle' | 'working' | 'reviewing' | 'blocked' | 'waiting' | 'offline'
 
 export type FocusLevel = 'soft' | 'deep'
 // soft: suppress system fallback nudges, idle-nudge; allow direct @mentions
@@ -26,6 +26,14 @@ export interface FocusState {
   reason?: string    // what they're focusing on
 }
 
+export interface WaitingState {
+  reason: string          // e.g. 'approval', 'review', 'human_input', 'token_refresh'
+  waitingFor?: string     // who/what specifically (e.g. 'ryan', 'kai', 'host_token')
+  taskId?: string         // related task
+  since: number           // when wait started
+  expiresAt?: number      // optional timeout
+}
+
 export interface AgentPresence {
   agent: string
   status: PresenceStatus
@@ -34,6 +42,7 @@ export interface AgentPresence {
   lastUpdate: number
   last_active?: number // Last real activity (message, task action, etc.)
   focus?: FocusState
+  waiting?: WaitingState  // populated when status === 'waiting'
 }
 
 export interface AgentActivity {
@@ -478,6 +487,31 @@ export class PresenceManager {
   }
 
   /**
+   * Set agent to waiting state (blocked on human).
+   */
+  setWaiting(agent: string, opts: { reason: string; waitingFor?: string; taskId?: string; expiresAt?: number }): void {
+    const lower = agent.toLowerCase()
+    const presence = this.presence.get(lower) || { agent: lower, status: 'idle' as PresenceStatus, since: Date.now(), lastUpdate: Date.now() }
+    presence.status = 'waiting'
+    presence.waiting = { reason: opts.reason, waitingFor: opts.waitingFor, taskId: opts.taskId, since: Date.now(), expiresAt: opts.expiresAt }
+    presence.lastUpdate = Date.now()
+    this.presence.set(lower, presence)
+  }
+
+  /**
+   * Clear waiting state — agent is unblocked.
+   */
+  clearWaiting(agent: string): void {
+    const lower = agent.toLowerCase()
+    const presence = this.presence.get(lower)
+    if (presence?.status === 'waiting') {
+      presence.status = 'idle'
+      presence.waiting = undefined
+      presence.lastUpdate = Date.now()
+    }
+  }
+
+  /**
    * Record real activity (message, task action, etc.)
    */
   recordActivity(agent: string, type: 'message' | 'task_completed' | 'heartbeat'): void {
@@ -631,6 +665,7 @@ export class PresenceManager {
       working: 0,
       reviewing: 0,
       blocked: 0,
+      waiting: 0,
       offline: 0,
     }
 
