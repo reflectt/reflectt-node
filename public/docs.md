@@ -1113,6 +1113,12 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/messages/channel/:channel` | List messages in a channel. Params: `since?`, `limit?`. |
 | GET | `/runs/retention/stats` | Preview retention: total runs, terminal runs, how many would be archived. Params: `maxAgeDays?`, `maxCompletedRuns?`. |
 | POST | `/runs/retention/apply` | Apply retention policy. Body: `{ maxAgeDays? (default 30), maxCompletedRuns? (default 100), deleteArchived? (default false), agentId?, dryRun? }`. Returns: archived, deleted, eventsDeleted counts. |
+| POST | `/agents/:agentId/artifacts` | Upload artifact. Body: `{ name (required), content (required), encoding? ("base64"), mimeType?, runId?, taskId?, metadata? }`. Stores file on disk + metadata in DB. |
+| GET | `/agents/:agentId/artifacts` | List artifacts for agent. Params: `runId?`, `taskId?`, `limit?`. Returns artifacts + usage. |
+| GET | `/artifacts/:artifactId` | Get artifact metadata. |
+| GET | `/artifacts/:artifactId/content` | Download artifact content (returns file with correct MIME type). |
+| DELETE | `/artifacts/:artifactId` | Delete artifact (removes file + DB row). |
+| GET | `/agents/:agentId/storage` | Get storage usage (totalBytes, count). |
 | POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
 | POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 
