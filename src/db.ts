@@ -555,6 +555,26 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type, created_at);
       `,
     },
+    {
+      version: 22,
+      sql: `
+        -- Agent memories: persistent key-value with tags and expiration
+        CREATE TABLE IF NOT EXISTS agent_memories (
+          id          TEXT PRIMARY KEY,
+          agent_id    TEXT NOT NULL,
+          namespace   TEXT NOT NULL DEFAULT 'default',
+          key         TEXT NOT NULL,
+          content     TEXT NOT NULL,
+          tags        TEXT NOT NULL DEFAULT '[]',
+          expires_at  INTEGER,
+          created_at  INTEGER NOT NULL,
+          updated_at  INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_memories_unique ON agent_memories(agent_id, namespace, key);
+        CREATE INDEX IF NOT EXISTS idx_agent_memories_agent ON agent_memories(agent_id, namespace, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_memories_expires ON agent_memories(expires_at) WHERE expires_at IS NOT NULL;
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
@@ -590,6 +610,7 @@ export function runMigrations(db: Database.Database): void {
     { version: 17, tables: ['system_loop_ticks'] },
     { version: 19, tables: ['kv'] },
     { version: 21, tables: ['agent_runs', 'agent_events'] },
+    { version: 22, tables: ['agent_memories'] },
   ]
 
   const existingTables = new Set(
