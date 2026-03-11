@@ -13590,5 +13590,108 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ── Agent Runs & Events ──────────────────────────────────────────────────
+  const {
+    createAgentRun,
+    updateAgentRun,
+    getAgentRun,
+    getActiveAgentRun,
+    listAgentRuns,
+    appendAgentEvent,
+    listAgentEvents,
+    VALID_RUN_STATUSES,
+  } = await import('./agent-runs.js')
+
+  // Create a new agent run
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/runs', async (request, reply) => {
+    const { agentId } = request.params
+    const body = request.body as { objective?: string; teamId?: string; taskId?: string; parentRunId?: string }
+    if (!body?.objective) return reply.code(400).send({ error: 'objective is required' })
+    const teamId = body.teamId ?? 'default'
+    try {
+      const run = createAgentRun(agentId, teamId, body.objective, {
+        taskId: body.taskId,
+        parentRunId: body.parentRunId,
+      })
+      return reply.code(201).send(run)
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // Update an agent run (status, context, artifacts)
+  app.patch<{ Params: { agentId: string; runId: string } }>('/agents/:agentId/runs/:runId', async (request, reply) => {
+    const { runId } = request.params
+    const body = request.body as {
+      status?: string
+      contextSnapshot?: Record<string, unknown>
+      artifacts?: Array<Record<string, unknown>>
+    }
+    if (body?.status && !VALID_RUN_STATUSES.includes(body.status as any)) {
+      return reply.code(400).send({ error: `Invalid status. Valid: ${VALID_RUN_STATUSES.join(', ')}` })
+    }
+    try {
+      const run = updateAgentRun(runId, {
+        status: body?.status as any,
+        contextSnapshot: body?.contextSnapshot,
+        artifacts: body?.artifacts,
+      })
+      if (!run) return reply.code(404).send({ error: 'Run not found' })
+      return run
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // List agent runs
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/runs', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { status?: string; teamId?: string; limit?: string }
+    const teamId = query.teamId ?? 'default'
+    const limit = query.limit ? parseInt(query.limit, 10) : undefined
+    return listAgentRuns(agentId, teamId, { status: query.status as any, limit })
+  })
+
+  // Get active run for an agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/runs/current', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { teamId?: string }
+    const teamId = query.teamId ?? 'default'
+    const run = getActiveAgentRun(agentId, teamId)
+    if (!run) return reply.code(404).send({ error: 'No active run' })
+    return run
+  })
+
+  // Append an event
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/events', async (request, reply) => {
+    const { agentId } = request.params
+    const body = request.body as { eventType?: string; runId?: string; payload?: Record<string, unknown> }
+    if (!body?.eventType) return reply.code(400).send({ error: 'eventType is required' })
+    try {
+      const event = appendAgentEvent({
+        agentId,
+        runId: body.runId,
+        eventType: body.eventType,
+        payload: body.payload,
+      })
+      return reply.code(201).send(event)
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // List agent events
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/events', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { runId?: string; type?: string; since?: string; limit?: string }
+    return listAgentEvents({
+      agentId,
+      runId: query.runId,
+      eventType: query.type,
+      since: query.since ? parseInt(query.since, 10) : undefined,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+    })
+  })
+
   return app
 }

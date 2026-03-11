@@ -521,6 +521,40 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_tasks_due_at ON tasks(due_at);
       `,
     },
+    {
+      version: 21,
+      sql: `
+        -- Agent runs: durable work sessions
+        CREATE TABLE IF NOT EXISTS agent_runs (
+          id              TEXT PRIMARY KEY,
+          agent_id        TEXT NOT NULL,
+          team_id         TEXT NOT NULL,
+          objective       TEXT NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'idle',
+          parent_run_id   TEXT,
+          context_snapshot TEXT DEFAULT '{}',
+          artifacts       TEXT DEFAULT '[]',
+          started_at      INTEGER NOT NULL,
+          updated_at      INTEGER NOT NULL,
+          completed_at    INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_team ON agent_runs(agent_id, team_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
+
+        -- Agent events: append-only event log
+        CREATE TABLE IF NOT EXISTS agent_events (
+          id          TEXT PRIMARY KEY,
+          run_id      TEXT,
+          agent_id    TEXT NOT NULL,
+          event_type  TEXT NOT NULL,
+          payload     TEXT NOT NULL DEFAULT '{}',
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_events_run ON agent_events(run_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_events_agent ON agent_events(agent_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type, created_at);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
@@ -555,6 +589,7 @@ export function runMigrations(db: Database.Database): void {
     { version: 16, tables: ['hosts'] },
     { version: 17, tables: ['system_loop_ticks'] },
     { version: 19, tables: ['kv'] },
+    { version: 21, tables: ['agent_runs', 'agent_events'] },
   ]
 
   const existingTables = new Set(
