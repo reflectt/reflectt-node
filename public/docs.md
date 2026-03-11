@@ -1105,6 +1105,7 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/agent-configs` | List all agent configs. Params: `teamId?`. |
 | GET | `/agents/:agentId/cost-check` | Runtime cost enforcement check. Params: `dailySpend?`, `monthlySpend?`. Returns: allowed, action (allow\|warn\|downgrade\|deny), remaining budgets, model/fallback. |
 | POST | `/events/routing/validate` | Validate routing semantics for an event payload. Body: `{ eventType, payload }`. Returns: valid, errors[], warnings[]. Actionable events (review_requested, approval_requested, escalation, handoff) require: action_required, urgency (low\|normal\|high\|critical), owner. |
+| GET | `/agents/:name/identity` | Host-native agent identity resolution. Resolves by name, alias, or display name without requiring OpenClaw gateway. Returns: agentId, displayName, role, aliases, capabilities, model, costCap. Merges YAML roles + agent_config table. |
 | POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
 | POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 
