@@ -10433,6 +10433,25 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const focusSummary = getFocusSummary()
 
+    // Boot context: recent memories + active run (survives restart)
+    let bootMemories: Array<{ key: string; content: string; namespace: string; updatedAt: number }> = []
+    let activeRun: { id: string; objective: string; status: string; startedAt: number } | null = null
+    try {
+      const { listMemories } = await import('./agent-memories.js')
+      const memories = listMemories({ agentId: agent, limit: 5 })
+      bootMemories = memories.map(m => ({
+        key: m.key, content: m.content.slice(0, 200),
+        namespace: m.namespace, updatedAt: m.updatedAt,
+      }))
+    } catch { /* agent-memories not available */ }
+    try {
+      const { getActiveAgentRun } = await import('./agent-runs.js')
+      const run = getActiveAgentRun(agent, 'default')
+      if (run) {
+        activeRun = { id: run.id, objective: run.objective, status: run.status, startedAt: run.startedAt }
+      }
+    } catch { /* agent-runs not available */ }
+
     return {
       agent, ts: Date.now(),
       active: slim(activeTask), next: pauseStatus.paused ? null : slim(nextTask),
@@ -10442,6 +10461,8 @@ export async function createServer(): Promise<FastifyInstance> {
       ...(focusSummary ? { focus: focusSummary } : {}),
       ...(agentDrops ? { drops: { total: agentDrops.total, rolling_1h: agentDrops.rolling_1h } } : {}),
       ...(pauseStatus.paused ? { paused: true, pauseMessage: pauseStatus.message, resumesAt: pauseStatus.entry?.pausedUntil ?? null } : {}),
+      ...(bootMemories.length > 0 ? { memories: bootMemories } : {}),
+      ...(activeRun ? { run: activeRun } : {}),
       action: pauseStatus.paused ? `PAUSED: ${pauseStatus.message}`
         : activeTask ? `Continue ${activeTask.id}`
         : nextTask ? `Claim ${nextTask.id}`
