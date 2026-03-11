@@ -1075,6 +1075,23 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | POST | `/manage/restart` | Graceful restart. Works with Docker, systemd, and reflectt CLI (PID file). Returns 501 if unsupported. |
 | GET | `/manage/disk` | Data directory sizes for capacity monitoring |
 
+### Agent Runs & Events
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agents/:agentId/runs` | Create a new agent run. Body: `{ objective, teamId?, taskId?, parentRunId? }` |
+| GET | `/agents/:agentId/runs` | List runs. Query: `?status=&teamId=&limit=` |
+| GET | `/agents/:agentId/runs/current` | Get active (non-terminal) run. Query: `?teamId=` |
+| PATCH | `/agents/:agentId/runs/:runId` | Update run. Body: `{ status?, contextSnapshot?, artifacts? }` |
+| POST | `/agents/:agentId/events` | Append an event (immutable). Body: `{ eventType, runId?, payload? }` |
+| GET | `/agents/:agentId/events` | List events. Query: `?runId=&type=&since=&limit=` |
+
+**Run statuses**: `idle`, `working`, `blocked`, `waiting_review`, `completed`, `failed`, `cancelled`
+
+**Event types**: `run_created`, `task_attached`, `tool_invoked`, `artifact_produced`, `review_requested`, `review_approved`, `review_rejected`, `blocked`, `handed_off`, `completed`, `failed`
+
+Events are **append-only** — no updates, no deletes.
+
 ### Browser Capability
 
 | Method | Path | Description |
