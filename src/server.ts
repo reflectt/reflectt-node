@@ -14034,7 +14034,75 @@ If your heartbeat shows **no active task** and **no next task**:
     const teamId = body.teamId ?? 'default'
     const result = await runWorkflow(template, agentId, teamId, body)
     return result
+  // ── Agent Messaging (Host-native) ─────────────────────────────────────
+  // Local agent-to-agent messaging. Replaces gateway for same-Host agents.
+
+  const { sendAgentMessage, listAgentMessages, listSentMessages, markMessagesRead, getUnreadCount, listChannelMessages } = await import('./agent-messaging.js')
+
+  // Send message
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/messages/send', async (request, reply) => {
+    const { agentId } = request.params
+    const body = request.body as { to?: string; channel?: string; content?: string; metadata?: Record<string, unknown> }
+    if (!body?.to) return reply.code(400).send({ error: 'to (recipient agent) is required' })
+    if (!body?.content) return reply.code(400).send({ error: 'content is required' })
+    const msg = sendAgentMessage({
+      fromAgent: agentId,
+      toAgent: body.to,
+      channel: body.channel,
+      content: body.content,
+      metadata: body.metadata,
+    })
+    // Emit event for SSE subscribers
+    eventBus.emit({
+      id: `amsg-evt-${Date.now()}`,
+      type: 'message_posted' as const,
+      timestamp: Date.now(),
+      data: { messageId: msg.id, from: agentId, to: body.to, channel: msg.channel },
+    })
+    return reply.code(201).send(msg)
   })
+
+  // Inbox
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/messages', async (request) => {
+    const { agentId } = request.params
+    const query = request.query as { channel?: string; unread?: string; since?: string; limit?: string }
+    return {
+      messages: listAgentMessages({
+        agentId,
+        channel: query.channel,
+        unreadOnly: query.unread === 'true',
+        since: query.since ? parseInt(query.since, 10) : undefined,
+        limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      }),
+      unreadCount: getUnreadCount(agentId),
+    }
+  })
+
+  // Sent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/messages/sent', async (request) => {
+    const { agentId } = request.params
+    const query = request.query as { limit?: string }
+    return { messages: listSentMessages(agentId, query.limit ? parseInt(query.limit, 10) : undefined) }
+  })
+
+  // Mark read
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/messages/read', async (request) => {
+    const { agentId } = request.params
+    const body = request.body as { messageIds?: string[] } ?? {}
+    const marked = markMessagesRead(agentId, body.messageIds)
+    return { marked }
+  })
+
+  // Channel messages
+  app.get('/messages/channel/:channel', async (request) => {
+    const { channel } = request.params as { channel: string }
+    const query = request.query as { since?: string; limit?: string }
+    return {
+      messages: listChannelMessages(channel, {
+        since: query.since ? parseInt(query.since, 10) : undefined,
+        limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      }),
+    }  })
 
   // ── Approval Routing ────────────────────────────────────────────────────
 
