@@ -12,7 +12,6 @@
  */
 
 import { getDb, safeJsonParse } from './db.js'
-import { eventBus } from './events.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -157,8 +156,6 @@ export function createAgentRun(
     payload: { objective, taskId: opts?.taskId },
   })
 
-  eventBus.emit('agent:run:created', { runId: id, agentId, teamId, objective })
-
   return {
     id,
     agentId,
@@ -225,10 +222,6 @@ export function updateAgentRun(
   if (!row) return null
 
   const run = rowToRun(row)
-
-  if (updates.status) {
-    eventBus.emit('agent:run:updated', { runId, status: updates.status })
-  }
 
   return run
 }
