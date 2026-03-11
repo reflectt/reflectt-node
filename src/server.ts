@@ -13845,9 +13845,18 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   // Append an event
+  const { validateRoutingSemantics } = await import('./agent-runs.js')
+
+  // GET /events/routing/validate — check if a payload passes routing semantics
+  app.post('/events/routing/validate', async (request) => {
+    const body = request.body as { eventType?: string; payload?: Record<string, unknown> }
+    if (!body?.eventType) return { valid: false, errors: ['eventType is required'], warnings: [] }
+    return validateRoutingSemantics(body.eventType, body.payload ?? {})
+  })
+
   app.post<{ Params: { agentId: string } }>('/agents/:agentId/events', async (request, reply) => {
     const { agentId } = request.params
-    const body = request.body as { eventType?: string; runId?: string; payload?: Record<string, unknown> }
+    const body = request.body as { eventType?: string; runId?: string; payload?: Record<string, unknown>; enforceRouting?: boolean }
     if (!body?.eventType) return reply.code(400).send({ error: 'eventType is required' })
     try {
       const event = appendAgentEvent({
@@ -13855,9 +13864,13 @@ If your heartbeat shows **no active task** and **no next task**:
         runId: body.runId,
         eventType: body.eventType,
         payload: body.payload,
+        enforceRouting: body.enforceRouting,
       })
       return reply.code(201).send(event)
     } catch (err: any) {
+      if (err.message.includes('Routing semantics violation')) {
+        return reply.code(422).send({ error: err.message, hint: 'Actionable events require: action_required (string), urgency (low|normal|high|critical), owner (string). Optional: expires_at (number).' })
+      }
       return reply.code(500).send({ error: err.message })
     }
   })
