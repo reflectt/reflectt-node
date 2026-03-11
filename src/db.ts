@@ -592,6 +592,25 @@ export function runMigrations(db: Database.Database): void {
           updated_at      INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_agent_config_team ON agent_config(team_id);
+      \`,
+    },
+    {
+      version: 24,
+      sql: \`
+        -- Agent messages: Host-native agent-to-agent messaging
+        CREATE TABLE IF NOT EXISTS agent_messages (
+          id          TEXT PRIMARY KEY,
+          from_agent  TEXT NOT NULL,
+          to_agent    TEXT NOT NULL,
+          channel     TEXT NOT NULL DEFAULT 'direct',
+          content     TEXT NOT NULL,
+          metadata    TEXT NOT NULL DEFAULT '{}',
+          read_at     INTEGER,
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_messages_to ON agent_messages(to_agent, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_messages_channel ON agent_messages(channel, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_messages_unread ON agent_messages(to_agent, read_at) WHERE read_at IS NULL;
       `,
     },
   ]
@@ -631,6 +650,7 @@ export function runMigrations(db: Database.Database): void {
     { version: 21, tables: ['agent_runs', 'agent_events'] },
     { version: 22, tables: ['agent_memories'] },
     { version: 23, tables: ['agent_config'] },
+    { version: 24, tables: ['agent_messages'] },
   ]
 
   const existingTables = new Set(
