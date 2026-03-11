@@ -1096,6 +1096,9 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | POST | `/workflows/:id/run` | Execute a workflow. Body: `{ agentId?, teamId?, objective?, taskId?, reviewer?, prUrl?, title?, urgency?, nextOwner?, summary? }`. Returns step-by-step results with timing. Currently available: `pr-review` (6 steps: create → work → review → approve → handoff → complete). |
 | POST | `/canvas/input` | Human→agent control seam for Presence Layer. Body: `{ action: "decision"\|"interrupt"\|"pause"\|"resume"\|"mute"\|"unmute", actor (required), targetRunId?, decisionId?, choice?: "approve"\|"deny"\|"defer", comment? }`. Emits canvas_input SSE event. |
 | GET | `/canvas/input/schema` | Discovery: lists valid actions and field descriptions for canvas input. |
+| POST | `/canvas/state` | Agent emits Presence Layer state transition. Body: `{ state: "floor"\|"listening"\|"thinking"\|"rendering"\|"ambient"\|"decision"\|"urgent"\|"handoff", sensors: null\|"mic"\|"camera"\|"mic+camera", agentId (required), payload?: { text?, media?, decision?: { question, decisionId, expiresAt?, autoAction? }, agents?: [{ name, state, task? }], summary?: { headline, items?, cost?, duration? } } }`. Emits canvas_render SSE event. |
+| GET | `/canvas/state` | Current Presence Layer state for agents. Params: `agentId?` (single agent) or all agents. |
+| GET | `/canvas/states` | Discovery: valid states, sensors, and payload schema. |
 | POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
 | POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 
