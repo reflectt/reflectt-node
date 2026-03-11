@@ -13865,9 +13865,10 @@ If your heartbeat shows **no active task** and **no next task**:
     if (!subject) return reply.code(400).send({ error: 'subject is required' })
     if (!body.html && !body.text) return reply.code(400).send({ error: 'html or text body is required' })
 
-    // Get team from cloud config
-    const teamId = (body.teamId as string) || 'default'
-    return cloudRelay(`/api/teams/${encodeURIComponent(teamId)}/email/send`, {
+    // Use host-relay endpoint — authenticates with host credential, uses host's own teamId server-side
+    const hostId = process.env.REFLECTT_HOST_ID
+    const relayPath = hostId ? `/api/hosts/${encodeURIComponent(hostId)}/relay/email` : '/api/hosts/relay/email'
+    return cloudRelay(relayPath, {
       from,
       to,
       subject,
@@ -13888,8 +13889,9 @@ If your heartbeat shows **no active task** and **no next task**:
     if (!to) return reply.code(400).send({ error: 'to is required (phone number)' })
     if (!msgBody) return reply.code(400).send({ error: 'body is required' })
 
-    const teamId = (body.teamId as string) || 'default'
-    return cloudRelay(`/api/teams/${encodeURIComponent(teamId)}/sms/send`, {
+    const hostIdSms = process.env.REFLECTT_HOST_ID
+    const smsRelayPath = hostIdSms ? `/api/hosts/${encodeURIComponent(hostIdSms)}/relay/sms` : '/api/hosts/relay/sms'
+    return cloudRelay(smsRelayPath, {
       to,
       body: msgBody,
       from: body.from,
