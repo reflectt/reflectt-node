@@ -265,16 +265,79 @@ export function listAgentRuns(
 
 // ── Events (append-only) ──────────────────────────────────────────────────
 
+// Event types that require structured payload fields per COO routing semantics
+const ACTIONABLE_EVENT_TYPES = new Set([
+  'review_requested',
+  'approval_requested',
+  'escalation',
+  'handoff',
+])
+
+const VALID_URGENCY = new Set(['low', 'normal', 'high', 'critical'])
+
+export interface RoutingValidation {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+}
+
+/**
+ * Validate routing semantics for actionable events.
+ * Enforces: action_required, urgency, owner required.
+ * Optional: expires_at.
+ */
+export function validateRoutingSemantics(eventType: string, payload: Record<string, unknown>): RoutingValidation {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  if (!ACTIONABLE_EVENT_TYPES.has(eventType)) {
+    return { valid: true, errors: [], warnings: [] }
+  }
+
+  if (!payload.action_required || typeof payload.action_required !== 'string') {
+    errors.push('Actionable events require action_required (string describing what needs to happen)')
+  }
+  if (!payload.urgency || typeof payload.urgency !== 'string') {
+    errors.push('Actionable events require urgency (low|normal|high|critical)')
+  } else if (!VALID_URGENCY.has(payload.urgency as string)) {
+    errors.push(`urgency must be one of: ${[...VALID_URGENCY].join(', ')}`)
+  }
+  if (!payload.owner || typeof payload.owner !== 'string') {
+    errors.push('Actionable events require owner (who needs to act)')
+  }
+
+  if (payload.expires_at !== undefined && typeof payload.expires_at !== 'number') {
+    warnings.push('expires_at should be a numeric timestamp (epoch ms)')
+  }
+
+  // Decision events should include rationale
+  if (eventType === 'approval_requested' && !payload.title) {
+    warnings.push('approval_requested events should include title for the approval queue')
+  }
+
+  return { valid: errors.length === 0, errors, warnings }
+}
+
 export function appendAgentEvent(event: {
   agentId: string
   runId?: string | null
   eventType: string
   payload?: Record<string, unknown>
+  enforceRouting?: boolean  // default true for actionable events
 }): AgentEvent {
   const db = getDb()
   const id = generateEventId()
   const now = Date.now()
   const payload = event.payload ?? {}
+
+  // Enforce routing semantics for actionable events
+  const enforce = event.enforceRouting !== false
+  if (enforce) {
+    const validation = validateRoutingSemantics(event.eventType, payload)
+    if (!validation.valid) {
+      throw new Error(`Routing semantics violation: ${validation.errors.join('; ')}`)
+    }
+  }
 
   db.prepare(`
     INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at)
