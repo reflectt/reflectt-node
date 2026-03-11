@@ -14187,7 +14187,59 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get<{ Params: { agentId: string } }>('/agents/:agentId/storage', async (request) => {
     const { agentId } = request.params
     return getStorageUsage(agentId)
-  })  // ── Approval Routing ────────────────────────────────────────────────────
+  // ── Webhook Storage ──────────────────────────────────────────────────
+  const { storeWebhookPayload, getWebhookPayload, listWebhookPayloads, markPayloadProcessed, getUnprocessedCount, purgeOldPayloads } = await import('./webhook-storage.js')
+
+  // Ingest webhook payload
+  app.post('/webhooks/ingest', async (request, reply) => {
+    const body = request.body as { source?: string; eventType?: string; agentId?: string; body?: Record<string, unknown> }
+    if (!body?.source) return reply.code(400).send({ error: 'source is required' })
+    if (!body?.eventType) return reply.code(400).send({ error: 'eventType is required' })
+    if (!body?.body) return reply.code(400).send({ error: 'body (payload) is required' })
+    const headers: Record<string, string> = {}
+    for (const [k, v] of Object.entries(request.headers)) {
+      if (typeof v === 'string') headers[k] = v
+    }
+    const payload = storeWebhookPayload({ source: body.source, eventType: body.eventType, agentId: body.agentId, body: body.body, headers })
+    return reply.code(201).send(payload)
+  })
+
+  // List payloads
+  app.get('/webhooks/payloads', async (request) => {
+    const query = request.query as { source?: string; agentId?: string; unprocessed?: string; since?: string; limit?: string }
+    return {
+      payloads: listWebhookPayloads({
+        source: query.source,
+        agentId: query.agentId,
+        unprocessedOnly: query.unprocessed === 'true',
+        since: query.since ? parseInt(query.since, 10) : undefined,
+        limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      }),
+      unprocessedCount: getUnprocessedCount({ source: query.source, agentId: query.agentId }),
+    }
+  })
+
+  // Get single payload
+  app.get('/webhooks/payloads/:payloadId', async (request, reply) => {
+    const { payloadId } = request.params as { payloadId: string }
+    const payload = getWebhookPayload(payloadId)
+    if (!payload) return reply.code(404).send({ error: 'Payload not found' })
+    return payload
+  })
+
+  // Mark processed
+  app.post('/webhooks/payloads/:payloadId/process', async (request, reply) => {
+    const { payloadId } = request.params as { payloadId: string }
+    const marked = markPayloadProcessed(payloadId)
+    if (!marked) return reply.code(404).send({ error: 'Payload not found or already processed' })
+    return { processed: true }
+  })
+
+  // Purge old processed payloads
+  app.post('/webhooks/purge', async (request) => {
+    const body = request.body as { maxAgeDays?: number } ?? {}
+    const deleted = purgeOldPayloads(body.maxAgeDays ?? 30)
+    return { deleted }  })  // ── Approval Routing ────────────────────────────────────────────────────
 
   const {
     listPendingApprovals,

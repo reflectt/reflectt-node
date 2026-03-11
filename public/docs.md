@@ -1119,6 +1119,11 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/artifacts/:artifactId/content` | Download artifact content (returns file with correct MIME type). |
 | DELETE | `/artifacts/:artifactId` | Delete artifact (removes file + DB row). |
 | GET | `/agents/:agentId/storage` | Get storage usage (totalBytes, count). |
+| POST | `/webhooks/ingest` | Store inbound webhook payload. Body: `{ source (required), eventType (required), body (required), agentId? }`. Captures request headers automatically. |
+| GET | `/webhooks/payloads` | List stored payloads. Params: `source?`, `agentId?`, `unprocessed?` (true), `since?`, `limit?`. Returns payloads + unprocessedCount. |
+| GET | `/webhooks/payloads/:payloadId` | Get single payload with full body + headers. |
+| POST | `/webhooks/payloads/:payloadId/process` | Mark payload as processed. |
+| POST | `/webhooks/purge` | Delete old processed payloads. Body: `{ maxAgeDays? }` (default 30). |
 | POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
 | POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 
