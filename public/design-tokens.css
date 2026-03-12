@@ -40,9 +40,9 @@
   --color-state-handoff: #10B981;        /* Emerald 500 — transferring control */
 
   /* ── Trust Indicator ──────────────────────────────────────────────── */
-  --color-trust-mic: #EF4444;            /* Red — microphone active */
-  --color-trust-camera: #EF4444;         /* Red — camera active */
-  --color-trust-mic-camera: #DC2626;     /* Red 600 — both active */
+  --color-trust-mic: #F87171;            /* Red 400 — visible without alarming */            /* Red — microphone active */
+  --color-trust-camera: #F87171;         /* Red — camera active */
+  --color-trust-mic-camera: #EF4444;  /* Red 500 — both sensors escalated */     /* Red 600 — both active */
   --trust-indicator-size: 10px;
   --trust-indicator-position-top: env(safe-area-inset-top, 8px);
   --trust-indicator-position-left: 12px;
