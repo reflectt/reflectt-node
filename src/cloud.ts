@@ -1121,10 +1121,20 @@ async function syncCanvas(): Promise<void> {
   // Get active (non-stale) canvas slots
   const activeSlots = slotManager.getActive()
 
-  // Push to cloud
+  // Also fetch agent canvas states from local API
+  let agents: Record<string, unknown> = {}
+  try {
+    const res = await fetch('http://127.0.0.1:4445/canvas/state')
+    if (res.ok) {
+      const data = await res.json() as { agents?: Record<string, unknown> }
+      agents = data.agents ?? {}
+    }
+  } catch { /* local API not ready */ }
+
+  // Push to cloud — include both slots and agent states
   const result = await cloudPost<{ ok: boolean; slotCount: number }>(
     `/api/hosts/${state.hostId}/canvas`,
-    { slots: activeSlots }
+    { slots: activeSlots, agents }
   )
 
   if (result.success && result.data) {
