@@ -27,6 +27,7 @@ import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
+import { listApprovalQueue } from './agent-runs.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -92,6 +93,7 @@ interface CloudState {
   taskSyncTimer: ReturnType<typeof setInterval> | null
   chatSyncTimer: ReturnType<typeof setInterval> | null
   canvasSyncTimer: ReturnType<typeof setInterval> | null
+  approvalSyncTimer: ReturnType<typeof setInterval> | null
   usageSyncTimer: ReturnType<typeof setInterval> | null
   reflectionSyncTimer: ReturnType<typeof setInterval> | null
   contextSyncTimer: ReturnType<typeof setInterval> | null
@@ -193,6 +195,7 @@ let state: CloudState = {
   taskSyncTimer: null,
   chatSyncTimer: null,
   canvasSyncTimer: null,
+  approvalSyncTimer: null,
   usageSyncTimer: null,
   reflectionSyncTimer: null,
   contextSyncTimer: null,
@@ -434,6 +437,12 @@ export async function startCloudIntegration(): Promise<void> {
     syncCanvas().catch(() => {})
   }, ACTIVE_CANVAS_SYNC_MS)
 
+  // Run approval sync — every 10s
+  syncRunApprovals().catch(() => {})
+  state.approvalSyncTimer = setInterval(() => {
+    syncRunApprovals().catch(() => {})
+  }, APPROVAL_SYNC_INTERVAL_MS)
+
   // Usage sync — adaptive: 15s when active, 60s when idle
   let lastUsageSyncAt = 0
   syncUsage().catch(() => {})
@@ -588,6 +597,10 @@ export function stopCloudIntegration(): void {
   if (state.canvasSyncTimer) {
     clearInterval(state.canvasSyncTimer)
     state.canvasSyncTimer = null
+  }
+  if (state.approvalSyncTimer) {
+    clearInterval(state.approvalSyncTimer)
+    state.approvalSyncTimer = null
   }
   if (state.usageSyncTimer) {
     clearInterval(state.usageSyncTimer)
@@ -1124,6 +1137,57 @@ async function syncCanvas(): Promise<void> {
     canvasSyncErrors++
     if (canvasSyncErrors <= 3 || canvasSyncErrors % 20 === 0) {
       console.warn(`☁️  [Canvas] Sync failed (${canvasSyncErrors}): ${result.error}`)
+    }
+  }
+}
+
+// ---- Run Approval Sync ----
+
+let approvalSyncErrors = 0
+let lastApprovalSyncAt = 0
+const APPROVAL_SYNC_INTERVAL_MS = 10_000
+
+async function syncRunApprovals(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  const now = Date.now()
+  if (now - lastApprovalSyncAt < APPROVAL_SYNC_INTERVAL_MS) return
+  lastApprovalSyncAt = now
+
+  try {
+    const items = listApprovalQueue({ category: 'review', limit: 20 })
+    if (items.length === 0 && approvalSyncErrors === 0) return // Skip push when empty and no prior errors
+
+    const payload = items.map(item => ({
+      eventId: item.id,
+      agentId: item.agentId,
+      runId: item.runId,
+      title: item.title,
+      description: item.description,
+      urgency: item.urgency,
+      payload: item.event.payload,
+    }))
+
+    const result = await cloudPost(
+      `/api/hosts/${state.hostId}/run-approvals`,
+      { items: payload }
+    )
+
+    if (result.success) {
+      if (approvalSyncErrors > 0) {
+        console.log(`☁️  [RunApprovals] Sync recovered after ${approvalSyncErrors} errors`)
+        approvalSyncErrors = 0
+      }
+    } else {
+      approvalSyncErrors++
+      if (approvalSyncErrors <= 3 || approvalSyncErrors % 20 === 0) {
+        console.warn(`☁️  [RunApprovals] Sync failed (${approvalSyncErrors}): ${result.error}`)
+      }
+    }
+  } catch (err: any) {
+    approvalSyncErrors++
+    if (approvalSyncErrors <= 3) {
+      console.warn(`☁️  [RunApprovals] Sync error: ${err?.message}`)
     }
   }
 }
