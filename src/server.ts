@@ -11938,17 +11938,12 @@ If your heartbeat shows **no active task** and **no next task**:
       return { success: false, error: 'agent and model are required' }
     }
     const event = recordUsage({
-      agent: body.agent as string,
-      task_id: body.task_id as string | undefined,
+      agentId: body.agent as string,
       model: body.model as string,
-      provider: (body.provider as string) || 'unknown',
-      input_tokens: Number(body.input_tokens) || 0,
-      output_tokens: Number(body.output_tokens) || 0,
-      estimated_cost_usd: body.estimated_cost_usd != null ? Number(body.estimated_cost_usd) : undefined,
-      category: (body.category as UsageEvent['category']) || 'other',
+      inputTokens: Number(body.input_tokens) || 0,
+      outputTokens: Number(body.output_tokens) || 0,
+      cost: body.estimated_cost_usd != null ? Number(body.estimated_cost_usd) : 0,
       timestamp: Number(body.timestamp) || Date.now(),
-      team_id: body.team_id as string | undefined,
-      metadata: body.metadata as Record<string, unknown> | undefined,
     })
     return { success: true, event }
   })
@@ -14577,6 +14572,65 @@ If your heartbeat shows **no active task** and **no next task**:
     const dailySpend = query.dailySpend ? parseFloat(query.dailySpend) : 0
     const monthlySpend = query.monthlySpend ? parseFloat(query.monthlySpend) : 0
     return checkCostCap(request.params.agentId, dailySpend, monthlySpend)
+  })
+
+  // ── Cost-Policy Enforcement Middleware ──────────────────────────────────
+
+  const {
+    enforcePolicy,
+    recordUsage,
+    getDailySpend,
+    getMonthlySpend,
+    purgeUsageLog,
+    ensureUsageLogTable,
+  } = await import('./cost-enforcement.js')
+
+  ensureUsageLogTable()
+
+  // POST /agents/:agentId/enforce-cost — runtime enforcement before model calls
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/enforce-cost', async (request, reply) => {
+    const result = enforcePolicy(request.params.agentId)
+    const status = result.action === 'deny' ? 403 : 200
+    return reply.code(status).send(result)
+  })
+
+  // GET /agents/:agentId/spend — current daily + monthly spend
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/spend', async (request) => {
+    const { agentId } = request.params
+    return {
+      agentId,
+      dailySpend: getDailySpend(agentId),
+      monthlySpend: getMonthlySpend(agentId),
+    }
+  })
+
+  // POST /usage/record — record a usage event
+  app.post('/usage/record', async (request, reply) => {
+    const body = request.body as {
+      agentId?: string; model?: string
+      inputTokens?: number; outputTokens?: number
+      cost?: number
+    }
+    if (!body?.agentId) return reply.code(400).send({ error: 'agentId is required' })
+    if (!body?.model) return reply.code(400).send({ error: 'model is required' })
+    if (typeof body.cost !== 'number') return reply.code(400).send({ error: 'cost is required (number)' })
+
+    recordUsage({
+      agentId: body.agentId,
+      model: body.model,
+      inputTokens: body.inputTokens ?? 0,
+      outputTokens: body.outputTokens ?? 0,
+      cost: body.cost,
+      timestamp: Date.now(),
+    })
+    return reply.code(201).send({ ok: true })
+  })
+
+  // POST /usage/purge — purge old usage records
+  app.post('/usage/purge', async (request) => {
+    const body = request.body as { maxAgeDays?: number } | null
+    const deleted = purgeUsageLog(body?.maxAgeDays ?? 90)
+    return { deleted }
   })
 
   // ── Agent Memories ─────────────────────────────────────────────────────
