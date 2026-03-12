@@ -135,11 +135,61 @@ function buildServerEnv(config: Config): NodeJS.ProcessEnv {
   return env
 }
 
+/**
+ * Check if dist/ is stale compared to src/ (i.e. source files were modified after last build).
+ * Returns a warning message if stale, or null if fresh.
+ */
+function checkBuildFreshness(): string | null {
+  const __filename = fileURLToPath(import.meta.url)
+  const projectRoot = join(dirname(__filename), '..')
+  const distDir = join(projectRoot, 'dist')
+  const srcDir = join(projectRoot, 'src')
+
+  if (!existsSync(distDir)) {
+    return `❌ Build output missing: ${distDir} does not exist. Run 'npm run build' before starting.`
+  }
+
+  const distIndex = join(distDir, 'server.js')
+  if (!existsSync(distIndex)) {
+    return `❌ Build output incomplete: dist/server.js not found. Run 'npm run build' before starting.`
+  }
+
+  try {
+    const distMtime = statSync(distIndex).mtimeMs
+    // Check a few key source files — if any are newer than dist, build is stale
+    const checkFiles = ['server.ts', 'cli.ts', 'config.ts', 'chat.ts']
+    for (const file of checkFiles) {
+      const srcFile = join(srcDir, file)
+      if (existsSync(srcFile)) {
+        const srcMtime = statSync(srcFile).mtimeMs
+        if (srcMtime > distMtime) {
+          return `⚠️  Build may be stale: src/${file} is newer than dist/server.js. Run 'npm run build' to rebuild.`
+        }
+      }
+    }
+  } catch {
+    // If stat fails, don't block startup
+  }
+
+  return null
+}
+
 function startServerDetached(config: Config): number {
   const { projectRoot, serverPath, useNode } = getRuntimePaths()
 
   if (!existsSync(serverPath)) {
     throw new Error(`Server file not found: ${serverPath}`)
+  }
+
+  // Check build freshness for compiled mode
+  if (useNode) {
+    const warning = checkBuildFreshness()
+    if (warning) {
+      console.warn(warning)
+      if (warning.startsWith('❌')) {
+        throw new Error('Cannot start: build output is missing or incomplete. Run "npm run build" first.')
+      }
+    }
   }
 
   const cmd = useNode ? 'node' : 'npx'

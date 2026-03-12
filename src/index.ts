@@ -46,7 +46,13 @@ function checkBuildFreshness(): void {
 
     if (newestSrc > distMtime + 1000) { // 1s tolerance
       const ageSec = Math.round((newestSrc - distMtime) / 1000)
-      console.warn(`⚠️  Build may be stale: src/ is ${ageSec}s newer than dist/. Run \`npm run build\` to recompile.`)
+      console.warn('')
+      console.warn('╔══════════════════════════════════════════════════════════════╗')
+      console.warn(`║  ⚠️  BUILD STALE: src/ is ${ageSec}s newer than dist/`)
+      console.warn('║  Run: npm run build')
+      console.warn('║  The running server may not reflect your latest code changes.')
+      console.warn('╚══════════════════════════════════════════════════════════════╝')
+      console.warn('')
     }
   } catch {
     // Non-fatal — skip check if anything goes wrong
