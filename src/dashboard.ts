@@ -2246,6 +2246,14 @@ ${internalMode ? `<div id="pause-banner" class="pause-banner" style="display:non
     <div id="routing-policy-panel" style="display:none;border-top:1px solid var(--border-subtle);padding:12px;max-height:400px;overflow-y:auto"></div>
   </div>
 
+  <!-- Agent-action approval queue: live review_requested events from agent runs -->
+  <div class="panel" id="agent-approval-panel">
+    <div class="panel-header">⚡ Agent Approvals <span class="count" id="agent-approval-count"></span>
+      <span style="float:right;font-size:10px;color:var(--text-dim);padding:4px 0">Live — approve/deny agent actions</span>
+    </div>
+    <div class="panel-body" id="agent-approval-body" style="max-height:400px;overflow-y:auto"></div>
+  </div>
+
   </div><!-- /page-reviews -->
 
   <!-- ═══ PAGE: Chat ═══ -->

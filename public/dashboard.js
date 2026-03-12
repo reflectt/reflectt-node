@@ -2219,6 +2219,70 @@ async function batchApproveHighConfidence() {
   } catch (e) { console.error('Batch approve failed:', e); }
 }
 
+// ---- Agent Action Approval Queue (review_requested events from agent runs) ----
+let agentApprovalData = null;
+
+async function loadAgentApprovals() {
+  try {
+    const res = await fetch(BASE + '/approval-queue?category=review');
+    agentApprovalData = await res.json();
+    renderAgentApprovals();
+  } catch (e) {
+    const body = document.getElementById('agent-approval-body');
+    if (body) body.innerHTML = '<div class="empty">Failed to load agent approvals</div>';
+  }
+}
+
+function renderAgentApprovals() {
+  const body = document.getElementById('agent-approval-body');
+  const count = document.getElementById('agent-approval-count');
+  if (!body) return;
+
+  const items = (agentApprovalData && agentApprovalData.items) ? agentApprovalData.items : [];
+  if (count) count.textContent = items.length > 0 ? items.length + ' pending' : '';
+
+  if (items.length === 0) {
+    body.innerHTML = '<div class="empty" style="text-align:center;padding:20px;color:var(--text-dim)">✓ No pending agent approvals.</div>';
+    return;
+  }
+
+  let html = '';
+  items.forEach(function(item) {
+    const urgencyColor = item.urgency === 'critical' ? '#ef4444' : item.urgency === 'high' ? '#f59e0b' : 'var(--text-dim)';
+    const title = (item.title || item.event && item.event.payload && item.event.payload.action_required || 'Agent action pending').substring(0, 80);
+    const desc = item.description || (item.event && item.event.payload && item.event.payload.description) || '';
+    const agentId = item.agentId || '?';
+    const runId = item.runId || '';
+    html += '<div class="approval-card" style="border-left:3px solid ' + urgencyColor + '">';
+    html += '<div class="approval-header">';
+    html += '<span style="color:' + urgencyColor + '">⚡</span> ';
+    html += '<span class="approval-title">' + esc(title) + '</span>';
+    html += '<span class="assignee-tag" style="margin-left:8px">@' + esc(agentId) + '</span>';
+    if (item.urgency) html += '<span style="font-size:10px;color:' + urgencyColor + ';margin-left:6px">' + esc(item.urgency) + '</span>';
+    html += '</div>';
+    if (desc) html += '<div class="approval-meta" style="font-size:12px;margin-top:4px">' + esc(desc.substring(0, 120)) + '</div>';
+    if (runId) html += '<div class="approval-meta" style="font-size:10px;color:var(--text-dim)">Run: ' + esc(runId) + '</div>';
+    html += '<div class="approval-actions">';
+    html += '<button class="btn-reject" onclick="decideAgentApproval(\'' + esc(item.id) + '\',\'reject\')">✗ Reject</button>';
+    html += '<button class="btn-approve" onclick="decideAgentApproval(\'' + esc(item.id) + '\',\'approve\')">✓ Approve</button>';
+    html += '</div>';
+    html += '</div>';
+  });
+
+  body.innerHTML = html;
+}
+
+async function decideAgentApproval(eventId, decision) {
+  try {
+    await fetch(BASE + '/approval-queue/' + encodeURIComponent(eventId) + '/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision: decision, actor: 'dashboard' })
+    });
+    await loadAgentApprovals();
+  } catch (e) { console.error('Agent approval decision failed:', e); }
+}
+
 // ---- Routing Policy Editor ----
 function toggleRoutingPolicy() {
   routingPolicyVisible = !routingPolicyVisible;
@@ -2394,7 +2458,7 @@ async function refresh() {
   if (refreshCount === 1 || forceFull) await refreshAgentRegistry();
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback(), loadPauseStatus(), loadIntensityControl(), loadPolls()]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadAgentApprovals(), loadFeedback(), loadPauseStatus(), loadIntensityControl(), loadPolls()]);
   await renderPromotionSSOT();
 }
 
