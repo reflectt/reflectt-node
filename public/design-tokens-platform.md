@@ -24,7 +24,7 @@ extension Color {
     static let stateHandoff = Color(hex: "#10B981")
 
     // Trust
-    static let trustActive = Color(hex: "#EF4444")
+    static let trustActive = Color(hex: "#F87171")  // Red 400 — visible without alarming
 }
 
 // Dimensions.swift
@@ -65,7 +65,7 @@ enum Timing {
 <color name="state_urgent">#FFEF4444</color>
 <color name="state_handoff">#FF10B981</color>
 
-<color name="trust_active">#FFEF4444</color>
+<color name="trust_active">#FFF87171</color> <!-- Red 400 -->
 
 <!-- dimens.xml -->
 <dimen name="tap_target_min">44dp</dimen>
@@ -87,6 +87,12 @@ object Timing {
     const val ORB_GLOW = 1800L
 }
 ```
+
+## Important Notes
+
+**Canvas state colors are tint references, not solid fills.** The spec uses these as radial gradient tints. Platform implementations should apply them as gradient bases, not flat backgrounds. For v0 surfaces using solid fills, these values are acceptable approximations.
+
+**Trust indicator uses red-400 (#F87171)** — deliberately lighter than error red. Present and visible without being alarming. Both-sensors escalates to red-500 (#EF4444).
 
 ## Token Categories
 
