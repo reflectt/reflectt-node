@@ -3448,6 +3448,22 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Presence loop demo — live end-to-end ambient→run→approve→result→collapse
+  app.get('/presence-loop', async (_request, reply) => {
+    try {
+      const { promises: fs } = await import('fs')
+      const { join } = await import('path')
+      const { fileURLToPath } = await import('url')
+      const { dirname } = await import('path')
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const html = await fs.readFile(join(__dirname, '..', 'public', 'presence-loop-demo.html'), 'utf-8')
+      reply.type('text/html; charset=utf-8').send(html)
+    } catch (err) {
+      reply.code(500).send({ error: 'Failed to load presence loop demo' })
+    }
+  })
+
   app.get('/docs', async (_request, reply) => {
     try {
       const { promises: fs } = await import('fs')
