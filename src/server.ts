@@ -8481,62 +8481,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // ── Approval Queue ──────────────────────────────────────────────────
-
-  app.get('/approval-queue', async () => {
-    // Tasks in 'todo' that were auto-assigned (have suggestedAgent in metadata) or need assignment review
-    const allTasks = taskManager.listTasks({})
-    const todoTasks = allTasks.filter(t => t.status === 'todo')
-
-    const items = todoTasks.map(t => {
-      const task = t as any
-      const meta = task.metadata || {}
-      const title = task.title || ''
-      const tags = Array.isArray(task.tags) ? task.tags : []
-      const doneCriteria = Array.isArray(task.done_criteria) ? task.done_criteria : []
-
-      // Score all agents for this task
-      const roles = getAgentRoles()
-      const agentOptions = roles.map(agent => {
-        const wipCount = allTasks.filter(at => at.status === 'doing' && (at.assignee || '').toLowerCase() === agent.name).length
-        const s = scoreAssignment(agent, { title, tags, done_criteria: doneCriteria }, wipCount)
-        return {
-          agentId: agent.name,
-          name: agent.name,
-          confidenceScore: Math.max(0, Math.min(1, s.score)),
-          affinityTags: agent.affinityTags,
-        }
-      }).sort((a, b) => b.confidenceScore - a.confidenceScore)
-
-      const topAgent = agentOptions[0]
-      const suggestedAgent = task.assignee || topAgent?.agentId || null
-      const confidenceScore = topAgent?.confidenceScore || 0
-      const confidenceReason = topAgent && topAgent.confidenceScore > 0
-        ? `${topAgent.name}: affinity match on ${topAgent.affinityTags.slice(0, 3).join(', ')}`
-        : 'No strong affinity match'
-
-      return {
-        taskId: task.id,
-        title,
-        description: task.description || '',
-        priority: task.priority || 'P3',
-        suggestedAgent,
-        confidenceScore,
-        confidenceReason,
-        agentOptions,
-        status: 'pending' as const,
-      }
-    })
-
-    const highConfidence = items.filter(i => i.confidenceScore >= 0.85)
-    const needsReview = items.filter(i => i.confidenceScore < 0.85)
-
-    return {
-      items: [...highConfidence, ...needsReview],
-      total: items.length,
-      highConfidenceCount: highConfidence.length,
-      needsReviewCount: needsReview.length,
-    }
-  })
+  // Note: GET /approval-queue is defined below near /approval-queue/:approvalId/decide
 
   app.post<{ Params: { taskId: string } }>('/approval-queue/:taskId/approve', async (request, reply) => {
     const body = request.body as Record<string, unknown>
