@@ -1111,6 +1111,8 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/agents/:agentId/messages/sent` | Sent messages. Params: `limit?`. |
 | POST | `/agents/:agentId/messages/read` | Mark messages as read. Body: `{ messageIds?: string[] }` (omit for mark all). |
 | GET | `/messages/channel/:channel` | List messages in a channel. Params: `since?`, `limit?`. |
+| GET | `/runs/retention/stats` | Preview retention: total runs, terminal runs, how many would be archived. Params: `maxAgeDays?`, `maxCompletedRuns?`. |
+| POST | `/runs/retention/apply` | Apply retention policy. Body: `{ maxAgeDays? (default 30), maxCompletedRuns? (default 100), deleteArchived? (default false), agentId?, dryRun? }`. Returns: archived, deleted, eventsDeleted counts. |
 | POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
 | POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 

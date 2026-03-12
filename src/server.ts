@@ -14103,7 +14103,37 @@ If your heartbeat shows **no active task** and **no next task**:
         limit: query.limit ? parseInt(query.limit, 10) : undefined,
       }),
     }  })
+  // ── Run Retention / Archive ────────────────────────────────────────────
 
+  const { applyRunRetention, getRetentionStats } = await import('./agent-runs.js')
+
+  // GET /runs/retention/stats — preview what retention policy would do
+  app.get('/runs/retention/stats', async (request) => {
+    const query = request.query as { maxAgeDays?: string; maxCompletedRuns?: string }
+    return getRetentionStats({
+      maxAgeDays: query.maxAgeDays ? parseInt(query.maxAgeDays, 10) : undefined,
+      maxCompletedRuns: query.maxCompletedRuns ? parseInt(query.maxCompletedRuns, 10) : undefined,
+    })
+  })
+
+  // POST /runs/retention/apply — apply retention policy
+  app.post('/runs/retention/apply', async (request) => {
+    const body = request.body as {
+      maxAgeDays?: number
+      maxCompletedRuns?: number
+      deleteArchived?: boolean
+      agentId?: string
+      dryRun?: boolean
+    } ?? {}
+    return applyRunRetention({
+      policy: {
+        maxAgeDays: body.maxAgeDays,
+        maxCompletedRuns: body.maxCompletedRuns,
+        deleteArchived: body.deleteArchived,
+      },
+      agentId: body.agentId,
+      dryRun: body.dryRun,
+    })  })
   // ── Approval Routing ────────────────────────────────────────────────────
 
   const {

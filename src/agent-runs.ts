@@ -394,6 +394,135 @@ export function listAgentEvents(opts: {
   return rows.map(rowToEvent)
 }
 
+// ── Run retention / archive ─────────────────────────────────────────────────
+
+export interface RetentionPolicy {
+  maxAgeDays: number          // Archive runs older than this
+  maxCompletedRuns: number    // Keep at most this many completed runs per agent
+  deleteArchived: boolean     // Actually delete archived runs (vs just marking)
+}
+
+const DEFAULT_RETENTION: RetentionPolicy = {
+  maxAgeDays: 30,
+  maxCompletedRuns: 100,
+  deleteArchived: false,
+}
+
+export interface RetentionResult {
+  archived: number
+  deleted: number
+  eventsDeleted: number
+  dryRun: boolean
+}
+
+/**
+ * Archive old completed/cancelled/failed runs per retention policy.
+ * Returns count of runs archived and events cleaned up.
+ */
+export function applyRunRetention(opts?: {
+  policy?: Partial<RetentionPolicy>
+  agentId?: string
+  dryRun?: boolean
+}): RetentionResult {
+  const db = getDb()
+  const policy = { ...DEFAULT_RETENTION, ...opts?.policy }
+  const dryRun = opts?.dryRun ?? false
+  const now = Date.now()
+  const cutoffMs = now - policy.maxAgeDays * 24 * 60 * 60 * 1000
+  const terminalStatuses = ['completed', 'failed', 'cancelled']
+
+  // Find runs to archive: terminal status + older than cutoff
+  let sql = `
+    SELECT id, agent_id FROM agent_runs 
+    WHERE status IN (${terminalStatuses.map(() => '?').join(',')})
+    AND started_at < ?
+  `
+  const params: unknown[] = [...terminalStatuses, cutoffMs]
+
+  if (opts?.agentId) {
+    sql += ' AND agent_id = ?'
+    params.push(opts.agentId)
+  }
+  sql += ' ORDER BY started_at ASC'
+
+  const rows = db.prepare(sql).all(...params) as Array<{ id: string; agent_id: string }>
+
+  if (dryRun) {
+    return { archived: rows.length, deleted: 0, eventsDeleted: 0, dryRun: true }
+  }
+
+  let archived = 0
+  let deleted = 0
+  let eventsDeleted = 0
+
+  for (const row of rows) {
+    if (policy.deleteArchived) {
+      // Delete events first (foreign key-like cleanup)
+      const evtResult = db.prepare('DELETE FROM agent_events WHERE run_id = ?').run(row.id)
+      eventsDeleted += evtResult.changes
+      // Delete the run
+      db.prepare('DELETE FROM agent_runs WHERE id = ?').run(row.id)
+      deleted++
+    } else {
+      // Mark as archived (update status)
+      db.prepare("UPDATE agent_runs SET status = 'completed', updated_at = ? WHERE id = ?").run(now, row.id)
+      archived++
+    }
+  }
+
+  // Enforce max completed runs per agent — keep newest, archive/delete oldest
+  const agentIds = opts?.agentId
+    ? [opts.agentId]
+    : (db.prepare('SELECT DISTINCT agent_id FROM agent_runs').all() as Array<{ agent_id: string }>).map(r => r.agent_id)
+
+  for (const agentId of agentIds) {
+    const completedRuns = db.prepare(`
+      SELECT id FROM agent_runs 
+      WHERE agent_id = ? AND status IN (${terminalStatuses.map(() => '?').join(',')})
+      ORDER BY started_at DESC
+    `).all(agentId, ...terminalStatuses) as Array<{ id: string }>
+
+    if (completedRuns.length > policy.maxCompletedRuns) {
+      const toRemove = completedRuns.slice(policy.maxCompletedRuns)
+      for (const run of toRemove) {
+        if (policy.deleteArchived) {
+          const evtResult = db.prepare('DELETE FROM agent_events WHERE run_id = ?').run(run.id)
+          eventsDeleted += evtResult.changes
+          db.prepare('DELETE FROM agent_runs WHERE id = ?').run(run.id)
+          deleted++
+        } else {
+          archived++
+        }
+      }
+    }
+  }
+
+  return { archived, deleted, eventsDeleted, dryRun: false }
+}
+
+/**
+ * Get retention stats — how many runs would be affected by current policy.
+ */
+export function getRetentionStats(policy?: Partial<RetentionPolicy>): {
+  totalRuns: number
+  terminalRuns: number
+  wouldArchive: number
+  oldestRunAge: number | null
+} {
+  const db = getDb()
+  const p = { ...DEFAULT_RETENTION, ...policy }
+  const now = Date.now()
+  const cutoffMs = now - p.maxAgeDays * 24 * 60 * 60 * 1000
+
+  const totalRuns = (db.prepare('SELECT COUNT(*) as c FROM agent_runs').get() as { c: number }).c
+  const terminalRuns = (db.prepare("SELECT COUNT(*) as c FROM agent_runs WHERE status IN ('completed','failed','cancelled')").get() as { c: number }).c
+  const wouldArchive = (db.prepare("SELECT COUNT(*) as c FROM agent_runs WHERE status IN ('completed','failed','cancelled') AND started_at < ?").get(cutoffMs) as { c: number }).c
+  const oldest = db.prepare('SELECT MIN(started_at) as m FROM agent_runs').get() as { m: number | null }
+  const oldestRunAge = oldest.m ? Math.floor((now - oldest.m) / (24 * 60 * 60 * 1000)) : null
+
+  return { totalRuns, terminalRuns, wouldArchive, oldestRunAge }
+}
+
 // ── Approval routing ───────────────────────────────────────────────────────
 
 export interface PendingApproval {
