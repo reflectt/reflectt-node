@@ -4,6 +4,26 @@
 
 import { createAgentRun, updateAgentRun, appendAgentEvent, getAgentRun } from './agent-runs.js'
 
+const LOCAL_NODE_BASE = process.env.REFLECTT_NODE_BASE_URL || 'http://127.0.0.1:4445'
+
+type CanvasEmitState = 'thinking' | 'rendering' | 'ambient' | 'urgent'
+
+async function emitCanvasState(agentId: string, state: CanvasEmitState, text: string, extraPayload: Record<string, unknown> = {}): Promise<void> {
+  try {
+    await fetch(`${LOCAL_NODE_BASE}/canvas/state`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        state,
+        agentId,
+        payload: { text, ...extraPayload },
+      }),
+    })
+  } catch {
+    // Presence updates are best-effort; workflow execution must continue.
+  }
+}
+
 export interface WorkflowStep {
   name: string
   description: string
@@ -155,6 +175,7 @@ export async function runWorkflow(
 
   for (const step of template.steps) {
     const stepStart = Date.now()
+    await emitCanvasState(ctx.agentId, 'thinking', step.description)
     try {
       const result = await step.action(ctx)
       stepResults.push({
@@ -165,8 +186,10 @@ export async function runWorkflow(
         durationMs: Date.now() - stepStart,
       })
       if (!result.success) {
+        await emitCanvasState(ctx.agentId, 'urgent', result.error || `Step failed: ${step.description}`)
         return { success: false, runId: ctx.runId, steps: stepResults, totalDurationMs: Date.now() - start }
       }
+      await emitCanvasState(ctx.agentId, 'rendering', `Completed: ${step.description}`)
     } catch (err: any) {
       stepResults.push({
         name: step.name,
@@ -174,10 +197,12 @@ export async function runWorkflow(
         error: err.message,
         durationMs: Date.now() - stepStart,
       })
+      await emitCanvasState(ctx.agentId, 'urgent', err.message || `Step failed: ${step.description}`)
       return { success: false, runId: ctx.runId, steps: stepResults, totalDurationMs: Date.now() - start }
     }
   }
 
+  await emitCanvasState(ctx.agentId, 'ambient', 'Workflow completed successfully')
   return { success: true, runId: ctx.runId, steps: stepResults, totalDurationMs: Date.now() - start }
 }
 
