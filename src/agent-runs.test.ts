@@ -2,6 +2,7 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
+import { validateRationale } from './agent-runs.js'
 
 // Inline DB setup — avoids importing db.ts which reads config
 function createTestDb(): Database.Database {
@@ -129,6 +130,27 @@ describe('agent_runs schema', () => {
   })
 })
 
+describe('agent_events rationale validation', () => {
+  it('accepts structured rationale', () => {
+    const parsed = validateRationale({
+      choice: 'approved PR #826',
+      considered: ['CSS-only, no logic changes', 'CI green'],
+      constraint: 'manual merge within scope',
+    })
+    assert.equal(parsed.choice, 'approved PR #826')
+    assert.equal(parsed.considered?.length, 2)
+    assert.equal(parsed.constraint, 'manual merge within scope')
+  })
+
+  it('rejects rationale without choice', () => {
+    assert.throws(() => validateRationale({ considered: ['missing choice'] }), /rationale\.choice is required/)
+  })
+
+  it('rejects non-string considered entries', () => {
+    assert.throws(() => validateRationale({ choice: 'x', considered: ['ok', 42] }), /rationale\.considered must be an array of non-empty strings/)
+  })
+})
+
 describe('agent_events schema (append-only)', () => {
   let db: Database.Database
 
@@ -220,6 +242,11 @@ describe('agent_events schema (append-only)', () => {
       task_id: 'task-123',
       decision: 'approved',
       next_action: 'merge and deploy',
+      rationale: {
+        choice: 'approved PR #826',
+        considered: ['CSS-only, no logic changes', 'CI green'],
+        constraint: 'manual merge within scope'
+      }
     })
     const now = Date.now()
     db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run('aevt-1', 'arun-1', 'link', 'handed_off', payload, now)
@@ -255,14 +282,14 @@ describe('PR review handoff workflow (release gate)', () => {
 
     // 3. Review requested
     db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run('aevt-4', 'arun-pr', 'link', 'review_requested', JSON.stringify({ pr_url: 'https://github.com/reflectt/reflectt-node/pull/830', target_agent: 'sage' }), now + 300)
+      .run('aevt-4', 'arun-pr', 'link', 'review_requested', JSON.stringify({ pr_url: 'https://github.com/reflectt/reflectt-node/pull/830', target_agent: 'sage', rationale: { choice: 'request review from sage', considered: ['schema touches persistence', 'needs second set of eyes'], constraint: 'review required before merge' } }), now + 300)
 
     // Update run to waiting_review
     db.prepare('UPDATE agent_runs SET status = ?, updated_at = ? WHERE id = ?').run('waiting_review', now + 300, 'arun-pr')
 
     // 4. Review approved (by second agent)
     db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run('aevt-5', 'arun-pr', 'sage', 'review_approved', JSON.stringify({ pr_url: 'https://github.com/reflectt/reflectt-node/pull/830', reviewer: 'sage', comment: 'LGTM' }), now + 500)
+      .run('aevt-5', 'arun-pr', 'sage', 'review_approved', JSON.stringify({ pr_url: 'https://github.com/reflectt/reflectt-node/pull/830', reviewer: 'sage', comment: 'LGTM', rationale: { choice: 'approve PR #830', considered: ['tests pass', 'schema is minimal'], constraint: 'within current sprint scope' } }), now + 500)
 
     // 5. Handoff + completion
     db.prepare(`INSERT INTO agent_events (id, run_id, agent_id, event_type, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
