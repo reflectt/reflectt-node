@@ -878,6 +878,10 @@ Set via `reflectionNudge` in policy config:
 | GET | `/usage/caps` | List active spend caps with current utilization status. |
 | POST | `/usage/caps` | Create spend cap. Body: `{ scope: "global"\|"agent"\|"team", scope_id?, period: "daily"\|"weekly"\|"monthly", limit_usd, action: "warn"\|"throttle"\|"block" }`. |
 | DELETE | `/usage/caps/:id` | Delete a spend cap. |
+| GET | `/agents/:agentId/spend` | Get current spend totals for a specific agent. Returns `{ agentId, totalCost, inputTokens, outputTokens, periodStart }`. |
+| POST | `/agents/:agentId/enforce-cost` | Trigger cost enforcement check for agent. Evaluates active caps and applies configured action (warn/throttle/block). Body: `{}`. |
+| POST | `/usage/record` | Record a single usage event. Body: `{ agentId, inputTokens, outputTokens, cost?, model?, taskId? }`. |
+| POST | `/usage/purge` | Purge old usage records. Body: `{ maxAgeDays? }` (default 90). |
 | GET | `/usage/routing-suggestions` | Smart routing savings suggestions (which low-stakes categories could use cheaper models). Query: `since`. |
 | GET | `/costs` | Cost dashboard — aggregated spend for COO/PM monitoring. Query: `days` (1–90, default 7). Returns: `daily_by_model` (spend per model per day), `daily_totals` (per-day rolled-up for threshold alerting), `avg_cost_by_lane` (avg cost per closed task by `qa_bundle.lane`, 30-day floor), `avg_cost_by_agent` (avg cost per closed task per agent + `top_model`, 30-day floor), `top_tasks_by_cost` (top 20 most expensive tasks in window), `summary` (total tokens + cost), `lane_agent_window_days` (actual window used for lane/agent averages). |
 
