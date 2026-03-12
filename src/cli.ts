@@ -105,9 +105,11 @@ function getRuntimePaths() {
   // Detect whether running from source (dev) or dist (npm install)
   const srcPath = join(projectRoot, 'src', 'index.ts')
   const distPath = join(projectRoot, 'dist', 'index.js')
-  const isSource = existsSync(srcPath)
+  // In production, always use compiled dist even if src/ exists (symlink installs)
+  const forceCompiled = process.env.NODE_ENV === 'production'
+  const isSource = !forceCompiled && existsSync(srcPath)
   const serverPath = isSource ? srcPath : distPath
-  const useNode = !isSource // npm install: use node directly; dev: use tsx
+  const useNode = !isSource // npm install / production: use node directly; dev: use tsx
 
   return { projectRoot, serverPath, useNode }
 }
