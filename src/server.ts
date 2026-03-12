@@ -14253,7 +14253,7 @@ If your heartbeat shows **no active task** and **no next task**:
   // Submit agent-action approval (approve_requested events)
   app.post<{ Params: { approvalId: string } }>('/approval-queue/:approvalId/decide', async (request, reply) => {
     const { approvalId } = request.params
-    const body = request.body as { decision?: string; actor?: string; comment?: string }
+    const body = request.body as { decision?: string; actor?: string; comment?: string; rationale?: { choice: string; considered: string[]; constraint: string } }
     if (!body?.decision || !['approve', 'reject', 'defer'].includes(body.decision)) {
       return reply.code(400).send({ error: 'decision must be "approve", "reject", or "defer"' })
     }
@@ -14261,11 +14261,18 @@ If your heartbeat shows **no active task** and **no next task**:
       return reply.code(400).send({ error: 'actor is required' })
     }
     try {
+      // Auto-supply minimal rationale if omitted — humans approving via UI won't know to send it
+      const rationale = body.rationale ?? {
+        choice: `${body.decision === 'approve' ? 'Approved' : 'Rejected'} by ${body.actor}`,
+        considered: ['approve', 'reject'],
+        constraint: 'Human decision via approval queue',
+      }
       const result = submitApprovalDecision({
         eventId: approvalId,
         decision: body.decision as 'approve' | 'reject',
         reviewer: body.actor,
         comment: body.comment,
+        rationale,
       })
 
       // Emit canvas_input event so Presence Layer updates
