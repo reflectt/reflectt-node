@@ -189,6 +189,17 @@ export function createAgentRun(
     payload: { objective, taskId: opts?.taskId },
   })
 
+  // Emit canvas state: listening (run created, waiting to start)
+  fetch('http://127.0.0.1:4445/canvas/state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      agentId,
+      state: 'listening',
+      payload: { text: objective },
+    }),
+  }).catch(() => {})
+
   return {
     id,
     agentId,
@@ -255,6 +266,32 @@ export function updateAgentRun(
   if (!row) return null
 
   const run = rowToRun(row)
+
+  // Emit canvas state on status transitions (fire-and-forget)
+  if (updates.status) {
+    const canvasState = updates.status === 'working' ? 'thinking'
+      : updates.status === 'waiting_review' ? 'decision'
+      : updates.status === 'completed' ? 'handoff'
+      : updates.status === 'failed' ? 'urgent'
+      : updates.status === 'blocked' ? 'ambient'
+      : updates.status === 'cancelled' ? 'ambient'
+      : null
+    if (canvasState) {
+      const payload: Record<string, unknown> = { text: run.objective }
+      if (updates.status === 'completed' && run.artifacts?.length) {
+        payload.evidence = run.artifacts
+      }
+      fetch('http://127.0.0.1:4445/canvas/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: run.agentId,
+          state: canvasState,
+          payload,
+        }),
+      }).catch(() => {}) // fire-and-forget
+    }
+  }
 
   return run
 }
