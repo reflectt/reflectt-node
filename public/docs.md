@@ -25,6 +25,7 @@ Base URL: `http://localhost:4445`
 - [Weekly Ship Log Template](../docs/WEEKLY_SHIP_LOG_TEMPLATE.md) — compact weekly status template.
 - [Incident Writeup Template](../docs/INCIDENT_WRITEUP_TEMPLATE.md) — timeline/root-cause/fix/prevention structure.
 - [Contributor Onboarding Script](../docs/CONTRIBUTOR_ONBOARDING_SCRIPT.md) — first-day workflow from clone to validated task.
+- [Dev Workflow](../docs/DEV_WORKFLOW.md) — production vs. development: npm install for prod, feature branches for dev.
 
 ---
 
