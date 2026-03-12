@@ -13869,15 +13869,18 @@ If your heartbeat shows **no active task** and **no next task**:
       })
       return reply.code(201).send(event)
     } catch (err: any) {
-      if (err.message.includes('Routing semantics violation')) {
-        return reply.code(422).send({ error: err.message, hint: 'Actionable events require: action_required (string), urgency (low|normal|high|critical), owner (string). Optional: expires_at (number).' })
-      }
-      return reply.code(500).send({ error: err.message })
       const message = String(err?.message || err)
+      if (message.includes('Routing semantics violation')) {
+        return reply.code(422).send({
+          error: message,
+          hint: 'Routing payload requires action_required (review|unblock|approve|fyi) and urgency (blocking|normal|low). Optional: owner, expires_at.',
+        })
+      }
       if (message.includes('rationale')) {
         return reply.code(400).send({ error: message })
       }
-      return reply.code(500).send({ error: message })    }
+      return reply.code(500).send({ error: message })
+    }
   })
 
   // List agent events
