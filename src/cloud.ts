@@ -27,7 +27,7 @@ import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
-import { listApprovalQueue } from './agent-runs.js'
+import { listApprovalQueue, listAgentEvents } from './agent-runs.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -94,6 +94,7 @@ interface CloudState {
   chatSyncTimer: ReturnType<typeof setInterval> | null
   canvasSyncTimer: ReturnType<typeof setInterval> | null
   approvalSyncTimer: ReturnType<typeof setInterval> | null
+  runEventSyncTimer: ReturnType<typeof setInterval> | null
   usageSyncTimer: ReturnType<typeof setInterval> | null
   reflectionSyncTimer: ReturnType<typeof setInterval> | null
   contextSyncTimer: ReturnType<typeof setInterval> | null
@@ -196,6 +197,7 @@ let state: CloudState = {
   chatSyncTimer: null,
   canvasSyncTimer: null,
   approvalSyncTimer: null,
+  runEventSyncTimer: null,
   usageSyncTimer: null,
   reflectionSyncTimer: null,
   contextSyncTimer: null,
@@ -443,6 +445,12 @@ export async function startCloudIntegration(): Promise<void> {
     syncRunApprovals().catch(() => {})
   }, APPROVAL_SYNC_INTERVAL_MS)
 
+  // Run event sync — every 5s
+  syncRunEvents().catch(() => {})
+  state.runEventSyncTimer = setInterval(() => {
+    syncRunEvents().catch(() => {})
+  }, RUN_EVENT_SYNC_INTERVAL_MS)
+
   // Usage sync — adaptive: 15s when active, 60s when idle
   let lastUsageSyncAt = 0
   syncUsage().catch(() => {})
@@ -601,6 +609,10 @@ export function stopCloudIntegration(): void {
   if (state.approvalSyncTimer) {
     clearInterval(state.approvalSyncTimer)
     state.approvalSyncTimer = null
+  }
+  if (state.runEventSyncTimer) {
+    clearInterval(state.runEventSyncTimer)
+    state.runEventSyncTimer = null
   }
   if (state.usageSyncTimer) {
     clearInterval(state.usageSyncTimer)
@@ -1198,6 +1210,62 @@ async function syncRunApprovals(): Promise<void> {
     approvalSyncErrors++
     if (approvalSyncErrors <= 3) {
       console.warn(`☁️  [RunApprovals] Sync error: ${err?.message}`)
+    }
+  }
+}
+
+// ---- Run Event Sync ----
+// Push recent run events to cloud so Presence SSE relay has data
+
+let lastRunEventSyncAt = 0
+let runEventSyncErrors = 0
+const RUN_EVENT_SYNC_INTERVAL_MS = 5_000
+
+async function syncRunEvents(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  const now = Date.now()
+  if (now - lastRunEventSyncAt < RUN_EVENT_SYNC_INTERVAL_MS) return
+  lastRunEventSyncAt = now
+
+  try {
+    // Get events from the last 30 seconds
+    const recentEvents = listAgentEvents({ since: now - 30_000, limit: 20 })
+    if (recentEvents.length === 0) return
+
+    // Group by runId and push to cloud
+    const byRun = new Map<string, typeof recentEvents>()
+    for (const event of recentEvents) {
+      const runId = event.runId || 'no-run'
+      if (!byRun.has(runId)) byRun.set(runId, [])
+      byRun.get(runId)!.push(event)
+    }
+
+    for (const [runId, events] of byRun) {
+      if (runId === 'no-run') continue
+      const payload = events.map(e => ({
+        id: e.id,
+        type: e.eventType,
+        agentId: e.agentId,
+        runId: e.runId,
+        payload: e.payload,
+        createdAt: e.createdAt,
+      }))
+
+      await cloudPost(
+        `/api/hosts/${state.hostId}/runs/${runId}/stream`,
+        { events: payload }
+      )
+    }
+
+    if (runEventSyncErrors > 0) {
+      console.log(`☁️  [RunEvents] Sync recovered after ${runEventSyncErrors} errors`)
+      runEventSyncErrors = 0
+    }
+  } catch (err: any) {
+    runEventSyncErrors++
+    if (runEventSyncErrors <= 3) {
+      console.warn(`☁️  [RunEvents] Sync error: ${err?.message}`)
     }
   }
 }
