@@ -628,6 +628,10 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_artifacts_agent ON artifacts(agent_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id) WHERE run_id IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id) WHERE task_id IS NOT NULL;      `,
+    },
+    {
+      version: 25,
+      sql: `
         -- Webhook payloads: persisted inbound email/SMS/webhook bodies
         CREATE TABLE IF NOT EXISTS webhook_payloads (
           id          TEXT PRIMARY KEY,
@@ -641,7 +645,8 @@ export function runMigrations(db: Database.Database): void {
         );
         CREATE INDEX IF NOT EXISTS idx_webhook_payloads_source ON webhook_payloads(source, created_at);
         CREATE INDEX IF NOT EXISTS idx_webhook_payloads_agent ON webhook_payloads(agent_id, created_at) WHERE agent_id IS NOT NULL;
-        CREATE INDEX IF NOT EXISTS idx_webhook_payloads_unprocessed ON webhook_payloads(processed, created_at) WHERE processed = 0;      `,    },
+        CREATE INDEX IF NOT EXISTS idx_webhook_payloads_unprocessed ON webhook_payloads(processed, created_at) WHERE processed = 0;      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
@@ -679,9 +684,9 @@ export function runMigrations(db: Database.Database): void {
     { version: 21, tables: ['agent_runs', 'agent_events'] },
     { version: 22, tables: ['agent_memories'] },
     { version: 23, tables: ['agent_config'] },
-    { version: 24, tables: ['agent_messages'] },
-    { version: 23, tables: ['artifacts'] },  ]
-    { version: 23, tables: ['webhook_payloads'] },  ]
+    { version: 24, tables: ['agent_messages', 'artifacts'] },
+    { version: 25, tables: ['webhook_payloads'] },
+  ]
   const existingTables = new Set(
     (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>)
       .map(r => r.name),

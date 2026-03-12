@@ -14059,6 +14059,8 @@ If your heartbeat shows **no active task** and **no next task**:
     const teamId = body.teamId ?? 'default'
     const result = await runWorkflow(template, agentId, teamId, body)
     return result
+  })
+
   // ── Agent Messaging (Host-native) ─────────────────────────────────────
   // Local agent-to-agent messaging. Replaces gateway for same-Host agents.
 
@@ -14212,6 +14214,8 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get<{ Params: { agentId: string } }>('/agents/:agentId/storage', async (request) => {
     const { agentId } = request.params
     return getStorageUsage(agentId)
+  })
+
   // ── Webhook Storage ──────────────────────────────────────────────────
   const { storeWebhookPayload, getWebhookPayload, listWebhookPayloads, markPayloadProcessed, getUnprocessedCount, purgeOldPayloads } = await import('./webhook-storage.js')
 
@@ -14264,7 +14268,10 @@ If your heartbeat shows **no active task** and **no next task**:
   app.post('/webhooks/purge', async (request) => {
     const body = request.body as { maxAgeDays?: number } ?? {}
     const deleted = purgeOldPayloads(body.maxAgeDays ?? 30)
-    return { deleted }  })  // ── Approval Routing ────────────────────────────────────────────────────
+    return { deleted }
+  })
+
+  // ── Approval Routing ────────────────────────────────────────────────────
 
   const {
     listPendingApprovals,
