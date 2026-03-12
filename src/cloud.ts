@@ -1344,12 +1344,64 @@ async function pollAndProcessCommands(): Promise<void> {
 async function handleCommand(cmd: PendingCommand): Promise<void> {
   if (cmd.type === 'context_sync') {
     await handleContextSync(cmd)
+  } else if (cmd.type === 'run_approve') {
+    await handleRunApprove(cmd)
   } else {
     console.log(`☁️  [Commands] Unknown command type: ${cmd.type} (${cmd.id}) — skipping`)
     // Ack unknown commands so they don't pile up
     await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
       action: 'complete',
       result: { skipped: true, reason: 'unknown_type' },
+    })
+  }
+}
+
+async function handleRunApprove(cmd: PendingCommand): Promise<void> {
+  if (!state.hostId) return
+
+  const eventId = cmd.payload?.eventId as string
+  const decision = cmd.payload?.decision as string
+  const actor = cmd.payload?.actor as string || 'cloud-dashboard'
+  const rationale = cmd.payload?.rationale as string || ''
+
+  if (!eventId || !decision) {
+    console.warn(`☁️  [Commands] run_approve missing eventId/decision (${cmd.id}) — failing`)
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'fail',
+      error: 'eventId and decision are required',
+    })
+    return
+  }
+
+  console.log(`☁️  [Commands] Processing run_approve: ${decision} for ${eventId} (${cmd.id})`)
+
+  // Ack immediately
+  await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+    action: 'ack',
+  })
+
+  // Execute locally against the approval queue
+  const port = process.env.REFLECTT_NODE_PORT || '4445'
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/approval-queue/${encodeURIComponent(eventId)}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, actor, rationale }),
+    })
+
+    const result = await res.json().catch(() => ({ success: false }))
+
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'complete',
+      result: { eventId, decision, status: res.status, ...(result as Record<string, unknown>) },
+    })
+
+    console.log(`☁️  [Commands] run_approve ${decision} for ${eventId} — ${res.status}`)
+  } catch (err: any) {
+    console.warn(`☁️  [Commands] run_approve failed for ${eventId}: ${err?.message}`)
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'fail',
+      error: err?.message || 'Local approval-queue call failed',
     })
   }
 }
