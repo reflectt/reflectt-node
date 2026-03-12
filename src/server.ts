@@ -157,6 +157,7 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
+import { requestImmediateCanvasSync } from './cloud.js'
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
 import { startDeployMonitor, stopDeployMonitor } from './deploy-monitor.js'
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
@@ -8741,8 +8742,167 @@ export async function createServer(): Promise<FastifyInstance> {
       data: { state, sensors, agentId, payload },
     })
 
+    // Trigger immediate cloud sync for real-time presence
+    requestImmediateCanvasSync()
+
     return { success: true, state, agentId, timestamp: now }
   })
+
+  // ── AgentPresence endpoint (matches presence-card-spec.md contract) ──
+  // POST /agents/:agentId/canvas — agent emits a presence-compatible canvas event
+  // Emits canvas_render SSE event with AgentPresence shape + triggers immediate cloud sync
+
+  const AGENT_IDENTITY_COLORS: Record<string, string> = {
+    pixel: '#a78bfa', link: '#60a5fa', kai: '#fb923c', harmony: '#34c45c',
+    rhythm: '#f472b6', echo: '#f87171', scout: '#fbbf24', sage: 'rgba(255,255,255,0.4)',
+    spark: '#f59e0b', swift: '#06b6d4', kotlin: '#7c3aed', bookkeeper: '#10b981',
+  }
+
+  type PresenceState = 'idle' | 'working' | 'needs-attention'
+
+  const AgentPresenceSchema = z.object({
+    state: z.enum(['idle', 'working', 'needs-attention']),
+    activeTask: z.object({
+      title: z.string(),
+      id: z.string(),
+    }).optional(),
+    recency: z.string().optional(),
+    attention: z.object({
+      type: z.enum(['approval', 'review', 'block']),
+      taskId: z.string(),
+      label: z.string().optional(),
+    }).optional(),
+    sensors: z.enum(['mic', 'camera', 'mic+camera']).nullable().default(null),
+    payload: z.record(z.unknown()).optional(),
+  })
+
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/canvas', async (request, reply) => {
+    const { agentId } = request.params
+    if (!agentId) return reply.code(400).send({ error: 'agentId is required' })
+
+    const result = AgentPresenceSchema.safeParse(request.body)
+    if (!result.success) {
+      reply.code(422)
+      return {
+        error: `Invalid presence: ${result.error.issues.map(i => i.message).join(', ')}`,
+        validStates: ['idle', 'working', 'needs-attention'],
+      }
+    }
+
+    const { state: presenceState, activeTask, recency, attention, sensors, payload } = result.data
+    const now = Date.now()
+    const identityColor = AGENT_IDENTITY_COLORS[agentId] || '#9ca3af'
+
+    // Map presence state to canvas state for backward compatibility
+    const canvasState: CanvasState = presenceState === 'needs-attention' ? 'decision'
+      : presenceState === 'working' ? 'thinking'
+      : 'ambient'
+
+    // Store in canvasStateMap (backward compat with existing GET /canvas/state)
+    canvasStateMap.set(agentId, {
+      state: canvasState,
+      sensors,
+      payload: { ...payload, activeTask, attention, presenceState },
+      updatedAt: now,
+    })
+
+    // Build AgentPresence payload (matches presence-card-spec.md)
+    const agentPresence = {
+      name: agentId,
+      identityColor,
+      state: presenceState,
+      activeTask,
+      recency: recency || 'just now',
+      attention,
+    }
+
+    // Emit canvas_render SSE event with AgentPresence shape
+    eventBus.emit({
+      id: `cpresence-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_render' as const,
+      timestamp: now,
+      data: {
+        // Legacy fields (backward compat)
+        state: canvasState,
+        sensors,
+        agentId,
+        payload: { ...payload, activeTask, attention },
+        // AgentPresence fields (new contract)
+        presence: agentPresence,
+      },
+    })
+
+    // Trigger immediate cloud sync so presence surface gets the update fast
+    requestImmediateCanvasSync()
+
+    return { success: true, presence: agentPresence, timestamp: now }
+  })
+
+  // GET /agents/:agentId/canvas — current AgentPresence for one agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/canvas', async (request) => {
+    const { agentId } = request.params
+    const entry = canvasStateMap.get(agentId)
+    if (!entry) {
+      return {
+        name: agentId,
+        identityColor: AGENT_IDENTITY_COLORS[agentId] || '#9ca3af',
+        state: 'idle' as PresenceState,
+        recency: 'unknown',
+      }
+    }
+
+    const presenceState: PresenceState =
+      (entry.payload as any)?.presenceState ||
+      (entry.state === 'decision' || entry.state === 'urgent' ? 'needs-attention' :
+       entry.state === 'thinking' || entry.state === 'rendering' ? 'working' : 'idle')
+
+    return {
+      name: agentId,
+      identityColor: AGENT_IDENTITY_COLORS[agentId] || '#9ca3af',
+      state: presenceState,
+      activeTask: (entry.payload as any)?.activeTask,
+      recency: formatRecency(entry.updatedAt),
+      attention: (entry.payload as any)?.attention,
+    }
+  })
+
+  // GET /canvas/presence — all agents as AgentPresence[] (for presence surface)
+  app.get('/canvas/presence', async () => {
+    const agents: Array<{
+      name: string
+      identityColor: string
+      state: PresenceState
+      activeTask?: { title: string; id: string }
+      recency: string
+      attention?: { type: string; taskId: string; label?: string }
+    }> = []
+
+    for (const [agentId, entry] of canvasStateMap) {
+      const presenceState: PresenceState =
+        (entry.payload as any)?.presenceState ||
+        (entry.state === 'decision' || entry.state === 'urgent' ? 'needs-attention' :
+         entry.state === 'thinking' || entry.state === 'rendering' ? 'working' : 'idle')
+
+      agents.push({
+        name: agentId,
+        identityColor: AGENT_IDENTITY_COLORS[agentId] || '#9ca3af',
+        state: presenceState,
+        activeTask: (entry.payload as any)?.activeTask,
+        recency: formatRecency(entry.updatedAt),
+        attention: (entry.payload as any)?.attention,
+      })
+    }
+
+    return { agents, count: agents.length }
+  })
+
+  function formatRecency(updatedAt: number): string {
+    const diff = Date.now() - updatedAt
+    if (diff < 60_000) return 'just now'
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+    return `${Math.floor(diff / 86_400_000)}d ago`
+  }
 
   // GET /canvas/state — current state for all agents (or one)
   app.get('/canvas/state', async (request) => {

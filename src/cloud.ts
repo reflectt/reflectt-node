@@ -129,6 +129,18 @@ export function markCloudActivity(): void {
   lastActivityAt = Date.now()
 }
 
+/** Request immediate canvas sync to cloud (called on canvas_render events) */
+export function requestImmediateCanvasSync(): void {
+  markCloudActivity()
+  // syncCanvas is module-scoped; we use a deferred call pattern
+  if (immediateSyncFn) immediateSyncFn()
+}
+
+let immediateSyncFn: (() => void) | null = null
+export function _registerImmediateSync(fn: () => void): void {
+  immediateSyncFn = fn
+}
+
 /** Check if the system is idle */
 function isIdle(): boolean {
   return Date.now() - lastActivityAt > IDLE_THRESHOLD_MS
@@ -430,6 +442,10 @@ export async function startCloudIntegration(): Promise<void> {
   // Canvas sync — adaptive: 5s when active, 60s when idle
   // Uses a single 5s tick that skips when idle (unless enough time has passed)
   let lastCanvasSyncAt = 0
+  _registerImmediateSync(() => {
+    syncCanvas().catch(() => {})
+    lastCanvasSyncAt = Date.now()
+  })
   syncCanvas().catch(() => {})
   state.canvasSyncTimer = setInterval(() => {
     const now = Date.now()
