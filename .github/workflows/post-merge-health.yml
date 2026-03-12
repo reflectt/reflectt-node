@@ -1,0 +1,52 @@
+name: post-merge-health
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  health-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Start server and health check
+        run: |
+          # Start server in background
+          node dist/index.js &
+          SERVER_PID=$!
+
+          # Wait for server to be ready (max 60s)
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:4445/health > /dev/null 2>&1; then
+              echo "✅ Server healthy after ${i}s"
+              HEALTH=$(curl -s http://127.0.0.1:4445/health)
+              echo "$HEALTH" | python3 -m json.tool
+              kill $SERVER_PID 2>/dev/null || true
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "❌ Server failed to respond to /health within 60s"
+          kill $SERVER_PID 2>/dev/null || true
+          exit 1
+        env:
+          NODE_ENV: production
+          PORT: "4445"
+          HOST: "127.0.0.1"
+          REFLECTT_HOME: /tmp/reflectt-test
