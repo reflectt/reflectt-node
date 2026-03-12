@@ -1124,6 +1124,8 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/webhooks/payloads/:payloadId` | Get single payload with full body + headers. |
 | POST | `/webhooks/payloads/:payloadId/process` | Mark payload as processed. |
 | POST | `/webhooks/purge` | Delete old processed payloads. Body: `{ maxAgeDays? }` (default 30). |
+| POST | `/agents/:agent/waiting` | Set agent to waiting state (blocked on human). Body: `{ reason (required), waitingFor?, taskId?, expiresAt? }`. Shows in heartbeat response. |
+| DELETE | `/agents/:agent/waiting` | Clear waiting state — agent is unblocked. |
 | POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
 | POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 

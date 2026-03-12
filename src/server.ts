@@ -10648,12 +10648,33 @@ export async function createServer(): Promise<FastifyInstance> {
       ...(pauseStatus.paused ? { paused: true, pauseMessage: pauseStatus.message, resumesAt: pauseStatus.entry?.pausedUntil ?? null } : {}),
       ...(bootMemories.length > 0 ? { memories: bootMemories } : {}),
       ...(activeRun ? { run: activeRun } : {}),
+      ...(() => {
+        const p = presenceManager.getAllPresence().find(p => p.agent === agent)
+        return p?.waiting ? { waiting: p.waiting } : {}
+      })(),
       action: pauseStatus.paused ? `PAUSED: ${pauseStatus.message}`
         : activeTask ? `Continue ${activeTask.id}`
         : nextTask ? `Claim ${nextTask.id}`
         : inbox.length > 0 ? `Check inbox (${inbox.length} messages)`
         : 'HEARTBEAT_OK',
     }
+  })
+
+  // ── Agent Waiting State ──────────────────────────────────────────────
+  // Agents signal they're blocked on human input. Shows in heartbeat + presence.
+
+  app.post<{ Params: { agent: string } }>('/agents/:agent/waiting', async (request, reply) => {
+    const agent = String(request.params.agent || '').trim().toLowerCase()
+    const body = request.body as { reason?: string; waitingFor?: string; taskId?: string; expiresAt?: number } ?? {}
+    if (!body.reason) return reply.code(400).send({ error: 'reason is required' })
+    presenceManager.setWaiting(agent, { reason: body.reason, waitingFor: body.waitingFor, taskId: body.taskId, expiresAt: body.expiresAt })
+    return { success: true, agent, status: 'waiting', waiting: { reason: body.reason, waitingFor: body.waitingFor, taskId: body.taskId, expiresAt: body.expiresAt } }
+  })
+
+  app.delete<{ Params: { agent: string } }>('/agents/:agent/waiting', async (request) => {
+    const agent = String(request.params.agent || '').trim().toLowerCase()
+    presenceManager.clearWaiting(agent)
+    return { success: true, agent, status: 'idle' }
   })
 
   // ── Bootstrap: dynamic agent config generation ──────────────────────
