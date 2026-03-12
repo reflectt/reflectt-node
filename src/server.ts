@@ -13845,6 +13845,22 @@ If your heartbeat shows **no active task** and **no next task**:
     return run
   })
 
+  // GET /agents/:agentId/runs/:runId — get a specific run by ID
+  app.get<{ Params: { agentId: string; runId: string } }>('/agents/:agentId/runs/:runId', async (request, reply) => {
+    const { runId } = request.params
+    const run = getAgentRun(runId)
+    if (!run) return reply.code(404).send({ error: 'Run not found' })
+    return run
+  })
+
+  // GET /runs/:runId — get a run by ID (no agent scoping)
+  app.get<{ Params: { runId: string } }>('/runs/:runId', async (request, reply) => {
+    const { runId } = request.params
+    const run = getAgentRun(runId)
+    if (!run) return reply.code(404).send({ error: 'Run not found' })
+    return run
+  })
+
   // Append an event
   const { validateRoutingSemantics } = await import('./agent-runs.js')
 
