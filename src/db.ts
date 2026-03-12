@@ -592,11 +592,11 @@ export function runMigrations(db: Database.Database): void {
           updated_at      INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_agent_config_team ON agent_config(team_id);
-      \`,
+      `,
     },
     {
       version: 24,
-      sql: \`
+      sql: `
         -- Agent messages: Host-native agent-to-agent messaging
         CREATE TABLE IF NOT EXISTS agent_messages (
           id          TEXT PRIMARY KEY,
