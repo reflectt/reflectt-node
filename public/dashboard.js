@@ -1840,10 +1840,16 @@ function renderReviewQueue() {
       const meta = t.metadata || {};
       const reviewState = typeof meta.review_state === 'string' ? meta.review_state : '';
       const reviewerDecision = meta.reviewer_decision;
+      const prMerged = !!(meta.pr_merged || (meta.pr_integrity && meta.pr_integrity.pr_merged));
+
+      // If reviewer approved AND PR is merged, this task is effectively done —
+      // don't page anyone. It just needs the status transition to 'done'.
+      // This prevents false-positive "Author action needed" alerts on completed work.
+      const isEffectivelyDone = prMerged && reviewerDecision && reviewerDecision.decision === 'approved';
 
       // If reviewer has acted (needs_author or reviewer_decision recorded), the ball is with the assignee.
       // We still track an SLA timer, but it should page the assignee (author), not the reviewer.
-      const waitOn = (reviewState === 'needs_author' || reviewerDecision != null) ? 'author' : 'reviewer';
+      const waitOn = isEffectivelyDone ? 'done' : (reviewState === 'needs_author' || reviewerDecision != null) ? 'author' : 'reviewer';
 
       const rawEntered = waitOn === 'author'
         ? (reviewerDecision && reviewerDecision.decidedAt) || meta.review_last_activity_at || meta.entered_validating_at || t.updatedAt || t.createdAt
@@ -1853,7 +1859,7 @@ function renderReviewQueue() {
       const timeInReview = Math.min(Math.max(0, now - enteredAt), MAX_REVIEW_MS);
       const slaState = getReviewSlaState(timeInReview);
 
-      return { ...t, timeInReview, slaState, enteredAt, waitOn, reviewState, hasReviewerDecision: reviewerDecision != null };
+      return { ...t, timeInReview, slaState, enteredAt, waitOn, reviewState, hasReviewerDecision: reviewerDecision != null, prMerged };
     })
     .sort((a, b) => {
       // Breaches first, then by time descending
@@ -1865,6 +1871,8 @@ function renderReviewQueue() {
 
   const reviewerQueue = validating.filter(t => t.waitOn === 'reviewer');
   const authorQueue = validating.filter(t => t.waitOn === 'author');
+  // Tasks where PR is merged + reviewer approved — effectively done, no alerts needed
+  const doneQueue = validating.filter(t => t.waitOn === 'done');
 
   if (validating.length === 0) {
     panel.style.display = '';
