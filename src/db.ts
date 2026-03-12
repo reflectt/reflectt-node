@@ -611,7 +611,23 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_agent_messages_to ON agent_messages(to_agent, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_messages_channel ON agent_messages(channel, created_at);
         CREATE INDEX IF NOT EXISTS idx_agent_messages_unread ON agent_messages(to_agent, read_at) WHERE read_at IS NULL;
-      `,
+        -- Artifacts: Host-native artifact store linked to runs/tasks
+        CREATE TABLE IF NOT EXISTS artifacts (
+          id          TEXT PRIMARY KEY,
+          agent_id    TEXT NOT NULL,
+          team_id     TEXT NOT NULL DEFAULT 'default',
+          run_id      TEXT,
+          task_id     TEXT,
+          name        TEXT NOT NULL,
+          mime_type   TEXT NOT NULL DEFAULT 'application/octet-stream',
+          size_bytes  INTEGER NOT NULL DEFAULT 0,
+          storage_path TEXT NOT NULL,
+          metadata    TEXT NOT NULL DEFAULT '{}',
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_artifacts_agent ON artifacts(agent_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id) WHERE run_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id) WHERE task_id IS NOT NULL;      `,
     },
   ]
 
@@ -651,7 +667,7 @@ export function runMigrations(db: Database.Database): void {
     { version: 22, tables: ['agent_memories'] },
     { version: 23, tables: ['agent_config'] },
     { version: 24, tables: ['agent_messages'] },
-  ]
+    { version: 23, tables: ['artifacts'] },  ]
 
   const existingTables = new Set(
     (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>)

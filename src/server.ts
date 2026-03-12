@@ -14134,7 +14134,60 @@ If your heartbeat shows **no active task** and **no next task**:
       agentId: body.agentId,
       dryRun: body.dryRun,
     })  })
-  // ── Approval Routing ────────────────────────────────────────────────────
+  // ── Artifact Store (Host-native) ──────────────────────────────────────
+  const { storeArtifact, getArtifact, readArtifactContent, listArtifacts, deleteArtifact, getStorageUsage } = await import('./artifact-store.js')
+
+  // Upload artifact
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/artifacts', async (request, reply) => {
+    const { agentId } = request.params
+    const body = request.body as { name?: string; content?: string; mimeType?: string; runId?: string; taskId?: string; metadata?: Record<string, unknown>; encoding?: string }
+    if (!body?.name) return reply.code(400).send({ error: 'name is required' })
+    if (!body?.content) return reply.code(400).send({ error: 'content is required' })
+    const contentBuf = body.encoding === 'base64' ? Buffer.from(body.content, 'base64') : Buffer.from(body.content)
+    const art = storeArtifact({ agentId, name: body.name, content: contentBuf, mimeType: body.mimeType, runId: body.runId, taskId: body.taskId, metadata: body.metadata })
+    return reply.code(201).send(art)
+  })
+
+  // List artifacts
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/artifacts', async (request) => {
+    const { agentId } = request.params
+    const query = request.query as { runId?: string; taskId?: string; limit?: string }
+    return {
+      artifacts: listArtifacts({ agentId, runId: query.runId, taskId: query.taskId, limit: query.limit ? parseInt(query.limit, 10) : undefined }),
+      usage: getStorageUsage(agentId),
+    }
+  })
+
+  // Get artifact metadata
+  app.get('/artifacts/:artifactId', async (request, reply) => {
+    const { artifactId } = request.params as { artifactId: string }
+    const art = getArtifact(artifactId)
+    if (!art) return reply.code(404).send({ error: 'Artifact not found' })
+    return art
+  })
+
+  // Download artifact content
+  app.get('/artifacts/:artifactId/content', async (request, reply) => {
+    const { artifactId } = request.params as { artifactId: string }
+    const content = readArtifactContent(artifactId)
+    if (!content) return reply.code(404).send({ error: 'Artifact not found or file missing' })
+    const art = getArtifact(artifactId)!
+    return reply.type(art.mimeType).send(content)
+  })
+
+  // Delete artifact
+  app.delete('/artifacts/:artifactId', async (request, reply) => {
+    const { artifactId } = request.params as { artifactId: string }
+    const deleted = deleteArtifact(artifactId)
+    if (!deleted) return reply.code(404).send({ error: 'Artifact not found' })
+    return { deleted: true }
+  })
+
+  // Storage usage
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/storage', async (request) => {
+    const { agentId } = request.params
+    return getStorageUsage(agentId)
+  })  // ── Approval Routing ────────────────────────────────────────────────────
 
   const {
     listPendingApprovals,
