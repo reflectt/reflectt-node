@@ -2,6 +2,7 @@
 // Runtime cost-policy enforcement middleware
 import { getDb } from './db.js'
 import { checkCostCap } from './agent-config.js'
+import { eventBus } from './events.js'
 
 export interface UsageRecord {
   agentId: string
@@ -70,6 +71,29 @@ export function enforcePolicy(agentId: string): EnforcementResult {
     case 'downgrade': effectiveModel = result.fallbackModel ?? result.model; reason = `Cost >90%. Using fallback: ${effectiveModel}`; break
     case 'warn': reason = 'Cost >80%. Monitor usage.'; break
   }
+
+  // Emit SSE events for enforcement actions (non-allow)
+  if (result.action !== 'allow') {
+    const now = Date.now()
+    eventBus.emit({
+      id: `cost-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_render' as any,
+      timestamp: now,
+      data: {
+        kind: `cost:${result.action}`,
+        agentId,
+        action: result.action,
+        dailySpend,
+        monthlySpend,
+        dailyRemaining: result.dailyRemaining,
+        monthlyRemaining: result.monthlyRemaining,
+        model: result.model,
+        effectiveModel,
+        reason,
+      },
+    })
+  }
+
   return { allowed: result.allowed, action: result.action, model: result.model, effectiveModel, reason, dailySpend, monthlySpend, dailyRemaining: result.dailyRemaining, monthlyRemaining: result.monthlyRemaining }
 }
 
