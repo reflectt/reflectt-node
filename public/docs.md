@@ -412,6 +412,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | POST | `/presence/:agent` | Update presence. Body: `{ "status": "working|idle|blocked|reviewing|offline" }` |
 | GET | `/presence/:agent/focus` | Get agent focus state (active, level, expiry) |
 | POST | `/presence/:agent/focus` | Toggle focus mode. Body: `{ "active": true, "level": "soft|deep", "durationMin": 60, "reason": "shipping PR" }`. Soft: suppresses system nudges, allows direct mentions. Deep: suppresses everything except blocker/review pings. |
+| GET | `/presence-loop` | Presence loop demo page — serves an HTML page that polls `/presence` to show live agent status changes. |
 
 ## Memory
 
@@ -1094,6 +1095,7 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/approvals/pending` | List pending approvals (review_requested events needing action). Query: `?agentId=&limit=` |
 | POST | `/approvals/:eventId/decide` | Submit approval decision. Body: `{ decision: "approve"|"reject", reviewer (required), comment? }`. Auto-unblocks run on approve. |
 | GET | `/agents/:agentId/runs/:runId/stream` | SSE stream for a specific run. Sends snapshot (run + recent events), then real-time events as they occur. Heartbeat every 15s. |
+| GET | `/runs/:runId/stream` | SSE stream for a run by ID (no agentId required). Cloud Presence surface subscribes here for live run activity. Sends snapshot then real-time events. Heartbeat every 15s. |
 | GET | `/agents/:agentId/stream` | SSE stream for all events for an agent. Sends snapshot (active run + recent events), then real-time events. Heartbeat every 15s. |
 | GET | `/workflows` | List available workflow templates. |
 | GET | `/workflows/:id` | Get template details (name, description, steps). |
