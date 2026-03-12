@@ -1,0 +1,10 @@
+src/
+tests/
+tools/
+scripts/
+*.test.ts
+*.spec.ts
+.github/
+docker/
+process/
+public/
