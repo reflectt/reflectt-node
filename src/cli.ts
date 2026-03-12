@@ -174,20 +174,69 @@ function checkBuildFreshness(): string | null {
   return null
 }
 
-function startServerDetached(config: Config): number {
+/**
+ * Auto-rebuild dist/ when stale or missing.
+ * Returns true if rebuild succeeded, false if it failed.
+ */
+function autoRebuild(projectRoot: string): boolean {
+  console.log('🔨 Build is stale or missing — auto-rebuilding...')
+  try {
+    execSync('npm run build', { cwd: projectRoot, stdio: 'inherit', timeout: 60_000 })
+    console.log('✅ Build complete')
+    return true
+  } catch (err) {
+    console.error('❌ Auto-rebuild failed:', (err as Error).message)
+    return false
+  }
+}
+
+function startServerDetached(config: Config, forceTsx = false): number {
   const { projectRoot, serverPath, useNode } = getRuntimePaths()
 
-  if (!existsSync(serverPath)) {
-    throw new Error(`Server file not found: ${serverPath}`)
+  // --tsx flag: always use tsx, skip dist entirely
+  if (forceTsx) {
+    const tsxPath = join(projectRoot, 'src', 'index.ts')
+    if (!existsSync(tsxPath)) {
+      throw new Error(`Source file not found: ${tsxPath}`)
+    }
+    const child = spawn('npx', ['tsx', tsxPath], {
+      env: buildServerEnv(config),
+      detached: true,
+      stdio: 'ignore',
+      cwd: projectRoot,
+    })
+    child.unref()
+    writeFileSync(PID_FILE, String(child.pid))
+    return child.pid!
   }
 
-  // Check build freshness for compiled mode
+  if (!existsSync(serverPath)) {
+    // Try auto-rebuild before giving up
+    if (useNode && autoRebuild(projectRoot)) {
+      // Re-check after rebuild
+      if (!existsSync(serverPath)) {
+        throw new Error(`Server file still not found after rebuild: ${serverPath}`)
+      }
+    } else if (useNode) {
+      throw new Error(`Server file not found: ${serverPath}. Auto-rebuild failed.`)
+    } else {
+      throw new Error(`Server file not found: ${serverPath}`)
+    }
+  }
+
+  // Check build freshness for compiled mode — auto-rebuild if stale
   if (useNode) {
     const warning = checkBuildFreshness()
     if (warning) {
-      console.warn(warning)
-      if (warning.startsWith('❌')) {
-        throw new Error('Cannot start: build output is missing or incomplete. Run "npm run build" first.')
+      if (warning.startsWith('❌') || warning.startsWith('⚠️')) {
+        if (!autoRebuild(projectRoot)) {
+          console.warn(warning)
+          if (warning.startsWith('❌')) {
+            throw new Error('Cannot start: build output is missing and auto-rebuild failed.')
+          }
+          // Stale warning but rebuild failed — continue with stale dist and warn
+          console.warn('⚠️  Continuing with potentially stale build')
+        }
       }
     }
   }
@@ -611,6 +660,7 @@ program
   .command('start')
   .description('Start the reflectt server')
   .option('-d, --detach', 'Run in background')
+  .option('--tsx', 'Use tsx (TypeScript) directly — no build step needed')
   .action(async (options) => {
     if (!existsSync(REFLECTT_HOME)) {
       console.log('📦 First run — initializing reflectt...')
@@ -670,9 +720,86 @@ program
 
     const { projectRoot, serverPath, useNode } = getRuntimePaths()
 
+    // --tsx flag: always use tsx, skip dist entirely
+    if (options.tsx) {
+      const tsxPath = join(projectRoot, 'src', 'index.ts')
+      if (!existsSync(tsxPath)) {
+        console.error(`❌ Source file not found: ${tsxPath}`)
+        console.error('   --tsx requires a source checkout (not an npm install)')
+        process.exit(1)
+      }
+
+      if (options.detach) {
+        const pid = startServerDetached(config, true)
+        const clientHost2 = (config.host === '0.0.0.0' || config.host === '::') ? '127.0.0.1' : config.host
+        console.log(`⏳ Starting reflectt server via tsx (PID: ${pid})...`)
+        let healthy = false
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 500))
+          try {
+            const ctrl = new AbortController()
+            const t = setTimeout(() => ctrl.abort(), 2000)
+            const r = await fetch(`http://${clientHost2}:${config.port}/health`, { signal: ctrl.signal })
+            clearTimeout(t)
+            if (r.ok) { healthy = true; break }
+          } catch { /* not ready */ }
+        }
+        console.log(healthy ? '✅ Server is running (tsx mode)!' : '⚠️  Server started but not responding yet')
+        process.exit(0)
+      }
+
+      console.log('🚀 Starting reflectt server (tsx mode — no build step)...')
+      const env = buildServerEnv(config)
+      const child = spawn('npx', ['tsx', tsxPath], {
+        env,
+        stdio: 'inherit',
+        cwd: projectRoot,
+      })
+      child.on('exit', (code) => process.exit(code ?? 1))
+      return
+    }
+
     if (!existsSync(serverPath)) {
-      console.error(`❌ Server file not found: ${serverPath}`)
-      process.exit(1)
+      // Auto-rebuild if dist is missing
+      if (useNode) {
+        console.log(`Server file not found: ${serverPath}`)
+        if (autoRebuild(projectRoot)) {
+          if (!existsSync(serverPath)) {
+            console.error('❌ Build succeeded but server file still missing')
+            process.exit(1)
+          }
+        } else {
+          // Rebuild failed — try tsx fallback if source exists
+          const tsxFallback = join(projectRoot, 'src', 'index.ts')
+          if (existsSync(tsxFallback)) {
+            console.log('💡 Falling back to tsx (source mode)...')
+            const env = buildServerEnv(config)
+            const child = spawn('npx', ['tsx', tsxFallback], {
+              env,
+              stdio: 'inherit',
+              cwd: projectRoot,
+            })
+            child.on('exit', (code) => process.exit(code ?? 1))
+            return
+          }
+          console.error('❌ Cannot start: no dist/ and no src/. Is this a valid reflectt-node checkout?')
+          process.exit(1)
+        }
+      } else {
+        console.error(`❌ Server file not found: ${serverPath}`)
+        process.exit(1)
+      }
+    }
+
+    // Auto-rebuild if stale
+    if (useNode) {
+      const warning = checkBuildFreshness()
+      if (warning && (warning.startsWith('❌') || warning.startsWith('⚠️'))) {
+        if (!autoRebuild(projectRoot)) {
+          console.warn(warning)
+          console.warn('⚠️  Continuing with potentially stale build')
+        }
+      }
     }
 
     const env = buildServerEnv(config)

@@ -31,6 +31,8 @@ reflectt start
 
 Open **[http://localhost:4445/dashboard](http://localhost:4445/dashboard)** — a starter team and first task are already there.
 
+> **Developing locally?** Clone the repo and run `npm run dev` — no build step needed, auto-restarts on file changes.
+
 > Just want to try it first? `npx reflectt-node` starts immediately, no install required.
 
 > **Using yarn?** `yarn global add reflectt-node` works, but run `yarn global bin` and add it to your `$PATH` if you get `reflectt: command not found`.

@@ -58,13 +58,18 @@ docker run -d --name reflectt-node \
 
 If using Docker, skip to [Check that it's running](#check-that-its-running).
 
-### From source
+### From source (recommended for development)
 
 ```bash
 git clone https://github.com/reflectt/reflectt-node.git
 cd reflectt-node
-npm install && npm run build
+npm install
+npm run dev        # Uses tsx — no build step, auto-restarts on changes
 ```
+
+> **No build step required.** `npm run dev` runs TypeScript directly via tsx with file watching. This is the recommended way to run locally during development.
+
+> **Production installs** use `reflectt start`, which auto-rebuilds if dist/ is stale or missing. You can also use `reflectt start --tsx` to skip the build entirely.
 
 ---
 
@@ -72,7 +77,7 @@ npm install && npm run build
 
 ```bash
 reflectt init     # Creates ~/.reflectt/ — only needed once
-reflectt start    # Starts the server
+reflectt start    # Starts the server (auto-rebuilds if needed)
 ```
 
 That's it. Your server is running at `http://localhost:4445`.

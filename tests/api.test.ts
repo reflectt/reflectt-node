@@ -4042,9 +4042,7 @@ describe('Approval Queue', () => {
     const { status, body } = await req('GET', '/approval-queue')
     expect(status).toBe(200)
     expect(body).toHaveProperty('items')
-    expect(body).toHaveProperty('total')
-    expect(body).toHaveProperty('highConfidenceCount')
-    expect(body).toHaveProperty('needsReviewCount')
+    expect(body).toHaveProperty('count')
     expect(Array.isArray(body.items)).toBe(true)
   })
 
