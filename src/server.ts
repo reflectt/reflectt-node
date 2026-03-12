@@ -13983,6 +13983,49 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
+  // ── Run Stream (by run ID only) ──────────────────────────────────────
+  // GET /runs/:runId/stream — SSE stream for a run without requiring agentId.
+  // Cloud Presence surface subscribes here to show live run activity.
+  app.get<{ Params: { runId: string } }>('/runs/:runId/stream', async (request, reply) => {
+    const { runId } = request.params
+    const run = getAgentRun(runId)
+    if (!run) { reply.code(404); return { error: 'Run not found' } }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Initial snapshot: run state + recent events
+    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ run, events: listAgentEvents({ runId, limit: 20 }) })}\n\n`)
+
+    const listenerId = `run-direct-stream-${runId}-${Date.now()}`
+    let closed = false
+
+    eventBus.on(listenerId, (event) => {
+      if (closed) return
+      const data = event.data as Record<string, unknown> | undefined
+      if (data && (data.runId === runId || data.agentId === run.agentId)) {
+        try {
+          reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+        } catch { /* connection closed */ }
+      }
+    })
+
+    const heartbeat = setInterval(() => {
+      if (closed) { clearInterval(heartbeat); return }
+      try { reply.raw.write(`:heartbeat\n\n`) } catch { clearInterval(heartbeat) }
+    }, 15_000)
+
+    request.raw.on('close', () => {
+      closed = true
+      eventBus.off(listenerId)
+      clearInterval(heartbeat)
+    })
+  })
+
   // ── Workflow Templates ─────────────────────────────────────────────────
 
   const { listWorkflowTemplates, getWorkflowTemplate, runWorkflow } = await import('./workflow-templates.js')
