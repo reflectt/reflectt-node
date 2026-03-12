@@ -14073,12 +14073,28 @@ If your heartbeat shows **no active task** and **no next task**:
       'X-Accel-Buffering': 'no',
     })
 
-    // Send current run state as initial snapshot
-    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ run, events: listAgentEvents({ runId, limit: 20 }) })}\n\n`)
+    // Support Last-Event-ID for reconnection
+    const lastEventId = request.headers['last-event-id'] as string | undefined
+    const lastEventTs = lastEventId ? parseInt(lastEventId, 10) : 0
+
+    if (lastEventTs > 0) {
+      // Reconnect: replay missed events
+      const missedEvents = listAgentEvents({ runId, limit: 100 })
+        .filter(e => (e as any).timestamp > lastEventTs)
+      for (const e of missedEvents) {
+        const id = (e as any).timestamp || Date.now()
+        reply.raw.write(`id: ${id}\nevent: replay\ndata: ${JSON.stringify(e)}\n\n`)
+      }
+    } else {
+      // Send current run state as initial snapshot
+      const snapshotId = Date.now()
+      reply.raw.write(`id: ${snapshotId}\nevent: snapshot\ndata: ${JSON.stringify({ run, events: listAgentEvents({ runId, limit: 20 }) })}\n\n`)
+    }
 
     // Subscribe to eventBus for this run's events
     const listenerId = `run-stream-${runId}-${Date.now()}`
     let closed = false
+    let eventSeq = Date.now()
 
     eventBus.on(listenerId, (event) => {
       if (closed) return
@@ -14086,7 +14102,8 @@ If your heartbeat shows **no active task** and **no next task**:
       // Forward events that match this agent or run
       if (data && (data.runId === runId || data.agentId === agentId)) {
         try {
-          reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+          eventSeq = Date.now()
+          reply.raw.write(`id: ${eventSeq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
         } catch { /* connection closed */ }
       }
     })
@@ -14149,6 +14166,7 @@ If your heartbeat shows **no active task** and **no next task**:
   // ── Run Stream (by run ID only) ──────────────────────────────────────
   // GET /runs/:runId/stream — SSE stream for a run without requiring agentId.
   // Cloud Presence surface subscribes here to show live run activity.
+  // Supports Last-Event-ID for reconnection: on reconnect, replays missed events.
   app.get<{ Params: { runId: string } }>('/runs/:runId/stream', async (request, reply) => {
     const { runId } = request.params
     const run = getAgentRun(runId)
@@ -14161,18 +14179,35 @@ If your heartbeat shows **no active task** and **no next task**:
       'X-Accel-Buffering': 'no',
     })
 
-    // Initial snapshot: run state + recent events
-    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ run, events: listAgentEvents({ runId, limit: 20 }) })}\n\n`)
+    // Support Last-Event-ID for reconnection
+    const lastEventId = request.headers['last-event-id'] as string | undefined
+    const lastEventTs = lastEventId ? parseInt(lastEventId, 10) : 0
+
+    if (lastEventTs > 0) {
+      // Reconnect: replay events since last received
+      const missedEvents = listAgentEvents({ runId, limit: 100 })
+        .filter(e => (e as any).timestamp > lastEventTs)
+      for (const e of missedEvents) {
+        const id = (e as any).timestamp || Date.now()
+        reply.raw.write(`id: ${id}\nevent: replay\ndata: ${JSON.stringify(e)}\n\n`)
+      }
+    } else {
+      // Initial snapshot: run state + recent events
+      const snapshotId = Date.now()
+      reply.raw.write(`id: ${snapshotId}\nevent: snapshot\ndata: ${JSON.stringify({ run, events: listAgentEvents({ runId, limit: 20 }) })}\n\n`)
+    }
 
     const listenerId = `run-direct-stream-${runId}-${Date.now()}`
     let closed = false
+    let eventSeq = Date.now()
 
     eventBus.on(listenerId, (event) => {
       if (closed) return
       const data = event.data as Record<string, unknown> | undefined
       if (data && (data.runId === runId || data.agentId === run.agentId)) {
         try {
-          reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+          eventSeq = Date.now()
+          reply.raw.write(`id: ${eventSeq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
         } catch { /* connection closed */ }
       }
     })
