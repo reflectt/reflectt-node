@@ -1126,6 +1126,8 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | POST | `/webhooks/purge` | Delete old processed payloads. Body: `{ maxAgeDays? }` (default 30). |
 | POST | `/agents/:agent/waiting` | Set agent to waiting state (blocked on human). Body: `{ reason (required), waitingFor?, taskId?, expiresAt? }`. Shows in heartbeat response. |
 | DELETE | `/agents/:agent/waiting` | Clear waiting state — agent is unblocked. |
+| GET | `/approval-queue` | Unified approval queue — everything needing human decision. Params: `agentId?`, `category?` (review\|agent_action), `includeExpired?` (true), `limit?`. Returns: items[], count, hasExpired. Each item: id, category, title, description, urgency, owner, expiresAt, autoAction, isExpired. |
+| POST | `/approval-queue/:approvalId/decide` | Resolve an approval. Body: `{ decision: "approve"\|"reject"\|"defer", actor (required), comment? }`. Emits canvas_input SSE event. |
 | POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
 | POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 

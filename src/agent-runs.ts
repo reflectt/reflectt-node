@@ -627,6 +627,99 @@ export function listPendingApprovals(opts?: {
  * Submit an approval decision. Records a review_approved or review_rejected event
  * and optionally unblocks the associated run.
  */
+/**
+ * Dedicated approval queue — unified view of everything needing human decision.
+ * Covers review_requested (PR reviews) AND approval_requested (agent actions like deploy/execute).
+ * Each item answers: what needs decision, who owns it, when it expires, what happens if ignored.
+ */
+export interface ApprovalQueueItem {
+  id: string
+  category: 'review' | 'agent_action'
+  event: AgentEvent
+  agentId: string
+  runId: string | null
+  title: string
+  description: string | null
+  urgency: string | null
+  owner: string | null
+  expiresAt: number | null
+  autoAction: string | null  // what happens if ignored past expiry
+  createdAt: number
+  isExpired: boolean
+}
+
+export function listApprovalQueue(opts?: {
+  agentId?: string
+  category?: 'review' | 'agent_action'
+  includeExpired?: boolean
+  limit?: number
+}): ApprovalQueueItem[] {
+  const db = getDb()
+  const limit = opts?.limit ?? 50
+  const now = Date.now()
+  const eventTypes = ["'review_requested'", "'approval_requested'"]
+
+  if (opts?.category === 'review') {
+    eventTypes.length = 0
+    eventTypes.push("'review_requested'")
+  } else if (opts?.category === 'agent_action') {
+    eventTypes.length = 0
+    eventTypes.push("'approval_requested'")
+  }
+
+  const conditions = [
+    `e.event_type IN (${eventTypes.join(', ')})`,
+  ]
+  const params: unknown[] = []
+
+  if (opts?.agentId) {
+    conditions.push('e.agent_id = ?')
+    params.push(opts.agentId)
+  }
+
+  // Exclude resolved items
+  const sql = `
+    SELECT e.* FROM agent_events e
+    WHERE ${conditions.join(' AND ')}
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_events r
+      WHERE r.run_id = e.run_id
+      AND r.event_type IN ('review_approved', 'review_rejected', 'approval_approved', 'approval_rejected')
+      AND r.created_at > e.created_at
+    )
+    ORDER BY e.created_at DESC
+    LIMIT ?
+  `
+  params.push(limit)
+
+  const rows = db.prepare(sql).all(...params) as EventRow[]
+  const items = rows.map(row => {
+    const event = rowToEvent(row)
+    const expiresAt = (event.payload.expires_at as number) ?? null
+    const isExpired = expiresAt !== null && expiresAt < now
+    return {
+      id: event.id,
+      category: (event.eventType === 'review_requested' ? 'review' : 'agent_action') as 'review' | 'agent_action',
+      event,
+      agentId: event.agentId,
+      runId: event.runId,
+      title: (event.payload.title as string) ?? (event.payload.action_required as string) ?? 'Pending approval',
+      description: (event.payload.description as string) ?? (event.payload.context as string) ?? null,
+      urgency: (event.payload.urgency as string) ?? null,
+      owner: (event.payload.owner as string) ?? null,
+      expiresAt,
+      autoAction: (event.payload.auto_action as string) ?? null,
+      createdAt: event.createdAt,
+      isExpired,
+    }
+  })
+
+  if (!opts?.includeExpired) {
+    return items.filter(i => !i.isExpired)
+  }
+  return items
+}
+
 export function submitApprovalDecision(opts: {
   eventId: string
   decision: 'approve' | 'reject'
