@@ -298,7 +298,11 @@ export function listAgentRuns(
 
 // ── Events (append-only) ──────────────────────────────────────────────────
 
-// Event types that require structured payload fields per COO routing semantics
+// Routing payload is a narrow API contract for actionable boundary writes.
+// Internal/event-specific payloads can still carry richer fields.
+export const VALID_ACTION_REQUIRED = ['review', 'unblock', 'approve', 'fyi'] as const
+export const VALID_ROUTING_URGENCY = ['blocking', 'normal', 'low'] as const
+
 const ACTIONABLE_EVENT_TYPES = new Set([
   'review_requested',
   'approval_requested',
@@ -306,7 +310,8 @@ const ACTIONABLE_EVENT_TYPES = new Set([
   'handoff',
 ])
 
-const VALID_URGENCY = new Set(['low', 'normal', 'high', 'critical'])
+const VALID_ACTION_REQUIRED_SET = new Set<string>(VALID_ACTION_REQUIRED)
+const VALID_ROUTING_URGENCY_SET = new Set<string>(VALID_ROUTING_URGENCY)
 
 export interface RoutingValidation {
   valid: boolean
@@ -314,38 +319,33 @@ export interface RoutingValidation {
   warnings: string[]
 }
 
-/**
- * Validate routing semantics for actionable events.
- * Enforces: action_required, urgency, owner required.
- * Optional: expires_at.
- */
 export function validateRoutingSemantics(eventType: string, payload: Record<string, unknown>): RoutingValidation {
   const errors: string[] = []
   const warnings: string[] = []
 
-  if (!ACTIONABLE_EVENT_TYPES.has(eventType)) {
+  const hasRoutingFields = payload.action_required !== undefined
+    || payload.urgency !== undefined
+    || payload.owner !== undefined
+    || payload.expires_at !== undefined
+
+  if (!ACTIONABLE_EVENT_TYPES.has(eventType) && !hasRoutingFields) {
     return { valid: true, errors: [], warnings: [] }
   }
 
-  if (!payload.action_required || typeof payload.action_required !== 'string') {
-    errors.push('Actionable events require action_required (string describing what needs to happen)')
+  if (typeof payload.action_required !== 'string' || payload.action_required.trim().length === 0) {
+    errors.push(`action_required is required and must be one of: ${VALID_ACTION_REQUIRED.join('|')}`)
+  } else if (!VALID_ACTION_REQUIRED_SET.has(payload.action_required.trim())) {
+    errors.push(`action_required must be one of: ${VALID_ACTION_REQUIRED.join('|')}`)
   }
-  if (!payload.urgency || typeof payload.urgency !== 'string') {
-    errors.push('Actionable events require urgency (low|normal|high|critical)')
-  } else if (!VALID_URGENCY.has(payload.urgency as string)) {
-    errors.push(`urgency must be one of: ${[...VALID_URGENCY].join(', ')}`)
-  }
-  if (!payload.owner || typeof payload.owner !== 'string') {
-    errors.push('Actionable events require owner (who needs to act)')
+
+  if (typeof payload.urgency !== 'string' || payload.urgency.trim().length === 0) {
+    errors.push(`urgency is required and must be one of: ${VALID_ROUTING_URGENCY.join('|')}`)
+  } else if (!VALID_ROUTING_URGENCY_SET.has(payload.urgency.trim())) {
+    errors.push(`urgency must be one of: ${VALID_ROUTING_URGENCY.join('|')}`)
   }
 
   if (payload.expires_at !== undefined && typeof payload.expires_at !== 'number') {
     warnings.push('expires_at should be a numeric timestamp (epoch ms)')
-  }
-
-  // Decision events should include rationale
-  if (eventType === 'approval_requested' && !payload.title) {
-    warnings.push('approval_requested events should include title for the approval queue')
   }
 
   return { valid: errors.length === 0, errors, warnings }

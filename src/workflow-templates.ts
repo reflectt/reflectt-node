@@ -79,7 +79,7 @@ export const prReviewWorkflow: WorkflowTemplate = {
           runId: ctx.runId,
           eventType: 'review_requested',
           payload: {
-            action_required: 'Review and approve the submitted work',
+            action_required: 'review',
             urgency: ctx.params.urgency as string ?? 'normal',
             owner: ctx.params.reviewer as string ?? 'kai',
             pr_url: ctx.params.prUrl as string,
@@ -115,7 +115,7 @@ export const prReviewWorkflow: WorkflowTemplate = {
           runId: ctx.runId,
           eventType: 'handoff',
           payload: {
-            action_required: 'Deploy or merge the approved work',
+            action_required: 'approve',
             urgency: 'normal',
             owner: ctx.params.nextOwner as string ?? ctx.agentId,
             summary: ctx.params.summary as string ?? 'Work reviewed and approved',

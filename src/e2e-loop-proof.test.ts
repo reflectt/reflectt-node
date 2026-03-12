@@ -53,10 +53,15 @@ describe('E2E Host Loop — trigger → run → decision → approval → comple
       eventType: 'review_requested',
       runId,
       payload: {
-        action_required: 'Approve E2E loop test',
+        action_required: 'approve',
         urgency: 'normal',
         owner: 'ryan',
         prUrl: 'https://github.com/reflectt/reflectt-node/pull/e2e-test',
+        rationale: {
+          choice: 'request approval for E2E loop proof',
+          considered: ['host loop reached review point', 'approval path needs proof'],
+          constraint: 'must pass through real approval endpoint',
+        },
       },
     })
     assert.equal(status, 201)
@@ -74,6 +79,11 @@ describe('E2E Host Loop — trigger → run → decision → approval → comple
       decision: 'approve',
       reviewer: 'ryan',
       comment: 'LGTM — E2E proof approved',
+      rationale: {
+        choice: 'approve E2E loop proof',
+        considered: ['review request present', 'loop should prove approval path'],
+        constraint: 'keep to host-only proof path',
+      },
     })
     assert.equal(status, 200)
     console.log('  ✓ Approved by ryan')
