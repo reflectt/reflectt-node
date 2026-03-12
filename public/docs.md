@@ -1106,6 +1106,9 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | POST | `/canvas/state` | Agent emits Presence Layer state transition. Body: `{ state: "floor"\|"listening"\|"thinking"\|"rendering"\|"ambient"\|"decision"\|"urgent"\|"handoff", sensors: null\|"mic"\|"camera"\|"mic+camera", agentId (required), payload?: { text?, media?, decision?: { question, decisionId, expiresAt?, autoAction? }, agents?: [{ name, state, task? }], summary?: { headline, items?, cost?, duration? } } }`. Emits canvas_render SSE event. |
 | GET | `/canvas/state` | Current Presence Layer state for agents. Params: `agentId?` (single agent) or all agents. |
 | GET | `/canvas/states` | Discovery: valid states, sensors, and payload schema. |
+| POST | `/agents/:agentId/canvas` | Agent emits AgentPresence-compatible state transition. Body: `{ state: "idle"\|"working"\|"needs-attention", activeTask?: { title, id }, recency?, attention?: { type: "approval"\|"review"\|"block", taskId, label? }, sensors?, payload? }`. Emits canvas_render SSE event with AgentPresence shape. Triggers immediate cloud sync. |
+| GET | `/agents/:agentId/canvas` | Current AgentPresence for one agent. Returns: `{ name, identityColor, state, activeTask?, recency, attention? }`. |
+| GET | `/canvas/presence` | All agents as AgentPresence[]. Returns: `{ agents: AgentPresence[], count }`. |
 | GET | `/agents/:agentId/config` | Get agent config (model preference, cost caps, settings). |
 | PUT | `/agents/:agentId/config` | Upsert agent config. Body: `{ model?, fallbackModel?, costCapDaily?, costCapMonthly?, maxTokensPerCall?, teamId?, settings? }`. |
 | DELETE | `/agents/:agentId/config` | Remove agent config. |
