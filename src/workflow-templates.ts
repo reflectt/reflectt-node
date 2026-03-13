@@ -104,6 +104,11 @@ export const prReviewWorkflow: WorkflowTemplate = {
             owner: ctx.params.reviewer as string ?? 'kai',
             pr_url: ctx.params.prUrl as string,
             title: ctx.params.title as string ?? 'Review requested',
+            rationale: {
+              choice: (ctx.params.rationale as string) ?? 'Work completed — requesting review to validate output against acceptance criteria.',
+              considered: ['self-merge', 'skip review'],
+              constraint: 'All decision events require structured rationale per routing schema',
+            },
           },
         })
         return { success: true, data: { eventId: event.id } }
@@ -121,6 +126,11 @@ export const prReviewWorkflow: WorkflowTemplate = {
           payload: {
             reviewer: ctx.params.reviewer as string ?? 'kai',
             comment: 'LGTM',
+            rationale: {
+              choice: (ctx.params.approvalRationale as string) ?? 'Changes reviewed and approved — meets acceptance criteria.',
+              considered: ['request changes', 'reject'],
+              constraint: 'Approval requires explicit rationale for audit trail',
+            },
           },
         })
         return { success: true }
@@ -133,12 +143,17 @@ export const prReviewWorkflow: WorkflowTemplate = {
         appendAgentEvent({
           agentId: ctx.agentId,
           runId: ctx.runId,
-          eventType: 'handoff',
+          eventType: 'handed_off',
           payload: {
             action_required: 'approve',
             urgency: 'normal',
             owner: ctx.params.nextOwner as string ?? ctx.agentId,
             summary: ctx.params.summary as string ?? 'Work reviewed and approved',
+            rationale: {
+              choice: (ctx.params.handoffRationale as string) ?? 'Handing off to next owner for final approval and merge.',
+              considered: ['self-complete', 'escalate'],
+              constraint: 'Handoff requires rationale per decision event schema',
+            },
           },
         })
         return { success: true }
