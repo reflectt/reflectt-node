@@ -77,6 +77,7 @@ interface TaskStateEntry {
   assignee?: string
   priority?: string
   updatedAt?: number
+  createdAt?: number
 }
 
 interface CloudConfig {
@@ -735,6 +736,7 @@ function getTasks(): TaskStateEntry[] {
     assignee: t.assignee,
     priority: t.priority,
     updatedAt: t.updatedAt || t.createdAt,
+    createdAt: t.createdAt,
   }))
 }
 
@@ -746,6 +748,33 @@ async function sendHeartbeat(): Promise<void> {
   const agents = getAgents()
   const tasks = getTasks()
   const doingTasks = tasks.filter(t => t.status === 'doing')
+
+  // ── Slow task detection ───────────────────────────────────────────────
+  // Include tasks that have been doing >4h with no activity (slow-flagged).
+  // These are NOT explicitly blocked — they're just stale.
+  const SLOW_HEARTBEAT_MS = 4 * 60 * 60 * 1000
+  const nowTs = Date.now()
+  const slowTasks = doingTasks.reduce<Array<{
+    id: string; title: string; assignee?: string; priority?: string;
+    slowSinceMs: number; slowSinceHours: number; lastActivityAt: number
+  }>>((acc, t) => {
+    const comments = taskManager.getTaskComments(t.id)
+    const lastComment = comments.length > 0 ? comments[comments.length - 1] : null
+    const lastActivityAt = lastComment?.timestamp ?? t.updatedAt ?? t.createdAt ?? nowTs
+    const age = nowTs - lastActivityAt
+    if (age > SLOW_HEARTBEAT_MS) {
+      acc.push({
+        id: t.id,
+        title: t.title,
+        assignee: t.assignee || undefined,
+        priority: t.priority || undefined,
+        slowSinceMs: age,
+        slowSinceHours: Math.round(age / 36_000) / 100,
+        lastActivityAt: lastActivityAt,
+      })
+    }
+    return acc
+  }, [])
 
   // Cloud API: POST /api/hosts/:hostId/heartbeat
   // Expects: { status, agents?, activeTasks? }
@@ -777,6 +806,7 @@ async function sendHeartbeat(): Promise<void> {
       priority: t.priority || undefined,
       updatedAt: t.updatedAt || Date.now(),
     })),
+    slowTasks: slowTasks.length > 0 ? slowTasks : undefined,
     metrics: (() => {
       const m = getRequestMetrics()
       return {
