@@ -1137,8 +1137,8 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | POST | `/webhooks/payloads/:payloadId/process` | Mark payload as processed. |
 | POST | `/webhooks/purge` | Delete old processed payloads. Body: `{ maxAgeDays? }` (default 30). |
 | GET | `/trust-events` | List trust-collapse signals. Params: `agentId?`, `eventType?` (false_assertion\|stale_status_claim\|self_review_violation\|missing_acceptance_criteria_block\|escalation_bypass), `since?` (epoch ms), `limit?`. |
-| POST | `/agents/:agent/waiting` | Set agent to waiting state (blocked on human). Body: `{ reason (required), waitingFor?, taskId?, expiresAt? }`. Shows in heartbeat response. |
-| DELETE | `/agents/:agent/waiting` | Clear waiting state — agent is unblocked. |
+| POST | `/agents/:agent/waiting` | Set agent to waiting state (blocked on human). Body: `{ reason (required), waitingFor?, taskId?, expiresAt? }`. Heartbeat emits `agent.status="waiting"` + `waitingFor` + `waitingTaskId`. Canvas maps to `state="needs-attention"` (amber pulse). |
+| DELETE | `/agents/:agent/waiting` | Clear waiting state — agent is unblocked. Canvas state returns to normal. |
 | GET | `/approval-queue` | Unified approval queue — everything needing human decision. Params: `agentId?`, `category?` (review\|agent_action), `includeExpired?` (true), `limit?`. Returns: items[], count, hasExpired. Each item: id, category, title, description, urgency, owner, expiresAt, autoAction, isExpired. |
 | POST | `/approval-queue/:approvalId/decide` | Resolve an approval. Body: `{ decision: "approve"\|"reject"\|"defer", actor (required), comment? }`. Emits canvas_input SSE event. |
 | GET | `/email/inbound/:emailId` | Retrieve a raw inbound email payload by its stored ID. Returns the webhook_payloads record (source, eventType, body, headers, processed, createdAt). 404 if not found or not an email-source payload. |
