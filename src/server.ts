@@ -12778,6 +12778,19 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const idempotencyKey = deliveryId ? `${provider}_${deliveryId}` : undefined
 
+    // Persist raw inbound payload for agent retrieval (non-blocking, best-effort)
+    try {
+      const { storeWebhookPayload: persistInbound } = await import('./webhook-storage.js')
+      const rawHeaders: Record<string, string> = {}
+      for (const [k, v] of Object.entries(request.headers)) {
+        if (typeof v === 'string') rawHeaders[k] = v
+        else if (Array.isArray(v)) rawHeaders[k] = v.join(', ')
+      }
+      persistInbound({ source: provider, eventType, body, headers: rawHeaders })
+    } catch {
+      // storage failure must not interrupt webhook delivery
+    }
+
     // Enrich GitHub webhook payloads with agent attribution
     const enrichedBody = provider === 'github'
       ? enrichWebhookPayload(body)
@@ -14779,6 +14792,17 @@ If your heartbeat shows **no active task** and **no next task**:
       bcc: body.bcc,
       agent: body.agentId || body.agent || 'unknown',
     }, reply)
+  })
+
+  // Retrieve raw inbound email payload by ID (alias for /webhooks/payloads/:id filtered to email sources)
+  app.get<{ Params: { emailId: string } }>('/email/inbound/:emailId', async (request, reply) => {
+    const { emailId } = request.params
+    const payload = getWebhookPayload(emailId)
+    if (!payload) return reply.code(404).send({ error: 'Inbound email payload not found' })
+    if (!['resend', 'email', 'sendgrid', 'mailgun'].includes(payload.source)) {
+      return reply.code(404).send({ error: 'Inbound email payload not found' })
+    }
+    return payload
   })
 
   // Send SMS via cloud relay
