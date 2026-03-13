@@ -23,9 +23,10 @@ export type AgentRunStatus =
   | 'completed'
   | 'failed'
   | 'cancelled'
+  | 'archived'
 
 export const VALID_RUN_STATUSES: AgentRunStatus[] = [
-  'idle', 'working', 'blocked', 'waiting_review', 'completed', 'failed', 'cancelled',
+  'idle', 'working', 'blocked', 'waiting_review', 'completed', 'failed', 'cancelled', 'archived',
 ]
 
 export const VALID_EVENT_TYPES = [
@@ -510,7 +511,7 @@ export function applyRunRetention(opts?: {
       deleted++
     } else {
       // Mark as archived (update status)
-      db.prepare("UPDATE agent_runs SET status = 'completed', updated_at = ? WHERE id = ?").run(now, row.id)
+      db.prepare("UPDATE agent_runs SET status = 'archived', updated_at = ? WHERE id = ?").run(now, row.id)
       archived++
     }
   }
@@ -536,6 +537,7 @@ export function applyRunRetention(opts?: {
           db.prepare('DELETE FROM agent_runs WHERE id = ?').run(run.id)
           deleted++
         } else {
+          db.prepare("UPDATE agent_runs SET status = 'archived', updated_at = ? WHERE id = ?").run(now, run.id)
           archived++
         }
       }
