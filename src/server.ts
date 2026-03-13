@@ -240,6 +240,12 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
     problems.push(`Title must be at least 10 characters (got ${data.title.trim().length}). Be specific about what needs to happen.`)
   }
 
+  // Done criteria presence: always required, even for todo (backlog) tasks.
+  // Silent omission is the root cause of tasks reaching doing with no verifiable exit condition.
+  if (!data.done_criteria || data.done_criteria.length === 0) {
+    problems.push('done_criteria is required and must contain at least one verifiable criterion. Tasks without acceptance criteria cannot be validated or closed.')
+  }
+
   // Done criteria quality: reject single-word criteria
   for (const criterion of data.done_criteria) {
     if (criterion.split(/\s+/).length < 3) {
@@ -247,10 +253,10 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
     }
   }
 
-  // For todo tasks, skip type-specific and done_criteria quality checks.
+  // For todo tasks, skip type-specific done_criteria quality checks.
   // These are backlog items — full readiness is enforced when moving to doing.
   if (data.status === 'todo') {
-    return problems // Return early with only title-level checks
+    return problems // Return early with only title-level + presence checks
   }
 
   // Type-specific checks (non-todo tasks)
@@ -7587,6 +7593,26 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       // ── End task-close gate ──
 
+      // ── done_criteria gate on doing transition ──
+      // Prevent tasks from entering active work without verifiable exit conditions.
+      // Effective criteria = incoming update (if provided) or existing task value.
+      if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
+        const effectiveDoneCriteria = (parsed.done_criteria && parsed.done_criteria.length > 0)
+          ? parsed.done_criteria
+          : (existing.done_criteria ?? [])
+        if (effectiveDoneCriteria.length === 0) {
+          reply.code(422)
+          return {
+            success: false,
+            error: 'done_criteria gate: task cannot move to doing without at least one verifiable criterion. Add done_criteria to this PATCH or update the task first.',
+            code: 'MISSING_DONE_CRITERIA',
+            gate: 'done_criteria',
+            hint: 'Include done_criteria: ["<criterion 1>", ...] in this PATCH request.',
+          }
+        }
+      }
+      // ── End done_criteria gate ──
+
       // ── WIP cap check on doing transition ──
       if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
         const assignee = parsed.assignee || existing.assignee || 'unknown'
@@ -14017,10 +14043,11 @@ If your heartbeat shows **no active task** and **no next task**:
   // List agent runs
   app.get<{ Params: { agentId: string } }>('/agents/:agentId/runs', async (request, reply) => {
     const { agentId } = request.params
-    const query = request.query as { status?: string; teamId?: string; limit?: string }
+    const query = request.query as { status?: string; teamId?: string; limit?: string; include_archived?: string }
     const teamId = query.teamId ?? 'default'
     const limit = query.limit ? parseInt(query.limit, 10) : undefined
-    return listAgentRuns(agentId, teamId, { status: query.status as any, limit })
+    const includeArchived = query.include_archived === 'true'
+    return listAgentRuns(agentId, teamId, { status: query.status as any, limit, includeArchived })
   })
 
   // Get active run for an agent
@@ -14358,6 +14385,17 @@ If your heartbeat shows **no active task** and **no next task**:
   // ── Run Retention / Archive ────────────────────────────────────────────
 
   const { applyRunRetention, getRetentionStats } = await import('./agent-runs.js')
+
+  // Schedule daily run retention archival using the configured TTL
+  const runRetentionIntervalMs = 24 * 60 * 60 * 1000 // 24 hours
+  const runRetentionTimer = setInterval(() => {
+    try {
+      applyRunRetention({ policy: { maxAgeDays: serverConfig.runRetentionDays } })
+    } catch { /* non-fatal */ }
+  }, runRetentionIntervalMs)
+  runRetentionTimer.unref()
+  // Run once at startup to archive any stale runs immediately
+  try { applyRunRetention({ policy: { maxAgeDays: serverConfig.runRetentionDays } }) } catch { /* non-fatal */ }
 
   // GET /runs/retention/stats — preview what retention policy would do
   app.get('/runs/retention/stats', async (request) => {

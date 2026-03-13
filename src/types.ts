@@ -126,6 +126,7 @@ export interface ServerConfig {
   port: number
   host: string
   corsEnabled: boolean
+  runRetentionDays: number
 }
 
 export interface ChatRoom {
