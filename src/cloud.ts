@@ -27,7 +27,7 @@ import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
-import { listApprovalQueue, listAgentEvents } from './agent-runs.js'
+import { listApprovalQueue, listAgentEvents, listAgentRuns, type AgentRun } from './agent-runs.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -466,6 +466,12 @@ export async function startCloudIntegration(): Promise<void> {
   state.runEventSyncTimer = setInterval(() => {
     syncRunEvents().catch(() => {})
   }, RUN_EVENT_SYNC_INTERVAL_MS)
+
+  // Agent runs sync — every 30s (pushes run records to cloud action_runs table)
+  syncAgentRuns().catch(() => {})
+  setInterval(() => {
+    syncAgentRuns().catch(() => {})
+  }, 30_000)
 
   // Usage sync — adaptive: 15s when active, 60s when idle
   let lastUsageSyncAt = 0
@@ -1348,6 +1354,39 @@ async function syncRunApprovals(): Promise<void> {
     approvalSyncErrors++
     if (approvalSyncErrors <= 3) {
       console.warn(`☁️  [RunApprovals] Sync error: ${err?.message}`)
+    }
+  }
+}
+
+// ---- Agent Runs Sync ----
+// Push agent run records to cloud action_runs table (used by cloud Runs screen)
+
+let agentRunSyncErrors = 0
+
+async function syncAgentRuns(): Promise<void> {
+  if (!state.hostId || !config) return
+  try {
+    const agents = getAgents()
+    if (agents.length === 0) return
+
+    const allRuns: AgentRun[] = []
+    for (const agent of agents) {
+      const runs = listAgentRuns(agent.name, 'default', { limit: 20 })
+      allRuns.push(...runs)
+    }
+    if (allRuns.length === 0) return
+
+    const result = await cloudPost(`/api/hosts/${state.hostId}/runs/sync`, { runs: allRuns })
+    if (result.success || result.data) {
+      if (agentRunSyncErrors > 0) {
+        console.log('☁️  [RunSync] Recovered after errors')
+        agentRunSyncErrors = 0
+      }
+    }
+  } catch (err: any) {
+    agentRunSyncErrors++
+    if (agentRunSyncErrors <= 3) {
+      console.warn(`☁️  [RunSync] Error: ${err?.message}`)
     }
   }
 }
