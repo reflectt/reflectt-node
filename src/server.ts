@@ -14595,6 +14595,55 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // POST /run-approvals/:eventId/decide — iOS lock screen action buttons
+  // Accepts approve/reject decisions from mobile clients directly.
+  // Mirrors /approval-queue/:id/decide but uses the run-approvals URL shape
+  // so iOS can construct the path from the eventId in the push payload.
+  app.post<{ Params: { eventId: string } }>('/run-approvals/:eventId/decide', async (request, reply) => {
+    const { eventId } = request.params
+    const body = request.body as {
+      decision?: string
+      actor?: string
+      reason?: string
+      rationale?: { choice?: string; considered?: string[]; constraint?: string }
+    }
+    if (!body?.decision || !['approve', 'reject'].includes(body.decision)) {
+      return reply.code(400).send({ error: 'decision must be "approve" or "reject"' })
+    }
+    if (!body?.actor) {
+      return reply.code(400).send({ error: 'actor is required' })
+    }
+    try {
+      const rationale = body.rationale ?? {
+        choice: body.decision === 'approve' ? 'Approved' : 'Rejected',
+        considered: ['approve', 'reject'],
+        constraint: `Mobile decision by ${body.actor}`,
+      }
+      const result = submitApprovalDecision({
+        eventId,
+        decision: body.decision as 'approve' | 'reject',
+        reviewer: body.actor,
+        comment: body.reason,
+        rationale: rationale as any,
+      })
+      // Emit canvas_input so Presence Layer reflects the decision
+      eventBus.emit({
+        id: `ra-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_input' as const,
+        timestamp: Date.now(),
+        data: {
+          action: 'decision',
+          approvalId: eventId,
+          decision: body.decision,
+          actor: body.actor,
+        },
+      })
+      return result
+    } catch (err: any) {
+      return reply.code(err.message.includes('not found') ? 404 : 400).send({ error: err.message })
+    }
+  })
+
   // ── Canvas Input ──────────────────────────────────────────────────────
   // Human → agent control seam for the Presence Layer.
   // Payload is intentionally small per COO spec: action + target + actor.
