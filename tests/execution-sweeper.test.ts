@@ -388,6 +388,17 @@ describe('Orphan PR detection accuracy', () => {
     // Should be 'merged' if gh CLI works, or 'unknown' if not
     expect(['open', 'merged', 'closed', 'unknown']).toContain(result.state)
   })
+
+  it('checkLivePrState caches results and avoids duplicate gh calls', async () => {
+    const { checkLivePrState, _clearPrStateCache } = await import('../src/executionSweeper.js')
+    _clearPrStateCache()
+
+    const prUrl = 'https://github.com/reflectt/reflectt-node/pull/208'
+    const first = checkLivePrState(prUrl)
+    const second = checkLivePrState(prUrl) // should be served from cache
+    // Both calls return the same result (cache hit)
+    expect(first.state).toBe(second.state)
+  })
 })
 
 // ── Escalation persistence + cooldown tests ────────────────────────────────

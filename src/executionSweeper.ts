@@ -526,6 +526,41 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
 
     if (ageSinceActivity >= VALIDATING_CRITICAL_MS && effective?.level !== 'critical') {
       const prUrl = extractPrUrl(meta)
+
+      // ── PR-merged auto-close guard ────────────────────────────────────
+      // Before firing a reminder, check if the linked PR is already merged.
+      // If merged, auto-close the task instead of sending a stale alert.
+      if (prUrl) {
+        const liveState = checkLivePrState(prUrl)
+        if (liveState.state === 'merged') {
+          logDryRun('pr_merged_autoclose', `${task.id} — PR ${prUrl} is merged, auto-closing instead of escalating`)
+          try {
+            await taskManager.updateTask(task.id, {
+              status: 'done',
+              metadata: {
+                ...meta,
+                auto_closed: true,
+                auto_closed_at: now,
+                auto_close_reason: 'sweeper_pr_merged',
+                pr_merged: true,
+                sweeper_escalation_level: undefined,
+                sweeper_escalated_at: undefined,
+                sweeper_escalation_count: undefined,
+              },
+            } as any)
+            autoClosedIds.add(task.id)
+            chatManager.sendMessage({
+              from: 'system',
+              channel: 'task-notifications',
+              content: `✅ Auto-closed "${task.title}" (${task.id}) — linked PR is merged. @${task.assignee || 'unassigned'} no action needed.`,
+            }).catch(() => {})
+          } catch (err) {
+            logDryRun('pr_merged_autoclose_failed', `${task.id} — ${String(err)}`)
+          }
+          continue
+        }
+      }
+
       const newCount = persistedCount + 1
       violations.push({
         taskId: task.id,
@@ -547,6 +582,41 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
       logDryRun('validating_critical', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee} count:${newCount}`)
     } else if (ageSinceActivity >= VALIDATING_SLA_MS && !effective) {
       const prUrl = extractPrUrl(meta)
+
+      // ── PR-merged auto-close guard ────────────────────────────────────
+      // Before firing an SLA warning, check if the linked PR is already merged.
+      // If merged, auto-close the task — no reviewer action needed.
+      if (prUrl) {
+        const liveState = checkLivePrState(prUrl)
+        if (liveState.state === 'merged') {
+          logDryRun('pr_merged_autoclose', `${task.id} — PR ${prUrl} is merged, auto-closing instead of SLA warning`)
+          try {
+            await taskManager.updateTask(task.id, {
+              status: 'done',
+              metadata: {
+                ...meta,
+                auto_closed: true,
+                auto_closed_at: now,
+                auto_close_reason: 'sweeper_pr_merged',
+                pr_merged: true,
+                sweeper_escalation_level: undefined,
+                sweeper_escalated_at: undefined,
+                sweeper_escalation_count: undefined,
+              },
+            } as any)
+            autoClosedIds.add(task.id)
+            chatManager.sendMessage({
+              from: 'system',
+              channel: 'task-notifications',
+              content: `✅ Auto-closed "${task.title}" (${task.id}) — linked PR is merged. @${task.assignee || 'unassigned'} no action needed.`,
+            }).catch(() => {})
+          } catch (err) {
+            logDryRun('pr_merged_autoclose_failed', `${task.id} — ${String(err)}`)
+          }
+          continue
+        }
+      }
+
       const newCount = persistedCount + 1
       violations.push({
         taskId: task.id,
