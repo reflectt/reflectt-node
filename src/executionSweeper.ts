@@ -122,6 +122,15 @@ const ESCALATION_COOLDOWN_MS = 4 * 60 * 60 * 1000 // 4 hours
 const ARTIFACT_GRACE_MS = 24 * 60 * 60 * 1000 // 24 hours
 
 /**
+ * Post-merge reviewer nudge: when PR is confirmed merged but reviewer hasn't acted,
+ * post a comment to nudge. Distinct from the SLA escalation alert.
+ */
+const POST_MERGE_NUDGE_MS = 2 * 60 * 60 * 1000 // 2h after PR merged with no reviewer activity
+
+/** Post-merge auto-close: PR merged + 24h stale — close regardless of review state */
+const POST_MERGE_AUTOCLOSE_MS = 24 * 60 * 60 * 1000 // 24h
+
+/**
  * @deprecated Use formatDuration(ms) from format-duration.ts instead.
  * Kept temporarily for reference; all call sites now use formatDuration().
  */
@@ -583,37 +592,66 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
     } else if (ageSinceActivity >= VALIDATING_SLA_MS && !effective) {
       const prUrl = extractPrUrl(meta)
 
-      // ── PR-merged auto-close guard ────────────────────────────────────
-      // Before firing an SLA warning, check if the linked PR is already merged.
-      // If merged, auto-close the task — no reviewer action needed.
+      // ── Post-merge reviewer SLA: nudge or auto-close ─────────────────
+      // When PR is confirmed merged, we don't need to escalate — we need
+      // the reviewer to sign off (or we auto-close after 24h).
+      //
+      // Tier A (2h): PR merged + no reviewer activity → nudge comment, skip SLA alert
+      // Tier B (24h): PR merged + stale → auto-close (done work shouldn't wait forever)
       if (prUrl) {
         const liveState = checkLivePrState(prUrl)
         if (liveState.state === 'merged') {
-          logDryRun('pr_merged_autoclose', `${task.id} — PR ${prUrl} is merged, auto-closing instead of SLA warning`)
-          try {
-            await taskManager.updateTask(task.id, {
-              status: 'done',
-              metadata: {
-                ...meta,
-                auto_closed: true,
-                auto_closed_at: now,
-                auto_close_reason: 'sweeper_pr_merged',
-                pr_merged: true,
-                sweeper_escalation_level: undefined,
-                sweeper_escalated_at: undefined,
-                sweeper_escalation_count: undefined,
-              },
-            } as any)
-            autoClosedIds.add(task.id)
-            chatManager.sendMessage({
-              from: 'system',
-              channel: 'task-notifications',
-              content: `✅ Auto-closed "${task.title}" (${task.id}) — linked PR is merged. @${task.assignee || 'unassigned'} no action needed.`,
-            }).catch(() => {})
-          } catch (err) {
-            logDryRun('pr_merged_autoclose_failed', `${task.id} — ${String(err)}`)
+          // Tier B: 24h+ since last activity — auto-close regardless of review state
+          if (ageSinceActivity >= POST_MERGE_AUTOCLOSE_MS) {
+            logDryRun('pr_merged_autoclose_24h', `${task.id} — PR merged, 24h stale, auto-closing`)
+            try {
+              const reviewApproved = meta.reviewer_approved === true || meta.review_state === 'approved'
+              await taskManager.updateTask(task.id, {
+                status: 'done',
+                metadata: {
+                  ...meta,
+                  auto_closed: true,
+                  auto_closed_at: now,
+                  auto_close_reason: reviewApproved ? 'sweeper_pr_merged_review_approved' : 'sweeper_pr_merged_24h_stale',
+                  pr_merged: true,
+                  sweeper_escalation_level: undefined,
+                  sweeper_escalated_at: undefined,
+                  sweeper_escalation_count: undefined,
+                },
+              } as any)
+              autoClosedIds.add(task.id)
+              await taskManager.addTaskComment(task.id, 'sweeper',
+                `[auto-close] PR is merged and task has been in validating for ${Math.round(ageSinceActivity / 3_600_000 * 10) / 10}h without reviewer action. Closing as done. Reviewer: @${task.reviewer || 'unassigned'} — if this was premature, reopen.`
+              )
+              chatManager.sendMessage({
+                from: 'system',
+                channel: 'task-notifications',
+                content: `✅ Auto-closed "${task.title}" (${task.id}) — PR merged + 24h stale. @${task.reviewer || 'unassigned'} reopen if needed.`,
+              }).catch(() => {})
+            } catch (err) {
+              logDryRun('pr_merged_autoclose_failed', `${task.id} — ${String(err)}`)
+            }
+            continue
           }
-          continue
+
+          // Tier A: 2h+ since last activity — post reviewer nudge (once)
+          if (ageSinceActivity >= POST_MERGE_NUDGE_MS && meta.post_merge_nudge_sent !== true) {
+            logDryRun('pr_merged_reviewer_nudge', `${task.id} — PR merged, nudging reviewer @${task.reviewer}`)
+            try {
+              taskManager.patchTaskMetadata(task.id, { post_merge_nudge_sent: true, post_merge_nudge_at: now })
+              await taskManager.addTaskComment(task.id, 'sweeper',
+                `[reviewer-nudge] PR is confirmed merged but no reviewer activity in ${Math.round(ageSinceActivity / 60_000)}m. @${task.reviewer || 'unassigned'} — please review and close, or approve so this can auto-close. Will auto-close at 24h if no action.`
+              )
+              chatManager.sendMessage({
+                from: 'system',
+                channel: 'task-notifications',
+                content: `📬 Reviewer nudge: "${task.title}" (${task.id}) PR is merged — @${task.reviewer || 'unassigned'} please review and close.`,
+              }).catch(() => {})
+            } catch (err) {
+              logDryRun('pr_merged_nudge_failed', `${task.id} — ${String(err)}`)
+            }
+          }
+          continue // don't fire SLA alert — PR is merged, work is done
         }
       }
 
