@@ -14072,7 +14072,8 @@ If your heartbeat shows **no active task** and **no next task**:
 
   app.post<{ Params: { agentId: string } }>('/agents/:agentId/events', async (request, reply) => {
     const { agentId } = request.params
-    const body = request.body as { eventType?: string; runId?: string; payload?: Record<string, unknown>; enforceRouting?: boolean }
+    // Note: `enforceRouting` is intentionally excluded from the accepted body — API layer always enforces.
+    const body = request.body as { eventType?: string; runId?: string; payload?: Record<string, unknown> }
     if (!body?.eventType) return reply.code(400).send({ error: 'eventType is required' })
     try {
       const event = appendAgentEvent({
@@ -14080,7 +14081,41 @@ If your heartbeat shows **no active task** and **no next task**:
         runId: body.runId,
         eventType: body.eventType,
         payload: body.payload,
-        enforceRouting: body.enforceRouting,
+        enforceRouting: true,  // always enforce at API boundary — callers cannot bypass
+      })
+      return reply.code(201).send(event)
+    } catch (err: any) {
+      const message = String(err?.message || err)
+      if (message.includes('Routing semantics violation')) {
+        return reply.code(422).send({
+          error: message,
+          hint: 'Routing payload requires action_required (review|unblock|approve|fyi) and urgency (blocking|normal|low). Optional: owner, expires_at.',
+        })
+      }
+      if (message.includes('rationale')) {
+        return reply.code(400).send({ error: message })
+      }
+      return reply.code(500).send({ error: message })
+    }
+  })
+
+  // POST /runs/:runId/events — post an event to a run by runId (without requiring agentId).
+  // Routing semantics are always enforced at this boundary; callers cannot opt out.
+  app.post<{ Params: { runId: string } }>('/runs/:runId/events', async (request, reply) => {
+    const { runId } = request.params
+    const body = request.body as { eventType?: string; payload?: Record<string, unknown> }
+    if (!body?.eventType) return reply.code(400).send({ error: 'eventType is required' })
+
+    const run = getAgentRun(runId)
+    if (!run) return reply.code(404).send({ error: `Run not found: ${runId}` })
+
+    try {
+      const event = appendAgentEvent({
+        agentId: run.agentId,
+        runId,
+        eventType: body.eventType,
+        payload: body.payload,
+        enforceRouting: true,  // always enforce at API boundary
       })
       return reply.code(201).send(event)
     } catch (err: any) {
