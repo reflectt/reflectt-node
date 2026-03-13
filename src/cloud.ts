@@ -1229,6 +1229,50 @@ async function syncCanvas(): Promise<void> {
     }
   } catch { /* local API not ready */ }
 
+  // ── Task-derived agent presence ─────────────────────────────────────────
+  // Agents that have open tasks are present even if they haven't pushed native
+  // canvas state. Any agent with a doing/validating task → "working".
+  // Any agent with a todo task (but no doing) → "working" (queued work).
+  // Native canvas state takes precedence when present — only fill gaps.
+  try {
+    const ACTIVE_STATUSES = ['doing', 'validating', 'todo']
+    const byAgent: Record<string, { bestStatus: string; taskTitle?: string }> = {}
+
+    for (const status of ACTIVE_STATUSES) {
+      const res = await fetch(`http://127.0.0.1:4445/tasks?status=${status}&limit=100`)
+      if (!res.ok) continue
+      const data = await res.json() as { tasks?: Array<{ assignee?: string; title?: string; status: string }> }
+      const tasks = data.tasks ?? []
+      for (const task of tasks) {
+        const assignee = task.assignee
+        if (!assignee || assignee === 'unassigned') continue
+        // Higher-priority status wins: doing > validating > todo
+        const existing = byAgent[assignee]
+        const priority = { doing: 0, validating: 1, todo: 2 }
+        const newPriority = priority[status as keyof typeof priority] ?? 99
+        const existingPriority = existing ? (priority[existing.bestStatus as keyof typeof priority] ?? 99) : 99
+        if (!existing || newPriority < existingPriority) {
+          byAgent[assignee] = { bestStatus: status, taskTitle: task.title }
+        }
+      }
+    }
+
+    // Merge derived states into agents — native canvas state takes precedence
+    const now = Date.now()
+    for (const [agentId, info] of Object.entries(byAgent)) {
+      if (agents[agentId]) continue // native state present — don't override
+      const derivedState = info.bestStatus === 'doing' ? 'working'
+        : info.bestStatus === 'validating' ? 'working'
+        : 'working' // todo → working (has queued work)
+      agents[agentId] = {
+        state: derivedState,
+        currentTask: info.taskTitle,
+        updatedAt: now,
+        source: 'task-derived',
+      }
+    }
+  } catch { /* task API not ready — not fatal */ }
+
   // ── Needs-attention call hook ───────────────────────────────────────────
   // Check for new needs-attention transitions BEFORE pushing to cloud.
   // The Fly canvas handler also triggers auto-calls, but this node-side hook
