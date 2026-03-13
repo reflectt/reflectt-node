@@ -110,6 +110,33 @@ Get your token at [app.reflectt.ai](https://app.reflectt.ai). Your node syncs to
 
 ---
 
+## Quick start — team in 2 minutes
+
+The fastest way to get a team running with 3 default agents (builder, researcher, coordinator):
+
+```bash
+# 1. Get the files
+git clone https://github.com/reflectt/reflectt-node.git && cd reflectt-node
+
+# 2. Set your LLM API key
+cp .env.starter .env
+echo "ANTHROPIC_API_KEY=your_key_here" >> .env   # or OPENAI_API_KEY
+
+# 3. Start
+docker compose -f docker-compose.starter.yml up -d
+```
+
+That's it. Open [http://localhost:4445](http://localhost:4445) — your team is running.
+
+**Connect to app.reflectt.ai for presence + cloud sync:**
+1. Sign up at [app.reflectt.ai](https://app.reflectt.ai) → Connect a host → copy your join token
+2. `docker exec reflectt-starter reflectt host connect --join-token <TOKEN>`
+3. Your team appears in presence within 60 seconds
+
+Customize the team by editing `defaults/TEAM-ROLES.starter.yaml` and restarting.
+
+---
+
 ## Docker
 
 ```bash
@@ -118,6 +145,31 @@ docker run -d --name reflectt-node \
   -v reflectt-data:/data \
   ghcr.io/reflectt/reflectt-node:latest
 ```
+
+### Docker Compose — one-command team setup
+
+Get a full team in presence in under 2 minutes:
+
+```bash
+# 1. Copy the env template and add your LLM key
+cp .env.starter .env
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env
+
+# 2. Start
+docker compose -f docker-compose.starter.yml up -d
+
+# 3. Open http://localhost:4445/dashboard
+#    → 3 starter agents already in presence
+```
+
+To connect to [app.reflectt.ai](https://app.reflectt.ai) for cloud presence:
+
+```bash
+# After signing up, get your join token and run:
+docker exec reflectt-starter reflectt host connect --join-token <TOKEN>
+```
+
+That's it — your team appears in the presence view within ~30 seconds.
 
 ---
 
