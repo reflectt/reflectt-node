@@ -63,9 +63,11 @@ function isDockerIdentityInherited(fileConfig: ReturnType<typeof loadCloudConfig
 
 interface AgentInfo {
   name: string
-  status: 'active' | 'idle' | 'offline'
+  status: 'active' | 'idle' | 'offline' | 'waiting'
   currentTask?: string
   lastSeen?: number
+  waitingFor?: string   // populated when status === 'waiting'
+  waitingTaskId?: string
 }
 
 interface TaskStateEntry {
@@ -689,11 +691,16 @@ function getAgents(): AgentInfo[] {
       name: role.name,
       status: p
         ? (p.status === 'working' || p.status === 'reviewing' ? 'active' as const
+          : p.status === 'waiting' ? 'waiting' as const
           : p.status === 'offline' ? 'offline' as const
           : 'idle' as const)
         : 'offline' as const,
       currentTask: p?.task,
       lastSeen: p?.lastUpdate,
+      ...(p?.status === 'waiting' && p.waiting ? {
+        waitingFor: p.waiting.waitingFor,
+        waitingTaskId: p.waiting.taskId,
+      } : {}),
     })
   }
 
@@ -703,10 +710,15 @@ function getAgents(): AgentInfo[] {
       agents.push({
         name: p.agent,
         status: p.status === 'working' || p.status === 'reviewing' ? 'active' as const
+          : p.status === 'waiting' ? 'waiting' as const
           : p.status === 'offline' ? 'offline' as const
           : 'idle' as const,
         currentTask: p.task,
         lastSeen: p.lastUpdate,
+        ...(p.status === 'waiting' && p.waiting ? {
+          waitingFor: p.waiting.waitingFor,
+          waitingTaskId: p.waiting.taskId,
+        } : {}),
       })
     }
   }
@@ -752,6 +764,10 @@ async function sendHeartbeat(): Promise<void> {
       status: a.status,
       currentTaskId: a.currentTask || undefined,
       lastSeenAt: a.lastSeen || Date.now(),
+      ...(a.status === 'waiting' ? {
+        waitingFor: a.waitingFor,
+        waitingTaskId: a.waitingTaskId,
+      } : {}),
     })),
     activeTasks: doingTasks.map(t => ({
       id: t.id,
@@ -1282,6 +1298,23 @@ async function syncCanvas(): Promise<void> {
         currentTask: info.taskTitle,
         updatedAt: now,
         source: 'task-derived',
+      }
+    }
+
+    // ── Waiting state overlay ───────────────────────────────────────────
+    // Agents in waiting status get state='needs-attention' (amber pulse) on canvas.
+    // This runs AFTER task-derived but BEFORE thinking inference — waiting overrides working.
+    // Native canvas state still wins if explicitly set.
+    const allAgentInfos = getAgents()
+    for (const agent of allAgentInfos) {
+      if (agent.status !== 'waiting') continue
+      if (agents[agent.name]) continue // native state — don't override
+      agents[agent.name] = {
+        state: 'waiting',        // soft amber drift — distinct from needs-attention (bright pulse)
+        updatedAt: now,
+        source: 'waiting-derived',
+        waitingFor: agent.waitingFor ?? null,
+        waitingTaskId: agent.waitingTaskId ?? null,
       }
     }
   } catch { /* task API not ready — not fatal */ }
