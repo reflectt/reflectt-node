@@ -1310,7 +1310,7 @@ async function syncCanvas(): Promise<void> {
       if (agent.status !== 'waiting') continue
       if (agents[agent.name]) continue // native state — don't override
       agents[agent.name] = {
-        state: 'needs-attention',
+        state: 'waiting',        // soft amber drift — distinct from needs-attention (bright pulse)
         updatedAt: now,
         source: 'waiting-derived',
         waitingFor: agent.waitingFor ?? null,
