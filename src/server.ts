@@ -575,6 +575,7 @@ const InboxQuerySchema = z.object({
   priority: z.enum(['high', 'medium', 'low']).optional(),
   limit: z.string().optional(),
   since: z.string().optional(),
+  mark_read: z.enum(['true', 'false']).optional(),
 })
 
 const InboxAckBodySchema = z.object({
@@ -4360,28 +4361,78 @@ export async function createServer(): Promise<FastifyInstance> {
       since: parseEpochMs(query.since),
     })
     
-    const inbox = inboxManager.getInbox(request.params.agent, allMessages, {
+    const agentName = request.params.agent
+    const sinceMs = parseEpochMs(query.since)
+    const itemLimit = boundedLimit(query.limit, DEFAULT_LIMITS.inbox, MAX_LIMITS.inbox)
+
+    const inbox = inboxManager.getInbox(agentName, allMessages, {
       priority: query.priority,
-      limit: boundedLimit(query.limit, DEFAULT_LIMITS.inbox, MAX_LIMITS.inbox),
-      since: parseEpochMs(query.since),
+      limit: itemLimit,
+      since: sinceMs,
     })
-    
+
+    // ── Merge in unread task comments addressed to this agent ──────────
+    // Include comments where the comment mentions @agent or is on a task
+    // assigned to this agent (author != agent = someone else wrote it).
+    const agentAliases = getAgentAliases(agentName)
+    const allTasks = taskManager.listTasks({ assigneeIn: agentAliases })
+    const taskCommentItems: Array<{
+      id: string; from: string; content: string; timestamp: number;
+      channel: string; task_id: string; comment_id: string; type: 'task_comment'
+    }> = []
+    for (const task of allTasks) {
+      const comments = taskManager.getTaskComments(task.id)
+      for (const c of comments) {
+        if (c.author === agentName) continue // skip own comments
+        if (c.suppressed) continue
+        if (sinceMs && c.timestamp < sinceMs) continue
+        const mentionsAgent = agentAliases.some(a => (c.content || '').toLowerCase().includes(`@${a}`))
+        const isOnAgentTask = agentAliases.includes(task.assignee || '')
+        if (!mentionsAgent && !isOnAgentTask) continue
+        taskCommentItems.push({
+          id: c.id,
+          from: c.author,
+          content: c.content,
+          timestamp: c.timestamp,
+          channel: 'task-comments',
+          task_id: task.id,
+          comment_id: c.id,
+          type: 'task_comment',
+        })
+      }
+    }
+
+    // Merge chat inbox + task comments, sort by timestamp desc, cap at limit
+    type InboxItem = typeof taskCommentItems[number] | (typeof inbox)[number] & { type?: string; task_id?: string; comment_id?: string }
+    const merged: InboxItem[] = ([...inbox.map(m => ({ ...m, type: 'mention' as const })), ...taskCommentItems] as InboxItem[])
+      .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+      .slice(0, itemLimit)
+
+    // Auto-mark read if requested
+    if (query.mark_read === 'true') {
+      const chatIds = inbox.map(m => m.id).filter(Boolean)
+      if (chatIds.length > 0) {
+        await inboxManager.ackMessages(agentName, chatIds, undefined)
+      }
+    }
+
     // Auto-update presence when agent checks inbox
-    presenceManager.updatePresence(request.params.agent, 'working')
+    presenceManager.updatePresence(agentName, 'working')
 
     const rawQuery = request.query as Record<string, string>
     if (isCompact(rawQuery)) {
-      const slim = inbox.map(m => ({
+      const slim = merged.map(m => ({
         from: m.from,
-        content: m.content,
+        content: (m as any).content,
         ts: m.timestamp,
-        ch: m.channel,
-        ...(m.priority ? { priority: m.priority } : {}),
+        ch: (m as any).channel,
+        ...((m as any).priority ? { priority: (m as any).priority } : {}),
+        ...((m as any).task_id ? { task_id: (m as any).task_id, comment_id: (m as any).comment_id } : {}),
       }))
       return { messages: slim, count: slim.length }
     }
-    
-    return { messages: inbox, count: inbox.length }
+
+    return { messages: merged, count: merged.length }
   })
 
   // Acknowledge messages
