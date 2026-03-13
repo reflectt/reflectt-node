@@ -20,7 +20,7 @@ import { chatManager } from './chat.js'
 import { remapGitHubMentions } from './github-webhook-attribution.js'
 import { slotManager } from './canvas-slots.js'
 import { getDb } from './db.js'
-import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions } from './usage-tracking.js'
+import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions, getCostForTaskId } from './usage-tracking.js'
 import { listReflections } from './reflections.js'
 import { listInsights } from './insights.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
@@ -1376,7 +1376,19 @@ async function syncAgentRuns(): Promise<void> {
     }
     if (allRuns.length === 0) return
 
-    const result = await cloudPost(`/api/hosts/${state.hostId}/runs/sync`, { runs: allRuns })
+    // Enrich runs with cost attribution from local model_usage table.
+    // task_id lives in contextSnapshot.taskId — only attributed when present.
+    // No time-window fallback (too error-prone for financial metrics).
+    const enrichedRuns = allRuns.map(run => {
+      const taskId = typeof run.contextSnapshot?.taskId === 'string' ? run.contextSnapshot.taskId : null
+      return {
+        ...run,
+        taskId,
+        costUsd: taskId ? getCostForTaskId(taskId) : null,
+      }
+    })
+
+    const result = await cloudPost(`/api/hosts/${state.hostId}/runs/sync`, { runs: enrichedRuns })
     if (result.success || result.data) {
       if (agentRunSyncErrors > 0) {
         console.log('☁️  [RunSync] Recovered after errors')

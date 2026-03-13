@@ -514,3 +514,19 @@ export function getRoutingSuggestions(options: { since?: number } = {}): Array<{
 
   return suggestions.sort((a, b) => b.savings_usd - a.savings_usd)
 }
+
+/**
+ * Get total cost for a specific task_id.
+ * Returns null if no usage records found for that task_id.
+ * Used by syncAgentRuns to enrich cloud run records with attributed cost.
+ */
+export function getCostForTaskId(taskId: string): number | null {
+  ensureUsageTables()
+  const db = getDb()
+  const row = db.prepare(
+    `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total_cost_usd, COUNT(*) as event_count
+     FROM model_usage WHERE task_id = ?`
+  ).get(taskId) as { total_cost_usd: number; event_count: number } | undefined
+  if (!row || row.event_count === 0) return null
+  return Math.round(row.total_cost_usd * 1_000_000) / 1_000_000
+}
