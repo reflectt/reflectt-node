@@ -276,7 +276,7 @@ export function getActiveAgentRun(agentId: string, teamId: string): AgentRun | n
 export function listAgentRuns(
   agentId: string,
   teamId: string,
-  opts?: { status?: AgentRunStatus; limit?: number },
+  opts?: { status?: AgentRunStatus; limit?: number; includeArchived?: boolean },
 ): AgentRun[] {
   const db = getDb()
   const limit = opts?.limit ?? 50
@@ -287,6 +287,9 @@ export function listAgentRuns(
   if (opts?.status) {
     sql += ' AND status = ?'
     params.push(opts.status)
+  } else if (!opts?.includeArchived) {
+    // Exclude archived runs from default listing
+    sql += " AND status != 'archived'"
   }
 
   sql += ' ORDER BY started_at DESC LIMIT ?'
