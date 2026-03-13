@@ -8840,7 +8840,7 @@ export async function createServer(): Promise<FastifyInstance> {
   type PresenceState = 'idle' | 'working' | 'needs-attention'
 
   const AgentPresenceSchema = z.object({
-    state: z.enum(['idle', 'working', 'needs-attention']),
+    state: z.enum(['idle', 'working', 'thinking', 'rendering', 'needs-attention', 'urgent', 'handoff', 'decision']),
     activeTask: z.object({
       title: z.string(),
       id: z.string(),
