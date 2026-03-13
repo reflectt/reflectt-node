@@ -1095,6 +1095,7 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/agents/:agentId/events` | List events. Query: `?runId=&type=&since=&limit=` |
 | GET | `/approvals/pending` | List pending approvals (review_requested events needing action). Query: `?agentId=&limit=` |
 | POST | `/approvals/:eventId/decide` | Submit approval decision. Body: `{ decision: "approve"|"reject", reviewer (required), comment? }`. Auto-unblocks run on approve. |
+| POST | `/run-approvals/:eventId/decide` | iOS lock screen action button endpoint. Body: `{ decision: "approve"|"reject", actor (required), reason? }`. Same effect as `/approvals/:eventId/decide` — emits canvas_input SSE on success. |
 | GET | `/agents/:agentId/runs/:runId/stream` | SSE stream for a specific run. Sends snapshot (run + recent events), then real-time events as they occur. Heartbeat every 15s. |
 | GET | `/runs/:runId/stream` | SSE stream for a run by ID (no agentId required). Cloud Presence surface subscribes here for live run activity. Sends snapshot then real-time events. Heartbeat every 15s. |
 | GET | `/agents/:agentId/stream` | SSE stream for all events for an agent. Sends snapshot (active run + recent events), then real-time events. Heartbeat every 15s. |
@@ -1138,6 +1139,7 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | DELETE | `/agents/:agent/waiting` | Clear waiting state — agent is unblocked. |
 | GET | `/approval-queue` | Unified approval queue — everything needing human decision. Params: `agentId?`, `category?` (review\|agent_action), `includeExpired?` (true), `limit?`. Returns: items[], count, hasExpired. Each item: id, category, title, description, urgency, owner, expiresAt, autoAction, isExpired. |
 | POST | `/approval-queue/:approvalId/decide` | Resolve an approval. Body: `{ decision: "approve"\|"reject"\|"defer", actor (required), comment? }`. Emits canvas_input SSE event. |
+| GET | `/email/inbound/:emailId` | Retrieve a raw inbound email payload by its stored ID. Returns the webhook_payloads record (source, eventType, body, headers, processed, createdAt). 404 if not found or not an email-source payload. |
 | POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
 | POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
 
