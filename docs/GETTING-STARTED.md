@@ -323,6 +323,7 @@ docker run -d --name reflectt-node -p 4445:4445 -v reflectt-data:/data reflectt-
 - **[Architecture](../ARCHITECTURE.md)** — how reflectt-node is built
 - **[Team roles](TEAM-ROLES.md)** — routing and role configuration reference
 - **[Cloud endpoints](CLOUD_ENDPOINTS.md)** — what syncs to the cloud
+- **[First-use verification](FIRST-USE-VERIFICATION.md)** — validate browser, SMS, and email + inbound webhook in one pass
 - **[Contributing](CONTRIBUTING.md)** — help build reflectt-node
 
 ---

@@ -134,6 +134,7 @@ Get your join token at app.reflectt.ai → your team → Settings → Join token
 
 ## Related
 
+- [First-use verification (browser, SMS, email)](./FIRST-USE-VERIFICATION.md)
 - [Gateway setup](./gateway-setup.md)
 - [Agent API reference](http://localhost:4445/capabilities) (once your node is running)
 - [reflectt-node on GitHub](https://github.com/reflectt/reflectt-node)
