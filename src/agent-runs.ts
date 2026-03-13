@@ -23,9 +23,10 @@ export type AgentRunStatus =
   | 'completed'
   | 'failed'
   | 'cancelled'
+  | 'archived'
 
 export const VALID_RUN_STATUSES: AgentRunStatus[] = [
-  'idle', 'working', 'blocked', 'waiting_review', 'completed', 'failed', 'cancelled',
+  'idle', 'working', 'blocked', 'waiting_review', 'completed', 'failed', 'cancelled', 'archived',
 ]
 
 export const VALID_EVENT_TYPES = [
@@ -276,7 +277,7 @@ export function getActiveAgentRun(agentId: string, teamId: string): AgentRun | n
 export function listAgentRuns(
   agentId: string,
   teamId: string,
-  opts?: { status?: AgentRunStatus; limit?: number },
+  opts?: { status?: AgentRunStatus; limit?: number; includeArchived?: boolean },
 ): AgentRun[] {
   const db = getDb()
   const limit = opts?.limit ?? 50
@@ -287,6 +288,9 @@ export function listAgentRuns(
   if (opts?.status) {
     sql += ' AND status = ?'
     params.push(opts.status)
+  } else if (!opts?.includeArchived) {
+    // Exclude archived runs from default listing
+    sql += " AND status != 'archived'"
   }
 
   sql += ' ORDER BY started_at DESC LIMIT ?'
@@ -507,7 +511,7 @@ export function applyRunRetention(opts?: {
       deleted++
     } else {
       // Mark as archived (update status)
-      db.prepare("UPDATE agent_runs SET status = 'completed', updated_at = ? WHERE id = ?").run(now, row.id)
+      db.prepare("UPDATE agent_runs SET status = 'archived', updated_at = ? WHERE id = ?").run(now, row.id)
       archived++
     }
   }
@@ -533,6 +537,7 @@ export function applyRunRetention(opts?: {
           db.prepare('DELETE FROM agent_runs WHERE id = ?').run(run.id)
           deleted++
         } else {
+          db.prepare("UPDATE agent_runs SET status = 'archived', updated_at = ? WHERE id = ?").run(now, run.id)
           archived++
         }
       }
