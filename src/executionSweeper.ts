@@ -1142,9 +1142,12 @@ export function startSweeper(): void {
       const result = await sweepValidatingQueue()
       escalateViolations(result.violations)
 
-      // Stale doing-task detection → emit trust signal
+      // Slow-task detection + trust signal (distinct from explicit blocked)
+      // Slow = doing >4h no activity. Blocked = explicit status change.
+      // Host enforces this — no @kai escalation, just flag in task comment.
       try {
-        const STALE_DOING_THRESHOLD_MS = 60 * 60 * 1000 // 1h without a comment
+        const SLOW_THRESHOLD_MS = 4 * 60 * 60 * 1000 // 4h without any activity
+        const TRUST_SIGNAL_THRESHOLD_MS = 60 * 60 * 1000 // 1h for trust signal (more sensitive)
         const now = Date.now()
         const doingTasks = taskManager.listTasks({ status: 'doing' })
         const { emitTrustEvent } = await import('./trust-events.js')
@@ -1153,7 +1156,9 @@ export function startSweeper(): void {
           const lastComment = comments.length > 0 ? comments[comments.length - 1] : null
           const lastTs = lastComment?.timestamp ?? task.updatedAt ?? task.createdAt
           const age = now - lastTs
-          if (age > STALE_DOING_THRESHOLD_MS) {
+
+          // Trust signal: 1h silence
+          if (age > TRUST_SIGNAL_THRESHOLD_MS) {
             emitTrustEvent({
               agentId: task.assignee || 'unknown',
               eventType: 'stale_status_claim',
@@ -1161,6 +1166,18 @@ export function startSweeper(): void {
               summary: `Task "${task.title}" in doing for ${Math.round(age / 60_000)}m without update`,
               context: { taskId: task.id, taskTitle: task.title, assignee: task.assignee, staleMs: age, lastCommentAt: lastTs },
             })
+          }
+
+          // Slow flag: 4h — post a comment to the task (not an escalation)
+          if (age > SLOW_THRESHOLD_MS) {
+            const alreadyFlagged = comments.some(c =>
+              c.author === 'sweeper' && typeof c.content === 'string' && c.content.includes('[slow-flag]')
+            )
+            if (!alreadyFlagged) {
+              await taskManager.addTaskComment(task.id, 'sweeper',
+                `[slow-flag] Task has been in doing for ${Math.round(age / 3_600_000 * 10) / 10}h without activity. Not blocked (no explicit status change) — just slow. Check GET /tasks/slow-blocked for full picture.`
+              )
+            }
           }
         }
       } catch { /* non-fatal */ }

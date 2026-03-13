@@ -5515,6 +5515,80 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  /**
+   * GET /tasks/slow-blocked
+   * Detect doing tasks that are slow (>4h no event, not explicitly blocked)
+   * vs explicitly blocked tasks. Different handling paths — no @kai escalation
+   * needed for detection; host enforces it.
+   *
+   * Returns:
+   *   slow[]  — doing tasks with no activity in >4h (not explicitly blocked)
+   *   blocked[] — tasks in blocked status
+   */
+  app.get('/tasks/slow-blocked', async (request) => {
+    const query = request.query as Record<string, string>
+    const SLOW_THRESHOLD_MS = parseInt(query.slowThresholdHours || '4') * 60 * 60 * 1000
+    const now = Date.now()
+
+    const doingTasks = taskManager.listTasks({ status: 'doing' })
+    const blockedTasks = taskManager.listTasks({ status: 'blocked' })
+
+    const slow: Array<{
+      taskId: string
+      title: string
+      assignee: string | null
+      priority: string | null
+      lastActivityAt: number
+      slowSinceMs: number
+      slowSinceHours: number
+    }> = []
+
+    for (const task of doingTasks) {
+      const comments = taskManager.getTaskComments(task.id)
+      const lastComment = comments.length > 0 ? comments[comments.length - 1] : null
+      const lastActivityAt = lastComment?.timestamp ?? task.updatedAt ?? task.createdAt
+      const age = now - lastActivityAt
+
+      if (age > SLOW_THRESHOLD_MS) {
+        slow.push({
+          taskId: task.id,
+          title: task.title,
+          assignee: task.assignee || null,
+          priority: task.priority || null,
+          lastActivityAt,
+          slowSinceMs: age,
+          slowSinceHours: Math.round(age / 36_000) / 100,
+        })
+      }
+    }
+
+    const blocked = blockedTasks.map(task => ({
+      taskId: task.id,
+      title: task.title,
+      assignee: task.assignee || null,
+      priority: task.priority || null,
+      blockedAt: task.updatedAt ?? task.createdAt,
+      blockedSinceMs: now - (task.updatedAt ?? task.createdAt),
+      blockedReason: (task.metadata as Record<string, unknown>)?.transition
+        ? ((task.metadata as Record<string, unknown>).transition as Record<string, unknown>)?.reason ?? null
+        : null,
+    }))
+
+    return {
+      slowThresholdHours: SLOW_THRESHOLD_MS / 3_600_000,
+      doingCount: doingTasks.length,
+      blockedCount: blocked.length,
+      slowCount: slow.length,
+      slow: slow.sort((a, b) => b.slowSinceMs - a.slowSinceMs),
+      blocked: blocked.sort((a, b) => b.blockedSinceMs - a.blockedSinceMs),
+      summary: slow.length === 0 && blocked.length === 0
+        ? 'all_clear'
+        : slow.length > 0 && blocked.length > 0 ? 'slow_and_blocked'
+        : slow.length > 0 ? 'has_slow'
+        : 'has_blocked',
+    }
+  })
+
   // Task history
   app.get<{ Params: { id: string } }>('/tasks/:id/history', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
