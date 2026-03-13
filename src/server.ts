@@ -8959,7 +8959,9 @@ export async function createServer(): Promise<FastifyInstance> {
     spark: '#f59e0b', swift: '#06b6d4', kotlin: '#7c3aed', bookkeeper: '#10b981',
   }
 
-  type PresenceState = 'idle' | 'working' | 'needs-attention'
+  type PresenceState = 'idle' | 'working' | 'thinking' | 'rendering' | 'needs-attention' | 'urgent' | 'handoff' | 'decision' | 'waiting'
+
+  const VALID_PRESENCE_STATES: PresenceState[] = ['idle', 'working', 'thinking', 'rendering', 'needs-attention', 'urgent', 'handoff', 'decision', 'waiting']
 
   const AgentPresenceSchema = z.object({
     state: z.enum(['idle', 'working', 'thinking', 'rendering', 'needs-attention', 'urgent', 'handoff', 'decision', 'waiting']),
@@ -8988,7 +8990,7 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.code(422)
       return {
         error: `Invalid presence: ${result.error.issues.map(i => i.message).join(', ')}`,
-        validStates: ['idle', 'working', 'needs-attention'],
+        validStates: VALID_PRESENCE_STATES,
       }
     }
 
@@ -8997,8 +8999,15 @@ export async function createServer(): Promise<FastifyInstance> {
     const identityColor = AGENT_IDENTITY_COLORS[agentId] || '#9ca3af'
 
     // Map presence state to canvas state for backward compatibility
+    // New states pass through directly to canvas (1:1 where names match)
     const canvasState: CanvasState = presenceState === 'needs-attention' ? 'decision'
       : presenceState === 'working' ? 'thinking'
+      : presenceState === 'thinking' ? 'thinking'
+      : presenceState === 'rendering' ? 'rendering'
+      : presenceState === 'urgent' ? 'urgent'
+      : presenceState === 'handoff' ? 'handoff'
+      : presenceState === 'decision' ? 'decision'
+      : presenceState === 'waiting' ? 'ambient'  // waiting = soft ambient (no ring)
       : 'ambient'
 
     // Store in canvasStateMap (backward compat with existing GET /canvas/state)
