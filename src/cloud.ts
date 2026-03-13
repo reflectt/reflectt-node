@@ -1143,6 +1143,64 @@ async function syncChat(): Promise<void> {
 
 let canvasSyncErrors = 0
 
+// ── Needs-attention call hook ─────────────────────────────────────────────
+// Track previous agent states to detect needs-attention transitions.
+// When an agent newly enters needs-attention/urgent, fire POST /call on the
+// Fly API for org members who have call_on_needs_attention=true.
+// The Fly API resolves phone numbers from team_members.notification_phone.
+const prevAgentStates = new Map<string, string>() // agentId → state
+
+function checkNeedsAttentionTransitions(
+  agents: Record<string, unknown>,
+  hostId: string,
+  cloudUrl: string,
+  credential: string,
+): void {
+  for (const [agentId, agentData] of Object.entries(agents)) {
+    const agentState = (agentData as Record<string, unknown>)?.state as string | undefined
+    if (!agentState) continue
+
+    const prev = prevAgentStates.get(agentId)
+    const isAlert = agentState === 'needs-attention' || agentState === 'urgent'
+    const wasAlert = prev === 'needs-attention' || prev === 'urgent'
+
+    prevAgentStates.set(agentId, agentState)
+
+    // Only fire on NEW transitions into alert state
+    if (!isAlert || wasAlert) continue
+
+    const taskData = (agentData as Record<string, unknown>)?.payload as Record<string, unknown> | undefined
+    const taskTitle = (taskData?.task as string) || (taskData?.title as string) || undefined
+
+    console.log(`☁️  [Canvas] needs-attention: @${agentId} → auto-call hook`)
+
+    // POST /call to Fly — Fly resolves phones for members with call_on_needs_attention=true
+    // If no members have that preference set, the call is a no-op (400 with no phone).
+    const callUrl = `${cloudUrl}/api/hosts/${hostId}/call`
+    fetch(callUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credential}`,
+      },
+      body: JSON.stringify({
+        agentId,
+        agentName: agentId,
+        taskTitle,
+        // No `to` — Fly resolves phone from team_members.notification_phone
+        // for members with call_on_needs_attention=true
+      }),
+    }).then(r => {
+      if (!r.ok && r.status !== 400) {
+        console.warn(`☁️  [Canvas] auto-call failed: ${r.status}`)
+      }
+    }).catch(err => {
+      // Non-fatal: call is best-effort
+      console.warn(`☁️  [Canvas] auto-call error: ${err instanceof Error ? err.message : err}`)
+    })
+  }
+}
+
 async function syncCanvas(): Promise<void> {
   if (!state.hostId || !config) return
 
@@ -1158,6 +1216,14 @@ async function syncCanvas(): Promise<void> {
       agents = data.agents ?? {}
     }
   } catch { /* local API not ready */ }
+
+  // ── Needs-attention call hook ───────────────────────────────────────────
+  // Check for new needs-attention transitions BEFORE pushing to cloud.
+  // The Fly canvas handler also triggers auto-calls, but this node-side hook
+  // fires immediately on state detection — no waiting for Fly SSE round-trip.
+  if (Object.keys(agents).length > 0 && state.hostId && state.credential && config.cloudUrl) {
+    checkNeedsAttentionTransitions(agents, state.hostId, config.cloudUrl, state.credential)
+  }
 
   // Push to cloud — include both slots and agent states
   const result = await cloudPost<{ ok: boolean; slotCount: number }>(
