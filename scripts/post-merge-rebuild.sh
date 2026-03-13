@@ -20,11 +20,12 @@ SERVICE_LOG="/tmp/reflectt-node.log"
 # Ensure PATH includes node/npm
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-# ── Branch guard: only restart production server from main ──────────
-# Feature branches must never trigger a production restart.
-CURRENT_BRANCH="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
-if [[ "$CURRENT_BRANCH" != "main" ]]; then
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] post-merge: skipping restart — branch is '$CURRENT_BRANCH' (not main)" | tee -a "$LOG_FILE"
+# ── Workspace guard: only restart from the production install path ───
+# Dev workspaces (projects/reflectt-node, reflectt-node-dev, worktrees)
+# must never trigger a production service restart.
+PROD_WORKSPACE="/Users/ryan/.openclaw/workspace/reflectt-node"
+if [[ "$REPO_DIR" != "$PROD_WORKSPACE" ]]; then
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] post-merge: skipping restart — repo is '$REPO_DIR' (not production workspace)" | tee -a "$LOG_FILE"
   exit 0
 fi
 
