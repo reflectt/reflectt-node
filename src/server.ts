@@ -3806,6 +3806,11 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Trigger immediate canvas sync so the new message's lastMessage
+    // reaches Fly's SSE subscribers without waiting for the 5s cycle.
+    // This is what makes two-way TTS feel real-time.
+    requestImmediateCanvasSync()
+
     return {
       success: true,
       message,
