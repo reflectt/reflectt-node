@@ -447,7 +447,7 @@ async function checkPortAvailable(port = 4445): Promise<PreflightResult> {
   }
 }
 
-async function checkCloudReachable(cloudUrl = 'https://app.reflectt.ai'): Promise<PreflightResult> {
+async function checkCloudReachable(cloudUrl = 'https://api.reflectt.ai'): Promise<PreflightResult> {
   const start = Date.now()
   const check = CHECKS.find(c => c.id === 'cloud-reachable')!
   const timeout = 10_000
@@ -532,7 +532,7 @@ async function checkAuthValid(opts: {
 }): Promise<PreflightResult> {
   const start = Date.now()
   const check = CHECKS.find(c => c.id === 'auth-valid')!
-  const cloudUrl = opts.cloudUrl || 'https://app.reflectt.ai'
+  const cloudUrl = opts.cloudUrl || 'https://api.reflectt.ai'
 
   if (!opts.joinToken && !opts.apiKey) {
     return {
