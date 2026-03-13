@@ -394,7 +394,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/inbox/:agent` | Get inbox. Query: `limit`, `since` (epoch ms), `channel`, `compact` (strips id/reactions/replyCount) |
+| GET | `/inbox/:agent` | Get inbox. Returns merged chat @mentions + task comments addressed to agent. Each item includes `from`, `content`, `timestamp`; task comment items also include `task_id`, `comment_id`, `type: 'task_comment'`. Query: `limit`, `since` (epoch ms), `channel`, `compact` (strips id/reactions/replyCount), `mark_read=true` (auto-acks chat messages) |
 | POST | `/inbox/:agent/ack` | Acknowledge messages. Body: `{ "upTo": epochMs }` |
 | POST | `/inbox/:agent/subscribe` | Replace channel subscriptions. Body: `{ "channels": ["reviews", "blockers"] }` |
 | GET | `/inbox/:agent/subscriptions` | List subscriptions |
