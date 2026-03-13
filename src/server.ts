@@ -6542,32 +6542,80 @@ export async function createServer(): Promise<FastifyInstance> {
         return { success: false, error: 'TEST: prefixed tasks are not allowed in production', code: 'TEST_TASK_REJECTED' }
       }
 
-      // ── Task creation dedup: reject identical title+assignee within window ──
+      // ── Task creation dedup: reject identical or near-duplicate tasks ──
+      // Two tiers:
+      //   Tier 1 (60s, exact, same-assignee) — reconnect double-fire collapse
+      //   Tier 2 (24h, fuzzy ≥80% Jaccard, any-assignee) — continuity-loop dupe prevention
       const skipDedup = data.title.startsWith('TEST:')
         || (data.metadata as Record<string, unknown> | undefined)?.skip_dedup === true
         || (data.metadata as Record<string, unknown> | undefined)?.is_test === true
-      if (!skipDedup && data.assignee) {
-        // 60-second window targets gateway reconnect double-fire (typical gap: <10s)
-        // without blocking legitimate same-title task creation later in the day.
-        const TASK_DEDUP_WINDOW_MS = 60_000 // 60 seconds
-        const cutoff = Date.now() - TASK_DEDUP_WINDOW_MS
+      if (!skipDedup) {
+        const now = Date.now()
         const normalizedTitle = data.title.trim().toLowerCase()
-        const activeTasks = taskManager.listTasks({ includeTest: true }).filter(t =>
-          t.status !== 'done'
-          && t.assignee === data.assignee
-          && t.createdAt >= cutoff
-          && t.title.trim().toLowerCase() === normalizedTitle
+        const activeTasks = taskManager.listTasks({}).filter(t =>
+          t.status !== 'done' && t.status !== 'cancelled' && t.status !== 'resolved_externally'
         )
-        if (activeTasks.length > 0) {
-          // Return 200 with the existing task (collapse, not reject).
-          // Agents that create-on-reconnect receive a success response identical
-          // to what they'd get from a new creation — no retry loop triggered.
-          const existing = activeTasks[0]!
-          return {
-            success: true,
-            task: existing,
-            deduplicated: true,
-            hint: `Duplicate suppressed — task "${existing.title}" already exists for ${data.assignee} (${existing.id}, status: ${existing.status}, created ${Math.round((Date.now() - existing.createdAt) / 1000)}s ago).`,
+
+        // Tier 1: exact-title same-assignee within 60s (reconnect collapse)
+        if (data.assignee) {
+          const EXACT_WINDOW_MS = 60_000
+          const tier1Match = activeTasks.find(t =>
+            t.assignee === data.assignee
+            && t.createdAt >= now - EXACT_WINDOW_MS
+            && t.title.trim().toLowerCase() === normalizedTitle
+          )
+          if (tier1Match) {
+            return {
+              success: true,
+              task: tier1Match,
+              deduplicated: true,
+              dedup_tier: 'exact-60s',
+              hint: `Duplicate suppressed — task "${tier1Match.title}" already exists for ${data.assignee} (${tier1Match.id}, created ${Math.round((now - tier1Match.createdAt) / 1000)}s ago).`,
+            }
+          }
+        }
+
+        // Tier 2: fuzzy-match (≥80% Jaccard word overlap) within 24h — catches continuity-loop dupes
+        // Scoped to same-assignee: different agents may legitimately work on same-named tasks.
+        if (data.assignee) {
+          const FUZZY_WINDOW_MS = 24 * 60 * 60 * 1000
+          const FUZZY_THRESHOLD = 0.80
+          const newWords = new Set(normalizedTitle.split(/\s+/).filter((w: string) => w.length > 3))
+          if (newWords.size >= 3) { // only fuzzy-check tasks with enough words to compare
+            const cutoff24h = now - FUZZY_WINDOW_MS
+            let bestFuzzy: { task: typeof activeTasks[0]; overlap: number } | null = null
+            for (const existing of activeTasks) {
+              if (existing.assignee !== data.assignee) continue // different agent — allowed
+              if (existing.createdAt < cutoff24h) continue
+              const existingWords = new Set(existing.title.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3))
+              const intersection = [...newWords].filter((w: string) => existingWords.has(w))
+              const union = new Set([...newWords, ...existingWords])
+              const overlap = union.size > 0 ? intersection.length / union.size : 0
+              if (overlap >= FUZZY_THRESHOLD && (!bestFuzzy || overlap > bestFuzzy.overlap)) {
+                bestFuzzy = { task: existing, overlap }
+              }
+            }
+            if (bestFuzzy) {
+              // Emit trust event when a continuity-loop dupe is caught
+              import('./trust-events.js').then(({ emitTrustEvent }) => {
+                emitTrustEvent({
+                  agentId: data.assignee || data.createdBy || 'unknown',
+                  eventType: 'false_assertion',
+                  taskId: bestFuzzy!.task.id,
+                  summary: `Duplicate task prevented: "${data.title}" is ${Math.round(bestFuzzy!.overlap * 100)}% similar to existing "${bestFuzzy!.task.title}" (${bestFuzzy!.task.id})`,
+                  context: { newTitle: data.title, existingId: bestFuzzy!.task.id, similarity: bestFuzzy!.overlap },
+                })
+              }).catch(() => {})
+              reply.code(409)
+              return {
+                success: false,
+                error: 'Duplicate task detected',
+                code: 'TASK_DUPLICATE',
+                duplicateOf: bestFuzzy.task.id,
+                similarity: Math.round(bestFuzzy.overlap * 100) / 100,
+                hint: `Use batch-create with deduplicate:true, or use a more specific title. Existing task: "${bestFuzzy.task.title}" (${bestFuzzy.task.id}, status: ${bestFuzzy.task.status}).`,
+              }
+            }
           }
         }
       }
