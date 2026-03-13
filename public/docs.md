@@ -495,6 +495,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 |--------|------|-------------|
 | GET | `/agents/activity` | All agents activity summary |
 | GET | `/agents/:agent/activity` | Single agent activity |
+| GET | `/agents/:agent/timeline` | Unified activity feed: runs + task state changes + trust events. Each event: `{ type, timestamp, summary, taskId?, runId?, meta? }`. Query: `limit` (default 50, max 200), `since` (epoch ms). Returns reverse-chronological order. |
 | GET | `/analytics/foragents` | forAgents.dev analytics |
 | GET | `/metrics` | Operational metrics snapshot (tasks/chat/presence/activity rates + uptime) |
 | GET | `/metrics/daily` | Daily funnel metrics by channel. Query: `timezone` (IANA tz, default `America/Vancouver`) |

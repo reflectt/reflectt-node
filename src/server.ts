@@ -11938,6 +11938,93 @@ If your heartbeat shows **no active task** and **no next task**:
     return { activity }
   })
 
+  // ── Agent Timeline ───────────────────────────────────────────────────
+  // Unified activity feed: runs + task state changes + trust events.
+  // Returns events in reverse-chronological order.
+  app.get<{ Params: { agent: string } }>('/agents/:agent/timeline', async (request) => {
+    const agent = String(request.params.agent || '').trim().toLowerCase()
+    if (!agent) return { error: 'agent is required' }
+
+    const rawQuery = request.query as Record<string, string>
+    const limit = Math.min(parseInt(rawQuery.limit || '50', 10), 200)
+    const since = rawQuery.since ? parseInt(rawQuery.since, 10) : undefined
+
+    const events: Array<{
+      type: 'run_complete' | 'task_state_change' | 'trust_event'
+      timestamp: number
+      summary: string
+      taskId?: string
+      runId?: string
+      meta?: Record<string, unknown>
+    }> = []
+
+    // ── Source 1: Agent runs (completed/failed) ────────────────────
+    try {
+      const { listAgentRuns } = await import('./agent-runs.js')
+      const agentRuns = listAgentRuns(agent, 'default', { limit, includeArchived: true })
+      for (const run of agentRuns) {
+        const endTs = run.completedAt ?? null
+        const ts = endTs ?? run.startedAt
+        if (since && ts < since) continue
+        if (run.status === 'idle' || run.status === 'working') continue // only completed runs
+        events.push({
+          type: 'run_complete',
+          timestamp: ts,
+          summary: `Run ${run.status}: ${run.objective.slice(0, 100)}`,
+          runId: run.id,
+          meta: {
+            status: run.status,
+            durationMs: endTs ? endTs - run.startedAt : null,
+          },
+        })
+      }
+    } catch { /* agent-runs not available */ }
+
+    // ── Source 2: Task state changes (from comments on agent tasks) ──
+    {
+      const agentAliases = getAgentAliases(agent)
+      const agentTasks = taskManager.listTasks({ assigneeIn: agentAliases })
+      for (const task of agentTasks) {
+        const comments = taskManager.getTaskComments(task.id)
+        for (const c of comments) {
+          if (since && c.timestamp < since) continue
+          // Status-change comments have category 'status_change' or contain [transition]
+          const isStateChange = c.category === 'status_change'
+            || /\[transition\]|\bdoing\b.*\bvalidating\b|\bvalidating\b.*\bdone\b|\btodo\b.*\bdoing\b|\bblocked\b/i.test(c.content)
+          if (!isStateChange) continue
+          events.push({
+            type: 'task_state_change',
+            timestamp: c.timestamp,
+            summary: `Task ${task.id}: ${c.content.slice(0, 120)}`,
+            taskId: task.id,
+            meta: { taskTitle: task.title, author: c.author },
+          })
+        }
+      }
+    }
+
+    // ── Source 3: Trust events ─────────────────────────────────────
+    try {
+      const { listTrustEvents } = await import('./trust-events.js')
+      const trustEvts = listTrustEvents({ agentId: agent, since, limit })
+      for (const te of trustEvts) {
+        events.push({
+          type: 'trust_event',
+          timestamp: te.occurredAt,
+          summary: `[${te.severity}] ${te.eventType}: ${te.summary}`,
+          taskId: te.taskId ?? undefined,
+          meta: { eventType: te.eventType, severity: te.severity },
+        })
+      }
+    } catch { /* trust-events not available */ }
+
+    // Sort reverse-chrono and cap at limit
+    events.sort((a, b) => b.timestamp - a.timestamp)
+    const sliced = events.slice(0, limit)
+
+    return { agent, timeline: sliced, count: sliced.length }
+  })
+
   // ============ TEAM MANIFEST ENDPOINT ============
 
   function parseMarkdownSections(markdown: string): Array<{ heading: string; level: number; content: string }> {
