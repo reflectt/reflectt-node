@@ -787,17 +787,24 @@ async function sendHeartbeat(): Promise<void> {
     contractVersion: 'host-heartbeat.v1',
     status: hostStatus,
     timestamp: Date.now(),
-    agents: agents.map(a => ({
-      id: a.name,
-      name: a.name,
-      status: a.status,
-      currentTaskId: a.currentTask || undefined,
-      lastSeenAt: a.lastSeen || Date.now(),
-      ...(a.status === 'waiting' ? {
-        waitingFor: a.waitingFor,
-        waitingTaskId: a.waitingTaskId,
-      } : {}),
-    })),
+    agents: agents.map(a => {
+      const agentAliases = [a.name]
+      const todoCount = tasks.filter(t => t.status === 'todo' && agentAliases.includes(t.assignee || '')).length
+      const doingCount = tasks.filter(t => t.status === 'doing' && agentAliases.includes(t.assignee || '')).length
+      const blockedCount = tasks.filter(t => t.status === 'blocked' && agentAliases.includes(t.assignee || '')).length
+      return {
+        id: a.name,
+        name: a.name,
+        status: a.status,
+        currentTaskId: a.currentTask || undefined,
+        lastSeenAt: a.lastSeen || Date.now(),
+        taskCounts: { todo: todoCount, doing: doingCount, blocked: blockedCount },
+        ...(a.status === 'waiting' ? {
+          waitingFor: a.waitingFor,
+          waitingTaskId: a.waitingTaskId,
+        } : {}),
+      }
+    }),
     activeTasks: doingTasks.map(t => ({
       id: t.id,
       title: t.title,
