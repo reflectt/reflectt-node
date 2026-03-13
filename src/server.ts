@@ -8907,13 +8907,28 @@ export async function createServer(): Promise<FastifyInstance> {
   // GET /canvas/state — current state for all agents (or one)
   app.get('/canvas/state', async (request) => {
     const query = request.query as { agentId?: string }
+
+    // Helper: get most recent chat message for an agent
+    function getLastMessage(agentId: string): { content: string; timestamp: number } | null {
+      try {
+        const _db = getDb()
+        const row = _db.prepare(
+          `SELECT content, timestamp FROM chat_messages WHERE "from" = ? AND "to" IS NULL ORDER BY timestamp DESC LIMIT 1`
+        ).get(agentId) as { content: string; timestamp: number } | undefined
+        return row ?? null
+      } catch {
+        return null
+      }
+    }
+
     if (query.agentId) {
       const entry = canvasStateMap.get(query.agentId)
-      return entry ?? { state: 'floor', sensors: null, payload: {}, updatedAt: null }
+      const base = entry ?? { state: 'floor', sensors: null, payload: {}, updatedAt: null }
+      return { ...base, lastMessage: getLastMessage(query.agentId) }
     }
     const all: Record<string, unknown> = {}
     for (const [id, entry] of canvasStateMap) {
-      all[id] = entry
+      all[id] = { ...entry, lastMessage: getLastMessage(id) }
     }
     return { agents: all, count: canvasStateMap.size }
   })
