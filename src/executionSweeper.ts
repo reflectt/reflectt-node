@@ -1142,6 +1142,29 @@ export function startSweeper(): void {
       const result = await sweepValidatingQueue()
       escalateViolations(result.violations)
 
+      // Stale doing-task detection → emit trust signal
+      try {
+        const STALE_DOING_THRESHOLD_MS = 60 * 60 * 1000 // 1h without a comment
+        const now = Date.now()
+        const doingTasks = taskManager.listTasks({ status: 'doing' })
+        const { emitTrustEvent } = await import('./trust-events.js')
+        for (const task of doingTasks) {
+          const comments = taskManager.getTaskComments(task.id)
+          const lastComment = comments.length > 0 ? comments[comments.length - 1] : null
+          const lastTs = lastComment?.timestamp ?? task.updatedAt ?? task.createdAt
+          const age = now - lastTs
+          if (age > STALE_DOING_THRESHOLD_MS) {
+            emitTrustEvent({
+              agentId: task.assignee || 'unknown',
+              eventType: 'stale_status_claim',
+              taskId: task.id,
+              summary: `Task "${task.title}" in doing for ${Math.round(age / 60_000)}m without update`,
+              context: { taskId: task.id, taskTitle: task.title, assignee: task.assignee, staleMs: age, lastCommentAt: lastTs },
+            })
+          }
+        }
+      } catch { /* non-fatal */ }
+
       // Todo hoarding sweep (runs alongside validating sweep)
       try {
         const { sweepTodoHoarding } = await import('./todoHoardingGuard.js')

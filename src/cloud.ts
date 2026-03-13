@@ -28,6 +28,7 @@ import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
 import { listApprovalQueue, listAgentEvents, listAgentRuns, type AgentRun } from './agent-runs.js'
+import { getUnpushedTrustEvents, markTrustEventsPushed } from './trust-events.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -472,6 +473,12 @@ export async function startCloudIntegration(): Promise<void> {
   setInterval(() => {
     syncAgentRuns().catch(() => {})
   }, 30_000)
+
+  // Trust event sync — every 60s (pushes unpushed trust signals to cloud)
+  syncTrustEvents().catch(() => {})
+  setInterval(() => {
+    syncTrustEvents().catch(() => {})
+  }, 60_000)
 
   // Usage sync — adaptive: 15s when active, 60s when idle
   let lastUsageSyncAt = 0
@@ -1401,6 +1408,25 @@ async function syncAgentRuns(): Promise<void> {
       console.warn(`☁️  [RunSync] Error: ${err?.message}`)
     }
   }
+}
+
+// ---- Trust Event Sync ----
+// Push unpushed trust-collapse signals to cloud agent_trust_events table.
+
+async function syncTrustEvents(): Promise<void> {
+  const { hostId } = state
+  if (!hostId) return
+  const events = getUnpushedTrustEvents(50)
+  if (events.length === 0) return
+  try {
+    const result = await cloudPost<{ ok: boolean; inserted: number }>(
+      `/api/hosts/${hostId}/trust-events/sync`,
+      { events: events.map(e => ({ id: e.id, agentId: e.agentId, type: e.eventType, severity: e.severity, taskId: e.taskId ?? null, summary: e.summary, metadata: e.context, emittedAt: e.occurredAt })) }
+    )
+    if (result.success || result.data?.ok) {
+      markTrustEventsPushed(events.map(e => e.id))
+    }
+  } catch { /* non-fatal */ }
 }
 
 // ---- Run Event Sync ----
