@@ -644,6 +644,18 @@ export function stopCloudIntegration(): void {
   }
   logConnectionEvent({ type: 'disconnected', timestamp: Date.now(), reason: 'shutdown' })
   console.log('☁️  Cloud integration: stopped')
+
+  // Clear canvas state on Fly so subscribers see an empty room, not ghost agents
+  if (state.hostId && state.credential && config) {
+    const clearUrl = `${config.cloudUrl}/api/hosts/${state.hostId}/canvas/clear`
+    fetch(clearUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.credential}`,
+      },
+    }).catch(() => { /* best-effort; already shutting down */ })
+  }
 }
 
 // ---- Data providers ----
