@@ -1136,6 +1136,7 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/webhooks/payloads/:payloadId` | Get single payload with full body + headers. |
 | POST | `/webhooks/payloads/:payloadId/process` | Mark payload as processed. |
 | POST | `/webhooks/purge` | Delete old processed payloads. Body: `{ maxAgeDays? }` (default 30). |
+| GET | `/trust-events` | List trust-collapse signals. Params: `agentId?`, `eventType?` (false_assertion\|stale_status_claim\|self_review_violation\|missing_acceptance_criteria_block\|escalation_bypass), `since?` (epoch ms), `limit?`. |
 | POST | `/agents/:agent/waiting` | Set agent to waiting state (blocked on human). Body: `{ reason (required), waitingFor?, taskId?, expiresAt? }`. Shows in heartbeat response. |
 | DELETE | `/agents/:agent/waiting` | Clear waiting state — agent is unblocked. |
 | GET | `/approval-queue` | Unified approval queue — everything needing human decision. Params: `agentId?`, `category?` (review\|agent_action), `includeExpired?` (true), `limit?`. Returns: items[], count, hasExpired. Each item: id, category, title, description, urgency, owner, expiresAt, autoAction, isExpired. |

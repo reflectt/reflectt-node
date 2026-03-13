@@ -782,6 +782,22 @@ function enforceQaBundleGateForValidating(
   // PR integrity: validate commit SHA + changed_files against live PR head
   if (!nonCodeLane && reviewPacket?.pr_url) {
     const overrideFlag = metadataObj.pr_integrity_override === true
+    if (overrideFlag) {
+      // Emit escalation_bypass: agent is skipping the PR integrity gate
+      const actor = (metadataObj.actor as string) || (metadataObj.assignee as string) || 'unknown'
+      import('./trust-events.js').then(({ emitTrustEvent }) => {
+        emitTrustEvent({
+          agentId: actor,
+          eventType: 'escalation_bypass',
+          severity: 'warning',
+          context: {
+            prUrl: reviewPacket?.pr_url,
+            overrideReason: metadataObj.pr_integrity_override_reason,
+            actor,
+          },
+        })
+      }).catch(() => {})
+    }
     if (!overrideFlag) {
       const integrity = validatePrIntegrity({
         pr_url: reviewPacket!.pr_url!,
@@ -6206,6 +6222,17 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Detect self-review: reviewer approving their own task
+    if (task.reviewer && task.assignee && task.reviewer.trim().toLowerCase() === task.assignee.trim().toLowerCase()) {
+      import('./trust-events.js').then(({ emitTrustEvent }) => {
+        emitTrustEvent({
+          agentId: body.reviewer,
+          eventType: 'self_review_violation',
+          context: { taskId: task.id, taskTitle: task.title, reviewer: task.reviewer, assignee: task.assignee, decision: body.decision },
+        })
+      }).catch(() => {})
+    }
+
     const decidedAt = Date.now()
     const isApprove = body.decision === 'approve'
     const decisionLabel = isApprove ? 'approved' : 'rejected'
@@ -6476,6 +6503,17 @@ export async function createServer(): Promise<FastifyInstance> {
       if (!skipDoR) {
         const readinessProblems = checkDefinitionOfReady(data)
         if (readinessProblems.length > 0) {
+          // Emit trust event if done_criteria is the specific blocker
+          if (!data.done_criteria || data.done_criteria.length === 0) {
+            const createdBy = typeof data.createdBy === 'string' ? data.createdBy : 'unknown'
+            import('./trust-events.js').then(({ emitTrustEvent }) => {
+              emitTrustEvent({
+                agentId: createdBy,
+                eventType: 'missing_acceptance_criteria_block',
+                context: { taskTitle: data.title, assignee: data.assignee, createdBy },
+              })
+            }).catch(() => {})
+          }
           reply.code(400)
           return {
             success: false,
@@ -7261,6 +7299,21 @@ export async function createServer(): Promise<FastifyInstance> {
           mergedMeta.reopen_reason = reopenReason
           mergedMeta.reopened_at = Date.now()
           mergedMeta.reopened_from = existing.status
+
+          // Emit trust signal: forced state bypass
+          const NORMAL_ESCALATION_PATHS = ['todo→doing', 'doing→validating', 'validating→done']
+          const jumpPath = `${existing.status}→${parsed.status}`
+          if (!NORMAL_ESCALATION_PATHS.includes(jumpPath)) {
+            import('./trust-events.js').then(({ emitTrustEvent }) => {
+              emitTrustEvent({
+                agentId: String(parsed.actor || parsed.assignee || 'unknown'),
+                eventType: 'escalation_bypass',
+                taskId: existing.id,
+                summary: `Task forced from ${existing.status}→${parsed.status} via reopen bypass`,
+                context: { taskId: existing.id, taskTitle: existing.title, from: existing.status, to: parsed.status, reason: reopenReason },
+              })
+            }).catch(() => {})
+          }
         }
       }
 
@@ -8787,7 +8840,7 @@ export async function createServer(): Promise<FastifyInstance> {
   type PresenceState = 'idle' | 'working' | 'needs-attention'
 
   const AgentPresenceSchema = z.object({
-    state: z.enum(['idle', 'working', 'needs-attention']),
+    state: z.enum(['idle', 'working', 'thinking', 'rendering', 'needs-attention', 'urgent', 'handoff', 'decision']),
     activeTask: z.object({
       title: z.string(),
       id: z.string(),
@@ -8800,6 +8853,8 @@ export async function createServer(): Promise<FastifyInstance> {
     }).optional(),
     sensors: z.enum(['mic', 'camera', 'mic+camera']).nullable().default(null),
     payload: z.record(z.unknown()).optional(),
+    currentPr: z.number().int().positive().optional(),   // open PR number agent is working on
+    progress: z.number().min(0).max(1).optional(),        // 0–1 completion estimate for active task
   })
 
   app.post<{ Params: { agentId: string } }>('/agents/:agentId/canvas', async (request, reply) => {
@@ -8815,7 +8870,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
-    const { state: presenceState, activeTask, recency, attention, sensors, payload } = result.data
+    const { state: presenceState, activeTask, recency, attention, sensors, payload, currentPr, progress } = result.data
     const now = Date.now()
     const identityColor = AGENT_IDENTITY_COLORS[agentId] || '#9ca3af'
 
@@ -8828,7 +8883,7 @@ export async function createServer(): Promise<FastifyInstance> {
     canvasStateMap.set(agentId, {
       state: canvasState,
       sensors,
-      payload: { ...payload, activeTask, attention, presenceState },
+      payload: { ...payload, activeTask, attention, presenceState, currentPr, progress },
       updatedAt: now,
     })
 
@@ -8840,6 +8895,8 @@ export async function createServer(): Promise<FastifyInstance> {
       activeTask,
       recency: recency || 'just now',
       attention,
+      ...(currentPr !== undefined ? { currentPr } : {}),
+      ...(progress !== undefined ? { progress } : {}),
     }
 
     // Emit canvas_render SSE event with AgentPresence shape
@@ -14576,6 +14633,21 @@ If your heartbeat shows **no active task** and **no next task**:
     const body = request.body as { maxAgeDays?: number } ?? {}
     const deleted = purgeOldPayloads(body.maxAgeDays ?? 30)
     return { deleted }
+  })
+
+  // ── Trust Events ────────────────────────────────────────────────────────
+
+  const { listTrustEvents } = await import('./trust-events.js')
+
+  // GET /trust-events — list trust-collapse signals (diagnostic)
+  app.get('/trust-events', async (request) => {
+    const query = request.query as { agentId?: string; eventType?: string; since?: string; limit?: string }
+    return listTrustEvents({
+      agentId: query.agentId,
+      eventType: query.eventType as any,
+      since: query.since ? parseInt(query.since, 10) : undefined,
+      limit: query.limit ? parseInt(query.limit, 10) : 50,
+    })
   })
 
   // ── Approval Routing ────────────────────────────────────────────────────

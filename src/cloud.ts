@@ -28,6 +28,7 @@ import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
 import { listApprovalQueue, listAgentEvents, listAgentRuns, type AgentRun } from './agent-runs.js'
+import { getUnpushedTrustEvents, markTrustEventsPushed } from './trust-events.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -472,6 +473,12 @@ export async function startCloudIntegration(): Promise<void> {
   setInterval(() => {
     syncAgentRuns().catch(() => {})
   }, 30_000)
+
+  // Trust event sync — every 60s (pushes unpushed trust signals to cloud)
+  syncTrustEvents().catch(() => {})
+  setInterval(() => {
+    syncTrustEvents().catch(() => {})
+  }, 60_000)
 
   // Usage sync — adaptive: 15s when active, 60s when idle
   let lastUsageSyncAt = 0
@@ -1279,6 +1286,37 @@ async function syncCanvas(): Promise<void> {
     }
   } catch { /* task API not ready — not fatal */ }
 
+  // ── Thinking state inference ────────────────────────────────────────────
+  // Agent has an active (running, non-completed) run AND hasn't sent a message
+  // in >2min → auto-derive state = 'thinking'. Explicit native canvas state always
+  // wins; this only fills gaps left after task-derived and native state passes.
+  // @swift @kotlin: once this ships, local heuristics for thinking can be removed.
+  try {
+    const THINKING_SILENCE_MS = 2 * 60 * 1000 // 2 minutes
+    const now2 = Date.now()
+    const presences = presenceManager.getAllPresence()
+    const presenceByAgent = new Map(presences.map(p => [p.agent, p]))
+    const allAgents = getAgents()
+    for (const agent of allAgents) {
+      // Skip if already has an explicit state (native or task-derived)
+      if (agents[agent.name]) continue
+      // Check for an active (incomplete) run
+      const runs = listAgentRuns(agent.name, 'default', { limit: 5 })
+      const hasActiveRun = runs.some(r => r.status === 'working' && r.completedAt === null)
+      if (!hasActiveRun) continue
+      // Check message silence window
+      const presence = presenceByAgent.get(agent.name)
+      const lastMsgTs = presence?.lastUpdate ?? 0
+      if (now2 - lastMsgTs > THINKING_SILENCE_MS) {
+        agents[agent.name] = {
+          state: 'thinking',
+          updatedAt: now2,
+          source: 'thinking-inferred',
+        }
+      }
+    }
+  } catch { /* non-fatal */ }
+
   // ── Needs-attention call hook ───────────────────────────────────────────
   // Check for new needs-attention transitions BEFORE pushing to cloud.
   // The Fly canvas handler also triggers auto-calls, but this node-side hook
@@ -1401,6 +1439,25 @@ async function syncAgentRuns(): Promise<void> {
       console.warn(`☁️  [RunSync] Error: ${err?.message}`)
     }
   }
+}
+
+// ---- Trust Event Sync ----
+// Push unpushed trust-collapse signals to cloud agent_trust_events table.
+
+async function syncTrustEvents(): Promise<void> {
+  const { hostId } = state
+  if (!hostId) return
+  const events = getUnpushedTrustEvents(50)
+  if (events.length === 0) return
+  try {
+    const result = await cloudPost<{ ok: boolean; inserted: number }>(
+      `/api/hosts/${hostId}/trust-events/sync`,
+      { events: events.map(e => ({ id: e.id, agentId: e.agentId, type: e.eventType, severity: e.severity, taskId: e.taskId ?? null, summary: e.summary, metadata: e.context, emittedAt: e.occurredAt })) }
+    )
+    if (result.success || result.data?.ok) {
+      markTrustEventsPushed(events.map(e => e.id))
+    }
+  } catch { /* non-fatal */ }
 }
 
 // ---- Run Event Sync ----
