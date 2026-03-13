@@ -14424,6 +14424,15 @@ If your heartbeat shows **no active task** and **no next task**:
       agentId: body.agentId,
       dryRun: body.dryRun,
     })  })
+  // ── Presence Narrator ──────────────────────────────────────────────────
+  // Posts first-person status narrations to chat every 5 min (±60s jitter)
+  // for agents with active doing tasks, following echo's constraint pack.
+  const { startPresenceNarrator } = await import('./presence-narrator.js')
+  const { getAgentRoles } = await import('./assignment.js')
+  const narratorAgentIds = getAgentRoles().map(r => r.name).filter(Boolean)
+  const stopNarrator = startPresenceNarrator(narratorAgentIds, taskManager)
+  app.addHook('onClose', async () => { stopNarrator() })
+
   // ── Artifact Store (Host-native) ──────────────────────────────────────
   const { storeArtifact, getArtifact, readArtifactContent, listArtifacts, deleteArtifact, getStorageUsage } = await import('./artifact-store.js')
 
