@@ -1091,7 +1091,8 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/agents/:agentId/runs` | List runs. Query: `?status=&teamId=&limit=` |
 | GET | `/agents/:agentId/runs/current` | Get active (non-terminal) run. Query: `?teamId=` |
 | PATCH | `/agents/:agentId/runs/:runId` | Update run. Body: `{ status?, contextSnapshot?, artifacts? }` |
-| POST | `/agents/:agentId/events` | Append an event (immutable). Body: `{ eventType, runId?, payload? }` |
+| POST | `/agents/:agentId/events` | Append an event (immutable). Body: `{ eventType, runId?, payload? }`. Routing enforced: actionable event types require `action_required` (review\|unblock\|approve\|fyi) and `urgency` (blocking\|normal\|low). |
+| POST | `/runs/:runId/events` | Append an event to a run by runId (resolves agentId automatically). Same routing enforcement as `/agents/:agentId/events`. Body: `{ eventType, payload? }`. |
 | GET | `/agents/:agentId/events` | List events. Query: `?runId=&type=&since=&limit=` |
 | GET | `/approvals/pending` | List pending approvals (review_requested events needing action). Query: `?agentId=&limit=` |
 | POST | `/approvals/:eventId/decide` | Submit approval decision. Body: `{ decision: "approve"|"reject", reviewer (required), comment? }`. Auto-unblocks run on approve. |
