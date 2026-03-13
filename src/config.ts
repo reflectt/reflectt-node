@@ -13,6 +13,7 @@ export const serverConfig: ServerConfig = {
   port: parseInt(process.env.PORT || '4445', 10),
   host: process.env.HOST || '0.0.0.0',
   corsEnabled: process.env.CORS_ENABLED !== 'false',
+  runRetentionDays: parseInt(process.env.REFLECTT_RUN_RETENTION_DAYS || '30', 10),
 }
 
 export const openclawConfig: OpenClawConfig = {
