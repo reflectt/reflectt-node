@@ -110,6 +110,33 @@ Get your token at [app.reflectt.ai](https://app.reflectt.ai). Your node syncs to
 
 ---
 
+## Quick start — team in 2 minutes
+
+The fastest way to get a team running with 3 default agents (builder, researcher, coordinator):
+
+```bash
+# 1. Get the files
+git clone https://github.com/reflectt/reflectt-node.git && cd reflectt-node
+
+# 2. Set your LLM API key
+cp .env.starter .env
+echo "ANTHROPIC_API_KEY=your_key_here" >> .env   # or OPENAI_API_KEY
+
+# 3. Start
+docker compose -f docker-compose.starter.yml up -d
+```
+
+That's it. Open [http://localhost:4445](http://localhost:4445) — your team is running.
+
+**Connect to app.reflectt.ai for presence + cloud sync:**
+1. Sign up at [app.reflectt.ai](https://app.reflectt.ai) → Connect a host → copy your join token
+2. `docker exec reflectt-starter reflectt host connect --join-token <TOKEN>`
+3. Your team appears in presence within 60 seconds
+
+Customize the team by editing `defaults/TEAM-ROLES.starter.yaml` and restarting.
+
+---
+
 ## Docker
 
 ```bash
