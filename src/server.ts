@@ -8853,6 +8853,8 @@ export async function createServer(): Promise<FastifyInstance> {
     }).optional(),
     sensors: z.enum(['mic', 'camera', 'mic+camera']).nullable().default(null),
     payload: z.record(z.unknown()).optional(),
+    currentPr: z.number().int().positive().optional(),   // open PR number agent is working on
+    progress: z.number().min(0).max(1).optional(),        // 0–1 completion estimate for active task
   })
 
   app.post<{ Params: { agentId: string } }>('/agents/:agentId/canvas', async (request, reply) => {
@@ -8868,7 +8870,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
-    const { state: presenceState, activeTask, recency, attention, sensors, payload } = result.data
+    const { state: presenceState, activeTask, recency, attention, sensors, payload, currentPr, progress } = result.data
     const now = Date.now()
     const identityColor = AGENT_IDENTITY_COLORS[agentId] || '#9ca3af'
 
@@ -8881,7 +8883,7 @@ export async function createServer(): Promise<FastifyInstance> {
     canvasStateMap.set(agentId, {
       state: canvasState,
       sensors,
-      payload: { ...payload, activeTask, attention, presenceState },
+      payload: { ...payload, activeTask, attention, presenceState, currentPr, progress },
       updatedAt: now,
     })
 
@@ -8893,6 +8895,8 @@ export async function createServer(): Promise<FastifyInstance> {
       activeTask,
       recency: recency || 'just now',
       attention,
+      ...(currentPr !== undefined ? { currentPr } : {}),
+      ...(progress !== undefined ? { progress } : {}),
     }
 
     // Emit canvas_render SSE event with AgentPresence shape
