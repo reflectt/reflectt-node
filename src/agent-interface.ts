@@ -10,6 +10,7 @@
  */
 
 import { checkActionAllowed } from "./agent-exec-guardrail.js";
+import { executeIntent as macOSExecuteIntent, requiresApproval as macOSRequiresApproval, validateIntent as macOSValidateIntent } from "./macos-accessibility.js";
 
 export type RunKind = 'github_issue_create'
 export type RunStatus = 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'rejected'
@@ -331,4 +332,213 @@ export function _clearRunsForTest(): void {
   runs.clear()
   subscribers.clear()
   pendingApprovals.clear()
+}
+
+// ── Immutable audit + replay packet ─────────────────────────────────────────
+
+/**
+ * Structured audit packet for a completed run.
+ * Includes intent, step timeline, approval decisions, outcome, and rollback hints.
+ *
+ * task-1773486840057-e92leqnr1
+ */
+export interface ReplayPacket {
+  schema: 'agent-interface-replay-v1'
+  runId: string
+  kind: string
+  generatedAt: number
+  run: {
+    id: string
+    kind: string
+    status: RunStatus
+    createdAt: number
+    completedAt: number | null
+    durationMs: number | null
+  }
+  intent: Record<string, unknown>
+  stepTimeline: Array<{
+    type: string
+    timestamp: number
+    offsetMs: number  // ms from run start
+    payload: Record<string, unknown>
+  }>
+  approvals: Array<{
+    requestedAt: number
+    resolvedAt: number | null
+    approved: boolean | null
+    timeoutMs: number
+  }>
+  outcome: {
+    status: RunStatus
+    result: Record<string, unknown> | null
+    errorMessage: string | null
+  }
+  rollbackHints: string[]
+}
+
+/**
+ * Build an immutable audit/replay packet for the given run.
+ * Safe to call at any run lifecycle stage.
+ */
+export function buildReplayPacket(runId: string): ReplayPacket | null {
+  const run = runs.get(runId)
+  if (!run) return null
+
+  const startMs = run.createdAt
+
+  // Find approval events
+  const approvals: ReplayPacket['approvals'] = []
+  let pendingApproval: Partial<ReplayPacket['approvals'][0]> | null = null
+  for (const event of run.log) {
+    if (event.type === 'approval_requested') {
+      pendingApproval = { requestedAt: event.timestamp, resolvedAt: null, approved: null, timeoutMs: 10 * 60 * 1000 }
+    } else if (event.type === 'approval_resolved' && pendingApproval) {
+      pendingApproval.resolvedAt = event.timestamp
+      pendingApproval.approved = (event.payload as any).approved ?? null
+      approvals.push(pendingApproval as ReplayPacket['approvals'][0])
+      pendingApproval = null
+    }
+  }
+  if (pendingApproval) approvals.push(pendingApproval as ReplayPacket['approvals'][0])
+
+  // Determine completion time
+  const terminalEvent = [...run.log].reverse().find(e =>
+    e.type === 'state_changed' && ['completed', 'failed', 'rejected'].includes((e.payload as any).to),
+  )
+  const completedAt = terminalEvent?.timestamp ?? null
+
+  // Rollback hints based on intent action
+  const intent = (run.input as any).intent ?? run.input
+  const rollbackHints = buildRollbackHints(run.kind as string, intent)
+
+  return {
+    schema: 'agent-interface-replay-v1',
+    runId,
+    kind: run.kind as string,
+    generatedAt: Date.now(),
+    run: {
+      id: run.id,
+      kind: run.kind as string,
+      status: run.status,
+      createdAt: run.createdAt,
+      completedAt,
+      durationMs: completedAt ? completedAt - startMs : null,
+    },
+    intent,
+    stepTimeline: run.log.map(event => ({
+      type: event.type,
+      timestamp: event.timestamp,
+      offsetMs: event.timestamp - startMs,
+      payload: event.payload,
+    })),
+    approvals,
+    outcome: {
+      status: run.status,
+      result: run.result ? { ...run.result } : null,
+      errorMessage: run.result?.errorMessage ?? null,
+    },
+    rollbackHints,
+  }
+}
+
+function buildRollbackHints(kind: string, intent: Record<string, unknown>): string[] {
+  if (kind === 'github_issue_create') {
+    return ['Close the created GitHub issue via the issue URL in the run result.']
+  }
+  if (kind === 'macos_ui_action') {
+    const action = String(intent?.action ?? '')
+    switch (action) {
+      case 'create_reminder':
+        return ['Open Reminders app → find and delete the created reminder manually.']
+      case 'draft_email':
+        return ['Open Mail app → Drafts → delete the draft before sending.']
+      case 'summarize_note':
+        return ['Read-only — no rollback needed.']
+      case 'open_app':
+      case 'focus_window':
+        return ['Reversible — close the application if needed.']
+      case 'type_text':
+        return ['Undo via Cmd+Z in the focused application.']
+      default:
+        return ['Review the target application manually for any unintended changes.']
+    }
+  }
+  return ['Review output carefully; consult the run log for step-by-step details.']
+}
+
+/**
+ * Execute a macOS UI action run.
+ * Handles the awaiting_approval gate for irreversible intents.
+ *
+ * task-1773486840001-u0shj14v3 / task-1773486840036-8x0o76rmp
+ */
+export async function executeMacOSUIAction(
+  runId: string,
+  intent: Record<string, unknown>,
+): Promise<void> {
+  // Validate
+  const validation = macOSValidateIntent(intent as any)
+  if (!validation.ok) {
+    emit(runId, { type: 'step_failed', timestamp: Date.now(), payload: { step: 'validate', error: validation.reason } })
+    transition(runId, 'failed')
+    return
+  }
+
+  transition(runId, 'running')
+  emit(runId, { type: 'step_started', timestamp: Date.now(), payload: { step: 'validate', action: (intent as any).action } })
+  emit(runId, { type: 'step_succeeded', timestamp: Date.now(), payload: { step: 'validate', action: (intent as any).action } })
+
+  // Irreversible: request human approval before executing
+  if (macOSRequiresApproval(intent as any)) {
+    transition(runId, 'awaiting_approval')
+    emit(runId, { type: 'approval_requested', timestamp: Date.now(), payload: {
+      message: `macOS action "${(intent as any).action}" requires human approval (pilot safety gate)`,
+      action: (intent as any).action,
+      app: (intent as any).app,
+      preview: ((intent as any).text ?? '').slice(0, 200),
+    }})
+
+    // Wait for approve/reject (10m timeout → auto-reject, matching github_issue_create pattern)
+    const approved = await new Promise<boolean>((resolve) => {
+      pendingApprovals.set(runId, { runId, resolve })
+      setTimeout(() => {
+        if (pendingApprovals.has(runId)) {
+          pendingApprovals.delete(runId)
+          resolve(false)
+        }
+      }, 10 * 60 * 1000)
+    })
+
+    emit(runId, { type: 'approval_resolved', timestamp: Date.now(), payload: { approved, runId } })
+
+    if (!approved) {
+      const run = runs.get(runId)
+      if (run) run.result = { outcome: 'rejected', recoveryHint: 'Re-submit and approve when ready.' } as any
+      transition(runId, 'rejected')
+      return
+    }
+
+    transition(runId, 'running')
+  }
+
+  // Execute
+  emit(runId, { type: 'step_started', timestamp: Date.now(), payload: { step: 'execute', action: (intent as any).action } })
+  const result = await macOSExecuteIntent(intent as any)
+
+  if (result.ok) {
+    emit(runId, { type: 'step_succeeded', timestamp: Date.now(), payload: {
+      step: 'execute',
+      action: (intent as any).action,
+      output: result.output?.slice(0, 200),
+      stepCount: result.steps.length,
+    }})
+    const run = runs.get(runId)
+    if (run) run.result = { outcome: 'completed', output: result.output, steps: result.steps } as any
+    transition(runId, 'completed')
+  } else {
+    emit(runId, { type: 'step_failed', timestamp: Date.now(), payload: { step: 'execute', error: result.error } })
+    const run = runs.get(runId)
+    if (run) run.result = { outcome: 'failed', errorMessage: result.error } as any
+    transition(runId, 'failed')
+  }
 }

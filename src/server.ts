@@ -163,7 +163,8 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
 import { createVoiceSession, getVoiceSession, processVoiceTranscript, subscribeVoiceSession } from './voice-sessions.js'
-import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, listPendingRuns, listRuns } from './agent-interface.js'
+import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, executeMacOSUIAction, buildReplayPacket, listPendingRuns, listRuns } from './agent-interface.js'
+import { validateIntent as macOSValidateIntent, isKillSwitchEngaged, engageKillSwitch, resetKillSwitch } from './macos-accessibility.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { requestImmediateCanvasSync } from './cloud.js'
@@ -7726,11 +7727,28 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // POST /agent-interface/runs — create and start a new agent action run
   app.post('/agent-interface/runs', async (request, reply) => {
-    const body = request.body as { kind?: string; repo?: string; title?: string; body?: string; dryRun?: boolean }
+    const body = request.body as { kind?: string; repo?: string; title?: string; body?: string; dryRun?: boolean; intent?: Record<string, unknown> }
     if (!body?.kind) { reply.status(400); return { success: false, message: 'kind is required' } }
-    if (body.kind !== 'github_issue_create') { reply.status(400); return { success: false, message: `Unknown kind: ${body.kind}` } }
 
-    const run = createRun('github_issue_create', {
+    const ALLOWED_KINDS = ['github_issue_create', 'macos_ui_action']
+    if (!ALLOWED_KINDS.includes(body.kind)) { reply.status(400); return { success: false, message: `Unknown kind: ${body.kind}. Allowed: ${ALLOWED_KINDS.join(', ')}` } }
+
+    // macos_ui_action: validate intent + kill-switch before creating run
+    if (body.kind === 'macos_ui_action') {
+      if (isKillSwitchEngaged()) {
+        reply.status(503); return { success: false, message: 'Kill-switch engaged — macOS accessibility control disabled' }
+      }
+      const intent = body.intent as any
+      const validation = macOSValidateIntent(intent ?? {})
+      if (!validation.ok) {
+        reply.status(400); return { success: false, message: validation.reason }
+      }
+    }
+
+    const run = createRun(body.kind as any, body.kind === 'macos_ui_action' ? {
+      intent: body.intent ?? {},
+      dryRun: body.dryRun ?? false,
+    } : {
       repo: body.repo ?? '',
       title: body.title ?? '',
       body: body.body ?? '',
@@ -7744,9 +7762,17 @@ export async function createServer(): Promise<FastifyInstance> {
       const to = (event.payload as any).to as string
       if (to === 'awaiting_approval') {
         // Push decision state to all agents watching the canvas SSE stream
+        const inp = run.input as any
+        const isMAC = (run.kind as string) === 'macos_ui_action'
+        const actionLabel = isMAC
+          ? `macOS: ${inp.intent?.action ?? 'ui action'} in ${inp.intent?.app ?? 'app'}`
+          : (inp.title ?? run.kind)
+        const descLabel = isMAC
+          ? `Pilot — ${inp.intent?.action}${inp.intent?.text ? `: "${String(inp.intent.text).slice(0, 60)}"` : ''}`
+          : `${run.kind} — ${inp.repo ?? ''}`
         const decisionPayload = {
-          title: `Agent action: ${(run.input as any).title ?? run.kind}`,
-          description: `${run.kind} — ${(run.input as any).repo ?? ''}`,
+          title: `Approval required: ${actionLabel}`,
+          description: descLabel,
           runId: run.id,
           approvalId: run.id,
           expiresAt: run.createdAt + 10 * 60 * 1000,
@@ -7764,9 +7790,9 @@ export async function createServer(): Promise<FastifyInstance> {
               name: 'agent-interface',
               identityColor: '#60a5fa',
               state: 'decision',
-              activeTask: { id: run.id, title: (run.input as any).title ?? run.kind },
+              activeTask: { id: run.id, title: actionLabel },
               recency: 'just now',
-              attention: { type: 'approval', taskId: run.id, label: (run.input as any).title ?? 'Agent action' },
+              attention: { type: 'approval', taskId: run.id, label: actionLabel },
             },
           },
         })
@@ -7777,12 +7803,17 @@ export async function createServer(): Promise<FastifyInstance> {
     })
 
     // Execute async — non-blocking
-    executeGithubIssueCreate(run.id, {
-      repo: body.repo ?? '',
-      title: body.title ?? '',
-      body: body.body ?? '',
-      dryRun: body.dryRun,
-    }).catch(err => { console.error('[agent-interface] run error:', err); runUnsub() })
+    if (body.kind === 'macos_ui_action') {
+      const intent = (body.intent ?? {}) as Record<string, unknown>
+      executeMacOSUIAction(run.id, intent).catch(err => { console.error('[agent-interface] macos run error:', err); runUnsub() })
+    } else {
+      executeGithubIssueCreate(run.id, {
+        repo: body.repo ?? '',
+        title: body.title ?? '',
+        body: body.body ?? '',
+        dryRun: body.dryRun,
+      }).catch(err => { console.error('[agent-interface] run error:', err); runUnsub() })
+    }
 
     return reply.code(201).send({ runId: run.id, status: run.status })
   })
@@ -7799,6 +7830,13 @@ export async function createServer(): Promise<FastifyInstance> {
     const run = getRun(request.params.runId)
     if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
     return { run }
+  })
+
+  // GET /agent-interface/runs/:runId/replay — immutable audit + replay packet
+  app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId/replay', (request, reply) => {
+    const packet = buildReplayPacket(request.params.runId)
+    if (!packet) { reply.status(404); return { success: false, message: 'Run not found' } }
+    return { packet }
   })
 
   // GET /agent-interface/runs/:runId/events — SSE stream of run events
@@ -7861,6 +7899,22 @@ export async function createServer(): Promise<FastifyInstance> {
     const ok = rejectRun(request.params.runId)
     if (!ok) { reply.status(409); return { success: false, message: 'No pending approval for this run' } }
     return { success: true, runId: request.params.runId }
+  })
+
+  // POST /agent-interface/kill-switch — instantly disable all macOS accessibility control
+  app.post('/agent-interface/kill-switch', (request) => {
+    const body = request.body as { engage?: boolean }
+    if (body?.engage === false) {
+      resetKillSwitch()
+      return { success: true, killSwitch: false, message: 'Kill-switch reset — macOS accessibility control re-enabled' }
+    }
+    engageKillSwitch()
+    return { success: true, killSwitch: true, message: 'Kill-switch engaged — all macOS accessibility control disabled immediately' }
+  })
+
+  // GET /agent-interface/kill-switch — check kill-switch state
+  app.get('/agent-interface/kill-switch', () => {
+    return { killSwitch: isKillSwitchEngaged() }
   })
 
   // ── Preflight Check endpoint ────────────────────────────────────────
