@@ -10014,27 +10014,50 @@ export async function createServer(): Promise<FastifyInstance> {
     broadcastRenderCommand(agentId, { type: 'visual', preset: 'exhale' })
   })
 
-  // POST /canvas/express — agent fires a real-time medium command at the canvas
-  // The command broadcasts instantly to all subscribed surfaces.
+  // POST /canvas/express — Reality Mixer: agent fires a multi-channel expression.
+  // Broadcasts canvas_expression on the SAME pulse SSE stream as burst/spark/milestone.
+  // Client already subscribed — no new connection needed.
+  //
+  // Body: {
+  //   agentId: string,
+  //   channels: {
+  //     voice?:      string — TTS text
+  //     visual?:     { flash?: string (hex), ambientCue?: string, particles?: 'surge'|'drift'|'scatter' }
+  //     typography?: { text: string, size?: 'sm'|'md'|'lg'|'xl', weight?: number, durationMs?: number, position?: 'center'|'upper'|'lower' }
+  //     sound?:      { kind: 'chime'|'resolve'|'alert'|'breath', intensity?: 0–1, panX?: 0–1 }
+  //     haptic?:     { preset: 'greeting'|'acknowledge'|'complete'|'urgent'|'question' }
+  //     narrative?:  string — ambient caption
+  //   }
+  // }
+  // All channels optional — fire only what the moment needs.
   app.post('/canvas/express', async (request, reply) => {
     const body = request.body as Record<string, unknown>
-    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : 'unknown'
-    const cmd = body.cmd ?? body.command ?? body
-
-    if (!cmd || typeof cmd !== 'object') {
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
+    if (!agentId) {
       reply.status(400)
-      return { success: false, message: 'cmd is required (or pass command fields at root)' }
+      return { success: false, message: 'agentId is required' }
     }
 
-    const type = (cmd as any).type
-    const VALID_TYPES = ['text', 'speak', 'visual', 'color', 'sound', 'haptic', 'clear']
-    if (!VALID_TYPES.includes(type)) {
+    const channels = (body.channels ?? {}) as Record<string, unknown>
+    if (typeof channels !== 'object' || channels === null) {
       reply.status(400)
-      return { success: false, message: `cmd.type must be one of: ${VALID_TYPES.join(', ')}` }
+      return { success: false, message: 'channels must be an object (all fields optional)' }
     }
 
-    const id = broadcastRenderCommand(agentId, cmd as RealityMixerCommand)
-    return { success: true, id, subscriberCount: renderStreamSubscribers.size }
+    const id = `expr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+    // Emit canvas_expression on the event bus — pulse stream forwards it immediately
+    eventBus.emit({
+      id,
+      type: 'canvas_expression' as const,
+      timestamp: Date.now(),
+      data: { agentId, channels },
+    })
+
+    // Also broadcast to Reality Mixer render stream for backward compat
+    broadcastRenderCommand(agentId, { type: 'text', content: JSON.stringify(channels) } as RealityMixerCommand)
+
+    return { success: true, id }
   })
 
   // GET /canvas/render/stream — SSE stream for the Reality Mixer
@@ -10216,7 +10239,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const listenerId = `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     eventBus.on(listenerId, (event) => {
       if (closed) return
-      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone') return
+      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression') return
       try {
         reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event.data as object, t: event.timestamp })}\n\n`)
       } catch { closed = true }
