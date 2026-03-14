@@ -27,6 +27,12 @@ const BUILD_VERSION = (() => {
 })()
 
 const BUILD_COMMIT = (() => {
+  // Prefer commit baked at build time (dist/commit.txt) — accurate regardless of CWD at runtime.
+  // Falls back to git rev-parse for dev mode (tsx / ts-node).
+  try {
+    const commitFile = new URL('../commit.txt', import.meta.url)
+    return readFileSync(commitFile, 'utf8').trim()
+  } catch { /* not a built dist — fall through to git */ }
   try {
     return execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
   } catch { return 'unknown' }
