@@ -7273,18 +7273,63 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const session = createVoiceSession(agentId)
 
+    // Helper: push activeSpeaker signal into canvas state so orb reacts
+    const setActiveSpeaker = (active: boolean) => {
+      const existing = canvasStateMap.get(agentId)
+      if (existing) {
+        canvasStateMap.set(agentId, {
+          ...existing,
+          payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active },
+          updatedAt: Date.now(),
+        })
+        eventBus.emit({
+          id: `crender-voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          type: 'canvas_render' as const,
+          timestamp: Date.now(),
+          data: {
+            state: existing.state,
+            sensors: existing.sensors,
+            agentId,
+            payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active },
+            presence: {
+              name: agentId,
+              identityColor: AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af',
+              state: (existing.payload as any)?.presenceState ?? 'working',
+              activeSpeaker: active,
+              activeTask: (existing.payload as any)?.activeTask,
+              recency: 'just now',
+            },
+          },
+        })
+        requestImmediateCanvasSync()
+      }
+    }
+
     // Kick off async processing — do not await so we return sessionId immediately
-    // agentResponder: stub that sends transcript as a task comment and returns a canned ACK
-    // Real LLM call can be wired here in a follow-up task
     const agentResponder = async (_agentId: string, text: string, _sessionId: string): Promise<string | null> => {
-      // MVP stub: echo the transcript back as a simple acknowledgement.
-      // Replace with real agent call (e.g., POST /agents/:id/runs) in future iteration.
+      // Emit thinking state to canvas
+      setActiveSpeaker(false)
       await new Promise(resolve => setTimeout(resolve, 400)) // simulate brief think time
       return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
     }
 
+    // Subscribe to voice events to drive canvas state
+    const unsubVoice = subscribeVoiceSession(session.id, (event) => {
+      if (event.type === 'agent.thinking') {
+        // Agent is processing — keep existing canvas state (thinking is already set via presence)
+      } else if (event.type === 'tts.ready') {
+        // Agent is now speaking — activate orb waveform/scale
+        setActiveSpeaker(true)
+      } else if (event.type === 'session.end' || event.type === 'error') {
+        // Clear speaker state
+        setActiveSpeaker(false)
+        unsubVoice()
+      }
+    })
+
     processVoiceTranscript(session.id, transcript, agentResponder).catch(err => {
       console.error('[voice] processVoiceTranscript error:', err)
+      unsubVoice()
     })
 
     return { success: true, sessionId: session.id }
