@@ -16645,14 +16645,107 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // ── Calendar Events API ────────────────────────────────────────────────
 
-  // Create an event
+  // GET /calendar/upcoming — next N days of events (agent execution surface)
+  // Accepts ?days=7 (default 7). Returns spec-shaped response sorted chronologically.
+  app.get('/calendar/upcoming', async (request) => {
+    const q = request.query as Record<string, string>
+    const days = Math.max(1, Math.min(90, parseInt(q.days ?? '7', 10) || 7))
+    const now = Date.now()
+    const to = now + days * 24 * 60 * 60 * 1000
+
+    const events = calendarEvents.listEvents({ from: now, to, status: 'confirmed' })
+
+    return {
+      events: events.map(e => ({
+        id: e.id,
+        title: e.summary,
+        start: new Date(e.dtstart).toISOString(),
+        end: new Date(e.dtend).toISOString(),
+        attendees: e.attendees.map(a => a.name),
+        calendar: e.categories[0] ?? null,
+        description: e.description || null,
+        location: e.location || null,
+        provider: 'local',
+      })),
+    }
+  })
+
+  // Create an event (spec format + legacy CreateEventInput both accepted)
+  // Spec format: { title, start, duration_minutes?, attendees?, calendar?, description? }
+  // Legacy format: { summary, organizer, dtstart, dtend, ... }
+  // Error codes: 422 for past start time, 409 for exact duplicate (same title+start)
   app.post('/calendar/events', async (request, reply) => {
     try {
-      const body = request.body as CreateEventInput
-      if (!body || !body.summary || !body.organizer) {
-        return reply.code(400).send({ error: 'summary and organizer are required' })
+      const body = request.body as Record<string, unknown>
+      if (!body) return reply.code(400).send({ error: 'Request body is required' })
+
+      let input: CreateEventInput
+
+      if (typeof body.title === 'string' || typeof body.start === 'string') {
+        // Spec format — translate to internal CreateEventInput
+        const title = typeof body.title === 'string' ? body.title.trim() : ''
+        const startStr = typeof body.start === 'string' ? body.start : ''
+        if (!title) return reply.code(400).send({ error: 'title is required' })
+        if (!startStr) return reply.code(400).send({ error: 'start is required' })
+
+        const dtstart = Date.parse(startStr)
+        if (isNaN(dtstart)) return reply.code(400).send({ error: 'start must be a valid ISO 8601 datetime' })
+
+        // 422 for past dates
+        if (dtstart < Date.now()) {
+          return reply.code(422).send({ error: 'start must be in the future', code: 'PAST_DATE' })
+        }
+
+        const durationMinutes = typeof body.duration_minutes === 'number' ? body.duration_minutes : 60
+        const dtend = dtstart + durationMinutes * 60 * 1000
+
+        // 409 duplicate check: same title + same start time
+        const existing = calendarEvents.listEvents({ from: dtstart - 1000, to: dtstart + 1000 })
+        const duplicate = existing.find(e => e.summary.toLowerCase() === title.toLowerCase() && e.dtstart === dtstart)
+        if (duplicate) {
+          return reply.code(409).send({ error: 'Duplicate event: same title and start time already exists', existing_id: duplicate.id })
+        }
+
+        const rawAttendees = Array.isArray(body.attendees) ? body.attendees : []
+        const calendar = typeof body.calendar === 'string' ? body.calendar : undefined
+        input = {
+          summary: title,
+          description: typeof body.description === 'string' ? body.description : undefined,
+          dtstart,
+          dtend,
+          organizer: 'agent',
+          attendees: rawAttendees.map((a: unknown) => ({
+            name: typeof a === 'string' ? a : String(a),
+            email: typeof a === 'string' && a.includes('@') ? a : undefined,
+            status: 'needs-action' as const,
+          })),
+          categories: calendar ? [calendar] : [],
+        }
+      } else {
+        // Legacy format
+        const legacy = body as unknown as CreateEventInput
+        if (!legacy.summary || !legacy.organizer) {
+          return reply.code(400).send({ error: 'summary and organizer are required' })
+        }
+        // 422 for past dates in legacy format too
+        if (typeof legacy.dtstart === 'number' && legacy.dtstart < Date.now()) {
+          return reply.code(422).send({ error: 'dtstart must be in the future', code: 'PAST_DATE' })
+        }
+        input = legacy
       }
-      const event = calendarEvents.createEvent(body)
+
+      const event = calendarEvents.createEvent(input)
+
+      // Return spec-shaped response for spec-format requests, full event for legacy
+      if (typeof body.title === 'string') {
+        return reply.code(201).send({
+          id: event.id,
+          title: event.summary,
+          start: new Date(event.dtstart).toISOString(),
+          end: new Date(event.dtend).toISOString(),
+          provider: 'local',
+        })
+      }
       return reply.code(201).send({ success: true, event })
     } catch (err: any) {
       return reply.code(400).send({ error: err.message })
