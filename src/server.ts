@@ -7273,18 +7273,63 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const session = createVoiceSession(agentId)
 
+    // Helper: push activeSpeaker signal into canvas state so orb reacts
+    const setActiveSpeaker = (active: boolean) => {
+      const existing = canvasStateMap.get(agentId)
+      if (existing) {
+        canvasStateMap.set(agentId, {
+          ...existing,
+          payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active },
+          updatedAt: Date.now(),
+        })
+        eventBus.emit({
+          id: `crender-voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          type: 'canvas_render' as const,
+          timestamp: Date.now(),
+          data: {
+            state: existing.state,
+            sensors: existing.sensors,
+            agentId,
+            payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active },
+            presence: {
+              name: agentId,
+              identityColor: AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af',
+              state: (existing.payload as any)?.presenceState ?? 'working',
+              activeSpeaker: active,
+              activeTask: (existing.payload as any)?.activeTask,
+              recency: 'just now',
+            },
+          },
+        })
+        requestImmediateCanvasSync()
+      }
+    }
+
     // Kick off async processing — do not await so we return sessionId immediately
-    // agentResponder: stub that sends transcript as a task comment and returns a canned ACK
-    // Real LLM call can be wired here in a follow-up task
     const agentResponder = async (_agentId: string, text: string, _sessionId: string): Promise<string | null> => {
-      // MVP stub: echo the transcript back as a simple acknowledgement.
-      // Replace with real agent call (e.g., POST /agents/:id/runs) in future iteration.
+      // Emit thinking state to canvas
+      setActiveSpeaker(false)
       await new Promise(resolve => setTimeout(resolve, 400)) // simulate brief think time
       return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
     }
 
+    // Subscribe to voice events to drive canvas state
+    const unsubVoice = subscribeVoiceSession(session.id, (event) => {
+      if (event.type === 'agent.thinking') {
+        // Agent is processing — keep existing canvas state (thinking is already set via presence)
+      } else if (event.type === 'tts.ready') {
+        // Agent is now speaking — activate orb waveform/scale
+        setActiveSpeaker(true)
+      } else if (event.type === 'session.end' || event.type === 'error') {
+        // Clear speaker state
+        setActiveSpeaker(false)
+        unsubVoice()
+      }
+    })
+
     processVoiceTranscript(session.id, transcript, agentResponder).catch(err => {
       console.error('[voice] processVoiceTranscript error:', err)
+      unsubVoice()
     })
 
     return { success: true, sessionId: session.id }
@@ -9161,6 +9206,12 @@ export async function createServer(): Promise<FastifyInstance> {
     payload: z.record(z.unknown()).optional(),
     currentPr: z.number().int().positive().optional(),   // open PR number agent is working on
     progress: z.number().min(0).max(1).optional(),        // 0–1 completion estimate for active task
+    urgency: z.number().min(0).max(1).optional(),         // 0.0–1.0 visual intensity for living canvas
+    ambientCue: z.object({                                // living canvas atmosphere override
+      colorHint: z.string().optional(),
+      particleIntensity: z.number().min(0).max(1).optional(),
+      pulseRate: z.enum(['slow', 'normal', 'fast']).optional(),
+    }).optional(),
   })
 
   app.post<{ Params: { agentId: string } }>('/agents/:agentId/canvas', async (request, reply) => {
@@ -9176,7 +9227,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
-    const { state: presenceState, activeTask, recency, attention, sensors, payload, currentPr, progress } = result.data
+    const { state: presenceState, activeTask, recency, attention, sensors, payload, currentPr, progress, urgency, ambientCue } = result.data
     const now = Date.now()
     const identityColor = AGENT_IDENTITY_COLORS[agentId] || '#9ca3af'
 
@@ -9192,15 +9243,24 @@ export async function createServer(): Promise<FastifyInstance> {
       : presenceState === 'waiting' ? 'ambient'  // waiting = soft ambient (no ring)
       : 'ambient'
 
+    // Derive urgency from state if not explicitly provided
+    const derivedUrgency: number = urgency ?? (
+      presenceState === 'urgent' ? 1.0 :
+      presenceState === 'decision' || presenceState === 'needs-attention' ? 0.75 :
+      presenceState === 'rendering' ? 0.4 :
+      presenceState === 'thinking' || presenceState === 'working' ? 0.2 :
+      0.0
+    )
+
     // Store in canvasStateMap (backward compat with existing GET /canvas/state)
     canvasStateMap.set(agentId, {
       state: canvasState,
       sensors,
-      payload: { ...payload, activeTask, attention, presenceState, currentPr, progress },
+      payload: { ...payload, activeTask, attention, presenceState, currentPr, progress, urgency: derivedUrgency, ambientCue },
       updatedAt: now,
     })
 
-    // Build AgentPresence payload (matches presence-card-spec.md)
+    // Build AgentPresence payload (matches presence-card-spec.md + CANVAS-STATE-CONTRACT-v1)
     const agentPresence = {
       name: agentId,
       identityColor,
@@ -9208,6 +9268,8 @@ export async function createServer(): Promise<FastifyInstance> {
       activeTask,
       recency: recency || 'just now',
       attention,
+      urgency: derivedUrgency,
+      ...(ambientCue !== undefined ? { ambientCue } : {}),
       ...(currentPr !== undefined ? { currentPr } : {}),
       ...(progress !== undefined ? { progress } : {}),
     }
@@ -9223,7 +9285,7 @@ export async function createServer(): Promise<FastifyInstance> {
         sensors,
         agentId,
         payload: { ...payload, activeTask, attention },
-        // AgentPresence fields (new contract)
+        // AgentPresence fields (new contract — includes urgency + ambientCue)
         presence: agentPresence,
       },
     })
@@ -9352,6 +9414,192 @@ export async function createServer(): Promise<FastifyInstance> {
   // GET /canvas/slots/all — all slots including stale (debug)
   app.get('/canvas/slots/all', async () => {
     return { slots: canvasSlots.getAll() }
+  })
+
+  // GET /canvas/team/mood — derived collective mood of all active agents
+  // Returns teamRhythm, tension, ambientPulse, dominantColor. Used by living canvas for atmosphere shifts.
+  app.get('/canvas/team/mood', async () => {
+    const now = Date.now()
+    const STALE_MS = 10 * 60 * 1000 // ignore agents silent >10m
+
+    const states: string[] = []
+    const agentNames: string[] = []
+
+    for (const [agentId, entry] of canvasStateMap) {
+      if (now - entry.updatedAt > STALE_MS) continue
+      states.push(entry.state)
+      agentNames.push(agentId)
+    }
+
+    const activeCount = states.length
+    const urgentCount = states.filter(s => s === 'urgent').length
+    const decisionCount = states.filter(s => s === 'decision').length
+    const renderingCount = states.filter(s => s === 'rendering').length
+    const thinkingCount = states.filter(s => s === 'thinking').length
+    const idleCount = states.filter(s => s === 'floor' || s === 'ambient').length
+    const workingCount = activeCount - idleCount
+
+    // Blocked task count from DB
+    let blockedTasks = 0
+    let pendingDecisions = 0
+    try {
+      const db = getDb()
+      const row = db.prepare(`SELECT COUNT(*) as n FROM tasks WHERE status = 'blocked'`).get() as { n: number }
+      blockedTasks = row?.n ?? 0
+      const drow = db.prepare(`SELECT COUNT(*) as n FROM tasks WHERE status = 'doing' AND priority IN ('P0','P1')`).get() as { n: number }
+      pendingDecisions = decisionCount + (drow?.n ?? 0)
+    } catch { /* non-fatal */ }
+
+    // tension: 0.0–1.0
+    // Driven by: blocked tasks, urgent agents, unresolved decisions, idle ratio
+    const tensionRaw =
+      (urgentCount * 0.35) +
+      (decisionCount * 0.25) +
+      (Math.min(blockedTasks, 5) * 0.08) +
+      (activeCount > 0 ? (1 - idleCount / activeCount) * 0.10 : 0)
+    const tension = Math.min(1.0, tensionRaw)
+
+    // teamRhythm: the collective feel
+    const teamRhythm: string =
+      urgentCount > 0 ? 'surge' :
+      activeCount === 0 || idleCount === activeCount ? 'quiet' :
+      decisionCount > 0 && workingCount > 0 ? 'tense' :
+      renderingCount + thinkingCount >= Math.max(1, activeCount * 0.6) ? 'flow' :
+      'grinding'
+
+    // dominantState: most "energetic" state present
+    const dominantState: string =
+      urgentCount > 0 ? 'urgent' :
+      decisionCount > 0 ? 'decision' :
+      renderingCount > 0 ? 'rendering' :
+      thinkingCount > 0 ? 'thinking' :
+      workingCount > 0 ? 'working' :
+      'idle'
+
+    // ambientPulse: background breathing rate
+    const ambientPulse: string =
+      teamRhythm === 'surge' ? 'fast' :
+      teamRhythm === 'flow' ? 'normal' :
+      teamRhythm === 'tense' ? 'slow' :
+      'slow'
+
+    // Dominant agent identity color (most active non-floor agent)
+    let dominantColor = '#60a5fa' // default link blue
+    for (const [agentId, entry] of canvasStateMap) {
+      if (entry.state !== 'floor' && entry.state !== 'ambient') {
+        dominantColor = AGENT_IDENTITY_COLORS[agentId] ?? dominantColor
+        break
+      }
+    }
+
+    return {
+      mood: {
+        teamRhythm,        // 'quiet' | 'flow' | 'grinding' | 'tense' | 'surge'
+        dominantState,     // most energetic state in the room
+        tension,           // 0.0–1.0
+        ambientPulse,      // 'slow' | 'normal' | 'fast'
+        dominantColor,     // hex — background tint driven by most active agent
+        activeAgents: agentNames,
+        counts: { active: activeCount, urgent: urgentCount, rendering: renderingCount, thinking: thinkingCount, decision: decisionCount, idle: idleCount, blocked: blockedTasks },
+      },
+      generated_at: new Date(now).toISOString(),
+    }
+  })
+
+  // GET /canvas/session/snapshot — resumable session state for cross-device continuity
+  // Returns the minimal snapshot needed for a second surface to resume from the same point.
+  // Spec: /Users/ryan/.openclaw/workspace-pixel/design/interface-os-v0-continuity.html
+  app.get('/canvas/session/snapshot', async (request) => {
+    const query = request.query as { agentId?: string }
+
+    // Determine the "active" agent: explicitly requested, or the most-recently-updated
+    let activeAgentId: string | null = query.agentId ?? null
+    let activeEntry: { state: string; sensors: string | null; payload: unknown; updatedAt: number } | null = null
+
+    if (activeAgentId) {
+      activeEntry = canvasStateMap.get(activeAgentId) ?? null
+    } else {
+      // Pick the most recently updated non-floor agent
+      for (const [id, entry] of canvasStateMap) {
+        if (entry.state !== 'floor') {
+          if (!activeEntry || entry.updatedAt > activeEntry.updatedAt) {
+            activeAgentId = id
+            activeEntry = entry
+          }
+        }
+      }
+    }
+
+    const now = Date.now()
+
+    if (!activeAgentId || !activeEntry) {
+      return {
+        snapshot: null,
+        reason: 'no_active_session',
+        generated_at: new Date(now).toISOString(),
+      }
+    }
+
+    const payload = activeEntry.payload as Record<string, unknown> | null ?? {}
+
+    // Last complete content block from canvas history
+    // getHistory returns Array<{ event: SlotEvent; timestamp: number }>
+    const recentHistory = canvasSlots.getHistory(undefined, 5)
+    const lastContent = recentHistory.length > 0 ? recentHistory[recentHistory.length - 1] : null
+
+    // Active decision payload (if in decision/urgent state)
+    const isDecision = activeEntry.state === 'decision' || activeEntry.state === 'urgent'
+
+    const snapshot = {
+      // Core session identity
+      agent_id: activeAgentId,
+      agent_label: payload.agentLabel ?? activeAgentId,
+      identity_color: AGENT_IDENTITY_COLORS[activeAgentId] ?? '#9ca3af',
+
+      // Canvas state (transferable)
+      canvas_state: activeEntry.state,
+      presence_state: payload.presenceState ?? null,
+      sensors: activeEntry.sensors ?? null,
+
+      // Active task context
+      active_task: payload.activeTask ?? null,
+      progress_pills: (payload as any).progressPills ?? null,
+
+      // Last completed content block (not mid-stream)
+      content_snapshot: lastContent
+        ? { type: lastContent.event.slot, body: lastContent.event.payload, timestamp: lastContent.timestamp }
+        : null,
+
+      // Decision payload — must follow the human to the next surface
+      active_decision: isDecision ? (payload.decision ?? payload.attention ?? null) : null,
+
+      // Attention / approval context
+      attention: payload.attention ?? null,
+
+      // Timing
+      session_age_ms: now - activeEntry.updatedAt,
+      updated_at: new Date(activeEntry.updatedAt).toISOString(),
+      generated_at: new Date(now).toISOString(),
+
+      // Handoff metadata
+      handoff: {
+        // Sensor consent is per-device — new device must re-consent
+        sensor_consent_transferred: false,
+        // In-progress streams cannot freeze — target joins at next complete block
+        stream_in_progress: activeEntry.state === 'rendering',
+        // Summary for handoff banner (e.g. "Agent is rendering a code review")
+        summary: (() => {
+          const name = payload.agentLabel ?? activeAgentId
+          if (activeEntry!.state === 'rendering') return `${name} is rendering${payload.activeTask ? ` — ${(payload.activeTask as any).title}` : ''}`
+          if (activeEntry!.state === 'decision' || activeEntry!.state === 'urgent') return `${name} needs a decision`
+          if (activeEntry!.state === 'thinking') return `${name} is thinking`
+          if (activeEntry!.state === 'waiting') return `${name} is waiting`
+          return `${name} is active`
+        })(),
+      },
+    }
+
+    return { snapshot, generated_at: snapshot.generated_at }
   })
 
   // GET /canvas/history — recent render history
