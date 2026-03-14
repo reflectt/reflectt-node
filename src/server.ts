@@ -14860,6 +14860,7 @@ If your heartbeat shows **no active task** and **no next task**:
         createdBy: 'system',
         priority: 'P2',
         metadata: {
+          eta: '5m',
           lane: 'workflow',
           source: 'workflow-regression',
           reflection_exempt: true,
