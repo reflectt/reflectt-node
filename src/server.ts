@@ -9399,6 +9399,96 @@ export async function createServer(): Promise<FastifyInstance> {
     return { slots: canvasSlots.getAll() }
   })
 
+  // GET /canvas/team/mood — derived collective mood of all active agents
+  // Not numbers. Mood. Rhythm. Tension. Used by living canvas to shift background atmosphere.
+  app.get('/canvas/team/mood', async () => {
+    const now = Date.now()
+    const STALE_MS = 10 * 60 * 1000 // ignore agents silent >10m
+
+    const states: string[] = []
+    const agentNames: string[] = []
+
+    for (const [agentId, entry] of canvasStateMap) {
+      if (now - entry.updatedAt > STALE_MS) continue
+      states.push(entry.state)
+      agentNames.push(agentId)
+    }
+
+    const activeCount = states.length
+    const urgentCount = states.filter(s => s === 'urgent').length
+    const decisionCount = states.filter(s => s === 'decision').length
+    const renderingCount = states.filter(s => s === 'rendering').length
+    const thinkingCount = states.filter(s => s === 'thinking').length
+    const idleCount = states.filter(s => s === 'floor' || s === 'ambient').length
+    const workingCount = activeCount - idleCount
+
+    // Blocked task count from DB
+    let blockedTasks = 0
+    let pendingDecisions = 0
+    try {
+      const db = getDb()
+      const row = db.prepare(`SELECT COUNT(*) as n FROM tasks WHERE status = 'blocked'`).get() as { n: number }
+      blockedTasks = row?.n ?? 0
+      const drow = db.prepare(`SELECT COUNT(*) as n FROM tasks WHERE status = 'doing' AND priority IN ('P0','P1')`).get() as { n: number }
+      pendingDecisions = decisionCount + (drow?.n ?? 0)
+    } catch { /* non-fatal */ }
+
+    // tension: 0.0–1.0
+    // Driven by: blocked tasks, urgent agents, unresolved decisions, idle ratio
+    const tensionRaw =
+      (urgentCount * 0.35) +
+      (decisionCount * 0.25) +
+      (Math.min(blockedTasks, 5) * 0.08) +
+      (activeCount > 0 ? (1 - idleCount / activeCount) * 0.10 : 0)
+    const tension = Math.min(1.0, tensionRaw)
+
+    // teamRhythm: the collective feel
+    const teamRhythm: string =
+      urgentCount > 0 ? 'surge' :
+      activeCount === 0 || idleCount === activeCount ? 'quiet' :
+      decisionCount > 0 && workingCount > 0 ? 'tense' :
+      renderingCount + thinkingCount >= Math.max(1, activeCount * 0.6) ? 'flow' :
+      'grinding'
+
+    // dominantState: most "energetic" state present
+    const dominantState: string =
+      urgentCount > 0 ? 'urgent' :
+      decisionCount > 0 ? 'decision' :
+      renderingCount > 0 ? 'rendering' :
+      thinkingCount > 0 ? 'thinking' :
+      workingCount > 0 ? 'working' :
+      'idle'
+
+    // ambientPulse: background breathing rate
+    const ambientPulse: string =
+      teamRhythm === 'surge' ? 'fast' :
+      teamRhythm === 'flow' ? 'normal' :
+      teamRhythm === 'tense' ? 'slow' :
+      'slow'
+
+    // Dominant agent identity color (most active non-floor agent)
+    let dominantColor = '#60a5fa' // default link blue
+    for (const [agentId, entry] of canvasStateMap) {
+      if (entry.state !== 'floor' && entry.state !== 'ambient') {
+        dominantColor = AGENT_IDENTITY_COLORS[agentId] ?? dominantColor
+        break
+      }
+    }
+
+    return {
+      mood: {
+        teamRhythm,        // 'quiet' | 'flow' | 'grinding' | 'tense' | 'surge'
+        dominantState,     // most energetic state in the room
+        tension,           // 0.0–1.0
+        ambientPulse,      // 'slow' | 'normal' | 'fast'
+        dominantColor,     // hex — background tint driven by most active agent
+        activeAgents: agentNames,
+        counts: { active: activeCount, urgent: urgentCount, rendering: renderingCount, thinking: thinkingCount, decision: decisionCount, idle: idleCount, blocked: blockedTasks },
+      },
+      generated_at: new Date(now).toISOString(),
+    }
+  })
+
   // GET /canvas/session/snapshot — resumable session state for cross-device continuity
   // Returns the minimal snapshot needed for a second surface to resume from the same point.
   // Spec: /Users/ryan/.openclaw/workspace-pixel/design/interface-os-v0-continuity.html
