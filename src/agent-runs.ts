@@ -725,6 +725,64 @@ export function listApprovalQueue(opts?: {
   return items
 }
 
+/**
+ * Notify a reviewer via their agent run when a task enters validating.
+ * Gets or creates the reviewer's current run, appends a review_requested
+ * event, and sets the run status to waiting_review.
+ *
+ * Task: task-review-run-wire
+ */
+export function notifyReviewerViaRun(task: {
+  id: string
+  title: string
+  reviewer: string
+  assignee?: string | null
+  metadata?: Record<string, unknown>
+  teamId?: string | null
+}): AgentRun {
+  const teamId = task.teamId ?? 'default'
+
+  // Get or create reviewer's current run
+  let run = getActiveAgentRun(task.reviewer, teamId)
+  if (!run) {
+    run = createAgentRun(task.reviewer, teamId, 'pending reviews')
+  }
+
+  // Extract pr_url from metadata
+  const meta = task.metadata ?? {}
+  const prUrl = (meta.pr_url as string | undefined)
+    ?? ((meta.review_handoff as Record<string, unknown> | undefined)?.pr_url as string | undefined)
+    ?? ((meta.qa_bundle as Record<string, unknown> | undefined)?.pr_url as string | undefined)
+    ?? null
+
+  // Extract qa_bundle summary
+  const qaBundle = meta.qa_bundle as Record<string, unknown> | undefined
+  const qaBundleSummary = ((qaBundle?.summary ?? qaBundle?.description) as string | undefined) ?? null
+
+  // Append review_requested event to reviewer's run
+  appendAgentEvent({
+    agentId: task.reviewer,
+    runId: run.id,
+    eventType: 'review_requested',
+    payload: {
+      task_id: task.id,
+      task_title: task.title,
+      pr_url: prUrl,
+      assignee: task.assignee ?? null,
+      action_required: 'review',
+      urgency: 'normal',
+      qa_bundle_summary: qaBundleSummary,
+      rationale: {
+        choice: `Review requested for task ${task.id}: ${task.title}`,
+      },
+    },
+  })
+
+  // Set run to waiting_review
+  const updated = updateAgentRun(run.id, { status: 'waiting_review' })
+  return updated ?? run
+}
+
 export function submitApprovalDecision(opts: {
   eventId: string
   decision: 'approve' | 'reject'

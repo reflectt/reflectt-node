@@ -8951,6 +8951,23 @@ export async function createServer(): Promise<FastifyInstance> {
         }).catch(() => {}) // Non-blocking
       }
 
+      // ── Reviewer run event: append review_requested to reviewer's agent run ──
+      if (parsed.status === 'validating' && existing.status !== 'validating' && existing.reviewer) {
+        const { notifyReviewerViaRun } = await import('./agent-runs.js')
+        try {
+          notifyReviewerViaRun({
+            id: task.id,
+            title: task.title,
+            reviewer: existing.reviewer,
+            assignee: task.assignee,
+            metadata: task.metadata as Record<string, unknown> | undefined,
+            teamId: task.teamId,
+          })
+        } catch (err) {
+          console.warn('[ReviewRun] Failed to notify reviewer via run:', (err as Error).message)
+        }
+      }
+
       // ── Activation funnel: track first_task_started / first_task_completed ──
       {
         const funnelUserId = (task.metadata as any)?.userId || task.assignee || ''
@@ -16708,6 +16725,17 @@ If your heartbeat shows **no active task** and **no next task**:
     const run = getActiveAgentRun(agentId, teamId)
     if (!run) return reply.code(404).send({ error: 'No active run' })
     return run
+  })
+
+  // GET /agents/:agentId/runs/current/pending-reviews
+  // Returns all review_requested events for the agent that have no matching review_approved/rejected.
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/runs/current/pending-reviews', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { limit?: string }
+    const { listPendingApprovals } = await import('./agent-runs.js')
+    const limit = query.limit ? parseInt(query.limit, 10) : undefined
+    const pending = listPendingApprovals({ agentId, limit })
+    return { agentId, pending }
   })
 
   // Append an event
