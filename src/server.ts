@@ -11071,6 +11071,64 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, card: { ...card, agentId: responderId, agentColor } }
   })
 
+  // POST /canvas/push — agent self-initiates a canvas event without a human query.
+  // Agents call this to surface their own work: utterances that float from their orb,
+  // release pulses when something ships, handoff arcs when work moves between agents.
+  // All events emit on the pulse SSE stream as canvas_push for the browser to render.
+  //
+  // pixel spec: design/canvas-as-ours.html
+  //
+  // Body:
+  //   type: 'utterance' | 'work_released' | 'handoff'
+  //   agentId: string
+  //   text?: string              (utterance: max 60 chars; work_released: optional label)
+  //   ttl?: number               (utterance: default 4000ms)
+  //   intensity?: number 0–1     (work_released: effort weight; default 0.6)
+  //   toAgentId?: string         (handoff: receiving agent)
+  //   taskTitle?: string         (handoff + work_released: what moved)
+  app.post('/canvas/push', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const type = typeof body.type === 'string' ? body.type : 'utterance'
+    const agentId = typeof body.agentId === 'string' ? body.agentId.toLowerCase() : 'agent'
+
+    const VALID_PUSH_TYPES = new Set(['utterance', 'work_released', 'handoff'])
+    if (!VALID_PUSH_TYPES.has(type)) {
+      reply.status(400)
+      return { success: false, message: `type must be one of: ${[...VALID_PUSH_TYPES].join(', ')}` }
+    }
+
+    const now = Date.now()
+
+    let payload: Record<string, unknown> = { type, agentId, t: now }
+
+    if (type === 'utterance') {
+      const raw = typeof body.text === 'string' ? body.text.trim() : ''
+      const text = raw.slice(0, 60)  // max 60 chars per spec
+      const ttl = typeof body.ttl === 'number' && body.ttl > 0 ? Math.min(body.ttl, 15_000) : 4_000
+      payload = { ...payload, text, ttl }
+    } else if (type === 'work_released') {
+      const text = typeof body.text === 'string' ? body.text.slice(0, 80) : 'work shipped'
+      const intensity = typeof body.intensity === 'number'
+        ? Math.min(1, Math.max(0.1, body.intensity)) : 0.6
+      const taskTitle = typeof body.taskTitle === 'string' ? body.taskTitle : undefined
+      payload = { ...payload, text, intensity, taskTitle }
+    } else if (type === 'handoff') {
+      const toAgentId = typeof body.toAgentId === 'string' ? body.toAgentId.toLowerCase() : ''
+      if (!toAgentId) {
+        reply.status(400)
+        return { success: false, message: 'handoff requires toAgentId' }
+      }
+      const taskTitle = typeof body.taskTitle === 'string' ? body.taskTitle : undefined
+      const text = typeof body.text === 'string' ? body.text.slice(0, 80) : undefined
+      payload = { ...payload, toAgentId, taskTitle, text }
+    }
+
+    // Emit on eventBus — forwarded immediately on pulse SSE stream
+    eventBus.emit({ id: `push-${now}-${Math.random().toString(36).slice(2, 6)}`, type: 'canvas_push', timestamp: now, data: payload })
+
+    return { success: true, type, agentId }
+  })
+
   // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
   // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
   // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
@@ -11160,7 +11218,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const listenerId = `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     eventBus.on(listenerId, (event) => {
       if (closed) return
-      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression' && event.type !== 'canvas_message') return
+      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression' && event.type !== 'canvas_message' && event.type !== 'canvas_push') return
       try {
         reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event.data as object, t: event.timestamp })}\n\n`)
       } catch { closed = true }

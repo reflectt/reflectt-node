@@ -29,7 +29,8 @@ export type EventType =
   | 'canvas_spark'      // agent-to-agent arc (collaboration, handoff, decision)
   | 'canvas_milestone'  // completion moment — task done, PR merged, streak broken
   | 'canvas_expression' // Reality Mixer — agent fires multi-channel expression (voice+visual+haptic+sound+text)
-  | 'canvas_message'   // human query response — typed card (tasks/info/revenue/onboarding) shown in canvas
+  | 'canvas_message'   // typed visual card — response to human query (tasks/info/revenue/onboarding)
+  | 'canvas_push'      // agent self-initiates canvas event without human query (utterance/work_released/handoff)
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -47,6 +48,7 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'canvas_milestone',
   'canvas_expression',
   'canvas_message',
+  'canvas_push',
 ])
 
 export interface Event {
@@ -221,7 +223,7 @@ class EventBus {
     }
 
     // Canvas events bypass batching — flush immediately for sub-100ms render latency
-    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression', 'canvas_message'])
+    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression', 'canvas_message', 'canvas_push'])
     if (IMMEDIATE_TYPES.has(event.type)) {
       if (this.batchTimer) { clearTimeout(this.batchTimer); this.batchTimer = null }
       this.pendingEvents.push(event)
