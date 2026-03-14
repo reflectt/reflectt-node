@@ -2253,7 +2253,7 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 60 * 1000)
   cadenceWatchdogTimer.unref()
 
-  // Mention rescue fallback (if Ryan mentions trio and no response arrives)
+  // Mention rescue fallback (if user mentions trio and no response arrives)
   const mentionRescueTimer = setInterval(() => {
     if (isQuietHours(Date.now())) return
     healthMonitor.runMentionRescueTick().catch(() => {})
@@ -6474,7 +6474,7 @@ export async function createServer(): Promise<FastifyInstance> {
         eta: '~2h',
         priority: 'P1',
         createdBy: 'kai',
-        metadata: { source: 'Ryan dogfooding Feb 16' },
+        metadata: { source: 'internal-dogfooding-feb-16' },
       },
     },
     feature: {
@@ -9873,7 +9873,7 @@ export async function createServer(): Promise<FastifyInstance> {
   }))
 
   // GET /canvas/slots — current active slots
-  // POST /canvas/gaze — client fires when Ryan holds cursor/gaze on an agent orb for ≥3 seconds.
+  // POST /canvas/gaze — client fires after user holds cursor/gaze on an agent orb for ≥3 seconds.
   // The agent "notices" and responds: generates a one-line thought about what they're doing,
   // fires canvas_expression so the room responds (dim others, speak, show task).
   // Body: { agentId: string, watcherId?: string, durationMs?: number }
@@ -9898,7 +9898,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const activeTask = payload?.activeTask as { title?: string } | undefined
     const currentState = state?.state ?? 'working'
 
-    // Generate a one-line "noticed" response — what the agent would say if they felt Ryan watching
+    // Generate a one-line "noticed" response — what the agent says when the user is watching
     let line = ''
     const anthropicKey = process.env.ANTHROPIC_API_KEY
     if (anthropicKey) {
