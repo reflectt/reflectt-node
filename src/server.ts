@@ -159,6 +159,7 @@ import { createStarterTeam } from './starter-team.js'
 import { bootstrapTeam, type BootstrapTeamRequest } from './bootstrap-team.js'
 import { registerManageRoutes } from './manage.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
+import { runPrLinkReconcileSweep } from './pr-link-reconciler.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
@@ -13565,6 +13566,36 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   // ── Scope Overlap Scanner ──────────────────────────────────────────
+  // POST /pr-link-reconciler/sweep — manually trigger a PR-link reconcile sweep
+  // Stamps canonical_pr + canonical_commit for validating tasks whose PRs have merged.
+  app.post('/pr-link-reconciler/sweep', async (_request, reply) => {
+    try {
+      const result = runPrLinkReconcileSweep({
+        getValidatingTasks: () => taskManager.listTasks({ status: 'validating' }),
+        patchTaskMetadata: (taskId, patch) => taskManager.patchTaskMetadata(taskId, patch),
+      })
+      return { success: true, ...result }
+    } catch (err: unknown) {
+      reply.status(500)
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // GET /pr-link-reconciler/preview — dry-run: show which tasks would be updated
+  app.get('/pr-link-reconciler/preview', async () => {
+    const tasks = taskManager.listTasks({ status: 'validating' })
+    const { extractPrUrl, hasCanonicalRefs } = await import('./pr-link-reconciler.js')
+    const candidates = tasks
+      .map(t => ({
+        taskId: t.id,
+        title: t.title?.slice(0, 60),
+        prUrl: extractPrUrl(t),
+        alreadyCanonical: hasCanonicalRefs(t),
+      }))
+      .filter(c => c.prUrl && !c.alreadyCanonical)
+    return { success: true, candidates, total: candidates.length }
+  })
+
   // POST /scope-overlap — trigger scope overlap scan after a PR merge
   app.post<{ Body: { prNumber: number; prTitle: string; prBranch: string; mergedTaskId?: string; repo?: string; mergeCommit?: string; notify?: boolean } }>('/scope-overlap', async (request) => {
     const { prNumber, prTitle, prBranch, mergedTaskId, repo, mergeCommit, notify } = request.body || {} as any
@@ -16651,6 +16682,34 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // Schedule daily webhook payload purge — removes stored payloads older than 90 days.
   // Dynamic import mirrors the best-effort pattern from the inbound webhook handler (PR #926 caveat resolved).
+  // ── PR-link reconciler: stamp canonical refs on validating tasks with merged PRs ──
+  // Runs at startup + every 30 minutes. Best-effort, never blocks startup.
+  ;(async () => {
+    const PR_RECONCILE_INTERVAL_MS = 30 * 60 * 1000 // 30 min
+
+    function doReconcileSweep() {
+      try {
+        const result = runPrLinkReconcileSweep({
+          getValidatingTasks: () => taskManager.listTasks({ status: 'validating' }),
+          patchTaskMetadata: (taskId, patch) => taskManager.patchTaskMetadata(taskId, patch),
+        })
+        if (result.stamped > 0) {
+          console.log(`[pr-link-reconciler] Swept ${result.swept} validating tasks: ${result.stamped} stamped, ${result.errors} errors (${result.durationMs}ms)`)
+        }
+      } catch (err) {
+        console.warn('[pr-link-reconciler] Sweep error:', err)
+      }
+    }
+
+    // Startup pass after 60s (let server settle first)
+    const startupTimer = setTimeout(doReconcileSweep, 60_000)
+    startupTimer.unref()
+
+    // Recurring sweep
+    const reconcileTimer = setInterval(doReconcileSweep, PR_RECONCILE_INTERVAL_MS)
+    reconcileTimer.unref()
+  })().catch(() => { /* never fail startup */ })
+
   const WEBHOOK_PAYLOAD_RETENTION_DAYS = 90
   ;(async () => {
     try {
