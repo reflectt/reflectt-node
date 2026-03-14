@@ -6439,6 +6439,46 @@ export async function createServer(): Promise<FastifyInstance> {
 
     await taskManager.addTaskComment(task.id, body.reviewer, `[review] ${decisionLabel}: ${body.comment}`)
 
+    // ── Cinematic beat: fire canvas_milestone on task completion ──
+    if (autoTransition && updated) {
+      const completedAt = decidedAt
+      const startedAt = (task.metadata as any)?.started_at as number | undefined
+      const ageMs = completedAt - (task.createdAt ?? completedAt)
+      const doingMs = startedAt ? completedAt - startedAt : 0
+
+      // intensity: age-weighted (30min+ = significant) + doing-duration bonus
+      const ageScore = Math.min(ageMs / (30 * 60 * 1000), 1)           // 30min → 1.0
+      const doingScore = Math.min(doingMs / (60 * 60 * 1000), 0.3)     // 1h doing → +0.3
+      const intensity = Math.min(Math.max(ageScore * 0.7 + doingScore + 0.15, 0.15), 1.0)
+
+      const assigneeId = updated.assignee ?? task.assignee ?? 'link'
+      const MILESTONE_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      const milestoneColor = MILESTONE_COLORS[assigneeId] ?? '#60a5fa'
+
+      setImmediate(() => {
+        eventBus.emit({
+          id: `milestone-${completedAt}-${task.id.slice(-6)}`,
+          type: 'canvas_milestone' as const,
+          timestamp: completedAt,
+          data: {
+            agentId: assigneeId,
+            title: updated.title,
+            taskId: task.id,
+            intensity,
+            ageMs,
+            milestoneColor,
+            channels: {
+              visual: { flash: milestoneColor, particles: intensity > 0.7 ? 'surge' : 'drift' },
+              narrative: `${assigneeId} shipped: ${updated.title?.slice(0, 60) ?? 'task'}`,
+            },
+          },
+        })
+      })
+    }
+
     return {
       success: true,
       decision: {
