@@ -549,14 +549,17 @@ async function main() {
       const { getDb } = await import('./db.js')
       const agents = getAgentRoles()
       if (agents.length > 0) {
-        // 60-second dedup guard: skip if a broadcast was sent within the last 60s
-        const BROADCAST_DEDUP_WINDOW_MS = 60_000
+        // Rate-limit restart broadcasts: suppress if same host fired within 15 minutes.
+        // Prevents cadence degradation on rapid restarts (e.g., crash-loop, deploy churn).
+        // First broadcast always goes through; window resets after RESTART_BROADCAST_COOLDOWN_MS.
+        // task-1773516754378-6pyxtkuzt / SIGNAL-ROUTING Change 1
+        const RESTART_BROADCAST_COOLDOWN_MS = 15 * 60 * 1000 // 15 minutes
         const db = getDb()
         const recentBroadcast = db.prepare(
           "SELECT 1 FROM chat_messages WHERE \"from\" = 'system' AND content LIKE '%Server restarted%' AND timestamp > ? LIMIT 1",
-        ).get(Date.now() - BROADCAST_DEDUP_WINDOW_MS)
+        ).get(Date.now() - RESTART_BROADCAST_COOLDOWN_MS)
         if (recentBroadcast) {
-          console.log('🔔 Auto-wake: skipped (duplicate within 60s)')
+          console.log('🔔 Auto-wake: restart broadcast suppressed (rate-limit: 1 per 15 min)')
         } else {
           // Seed presence so idle-nudge system has agents to evaluate
           for (const agent of agents) {
