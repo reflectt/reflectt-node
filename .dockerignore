@@ -5,7 +5,7 @@ data
 .env
 *.md
 !README.md
-tools
+# tools/ is intentionally included — bake-commit.mjs is called by npm run build
 test
 tests
 *.test.ts
