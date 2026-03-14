@@ -54,6 +54,110 @@ interface PendingNudge {
 const pendingNudges: PendingNudge[] = []
 const lastNudgeAt: Record<string, number> = {}
 
+// Dedup guards for tiered escalation (SIGNAL-ROUTING Change 2)
+// mention fires at most once per 24h per agent; escalate at most once per 48h.
+// task-1773525631162-cjxch4mrz
+const mentionLastAt: Record<string, number> = {}
+const escalateLastAt: Record<string, number> = {}
+const MENTION_DEDUP_MS = 24 * 60 * 60 * 1000
+const ESCALATE_DEDUP_MS = 48 * 60 * 60 * 1000
+
+export type ReflectionTier = 'none' | 'digest' | 'mention' | 'escalate' | 'immediate'
+
+/**
+ * 4-tier reflection reminder decision per SIGNAL-ROUTING Change 2 spec.
+ *
+ * | Overdue    | Tier      | Channel |
+ * |------------|-----------|---------|
+ * | < 14h      | none      | —       |
+ * | 14h–24h    | digest    | #ops (batched, no @mention) |
+ * | 24h–48h    | mention   | #ops with @mention, once per 24h |
+ * | 48h+       | escalate  | #ops with @kai, once per 48h |
+ * | post-task  | immediate | #general direct to agent |
+ */
+export function getReflectionTier(
+  agent: string,
+  lastReflectionAt: number,
+  justCompletedTask: boolean,
+  nowMs = Date.now(),
+): ReflectionTier {
+  if (justCompletedTask) return 'immediate'
+
+  const overdueMs = nowMs - lastReflectionAt
+  const overdueHours = overdueMs / (1000 * 60 * 60)
+
+  if (overdueHours < 14) return 'none'
+  if (overdueHours < 24) return 'digest'
+
+  if (overdueHours < 48) {
+    // mention: dedup to once per 24h
+    const lastMention = mentionLastAt[agent] ?? 0
+    if (nowMs - lastMention < MENTION_DEDUP_MS) return 'none'
+    mentionLastAt[agent] = nowMs // record on selection so dispatch doesn't double-set
+    return 'mention'
+  }
+
+  // escalate: dedup to once per 48h
+  const lastEscalate = escalateLastAt[agent] ?? 0
+  if (nowMs - lastEscalate < ESCALATE_DEDUP_MS) return 'none'
+  escalateLastAt[agent] = nowMs // record on selection
+  return 'escalate'
+}
+
+/** Exposed for tests — reset dedup state between test runs */
+export function _resetTierDedupForTest(): void {
+  for (const k of Object.keys(mentionLastAt)) delete mentionLastAt[k]
+  for (const k of Object.keys(escalateLastAt)) delete escalateLastAt[k]
+}
+
+/**
+ * Dispatch a reflection reminder based on the computed tier.
+ * digest → batchNag (existing batch-before-post gate, Change 4)
+ * mention/escalate → immediate routeMessage to #ops
+ * immediate → routeMessage to #general direct to agent
+ */
+export async function dispatchReflectionTier(
+  agent: string,
+  tier: ReflectionTier,
+  hoursSince: number,
+  lastReflectionAt: number,
+  config: ReflectionNudgeConfig,
+): Promise<void> {
+  const opsChannel = 'ops'
+  const now = Date.now()
+
+  switch (tier) {
+    case 'none':
+      return
+
+    case 'digest':
+      // Add to ops batch — batchNag handles flush (Change 4)
+      batchNag(opsChannel, `@${agent}: reflection ${hoursSince}h overdue — submit when you can`)
+      return
+
+    case 'mention': {
+      // mentionLastAt already set in getReflectionTier
+      const msg = `🪞 @${agent} reflection overdue ${hoursSince}h — submit when you have a moment. POST /reflections.`
+      await routeMessage({ from: 'system', content: msg, category: 'watchdog-alert', severity: 'warning', forceChannel: opsChannel }).catch(() => {})
+      return
+    }
+
+    case 'escalate': {
+      // escalateLastAt already set in getReflectionTier
+      const lastDate = lastReflectionAt > 0 ? new Date(lastReflectionAt).toISOString().slice(0, 10) : 'never'
+      const msg = `🚨 @kai @${agent} reflection overdue ${hoursSince}h. Last reflection: ${lastDate}. Needs attention.`
+      await routeMessage({ from: 'system', content: msg, category: 'watchdog-alert', severity: 'critical', forceChannel: opsChannel }).catch(() => {})
+      return
+    }
+
+    case 'immediate': {
+      const msg = `🪞 @${agent} task complete — good moment to reflect. POST /reflections.`
+      batchNag(config.channel || 'general', msg)
+      return
+    }
+  }
+}
+
 /** Running guard — prevents concurrent tick calls from firing duplicate nudges */
 let _tickRunning = false
 
@@ -239,21 +343,25 @@ async function _doTick(): Promise<{
     }
 
     if (shouldNudge) {
-      await sendIdleNudge(agent, hoursSinceDisplay, tracking?.tasks_done_since_reflection || 0, config)
-      lastNudgeAt[agent] = now
+      // 4-tier dispatch per SIGNAL-ROUTING Change 2
+      const tier = getReflectionTier(agent, lastReflection, false, now)
+      if (tier !== 'none') {
+        await dispatchReflectionTier(agent, tier, hoursSinceDisplay, lastReflection, config)
+        lastNudgeAt[agent] = now
 
-      // Record nudge in DB
-      ensureReflectionTrackingTable()
-      const db = getDb()
-      db.prepare(`
-        INSERT INTO reflection_tracking (agent, last_nudge_at, tasks_done_since_reflection, updated_at)
-        VALUES (?, ?, 0, ?)
-        ON CONFLICT(agent) DO UPDATE SET
-          last_nudge_at = ?,
-          updated_at = ?
-      `).run(agent, now, now, now, now)
+        // Record nudge in DB
+        ensureReflectionTrackingTable()
+        const db = getDb()
+        db.prepare(`
+          INSERT INTO reflection_tracking (agent, last_nudge_at, tasks_done_since_reflection, updated_at)
+          VALUES (?, ?, 0, ?)
+          ON CONFLICT(agent) DO UPDATE SET
+            last_nudge_at = ?,
+            updated_at = ?
+        `).run(agent, now, now, now, now)
 
-      idleNudges++
+        idleNudges++
+      }
     }
   }
 
