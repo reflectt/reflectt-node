@@ -25,6 +25,8 @@ export type EventType =
   | 'insight_created'
   | 'canvas_input'
   | 'canvas_render'
+  | 'canvas_burst'   // dramatic state transition burst (thought_manifest, urgency_spike, tension_release…)
+  | 'canvas_spark'   // agent-to-agent arc (collaboration, handoff, decision)
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -37,6 +39,8 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'insight_created',
   'canvas_input',
   'canvas_render',
+  'canvas_burst',
+  'canvas_spark',
 ])
 
 export interface Event {
