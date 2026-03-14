@@ -2347,6 +2347,24 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 60 * 1000)
   reflectionPipelineTimer.unref()
 
+  // Webhook payload retention: purge processed payloads older than 90 days.
+  // Runs once at startup then every 24 hours. Only processes payloads with processed=1.
+  const WEBHOOK_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
+  const WEBHOOK_RETENTION_DAYS = parseInt(process.env.WEBHOOK_RETENTION_DAYS ?? '90', 10)
+  const runWebhookPurge = () => {
+    import('./webhook-storage.js').then(({ purgeOldPayloads }) => {
+      try {
+        const deleted = purgeOldPayloads(WEBHOOK_RETENTION_DAYS)
+        if (deleted > 0) {
+          console.log(`[webhook-purge] Purged ${deleted} processed payload(s) older than ${WEBHOOK_RETENTION_DAYS} days`)
+        }
+      } catch { /* non-fatal — storage may not be initialised yet on first tick */ }
+    }).catch(() => { /* module unavailable — skip */ })
+  }
+  runWebhookPurge() // eager first run on startup
+  const webhookPurgeTimer = setInterval(runWebhookPurge, WEBHOOK_PURGE_INTERVAL_MS)
+  webhookPurgeTimer.unref()
+
   // Load unified policy config (file + env overrides)
   const policy = policyManager.load()
 
@@ -16521,6 +16539,22 @@ If your heartbeat shows **no active task** and **no next task**:
   runRetentionTimer.unref()
   // Run once at startup to archive any stale runs immediately
   try { applyRunRetention({ policy: { maxAgeDays: serverConfig.runRetentionDays } }) } catch { /* non-fatal */ }
+
+  // Schedule daily webhook payload purge — removes stored payloads older than 90 days.
+  // Dynamic import mirrors the best-effort pattern from the inbound webhook handler (PR #926 caveat resolved).
+  const WEBHOOK_PAYLOAD_RETENTION_DAYS = 90
+  ;(async () => {
+    try {
+      const { purgeOldPayloads } = await import('./webhook-storage.js')
+      // Run at startup
+      try { purgeOldPayloads(WEBHOOK_PAYLOAD_RETENTION_DAYS) } catch { /* non-fatal */ }
+      // Then daily
+      const webhookPurgeTimer = setInterval(() => {
+        try { purgeOldPayloads(WEBHOOK_PAYLOAD_RETENTION_DAYS) } catch { /* non-fatal */ }
+      }, 24 * 60 * 60 * 1000)
+      webhookPurgeTimer.unref()
+    } catch { /* webhook-storage not available — skip */ }
+  })().catch(() => { /* outer non-fatal */ })
 
   // GET /runs/retention/stats — preview what retention policy would do
   app.get('/runs/retention/stats', async (request) => {
