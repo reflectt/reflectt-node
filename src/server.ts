@@ -9532,6 +9532,10 @@ export async function createServer(): Promise<FastifyInstance> {
     const { state, sensors, agentId, payload } = result.data
     const now = Date.now()
 
+    // Detect dramatic state transitions → emit spark burst
+    const prev = canvasStateMap.get(agentId)
+    const prevState = prev?.state ?? 'floor'
+
     // Store current state
     canvasStateMap.set(agentId, { state, sensors, payload, updatedAt: now })
 
@@ -9542,6 +9546,51 @@ export async function createServer(): Promise<FastifyInstance> {
       timestamp: now,
       data: { state, sensors, agentId, payload },
     })
+
+    // Emit canvas_burst on dramatic transitions (thought manifesting, urgency breaking, etc.)
+    const BURST_TRANSITIONS: Array<[string, string, string, number]> = [
+      // [from, to, kind, intensity]
+      ['thinking', 'rendering', 'thought_manifest', 0.9],
+      ['working',  'rendering', 'output_burst',     0.7],
+      ['thinking', 'decision',  'decision_emerge',  0.85],
+      ['floor',    'urgent',    'urgency_spike',     1.0],
+      ['ambient',  'urgent',    'urgency_spike',     1.0],
+      ['working',  'urgent',    'urgency_spike',     1.0],
+      ['decision', 'working',   'decision_resolved', 0.75],
+      ['urgent',   'working',   'tension_release',   0.8],
+      ['urgent',   'floor',     'tension_release',   0.8],
+    ]
+    for (const [from, to, kind, intensity] of BURST_TRANSITIONS) {
+      if (prevState === from && state === to) {
+        eventBus.emit({
+          id: `cburst-${now}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'canvas_burst' as const,
+          timestamp: now,
+          data: { agentId, from: prevState, to: state, kind, intensity },
+        })
+        break
+      }
+    }
+
+    // Auto-detect collaboration: if another agent is on the same active task, emit a spark arc
+    const activeTaskId = (payload as Record<string, unknown>).activeTask
+      ? ((payload as any).activeTask as { id?: string }).id
+      : null
+    if (activeTaskId) {
+      for (const [otherId, otherEntry] of canvasStateMap) {
+        if (otherId === agentId) continue
+        const otherPayload = otherEntry.payload as Record<string, unknown>
+        const otherTaskId = (otherPayload as any)?.activeTask?.id
+        if (otherTaskId === activeTaskId && now - otherEntry.updatedAt < 5 * 60 * 1000) {
+          eventBus.emit({
+            id: `cspark-${now}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'canvas_spark' as const,
+            timestamp: now,
+            data: { from: agentId, to: otherId, taskId: activeTaskId, intensity: 0.7, kind: 'collaboration' },
+          })
+        }
+      }
+    }
 
     // Trigger immediate cloud sync for real-time presence
     requestImmediateCanvasSync()
@@ -9887,6 +9936,33 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // POST /canvas/spark — explicit agent-to-agent arc (thought hand-off, handshake, collab signal)
+  // Body: { from: agentId, to: agentId, kind: 'thought'|'handoff'|'collab'|'decision', intensity?: 0–1, label?: string }
+  app.post('/canvas/spark', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const from = typeof body.from === 'string' ? body.from.trim() : ''
+    const to   = typeof body.to   === 'string' ? body.to.trim()   : ''
+    const kind = ['thought', 'handoff', 'collab', 'decision', 'sync'].includes(body.kind as string)
+      ? (body.kind as string) : 'thought'
+    const intensity = typeof body.intensity === 'number' ? Math.min(1, Math.max(0, body.intensity)) : 0.7
+    const label = typeof body.label === 'string' ? body.label.slice(0, 80) : undefined
+
+    if (!from || !to) {
+      reply.status(400)
+      return { success: false, message: 'from and to are required' }
+    }
+
+    const now = Date.now()
+    eventBus.emit({
+      id: `cspark-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_spark' as const,
+      timestamp: now,
+      data: { from, to, kind, intensity, label: label ?? null },
+    })
+
+    return { success: true, from, to, kind, intensity }
+  })
+
   // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
   // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
   // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
@@ -9972,7 +10048,20 @@ export async function createServer(): Promise<FastifyInstance> {
       emitTick()
     }, 2000)
 
-    request.raw.on('close', () => { clearInterval(interval) })
+    // Also forward burst + spark events in real-time (don't wait for next tick)
+    const listenerId = `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    eventBus.on(listenerId, (event) => {
+      if (closed) return
+      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark') return
+      try {
+        reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event.data as object, t: event.timestamp })}\n\n`)
+      } catch { closed = true }
+    })
+
+    request.raw.on('close', () => {
+      clearInterval(interval)
+      eventBus.off(listenerId)
+    })
 
     // Keep connection alive — never resolve
     return new Promise<void>(() => {})
