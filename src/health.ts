@@ -278,7 +278,9 @@ export type IdleNudgeDecision = {
     | 'recent-task-comment'
     | 'task-focus-window'
     | 'queue-clear'
+    | 'queue-clear-restart-window'
     | 'eligible'
+    | 'eligible-restart-window'
   lane: IdleNudgeLaneState
   renderedMessage: string | null
   at: number
@@ -309,6 +311,26 @@ class TeamHealthMonitor {
   private readonly leadCadenceMaxMin = 60
   private readonly blockedEscalationMin = 20
   private readonly trioSilenceMaxMin = 60
+
+  // ── Restart window tracker — SIGNAL-ROUTING Change 3 ─────────────────
+  // Idle escalations are downgraded (no @owner tag) during restart bursts.
+  // Uses same chat_messages DB pattern as Change 1 restart rate-limit.
+  // task-1773528961567-b3leu2g27
+  private readonly RESTART_WINDOW_MS = 30 * 60 * 1000   // 30-minute window
+  private readonly RESTART_BURST_THRESHOLD = 2            // ≥2 restarts = in-window
+
+  private isInRestartWindow(): boolean {
+    try {
+      const db = getDb()
+      const cutoff = Date.now() - this.RESTART_WINDOW_MS
+      const row = db.prepare(
+        "SELECT COUNT(*) as cnt FROM chat_messages WHERE \"from\" = 'system' AND content LIKE '%Server restarted%' AND timestamp > ?",
+      ).get(cutoff) as { cnt: number } | undefined
+      return (row?.cnt ?? 0) >= this.RESTART_BURST_THRESHOLD
+    } catch {
+      return false // safe default: don't suppress if DB unavailable
+    }
+  }
 
   // System idle nudge settings (configurable via env)
   private readonly idleNudgeEnabled = process.env.IDLE_NUDGE_ENABLED !== 'false'
@@ -2010,9 +2032,15 @@ class TeamHealthMonitor {
           continue
         }
 
-        const intro = tier === 1
-          ? `@${agent} system reminder: you appear idle for ${inactivityMin}m and have no active task. Pull work now.`
-          : `@${agent} @owner system escalation: ${inactivityMin}m idle and no active task. Pull work now.`
+        // Restart-window gate: downgrade escalation during burst restarts (SIGNAL-ROUTING Change 3)
+        // ≥2 restarts in 30min → strip @owner/@kai mentions, label as possibly false-positive
+        const inRestartWindow = this.isInRestartWindow()
+
+        const intro = inRestartWindow
+          ? `@${agent} [idle-info, restart-window-active — may be false-positive] idle for ${inactivityMin}m with no active task.`
+          : tier === 1
+            ? `@${agent} system reminder: you appear idle for ${inactivityMin}m and have no active task. Pull work now.`
+            : `@${agent} @owner system escalation: ${inactivityMin}m idle and no active task. Pull work now.`
 
         const template = [
           `1) Pull: GET /tasks/next?agent=${agent}`,
@@ -2020,12 +2048,14 @@ class TeamHealthMonitor {
           '3) Post: /tasks/<id>/comments with 1) shipped 2) blocker 3) next+ETA',
         ].join('\n')
 
-        const renderedMessage = `${intro}\n${template}`
+        const renderedMessage = inRestartWindow
+          ? intro  // no action template during restart window — informational only
+          : `${intro}\n${template}`
 
         decisions.push({
           ...baseDecision,
-          decision: tier === 1 ? 'warn' : 'escalate',
-          reason: 'queue-clear',
+          decision: inRestartWindow ? 'warn' : (tier === 1 ? 'warn' : 'escalate'),
+          reason: inRestartWindow ? 'queue-clear-restart-window' : 'queue-clear',
           renderedMessage,
         })
 
@@ -2037,8 +2067,9 @@ class TeamHealthMonitor {
           from: 'system',
           content: renderedMessage,
           category: 'watchdog-alert',
-          severity: tier === 2 ? 'warning' : 'info',
-          mentions: tier === 2 ? [agent, 'kai'] : [agent],
+          // During restart window: downgrade to info, no @owner escalation
+          severity: (!inRestartWindow && tier === 2) ? 'warning' : 'info',
+          mentions: inRestartWindow ? [agent] : (tier === 2 ? [agent, 'kai'] : [agent]),
         })
 
         const unchangedNudgeCount = state && state.lastSignature === signature
@@ -2092,16 +2123,21 @@ class TeamHealthMonitor {
         continue
       }
 
+      // Restart-window gate: downgrade escalation during burst restarts (SIGNAL-ROUTING Change 3)
+      const inRestartWindow = this.isInRestartWindow()
+
       // ETA-only escalation: after 2 repeated status updates without artifacts,
       // require artifact link or explicit blocker, else flag for reassignment
       const etaOnlyCount = this.countRecentEtaOnlyUpdates(messages, agent, taskId)
       const needsArtifact = etaOnlyCount >= 2
 
-      const intro = needsArtifact
-        ? `@${agent} @owner escalation: ${etaOnlyCount} status updates on ${taskId} with no artifact or blocker. Post artifact link or explicit blocker now, or task will be flagged for reassignment.`
-        : tier === 1
-          ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
-          : `@${agent} @owner system escalation: ${inactivityMin}m idle. Post required status format now.`
+      const intro = inRestartWindow
+        ? `@${agent} [idle-info, restart-window-active — may be false-positive] idle for ${inactivityMin}m on ${taskId}.`
+        : needsArtifact
+          ? `@${agent} @owner escalation: ${etaOnlyCount} status updates on ${taskId} with no artifact or blocker. Post artifact link or explicit blocker now, or task will be flagged for reassignment.`
+          : tier === 1
+            ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
+            : `@${agent} @owner system escalation: ${inactivityMin}m idle. Post required status format now.`
 
       const template = needsArtifact
         ? [
@@ -2116,12 +2152,14 @@ class TeamHealthMonitor {
             '3) Next: <next deliverable + ETA>',
           ].join('\n')
 
-      const renderedMessage = `${intro}\n${template}`
+      const renderedMessage = inRestartWindow
+        ? intro  // informational only during restart window
+        : `${intro}\n${template}`
 
       decisions.push({
         ...baseDecision,
-        decision: tier === 1 ? 'warn' : 'escalate',
-        reason: 'eligible',
+        decision: inRestartWindow ? 'warn' : (tier === 1 ? 'warn' : 'escalate'),
+        reason: inRestartWindow ? 'eligible-restart-window' : 'eligible',
         renderedMessage,
       })
 
@@ -2133,9 +2171,10 @@ class TeamHealthMonitor {
         from: 'system',
         content: renderedMessage,
         category: 'watchdog-alert',
-        severity: tier === 2 ? 'warning' : 'info',
+        severity: (!inRestartWindow && tier === 2) ? 'warning' : 'info',
         taskId: taskId || undefined,
-        mentions: tier === 2 ? [agent, 'kai'] : [agent],
+        // During restart window: strip @owner/@kai — informational only
+        mentions: inRestartWindow ? [agent] : (tier === 2 ? [agent, 'kai'] : [agent]),
       })
 
       const unchangedNudgeCount = state && state.lastSignature === signature
