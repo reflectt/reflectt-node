@@ -31,6 +31,7 @@ export type EventType =
   | 'canvas_expression' // Reality Mixer — agent fires multi-channel expression (voice+visual+haptic+sound+text)
   | 'canvas_message'   // typed visual card — response to human query (tasks/info/revenue/onboarding)
   | 'canvas_push'      // agent self-initiates canvas event without human query (utterance/work_released/handoff)
+  | 'canvas_artifact'  // proof artifact drifts through canvas on task/PR completion (commit/pr/test/run/approval)
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -49,6 +50,7 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'canvas_expression',
   'canvas_message',
   'canvas_push',
+  'canvas_artifact',
 ])
 
 export interface Event {
@@ -223,7 +225,7 @@ class EventBus {
     }
 
     // Canvas events bypass batching — flush immediately for sub-100ms render latency
-    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression', 'canvas_message', 'canvas_push'])
+    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression', 'canvas_message', 'canvas_push', 'canvas_artifact'])
     if (IMMEDIATE_TYPES.has(event.type)) {
       if (this.batchTimer) { clearTimeout(this.batchTimer); this.batchTimer = null }
       this.pendingEvents.push(event)
