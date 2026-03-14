@@ -7726,11 +7726,29 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // POST /agent-interface/runs — create and start a new agent action run
   app.post('/agent-interface/runs', async (request, reply) => {
-    const body = request.body as { kind?: string; repo?: string; title?: string; body?: string; dryRun?: boolean }
+    const body = request.body as { kind?: string; repo?: string; title?: string; body?: string; dryRun?: boolean; intent?: Record<string, unknown> }
     if (!body?.kind) { reply.status(400); return { success: false, message: 'kind is required' } }
-    if (body.kind !== 'github_issue_create') { reply.status(400); return { success: false, message: `Unknown kind: ${body.kind}` } }
 
-    const run = createRun('github_issue_create', {
+    const ALLOWED_KINDS = ['github_issue_create', 'macos_ui_action']
+    if (!ALLOWED_KINDS.includes(body.kind)) { reply.status(400); return { success: false, message: `Unknown kind: ${body.kind}. Allowed: ${ALLOWED_KINDS.join(', ')}` } }
+
+    // macos_ui_action: validate intent + kill-switch before creating run
+    if (body.kind === 'macos_ui_action') {
+      const { validateIntent, isKillSwitchEngaged } = await import('./macos-accessibility.js')
+      if (isKillSwitchEngaged()) {
+        reply.status(503); return { success: false, message: 'Kill-switch engaged — macOS accessibility control disabled' }
+      }
+      const intent = body.intent as any
+      const validation = validateIntent(intent ?? {})
+      if (!validation.ok) {
+        reply.status(400); return { success: false, message: validation.reason }
+      }
+    }
+
+    const run = createRun(body.kind as any, body.kind === 'macos_ui_action' ? {
+      intent: body.intent ?? {},
+      dryRun: body.dryRun ?? false,
+    } : {
       repo: body.repo ?? '',
       title: body.title ?? '',
       body: body.body ?? '',
@@ -7777,12 +7795,25 @@ export async function createServer(): Promise<FastifyInstance> {
     })
 
     // Execute async — non-blocking
-    executeGithubIssueCreate(run.id, {
-      repo: body.repo ?? '',
-      title: body.title ?? '',
-      body: body.body ?? '',
-      dryRun: body.dryRun,
-    }).catch(err => { console.error('[agent-interface] run error:', err); runUnsub() })
+    if (body.kind === 'macos_ui_action') {
+      import('./macos-accessibility.js').then(({ executeIntent, requiresApproval }) => {
+        const intent = (body.intent ?? {}) as any
+        // If this intent needs approval, the run is already in awaiting_approval state;
+        // the approval gate will call approveRun which re-invokes execution.
+        if (!requiresApproval(intent)) {
+          import('./agent-interface.js').then(({ executeMacOSUIAction }) => {
+            executeMacOSUIAction(run.id, intent).catch(err => { console.error('[agent-interface] macos run error:', err); runUnsub() })
+          }).catch(() => { console.error('[agent-interface] failed to import executeMacOSUIAction') })
+        }
+      }).catch(() => { console.error('[agent-interface] failed to import macos-accessibility') })
+    } else {
+      executeGithubIssueCreate(run.id, {
+        repo: body.repo ?? '',
+        title: body.title ?? '',
+        body: body.body ?? '',
+        dryRun: body.dryRun,
+      }).catch(err => { console.error('[agent-interface] run error:', err); runUnsub() })
+    }
 
     return reply.code(201).send({ runId: run.id, status: run.status })
   })
@@ -7861,6 +7892,24 @@ export async function createServer(): Promise<FastifyInstance> {
     const ok = rejectRun(request.params.runId)
     if (!ok) { reply.status(409); return { success: false, message: 'No pending approval for this run' } }
     return { success: true, runId: request.params.runId }
+  })
+
+  // POST /agent-interface/kill-switch — instantly disable all macOS accessibility control
+  app.post('/agent-interface/kill-switch', async (request) => {
+    const body = request.body as { engage?: boolean }
+    const { engageKillSwitch, resetKillSwitch, isKillSwitchEngaged } = await import('./macos-accessibility.js')
+    if (body?.engage === false) {
+      resetKillSwitch()
+      return { success: true, killSwitch: false, message: 'Kill-switch reset — macOS accessibility control re-enabled' }
+    }
+    engageKillSwitch()
+    return { success: true, killSwitch: true, message: 'Kill-switch engaged — all macOS accessibility control disabled immediately' }
+  })
+
+  // GET /agent-interface/kill-switch — check kill-switch state
+  app.get('/agent-interface/kill-switch', async () => {
+    const { isKillSwitchEngaged } = await import('./macos-accessibility.js')
+    return { killSwitch: isKillSwitchEngaged() }
   })
 
   // ── Preflight Check endpoint ────────────────────────────────────────

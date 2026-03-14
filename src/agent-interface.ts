@@ -332,3 +332,76 @@ export function _clearRunsForTest(): void {
   subscribers.clear()
   pendingApprovals.clear()
 }
+
+/**
+ * Execute a macOS UI action run.
+ * Handles the awaiting_approval gate for irreversible intents.
+ *
+ * task-1773486840001-u0shj14v3 / task-1773486840036-8x0o76rmp
+ */
+export async function executeMacOSUIAction(
+  runId: string,
+  intent: Record<string, unknown>,
+): Promise<void> {
+  const { executeIntent, requiresApproval, validateIntent } = await import('./macos-accessibility.js')
+
+  // Validate
+  const validation = validateIntent(intent as any)
+  if (!validation.ok) {
+    emit(runId, { type: 'step_failed', timestamp: Date.now(), payload: { step: 'validate', error: validation.reason } })
+    transition(runId, 'failed')
+    return
+  }
+
+  transition(runId, 'running')
+  emit(runId, { type: 'step_started', timestamp: Date.now(), payload: { step: 'validate', action: (intent as any).action } })
+  emit(runId, { type: 'step_succeeded', timestamp: Date.now(), payload: { step: 'validate', action: (intent as any).action } })
+
+  // Irreversible: request approval
+  if (requiresApproval(intent as any)) {
+    transition(runId, 'awaiting_approval')
+    emit(runId, { type: 'approval_requested', timestamp: Date.now(), payload: {
+      message: `macOS action "${(intent as any).action}" requires human approval`,
+    }})
+    // Wait for approval or timeout
+    await new Promise<void>((resolve, reject) => {
+      const TIMEOUT_MS = 10 * 60 * 1000
+      const timer = setTimeout(() => {
+        emit(runId, { type: 'step_failed', timestamp: Date.now(), payload: { step: 'approval', error: 'Approval timeout (10m) — auto-rejected' } })
+        transition(runId, 'failed')
+        reject(new Error('Approval timeout'))
+      }, TIMEOUT_MS)
+      const unsub = subscribeRun(runId, (event) => {
+        if (event.type !== 'state_changed') return
+        const { to } = event.payload as { to: string }
+        if (to === 'running') { clearTimeout(timer); unsub(); resolve() }
+        else if (to === 'failed') { clearTimeout(timer); unsub(); reject(new Error('Run rejected')) }
+      })
+    }).catch(() => { /* handled inline */ })
+
+    // Bail if not running after approval gate
+    const run = runs.get(runId)
+    if (!run || run.status !== 'running') return
+  }
+
+  // Execute
+  emit(runId, { type: 'step_started', timestamp: Date.now(), payload: { step: 'execute', action: (intent as any).action } })
+  const result = await executeIntent(intent as any)
+
+  if (result.ok) {
+    emit(runId, { type: 'step_succeeded', timestamp: Date.now(), payload: {
+      step: 'execute',
+      action: (intent as any).action,
+      output: result.output?.slice(0, 200),
+      stepCount: result.steps.length,
+    }})
+    const run = runs.get(runId)
+    if (run) run.result = { outcome: 'completed', output: result.output, steps: result.steps } as any
+    transition(runId, 'completed')
+  } else {
+    emit(runId, { type: 'step_failed', timestamp: Date.now(), payload: { step: 'execute', error: result.error } })
+    const run = runs.get(runId)
+    if (run) run.result = { outcome: 'failed', errorMessage: result.error } as any
+    transition(runId, 'failed')
+  }
+}
