@@ -118,6 +118,16 @@
       "pathPattern": "^src/server\\.ts$",
       "pattern": "reflectt\\.ai",
       "reason": "Canvas query handler \u2014 onboarding CTA docs link and revenue context prompt, intentional public-facing copy"
+    },
+    {
+      "pathPattern": "^src/server\\.ts$",
+      "pattern": "reflectt\\.ai/docs",
+      "reason": "Canvas query onboarding CTA docs link \u2014 intentional public-facing URL"
+    },
+    {
+      "pathPattern": "^src/server\\.ts$",
+      "pattern": "building reflectt\\.ai",
+      "reason": "Canvas query LLM prompt context \u2014 intentional product description string"
     }
   ]
 }
