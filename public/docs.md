@@ -643,6 +643,8 @@ Multi-host management: remote hosts register via heartbeat and are tracked by st
 | POST | `/insights/:id/cooldown` | Localhost-only. Set insight status to `cooldown` (default 14d window). Body: `{ actor, reason, notes?, cooldown_until?, cooldown_reason? }`. Optional auth via `REFLECTT_INSIGHT_MUTATION_TOKEN`. Audit logged. |
 | POST | `/insights/:id/close` | Localhost-only. Set insight status to `closed`. Body: `{ actor, reason, notes? }`. Optional auth via `REFLECTT_INSIGHT_MUTATION_TOKEN`. Audit logged. |
 | GET | `/insights/stats` | Aggregate stats: by status, priority, failure family. |
+| POST | `/insights/stale-candidates/reconcile` | Run stale candidate reconcile sweep. Body: `{ dry_run?: boolean (default true), insight_ids?: string[], actor?: string }`. Closes candidate insights where recovery evidence exists and guardrails pass. Returns `{ swept, eligible, closed, blocked, errors, dryRun, candidates[], durationMs }`. |
+| GET | `/insights/stale-candidates/preview` | Dry-run reconcile sweep (GET for convenience). Shows which candidate insights would be closed. |
 | POST | `/insights/tick-cooldowns` | Advance cooldown state machine: promoted past deadline → cooldown, expired cooldown → archived. |
 | POST | `/insights/:id/promote` | Promote insight to board task. Body: `{ contract: { owner, reviewer, eta, acceptance_check, artifact_proof_requirement, next_checkpoint_eta }, promoted_by }`. Optional: `title`, `description`, `priority`, `team_id`. Returns task_id + audit entry. |
 | GET | `/insights/:id/audit` | Promotion audit trail for an insight. |
