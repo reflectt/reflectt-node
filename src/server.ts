@@ -14816,6 +14816,94 @@ If your heartbeat shows **no active task** and **no next task**:
     return result
   })
 
+  // POST /workflows/pr-review-demo — canonical runnable regression workflow
+  // Happy path: create task (if missing) → run template → return run + recent events.
+  app.post('/workflows/pr-review-demo', async (request, reply) => {
+    const body = request.body as {
+      agentId?: string
+      reviewer?: string
+      teamId?: string
+      taskId?: string
+      prUrl?: string
+      objective?: string
+      title?: string
+      urgency?: string
+      nextOwner?: string
+      summary?: string
+    } ?? {}
+
+    const template = getWorkflowTemplate('pr-review')
+    if (!template) {
+      reply.code(500)
+      return { error: 'Workflow template "pr-review" is not registered' }
+    }
+
+    const agentId = body.agentId ?? 'link'
+    const reviewer = body.reviewer ?? 'kai'
+    const teamId = body.teamId ?? 'default'
+
+    let taskId = body.taskId
+    let createdTaskId: string | undefined
+
+    if (!taskId) {
+      const demoTask = await taskManager.createTask({
+        title: body.title ?? `Workflow demo: PR review handoff (${new Date().toISOString()})`,
+        description: 'Auto-generated demo task for /workflows/pr-review-demo regression path.',
+        status: 'doing',
+        assignee: agentId,
+        reviewer,
+        done_criteria: [
+          'Workflow run is created and attached to this task.',
+          'Review request + approval + handoff events are emitted.',
+          'Run reaches completed state with no failed steps.',
+        ],
+        createdBy: 'system',
+        priority: 'P2',
+        metadata: {
+          lane: 'workflow',
+          source: 'workflow-regression',
+          reflection_exempt: true,
+          reflection_exempt_reason: 'Synthetic regression task for workflow endpoint verification',
+        },
+      })
+      taskId = demoTask.id
+      createdTaskId = demoTask.id
+    }
+
+    const result = await runWorkflow(template, agentId, teamId, {
+      ...body,
+      reviewer,
+      teamId,
+      taskId,
+      objective: body.objective ?? 'Canonical PR review workflow regression run',
+      title: body.title ?? 'PR review demo run',
+      urgency: body.urgency ?? 'normal',
+      nextOwner: body.nextOwner ?? reviewer,
+      summary: body.summary ?? 'Regression demo completed via /workflows/pr-review-demo',
+      prUrl: body.prUrl ?? 'https://github.com/reflectt/reflectt-node/pull/0',
+    })
+
+    const run = result.runId ? getAgentRun(result.runId) : null
+    const events = result.runId ? listAgentEvents({ runId: result.runId, limit: 30 }) : []
+
+    return {
+      success: result.success,
+      workflow: 'pr-review-demo',
+      template: template.id,
+      taskId,
+      createdTaskId,
+      run,
+      result,
+      eventCount: events.length,
+      events,
+      regression: {
+        endpoint: '/workflows/pr-review-demo',
+        createdTask: Boolean(createdTaskId),
+        completed: run?.status === 'completed',
+      },
+    }
+  })
+
   // ── Agent Messaging (Host-native) ─────────────────────────────────────
   // Local agent-to-agent messaging. Replaces gateway for same-Host agents.
 
