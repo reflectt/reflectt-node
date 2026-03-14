@@ -25,6 +25,9 @@ export type EventType =
   | 'insight_created'
   | 'canvas_input'
   | 'canvas_render'
+  | 'canvas_burst'     // dramatic state transition burst (thought_manifest, urgency_spike, tension_release…)
+  | 'canvas_spark'     // agent-to-agent arc (collaboration, handoff, decision)
+  | 'canvas_milestone' // completion moment — task done, PR merged, streak broken
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -37,6 +40,9 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'insight_created',
   'canvas_input',
   'canvas_render',
+  'canvas_burst',
+  'canvas_spark',
+  'canvas_milestone',
 ])
 
 export interface Event {
@@ -187,7 +193,9 @@ class EventBus {
   }
 
   /**
-   * Emit an event to all matching subscriptions (with batching)
+   * Emit an event to all matching subscriptions (with batching).
+   * Canvas events (canvas_render, canvas_burst, canvas_spark, canvas_milestone)
+   * are flushed immediately — they drive live visual experiences and must feel instant.
    */
   emit(event: Event): void {
     // Add to log
@@ -206,6 +214,15 @@ class EventBus {
       } catch (err) {
         console.error(`[EventBus] Internal listener '${id}' error:`, err)
       }
+    }
+
+    // Canvas events bypass batching — flush immediately for sub-100ms render latency
+    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone'])
+    if (IMMEDIATE_TYPES.has(event.type)) {
+      if (this.batchTimer) { clearTimeout(this.batchTimer); this.batchTimer = null }
+      this.pendingEvents.push(event)
+      this.flushBatch()
+      return
     }
 
     // Add to pending batch

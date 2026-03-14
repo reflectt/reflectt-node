@@ -9484,6 +9484,15 @@ export async function createServer(): Promise<FastifyInstance> {
     payload: z.object({
       text: z.string().optional(),
       media: z.unknown().optional(),
+      // Explicit content type — eliminates heuristic inference on the canvas
+      content: z.object({
+        type: z.enum(['text', 'markdown', 'code', 'image']).optional(),
+        lang: z.string().optional(),  // syntax hint for code blocks (e.g. "typescript", "bash")
+        progress: z.array(z.object({
+          label: z.string(),
+          state: z.enum(['pending', 'active', 'done', 'failed']),
+        })).optional(),
+      }).optional(),
       decision: z.object({
         question: z.string(),
         context: z.string().optional(),
@@ -9523,6 +9532,10 @@ export async function createServer(): Promise<FastifyInstance> {
     const { state, sensors, agentId, payload } = result.data
     const now = Date.now()
 
+    // Detect dramatic state transitions → emit spark burst
+    const prev = canvasStateMap.get(agentId)
+    const prevState = prev?.state ?? 'floor'
+
     // Store current state
     canvasStateMap.set(agentId, { state, sensors, payload, updatedAt: now })
 
@@ -9533,6 +9546,51 @@ export async function createServer(): Promise<FastifyInstance> {
       timestamp: now,
       data: { state, sensors, agentId, payload },
     })
+
+    // Emit canvas_burst on dramatic transitions (thought manifesting, urgency breaking, etc.)
+    const BURST_TRANSITIONS: Array<[string, string, string, number]> = [
+      // [from, to, kind, intensity]
+      ['thinking', 'rendering', 'thought_manifest', 0.9],
+      ['working',  'rendering', 'output_burst',     0.7],
+      ['thinking', 'decision',  'decision_emerge',  0.85],
+      ['floor',    'urgent',    'urgency_spike',     1.0],
+      ['ambient',  'urgent',    'urgency_spike',     1.0],
+      ['working',  'urgent',    'urgency_spike',     1.0],
+      ['decision', 'working',   'decision_resolved', 0.75],
+      ['urgent',   'working',   'tension_release',   0.8],
+      ['urgent',   'floor',     'tension_release',   0.8],
+    ]
+    for (const [from, to, kind, intensity] of BURST_TRANSITIONS) {
+      if (prevState === from && state === to) {
+        eventBus.emit({
+          id: `cburst-${now}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'canvas_burst' as const,
+          timestamp: now,
+          data: { agentId, from: prevState, to: state, kind, intensity },
+        })
+        break
+      }
+    }
+
+    // Auto-detect collaboration: if another agent is on the same active task, emit a spark arc
+    const activeTaskId = (payload as Record<string, unknown>).activeTask
+      ? ((payload as any).activeTask as { id?: string }).id
+      : null
+    if (activeTaskId) {
+      for (const [otherId, otherEntry] of canvasStateMap) {
+        if (otherId === agentId) continue
+        const otherPayload = otherEntry.payload as Record<string, unknown>
+        const otherTaskId = (otherPayload as any)?.activeTask?.id
+        if (otherTaskId === activeTaskId && now - otherEntry.updatedAt < 5 * 60 * 1000) {
+          eventBus.emit({
+            id: `cspark-${now}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'canvas_spark' as const,
+            timestamp: now,
+            data: { from: agentId, to: otherId, taskId: activeTaskId, intensity: 0.7, kind: 'collaboration' },
+          })
+        }
+      }
+    }
 
     // Trigger immediate cloud sync for real-time presence
     requestImmediateCanvasSync()
@@ -9575,6 +9633,14 @@ export async function createServer(): Promise<FastifyInstance> {
       colorHint: z.string().optional(),
       particleIntensity: z.number().min(0).max(1).optional(),
       pulseRate: z.enum(['slow', 'normal', 'fast']).optional(),
+    }).optional(),
+    content: z.object({                                   // explicit content-type for deterministic rendering
+      type: z.enum(['text', 'markdown', 'code', 'image']).optional(),
+      lang: z.string().optional(),                        // code syntax hint (e.g. "typescript", "bash")
+      progress: z.array(z.object({
+        label: z.string(),
+        state: z.enum(['pending', 'active', 'done', 'failed']),
+      })).optional(),
     }).optional(),
   })
 
@@ -9868,6 +9934,301 @@ export async function createServer(): Promise<FastifyInstance> {
       },
       generated_at: new Date(now).toISOString(),
     }
+  })
+
+  // POST /canvas/spark — explicit agent-to-agent arc (thought hand-off, handshake, collab signal)
+  // Body: { from: agentId, to: agentId, kind: 'thought'|'handoff'|'collab'|'decision', intensity?: 0–1, label?: string }
+  app.post('/canvas/spark', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const from = typeof body.from === 'string' ? body.from.trim() : ''
+    const to   = typeof body.to   === 'string' ? body.to.trim()   : ''
+    const kind = ['thought', 'handoff', 'collab', 'decision', 'sync'].includes(body.kind as string)
+      ? (body.kind as string) : 'thought'
+    const intensity = typeof body.intensity === 'number' ? Math.min(1, Math.max(0, body.intensity)) : 0.7
+    const label = typeof body.label === 'string' ? body.label.slice(0, 80) : undefined
+
+    if (!from || !to) {
+      reply.status(400)
+      return { success: false, message: 'from and to are required' }
+    }
+
+    const now = Date.now()
+    eventBus.emit({
+      id: `cspark-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_spark' as const,
+      timestamp: now,
+      data: { from, to, kind, intensity, label: label ?? null },
+    })
+
+    return { success: true, from, to, kind, intensity }
+  })
+
+  // ── Reality Mixer — agent-driven real-time medium control ──────────────────
+  // Agents call POST /canvas/express and the command fires immediately on every
+  // subscribed canvas via GET /canvas/render/stream SSE.
+  // Supports: text overlay, speak (TTS), visual preset, agent color push, haptic, sound.
+
+  type RealityMixerCommand =
+    | { type: 'text';    content: string; style?: Record<string, unknown>; durationMs?: number }
+    | { type: 'speak';   content: string; voiceId?: string; agentId?: string }
+    | { type: 'visual';  preset: 'urgency' | 'celebration' | 'thinking' | 'flow' | 'tension' | 'exhale' | 'spark' }
+    | { type: 'color';   agent: string; color: string }
+    | { type: 'sound';   src: string; volume?: number }
+    | { type: 'haptic';  pattern: 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'error' }
+    | { type: 'clear' }
+
+  // In-memory command queue — new subscribers get last 20 commands for replay
+  const renderCommandLog: Array<{ id: string; ts: number; agentId: string; cmd: RealityMixerCommand }> = []
+  const MAX_RENDER_LOG = 20
+
+  // Subscriber set for GET /canvas/render/stream
+  const renderStreamSubscribers = new Map<string, { send: (data: string) => void; closed: boolean }>()
+
+  function broadcastRenderCommand(agentId: string, cmd: RealityMixerCommand): string {
+    const id = `rc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const entry = { id, ts: Date.now(), agentId, cmd }
+    renderCommandLog.push(entry)
+    if (renderCommandLog.length > MAX_RENDER_LOG) renderCommandLog.shift()
+
+    const payload = JSON.stringify(entry)
+    for (const [subId, sub] of renderStreamSubscribers) {
+      if (sub.closed) { renderStreamSubscribers.delete(subId); continue }
+      try { sub.send(payload) } catch { sub.closed = true; renderStreamSubscribers.delete(subId) }
+    }
+    return id
+  }
+
+  // Auto-expression listener: when tasks.ts fires canvas_spark { kind:'auto_expression' },
+  // route it into the Reality Mixer so the canvas hears the agent speak.
+  eventBus.on('auto-expression-router', (event) => {
+    if (event.type !== 'canvas_spark') return
+    const data = event.data as Record<string, unknown>
+    if (data?.kind !== 'auto_expression') return
+    const agentId = String(data.agentId ?? 'unknown')
+    const line = String(data.line ?? '')
+    const voiceId = data.voiceId ? String(data.voiceId) : undefined
+    if (!line) return
+    // Fire speak command through Reality Mixer — the agent's voice in the room
+    broadcastRenderCommand(agentId, { type: 'speak', content: line, voiceId, agentId })
+    // Also fire a visual exhale so the room settles after completion
+    broadcastRenderCommand(agentId, { type: 'visual', preset: 'exhale' })
+  })
+
+  // POST /canvas/express — agent fires a real-time medium command at the canvas
+  // The command broadcasts instantly to all subscribed surfaces.
+  app.post('/canvas/express', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : 'unknown'
+    const cmd = body.cmd ?? body.command ?? body
+
+    if (!cmd || typeof cmd !== 'object') {
+      reply.status(400)
+      return { success: false, message: 'cmd is required (or pass command fields at root)' }
+    }
+
+    const type = (cmd as any).type
+    const VALID_TYPES = ['text', 'speak', 'visual', 'color', 'sound', 'haptic', 'clear']
+    if (!VALID_TYPES.includes(type)) {
+      reply.status(400)
+      return { success: false, message: `cmd.type must be one of: ${VALID_TYPES.join(', ')}` }
+    }
+
+    const id = broadcastRenderCommand(agentId, cmd as RealityMixerCommand)
+    return { success: true, id, subscriberCount: renderStreamSubscribers.size }
+  })
+
+  // GET /canvas/render/stream — SSE stream for the Reality Mixer
+  // Agents push commands via POST /canvas/express; surfaces subscribe here and execute.
+  // New subscribers receive last 20 commands for catch-up.
+  app.get('/canvas/render/stream', async (request, reply) => {
+    reply.raw.setHeader('Content-Type', 'text/event-stream')
+    reply.raw.setHeader('Cache-Control', 'no-cache')
+    reply.raw.setHeader('Connection', 'keep-alive')
+    reply.raw.flushHeaders?.()
+
+    let closed = false
+    request.raw.on('close', () => { closed = true })
+
+    const subId = `rsub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    renderStreamSubscribers.set(subId, {
+      closed: false,
+      send: (data: string) => {
+        if (closed) return
+        reply.raw.write(`data: ${data}\n\n`)
+      },
+    })
+
+    // Replay last 20 commands so late joiners catch up
+    for (const entry of renderCommandLog) {
+      if (closed) break
+      try { reply.raw.write(`event: replay\ndata: ${JSON.stringify(entry)}\n\n`) } catch { break }
+    }
+
+    request.raw.on('close', () => {
+      closed = true
+      renderStreamSubscribers.delete(subId)
+    })
+
+    return new Promise<void>(() => {})
+  })
+
+  // POST /canvas/pulse — agent pushes urgency + optional burst without a full canvas/state update
+  // Lighter-weight than POST /canvas/state; fires canvas_burst if burst=true.
+  // Body: { agentId: string, urgency?: 0–1, burst?: boolean, label?: string }
+  app.post('/canvas/pulse', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
+    if (!agentId) {
+      reply.status(400)
+      return { success: false, message: 'agentId is required' }
+    }
+
+    const urgency = typeof body.urgency === 'number'
+      ? Math.max(0, Math.min(1, body.urgency))
+      : undefined
+    const burst = body.burst === true
+    const label = typeof body.label === 'string' ? body.label.slice(0, 80) : undefined
+
+    // Update agent urgency in canvasStateMap if provided
+    if (urgency !== undefined) {
+      const current = canvasStateMap.get(agentId)
+      if (current) {
+        const currentPayload = current.payload as Record<string, unknown>
+        canvasStateMap.set(agentId, {
+          ...current,
+          payload: { ...currentPayload, urgency },
+          updatedAt: Date.now(),
+        })
+      }
+    }
+
+    // Fire canvas_burst event if requested
+    if (burst) {
+      const currentState = canvasStateMap.get(agentId)?.state ?? 'working'
+      eventBus.emit({
+        id: `burst-pulse-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_burst',
+        timestamp: Date.now(),
+        data: {
+          agentId,
+          fromState: currentState,
+          toState: currentState,
+          arcType: label ?? 'pulse_burst',
+          intensity: urgency ?? 0.7,
+        },
+      })
+    }
+
+    return {
+      success: true,
+      agentId,
+      urgency: urgency ?? null,
+      burst,
+    }
+  })
+
+  // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
+  // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
+  // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
+  app.get('/canvas/pulse', async (request, reply) => {
+    const STALE_MS = 10 * 60 * 1000
+    const IDENTITY_COLORS: Record<string, string> = {
+      kai: '#fb923c',
+      pixel: '#a78bfa',
+      link: '#60a5fa',
+    }
+    const STATE_URGENCY: Record<string, number> = {
+      urgent: 1.0, decision: 0.85, needs_attention: 0.75,
+      rendering: 0.5, thinking: 0.45, working: 0.3,
+      waiting: 0.15, handoff: 0.2, idle: 0.0, floor: 0.0, ambient: 0.05,
+    }
+
+    reply.raw.setHeader('Content-Type', 'text/event-stream')
+    reply.raw.setHeader('Cache-Control', 'no-cache')
+    reply.raw.setHeader('Connection', 'keep-alive')
+    reply.raw.flushHeaders?.()
+
+    let closed = false
+    request.raw.on('close', () => { closed = true })
+
+    const emitTick = () => {
+      if (closed) return
+      const now = Date.now()
+
+      // Per-agent orb data
+      const agents: Array<{
+        id: string; state: string; urgency: number;
+        activeSpeaker: boolean; color: string; age: number
+      }> = []
+
+      for (const [agentId, entry] of canvasStateMap) {
+        if (now - entry.updatedAt > STALE_MS) continue
+        const payload = entry.payload as Record<string, unknown> ?? {}
+        const presState = String((payload as any).presenceState ?? entry.state)
+        const explicitUrgency = typeof (payload as any).urgency === 'number' ? (payload as any).urgency : null
+        const urgency = explicitUrgency ?? (STATE_URGENCY[presState] ?? STATE_URGENCY[entry.state] ?? 0)
+        agents.push({
+          id: agentId,
+          state: presState,
+          urgency,
+          activeSpeaker: !!(payload as any).activeSpeaker,
+          color: IDENTITY_COLORS[agentId] ?? '#94a3b8',
+          age: now - entry.updatedAt,
+        })
+      }
+
+      // Team mood (inline mini-derivation from canvasStateMap)
+      const states = agents.map(a => a.state)
+      const urgentCount = states.filter(s => s === 'urgent').length
+      const decisionCount = states.filter(s => s === 'decision').length
+      const renderingCount = states.filter(s => s === 'rendering').length
+      const thinkingCount = states.filter(s => s === 'thinking').length
+      const idleCount = states.filter(s => s === 'floor' || s === 'ambient' || s === 'idle').length
+      const activeCount = agents.length
+      const workingCount = activeCount - idleCount
+      const tension = Math.min(1.0, (urgentCount * 0.35) + (decisionCount * 0.25) + (activeCount > 0 ? (workingCount / activeCount) * 0.15 : 0))
+      const rhythm = urgentCount > 0 ? 'surge' : activeCount === 0 ? 'quiet' : decisionCount > 0 ? 'tense' : renderingCount + thinkingCount >= Math.max(1, activeCount * 0.6) ? 'flow' : 'grinding'
+      const ambientPulse = rhythm === 'surge' ? 'fast' : rhythm === 'flow' ? 'normal' : 'slow'
+      let dominantColor = '#60a5fa'
+      for (const a of agents) {
+        if (a.state !== 'floor' && a.state !== 'ambient') { dominantColor = a.color; break }
+      }
+
+      const tick = {
+        t: now,
+        agents,
+        team: { rhythm, tension, ambientPulse, dominantColor },
+      }
+
+      try {
+        reply.raw.write(`data: ${JSON.stringify(tick)}\n\n`)
+      } catch { closed = true }
+    }
+
+    // Emit immediately + every 2s
+    emitTick()
+    const interval = setInterval(() => {
+      if (closed) { clearInterval(interval); return }
+      emitTick()
+    }, 2000)
+
+    // Also forward burst + spark events in real-time (don't wait for next tick)
+    const listenerId = `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    eventBus.on(listenerId, (event) => {
+      if (closed) return
+      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone') return
+      try {
+        reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event.data as object, t: event.timestamp })}\n\n`)
+      } catch { closed = true }
+    })
+
+    request.raw.on('close', () => {
+      clearInterval(interval)
+      eventBus.off(listenerId)
+    })
+
+    // Keep connection alive — never resolve
+    return new Promise<void>(() => {})
   })
 
   // GET /canvas/session/mode — inferred presence mode for the current session
