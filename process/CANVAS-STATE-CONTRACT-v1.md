@@ -125,7 +125,21 @@ Human-readable states used in `presence.state`. These drive living canvas visual
 
 ---
 
-## 4. activeSpeaker
+## 4. State Priority Cascade
+
+When multiple presence states are active simultaneously, this cascade determines which wins:
+
+```
+listening > speaking > thinking > rendering > urgent > needs-attention > waiting > working > idle
+```
+
+**waiting vs needs-attention are emotionally distinct — do not merge:**
+- `waiting` — patient, soft amber drift, 3s rhythm. "I'm ready when you are."
+- `needs-attention` — active amber ring pulse, 1s rhythm. "I need you now."
+
+---
+
+## 5. activeSpeaker
 
 `presence.activeSpeaker = true` when the agent is actively vocalizing TTS output.
 
