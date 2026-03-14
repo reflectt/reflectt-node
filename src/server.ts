@@ -6558,6 +6558,21 @@ export async function createServer(): Promise<FastifyInstance> {
             },
           },
         })
+
+        // canvas_artifact: proof card drifts through canvas on task completion
+        eventBus.emit({
+          id: `artifact-${completedAt}-${task.id.slice(-6)}`,
+          type: 'canvas_artifact' as const,
+          timestamp: completedAt,
+          data: {
+            kind: 'approval',
+            agentId: assigneeId,
+            identityColor: milestoneColor,
+            label: updated.title?.slice(0, 80) ?? 'task done',
+            taskId: task.id,
+            timestamp: completedAt,
+          },
+        })
       })
     }
 
@@ -10527,6 +10542,22 @@ export async function createServer(): Promise<FastifyInstance> {
       }, delay + WAVE_STAGGER_MS) // first wave after initial gold flash
     }
 
+    // canvas_artifact: PR merge proof card drifts through canvas
+    const identityColor = VICTORY_COLORS[agentId] ?? '#60a5fa'
+    eventBus.emit({
+      id: `artifact-pr-${now}`,
+      type: 'canvas_artifact' as const,
+      timestamp: now,
+      data: {
+        kind: 'pr',
+        agentId,
+        identityColor,
+        label: prTitle?.slice(0, 80) ?? `PR #${prNumber} merged`,
+        artifactUrl: prUrl || undefined,
+        timestamp: now,
+      },
+    })
+
     return { success: true, prNumber, intensity, wave }
   })
 
@@ -11129,6 +11160,46 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, type, agentId }
   })
 
+  // POST /canvas/artifact — emit a proof artifact that drifts through the canvas.
+  // Fires automatically on task completion and PR merge (see hooks below).
+  // Agents can also call this directly to surface any work artifact.
+  //
+  // spec: design/interface-os-v0-artifact-stream.html
+  //
+  // Body:
+  //   type: 'commit' | 'pr' | 'test' | 'run' | 'approval'
+  //   agentId: string          (sender agent)
+  //   title: string            (short label, max 80 chars)
+  //   url?: string             (link to artifact)
+  //   taskId?: string          (related task, for context)
+  app.post('/canvas/artifact', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const VALID_KINDS = new Set(['commit', 'pr', 'test', 'run', 'approval'])
+    const kind = typeof body.kind === 'string' && VALID_KINDS.has(body.kind) ? body.kind : 'run'
+    const agentId = typeof body.agentId === 'string' ? body.agentId.toLowerCase() : 'agent'
+    const label = typeof body.label === 'string' ? body.label.slice(0, 80) : 'work shipped'
+    const artifactUrl = typeof body.artifactUrl === 'string' ? body.artifactUrl : undefined
+    const taskId = typeof body.taskId === 'string' ? body.taskId : undefined
+    const now = Date.now()
+
+    const AGENT_COLORS: Record<string, string> = {
+      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      rhythm: '#a3e635', swift: '#38bdf8', kotlin: '#f97316',
+    }
+    const identityColor = AGENT_COLORS[agentId] ?? '#94a3b8'
+
+    const payload = { kind, agentId, identityColor, label, artifactUrl, taskId, timestamp: now }
+    eventBus.emit({
+      id: `artifact-${now}-${Math.random().toString(36).slice(2, 6)}`,
+      type: 'canvas_artifact',
+      timestamp: now,
+      data: payload,
+    })
+
+    return { success: true, kind, agentId, label }
+  })
+
   // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
   // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
   // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
@@ -11218,7 +11289,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const listenerId = `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     eventBus.on(listenerId, (event) => {
       if (closed) return
-      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression' && event.type !== 'canvas_message' && event.type !== 'canvas_push') return
+      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression' && event.type !== 'canvas_message' && event.type !== 'canvas_push' && event.type !== 'canvas_artifact') return
       try {
         reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event.data as object, t: event.timestamp })}\n\n`)
       } catch { closed = true }
