@@ -384,4 +384,84 @@ describe('Canvas push on task transitions', () => {
     expect(wr).toBeDefined()
     expect((wr as any).data.summary).toContain('ready for review')
   })
+
+  it('emits canvas_push work_released when task moves validating→done', async () => {
+    // Insert directly at validating with reviewer_approved=true to pass task-close gate
+    const db = getDb()
+    const taskId = `task-test-done-push-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const now = Date.now()
+    db.prepare(`INSERT INTO tasks (id, title, description, status, assignee, reviewer, priority, created_by, created_at, updated_at, done_criteria, metadata)
+      VALUES (@id, @title, @description, @status, @assignee, @reviewer, @priority, @created_by, @created_at, @updated_at, @done_criteria, @metadata)`).run({
+      id: taskId,
+      title: `TEST: done canvas_push ${taskId}`,
+      description: '',
+      status: 'validating',
+      assignee: 'kai',
+      reviewer: 'coo',
+      priority: 'P2',
+      created_by: 'test',
+      created_at: now,
+      updated_at: now,
+      done_criteria: JSON.stringify(['done']),
+      metadata: JSON.stringify({ is_test: true, reviewer_approved: true }),
+    })
+    createdIds.push(taskId)
+
+    const captured: unknown[] = []
+    const listenerId = `test-done-push-${Date.now()}`
+    eventBus.on(listenerId, (event) => { if (event.type === 'canvas_push') captured.push(event) })
+    try {
+      await app.inject({
+        method: 'PATCH', url: `/tasks/${taskId}`,
+        payload: { status: 'done', actor: 'coo', metadata: { artifacts: ['https://github.com/reflectt/reflectt-node/pull/999'], reviewer_approved: true, is_test: true } },
+      })
+    } finally {
+      eventBus.off(listenerId)
+    }
+
+    const wr = (captured as any[]).find(e => (e.data as any)?.type === 'work_released')
+    expect(wr).toBeDefined()
+    expect((wr as any).data.agentId).toBe('kai')
+    expect((wr as any).data.intensity).toBe(0.8)
+  })
+
+  it('emits canvas_push utterance when task moves doing→blocked', async () => {
+    // Insert directly at doing status with reviewer+eta so validateLifecycleGates passes
+    const db = getDb()
+    const taskId = `task-test-blocked-push-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    const now = Date.now()
+    db.prepare(`INSERT INTO tasks (id, title, description, status, assignee, reviewer, priority, created_by, created_at, updated_at, done_criteria, metadata)
+      VALUES (@id, @title, @description, @status, @assignee, @reviewer, @priority, @created_by, @created_at, @updated_at, @done_criteria, @metadata)`).run({
+      id: taskId,
+      title: `TEST: blocked canvas_push ${taskId}`,
+      description: '',
+      status: 'doing',
+      assignee: 'link',
+      reviewer: 'kai',
+      priority: 'P2',
+      created_by: 'test',
+      created_at: now,
+      updated_at: now,
+      done_criteria: JSON.stringify(['done']),
+      metadata: JSON.stringify({ is_test: true, eta: '2026-04-01' }),
+    })
+    createdIds.push(taskId)
+
+    const captured: unknown[] = []
+    const listenerId = `test-blocked-push-${Date.now()}`
+    eventBus.on(listenerId, (event) => { if (event.type === 'canvas_push') captured.push(event) })
+    try {
+      await app.inject({
+        method: 'PATCH', url: `/tasks/${taskId}`,
+        payload: { status: 'blocked', metadata: { transition: { type: 'pause', reason: 'waiting on dependency' } } },
+      })
+    } finally {
+      eventBus.off(listenerId)
+    }
+
+    const utterance = (captured as any[]).find(e => (e.data as any)?.type === 'utterance')
+    expect(utterance).toBeDefined()
+    expect((utterance as any).data.agentId).toBe('link')
+    expect((utterance as any).data.text).toContain('blocked on')
+  })
 })
