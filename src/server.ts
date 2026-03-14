@@ -157,7 +157,7 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
 import { createVoiceSession, getVoiceSession, processVoiceTranscript, subscribeVoiceSession } from './voice-sessions.js'
-import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate } from './agent-interface.js'
+import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, listPendingRuns } from './agent-interface.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { requestImmediateCanvasSync } from './cloud.js'
@@ -15526,10 +15526,30 @@ If your heartbeat shows **no active task** and **no next task**:
       includeExpired: query.includeExpired === 'true',
       limit: query.limit ? parseInt(query.limit, 10) : undefined,
     })
+
+    // Also surface agent-interface runs awaiting approval — they appear in the same decision card
+    const pendingRuns = listPendingRuns()
+    const agentInterfaceItems = pendingRuns.map(run => ({
+      id: run.id,
+      category: 'agent_action' as const,
+      agentId: 'agent-interface',
+      runId: run.id,
+      title: `Agent action: ${(run.input as any).title ?? run.kind}`,
+      description: `${run.kind} — ${(run.input as any).repo ?? ''}: ${(run.input as any).title ?? ''}`.trim(),
+      urgency: 'normal',
+      owner: 'human',
+      expiresAt: run.createdAt + 10 * 60 * 1000,
+      autoAction: 'reject',
+      createdAt: run.createdAt,
+      isExpired: Date.now() > run.createdAt + 10 * 60 * 1000,
+      event: { id: run.id, event_type: 'approval_requested', payload: run.input },
+    }))
+
+    const allItems = [...items, ...agentInterfaceItems]
     return {
-      items,
-      count: items.length,
-      hasExpired: items.some(i => i.isExpired),
+      items: allItems,
+      count: allItems.length,
+      hasExpired: allItems.some(i => i.isExpired),
     }
   })
 
@@ -15606,10 +15626,10 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // POST /run-approvals/:eventId/decide — iOS lock screen action buttons
+  // POST /run-approvals/:eventId/decide — iOS lock screen action buttons + agent-interface approval bridge
   // Accepts approve/reject decisions from mobile clients directly.
-  // Mirrors /approval-queue/:id/decide but uses the run-approvals URL shape
-  // so iOS can construct the path from the eventId in the push payload.
+  // Also handles agent-interface run approvals — if eventId matches a pending agent-interface run,
+  // routes to approveRun/rejectRun instead of the legacy event system.
   app.post<{ Params: { eventId: string } }>('/run-approvals/:eventId/decide', async (request, reply) => {
     const { eventId } = request.params
     const body = request.body as {
@@ -15624,6 +15644,25 @@ If your heartbeat shows **no active task** and **no next task**:
     if (!body?.actor) {
       return reply.code(400).send({ error: 'actor is required' })
     }
+
+    // Check if this is an agent-interface run approval (eventId = runId)
+    const agentInterfaceRun = getRun(eventId)
+    if (agentInterfaceRun) {
+      if (agentInterfaceRun.status !== 'awaiting_approval') {
+        return reply.code(409).send({ error: `Run is ${agentInterfaceRun.status}, not awaiting_approval` })
+      }
+      const ok = body.decision === 'approve' ? approveRun(eventId) : rejectRun(eventId)
+      if (!ok) return reply.code(409).send({ error: 'No pending approval for this run' })
+      // Emit canvas_input so Presence Layer reflects the decision
+      eventBus.emit({
+        id: `ai-decide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_input' as const,
+        timestamp: Date.now(),
+        data: { action: 'decision', approvalId: eventId, decision: body.decision, actor: body.actor },
+      })
+      return { success: true, runId: eventId, decision: body.decision }
+    }
+
     try {
       const rationale = body.rationale ?? {
         choice: body.decision === 'approve' ? 'Approved' : 'Rejected',
