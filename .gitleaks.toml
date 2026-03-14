@@ -38,6 +38,9 @@ regexes = [
   '''YOUR_\w+''',
   '''REPLACE_WITH_''',
   '''<your-\w+>''',
+  # Env var name references in docs (not actual values) — safe to allow
+  # Pattern: "With ANTHROPIC_API_KEY:" or "Requires ANTHROPIC_API_KEY" in documentation prose
+  '''With ANTHROPIC_API_KEY''',
 ]
 
 # Block common env dump patterns even if not caught by default rules
