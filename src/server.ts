@@ -9206,6 +9206,12 @@ export async function createServer(): Promise<FastifyInstance> {
     payload: z.record(z.unknown()).optional(),
     currentPr: z.number().int().positive().optional(),   // open PR number agent is working on
     progress: z.number().min(0).max(1).optional(),        // 0–1 completion estimate for active task
+    urgency: z.number().min(0).max(1).optional(),         // 0.0–1.0 visual intensity for living canvas
+    ambientCue: z.object({                                // living canvas atmosphere override
+      colorHint: z.string().optional(),
+      particleIntensity: z.number().min(0).max(1).optional(),
+      pulseRate: z.enum(['slow', 'normal', 'fast']).optional(),
+    }).optional(),
   })
 
   app.post<{ Params: { agentId: string } }>('/agents/:agentId/canvas', async (request, reply) => {
@@ -9221,7 +9227,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
-    const { state: presenceState, activeTask, recency, attention, sensors, payload, currentPr, progress } = result.data
+    const { state: presenceState, activeTask, recency, attention, sensors, payload, currentPr, progress, urgency, ambientCue } = result.data
     const now = Date.now()
     const identityColor = AGENT_IDENTITY_COLORS[agentId] || '#9ca3af'
 
@@ -9237,15 +9243,24 @@ export async function createServer(): Promise<FastifyInstance> {
       : presenceState === 'waiting' ? 'ambient'  // waiting = soft ambient (no ring)
       : 'ambient'
 
+    // Derive urgency from state if not explicitly provided
+    const derivedUrgency: number = urgency ?? (
+      presenceState === 'urgent' ? 1.0 :
+      presenceState === 'decision' || presenceState === 'needs-attention' ? 0.75 :
+      presenceState === 'rendering' ? 0.4 :
+      presenceState === 'thinking' || presenceState === 'working' ? 0.2 :
+      0.0
+    )
+
     // Store in canvasStateMap (backward compat with existing GET /canvas/state)
     canvasStateMap.set(agentId, {
       state: canvasState,
       sensors,
-      payload: { ...payload, activeTask, attention, presenceState, currentPr, progress },
+      payload: { ...payload, activeTask, attention, presenceState, currentPr, progress, urgency: derivedUrgency, ambientCue },
       updatedAt: now,
     })
 
-    // Build AgentPresence payload (matches presence-card-spec.md)
+    // Build AgentPresence payload (matches presence-card-spec.md + CANVAS-STATE-CONTRACT-v1)
     const agentPresence = {
       name: agentId,
       identityColor,
@@ -9253,6 +9268,8 @@ export async function createServer(): Promise<FastifyInstance> {
       activeTask,
       recency: recency || 'just now',
       attention,
+      urgency: derivedUrgency,
+      ...(ambientCue !== undefined ? { ambientCue } : {}),
       ...(currentPr !== undefined ? { currentPr } : {}),
       ...(progress !== undefined ? { progress } : {}),
     }
@@ -9268,7 +9285,7 @@ export async function createServer(): Promise<FastifyInstance> {
         sensors,
         agentId,
         payload: { ...payload, activeTask, attention },
-        // AgentPresence fields (new contract)
+        // AgentPresence fields (new contract — includes urgency + ambientCue)
         presence: agentPresence,
       },
     })
