@@ -593,6 +593,7 @@ Multi-host management: remote hosts register via heartbeat and are tracked by st
 | GET | `/widget/feedback.js` | Embeddable feedback widget (Shadow DOM, self-contained). Embed: `<script src="/widget/feedback.js" data-token="..." data-theme="auto">`. |
 | GET | `/routing/log` | Recent routing decisions. Query: `?limit=50&since=timestamp&category=watchdog-alert&severity=warning`. |
 | POST | `/routing/resolve` | Dry-run route resolution. Body: `{ from, content, severity?, category?, taskId?, mentions? }`. Returns where message would go. |
+| POST | `/routing/simulate` | Comms routing policy simulator. Body: `{ policy: CommsRoutingPolicy, scenarios: RoutingScenario[] }` (max 100 scenarios). Returns `{ success, count, results: CommsRouteResult[] }`. Each result includes `owner`, `assignee`, `fallback`, `escalate`, `reasonCode`, `rationale`. |
 | POST | `/routing/overrides` | Create a routing override. Body: `CreateOverrideInput` with target, target_type, override config, TTL. Returns created override. |
 | GET | `/routing/overrides` | List routing overrides. Query: `?target=agent&target_type=agent|role&status=active|expired&limit=N`. |
 | GET | `/routing/overrides/:id` | Get a specific routing override by ID. |
