@@ -7350,6 +7350,44 @@ export async function createServer(): Promise<FastifyInstance> {
       return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
     }
 
+    // Agent voice IDs (ElevenLabs) — per-agent identity, same mapping as cloud
+    const NODE_AGENT_VOICE_IDS: Record<string, string> = {
+      link: 'pNInz6obpgDQGcFmaJgB',    // Adam
+      kai: 'onwK4e9ZLuTAKqWW03F9',     // Daniel
+      pixel: 'EXAVITQu4vr4xnSDxMaL',   // Sarah
+      sage: 'yoZ06aMxZJJ28mfd3POQ',    // Rachel
+      scout: '3XbDmaS0mwj3WIVTUxWa',   // Charlie
+      echo: 'MF3mGyEYCl7XYWbV9V6O',    // Elli
+    }
+
+    // Synthesize TTS via ElevenLabs if key is set
+    const synthesizeTts = async (text: string, forAgentId: string): Promise<string | null> => {
+      const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
+      if (!elevenKey) return null
+      const voiceId = NODE_AGENT_VOICE_IDS[forAgentId] ?? NODE_AGENT_VOICE_IDS['link']
+      try {
+        const res = await fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+          {
+            method: 'POST',
+            headers: {
+              'xi-api-key': elevenKey,
+              'Content-Type': 'application/json',
+              'Accept': 'audio/mpeg',
+            },
+            body: JSON.stringify({ text: text.slice(0, 500), model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+            signal: AbortSignal.timeout(20000),
+          }
+        )
+        if (!res.ok) return null
+        const buf = Buffer.from(await res.arrayBuffer())
+        // Return as data URI so the client can play it without a second request
+        return `data:audio/mpeg;base64,${buf.toString('base64')}`
+      } catch {
+        return null
+      }
+    }
+
     // Subscribe to voice events to drive canvas state
     const unsubVoice = subscribeVoiceSession(session.id, (event) => {
       if (event.type === 'agent.thinking') {
@@ -7364,7 +7402,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     })
 
-    processVoiceTranscript(session.id, transcript, agentResponder).catch(err => {
+    processVoiceTranscript(session.id, transcript, agentResponder, synthesizeTts).catch(err => {
       console.error('[voice] processVoiceTranscript error:', err)
       unsubVoice()
     })
