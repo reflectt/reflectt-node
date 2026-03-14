@@ -9391,8 +9391,9 @@ export async function createServer(): Promise<FastifyInstance> {
     const payload = activeEntry.payload as Record<string, unknown> | null ?? {}
 
     // Last complete content block from canvas history
+    // getHistory returns Array<{ event: SlotEvent; timestamp: number }>
     const recentHistory = canvasSlots.getHistory(undefined, 5)
-    const lastContent = recentHistory.find(h => h.agentId === activeAgentId) ?? null
+    const lastContent = recentHistory.length > 0 ? recentHistory[recentHistory.length - 1] : null
 
     // Active decision payload (if in decision/urgent state)
     const isDecision = activeEntry.state === 'decision' || activeEntry.state === 'urgent'
@@ -9414,7 +9415,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // Last completed content block (not mid-stream)
       content_snapshot: lastContent
-        ? { type: lastContent.slot, body: lastContent.content, slot_id: lastContent.id }
+        ? { type: lastContent.event.slot, body: lastContent.event.payload, timestamp: lastContent.timestamp }
         : null,
 
       // Decision payload — must follow the human to the next surface
