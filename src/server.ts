@@ -7251,13 +7251,94 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Voice API ──────────────────────────────────────────────────────────────
 
+  // ── STT helper: transcribe audio buffer via Whisper API ──────────────────────
+  async function transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string | null> {
+    const openaiKey = process.env.OPENAI_API_KEY
+    if (!openaiKey) return null
+
+    try {
+      const formData = new FormData()
+      // Whisper accepts webm, mp4, mp3, wav, ogg, m4a
+      const ext = mimeType.includes('webm') ? 'webm'
+        : mimeType.includes('ogg') ? 'ogg'
+        : mimeType.includes('mp4') || mimeType.includes('m4a') ? 'mp4'
+        : mimeType.includes('wav') ? 'wav'
+        : mimeType.includes('mp3') || mimeType.includes('mpeg') ? 'mp3'
+        : 'webm'
+
+      const blob = new Blob([audioBuffer], { type: mimeType || 'audio/webm' })
+      formData.append('file', blob, `audio.${ext}`)
+      formData.append('model', 'whisper-1')
+      formData.append('response_format', 'text')
+
+      const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${openaiKey}` },
+        body: formData,
+        signal: AbortSignal.timeout(30000),
+      })
+
+      if (!res.ok) {
+        console.error('[voice/stt] Whisper error', res.status)
+        return null
+      }
+      const text = (await res.text()).trim()
+      return text || null
+    } catch (err) {
+      console.error('[voice/stt] transcribeAudio failed:', err)
+      return null
+    }
+  }
+
   // POST /voice/input — create a voice session + begin processing
-  // Body: { agentId: string, transcript?: string }
-  // Returns: { sessionId }
+  // Accepts JSON: { agentId, transcript }
+  // Accepts multipart: { agentId (field), audio (file, any browser audio format) }
+  // Returns: { sessionId, transcribed? (true if audio was STT'd) }
   app.post('/voice/input', async (request, reply) => {
-    const body = request.body as Record<string, unknown>
-    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
-    const transcript = typeof body.transcript === 'string' ? body.transcript.trim() : ''
+    let agentId = ''
+    let transcript = ''
+    let transcribed = false
+
+    // Detect multipart (audio blob upload)
+    const contentType = request.headers['content-type'] ?? ''
+    if (contentType.includes('multipart/form-data')) {
+      try {
+        const parts = request.parts()
+        let audioBuffer: Buffer | null = null
+        let audioMime = 'audio/webm'
+
+        for await (const part of parts) {
+          if (part.type === 'field' && part.fieldname === 'agentId') {
+            agentId = String(part.value).trim()
+          } else if (part.type === 'file' && part.fieldname === 'audio') {
+            audioMime = part.mimetype || 'audio/webm'
+            const chunks: Buffer[] = []
+            for await (const chunk of part.file) chunks.push(chunk)
+            audioBuffer = Buffer.concat(chunks)
+          }
+        }
+
+        if (!agentId) { reply.status(400); return { success: false, message: 'agentId is required' } }
+        if (!audioBuffer || audioBuffer.length === 0) { reply.status(400); return { success: false, message: 'audio field required in multipart form' } }
+
+        // STT: transcribe via Whisper
+        const sttResult = await transcribeAudio(audioBuffer, audioMime)
+        if (!sttResult) {
+          // STT failed or no key — return error (client must send text transcript)
+          reply.status(503)
+          return { success: false, message: 'STT unavailable — set OPENAI_API_KEY or send text transcript' }
+        }
+        transcript = sttResult
+        transcribed = true
+      } catch (err) {
+        reply.status(400); return { success: false, message: 'Invalid multipart body' }
+      }
+    } else {
+      // JSON path
+      const body = request.body as Record<string, unknown>
+      agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
+      transcript = typeof body.transcript === 'string' ? body.transcript.trim() : ''
+    }
 
     if (!agentId) {
       reply.status(400)
@@ -7265,7 +7346,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
     if (!transcript) {
       reply.status(400)
-      return { success: false, message: 'transcript is required (audio STT not yet supported)' }
+      return { success: false, message: 'transcript is required (or send audio file via multipart)' }
     }
     if (transcript.length > 4000) {
       reply.status(400)
@@ -7333,7 +7414,7 @@ export async function createServer(): Promise<FastifyInstance> {
       unsubVoice()
     })
 
-    return { success: true, sessionId: session.id }
+    return { success: true, sessionId: session.id, ...(transcribed ? { transcribed: true } : {}) }
   })
 
   // POST /voice/audio — accept an audio blob, transcribe via STT, pipe to voice pipeline
