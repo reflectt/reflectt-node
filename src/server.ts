@@ -9631,6 +9631,39 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Auto ghost trail — every state transition leaves a faint particle exhale.
+    // Fires immediately so SSE subscribers receive it before the next pulse tick.
+    // Client renders _ghost=true events with low opacity (0.06-0.14), no TTS.
+    if (prevState !== state) {
+      const GHOST_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      const ghostIntensity =
+        state === 'urgent'   ? 0.9 :
+        state === 'decision' ? 0.75 :
+        state === 'rendering'? 0.6 :
+        state === 'thinking' ? 0.4 : 0.25
+      const ghostParticles =
+        ghostIntensity > 0.7 ? 'surge' : ghostIntensity > 0.4 ? 'drift' : 'scatter'
+      eventBus.emit({
+        id: `ghost-${now}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_expression' as const,
+        timestamp: now,
+        data: {
+          agentId,
+          channels: {
+            visual: {
+              flash: GHOST_COLORS[agentId] ?? '#60a5fa',
+              particles: ghostParticles,
+            },
+            narrative: `${agentId} → ${state}`,
+          },
+          _ghost: true,
+        },
+      })
+    }
+
     // Trigger immediate cloud sync for real-time presence
     requestImmediateCanvasSync()
 
@@ -9962,6 +9995,256 @@ export async function createServer(): Promise<FastifyInstance> {
     })
 
     return { success: true, agentId, line, expressionId }
+  })
+
+  // POST /canvas/briefing — The Briefing: server-coordinated team intro on canvas mount.
+  // Fires N canvas_expression events staggered 700ms apart (one per active agent).
+  // Each event carries the agent's identity color, current task, state, and a one-line voice.
+  // Idempotent: calling twice within 30s returns early (no double briefing).
+  // Returns: { success, agents: [{ agentId, queued }], idempotent? }
+  const briefingLastFiredAt = new Map<string, number>()
+  const BRIEFING_COOLDOWN_MS = 30_000
+  const BRIEFING_STAGGER_MS = 700
+
+  app.post('/canvas/briefing', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const requesterId = typeof body.requesterId === 'string' ? body.requesterId : 'canvas'
+
+    const lastFired = briefingLastFiredAt.get(requesterId) ?? 0
+    if (Date.now() - lastFired < BRIEFING_COOLDOWN_MS) {
+      return { success: true, idempotent: true, message: 'Briefing already fired — cooling down' }
+    }
+    briefingLastFiredAt.set(requesterId, Date.now())
+
+    const STALE_MS = 10 * 60 * 1000
+    const BRIEFING_COLORS: Record<string, string> = {
+      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+    }
+    const STATE_LINES: Record<string, string[]> = {
+      working:   ['On it.', 'In the work.', 'Building.'],
+      thinking:  ['Thinking it through.', 'Processing.', 'Still with you.'],
+      rendering: ['Rendering now.', 'Almost done.', 'Generating output.'],
+      urgent:    ['Need you here.', 'Something needs your eye.', 'Urgent.'],
+      decision:  ['Waiting on you.', 'Your call.', 'Decision needed.'],
+      idle:      ['Standing by.', 'Ready when you are.', 'Quiet for now.'],
+      handoff:   ['Passing the baton.', 'Ready to hand off.', 'Your turn.'],
+    }
+
+    const now = Date.now()
+    const activeAgents = [...canvasStateMap.entries()]
+      .filter(([, e]) => now - e.updatedAt < STALE_MS)
+      .map(([id, e]) => ({
+        agentId: id,
+        state: e.state,
+        task: (e.payload as any)?.activeTask?.title as string | undefined,
+      }))
+
+    const anthropicKey = process.env.ANTHROPIC_API_KEY
+    const results: Array<{ agentId: string; queued: boolean }> = []
+
+    for (let i = 0; i < activeAgents.length; i++) {
+      const agent = activeAgents[i]!
+      const stagger = i * BRIEFING_STAGGER_MS
+
+      // Generate voice line — LLM preferred, template fallback
+      let voiceLine = ''
+      if (anthropicKey) {
+        try {
+          const ctx = agent.task ? `working on "${agent.task.slice(0, 50)}"` : `in ${agent.state} state`
+          const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 30, messages: [{ role: 'user', content: `You are ${agent.agentId}, an AI agent, ${ctx}. The team canvas just opened. Say ONE sentence (8 words max). Natural, present tense, in your voice.` }] }),
+            signal: AbortSignal.timeout(5000),
+          })
+          if (resp.ok) {
+            const data = await resp.json() as { content?: Array<{ text?: string }> }
+            voiceLine = data.content?.[0]?.text?.trim().slice(0, 60) ?? ''
+          }
+        } catch { /* template fallback */ }
+      }
+      if (!voiceLine) {
+        const opts = STATE_LINES[agent.state] ?? STATE_LINES['working']!
+        voiceLine = opts[Math.floor(Math.random() * opts.length)]!
+      }
+
+      // Stagger the canvas_expression events so they cascade into the room
+      setTimeout(() => {
+        eventBus.emit({
+          id: `briefing-${now}-${agent.agentId}`,
+          type: 'canvas_expression' as const,
+          timestamp: Date.now(),
+          data: {
+            agentId: agent.agentId,
+            channels: {
+              voice: voiceLine,
+              visual: {
+                flash: BRIEFING_COLORS[agent.agentId] ?? '#94a3b8',
+                particles: (agent.state === 'urgent' ? 'surge' : ['rendering', 'thinking'].includes(agent.state) ? 'drift' : 'scatter') as 'surge' | 'drift' | 'scatter',
+              },
+              typography: {
+                text: agent.task ?? voiceLine,
+                size: 'lg',
+                weight: 200,
+                durationMs: 3000,
+                position: 'center',
+              },
+              narrative: `${agent.agentId} · ${agent.state}`,
+            },
+            _briefing: true,
+          },
+        })
+      }, stagger)
+
+      results.push({ agentId: agent.agentId, queued: true })
+    }
+
+    return { success: true, agents: results, totalMs: activeAgents.length * BRIEFING_STAGGER_MS }
+  })
+
+  app.post('/canvas/victory', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId : 'team'
+    const prUrl  = typeof body.prUrl === 'string' ? body.prUrl : ''
+    const prTitle = typeof body.prTitle === 'string' ? body.prTitle : 'PR merged'
+    const prNumber = typeof body.prNumber === 'number' ? body.prNumber :
+      prUrl ? parseInt(prUrl.split('/').pop() ?? '0', 10) || 0 : 0
+
+    // Intensity: explicit override, else derive from PR size hint in URL (number → bigger = more)
+    const intensity = typeof body.intensity === 'number'
+      ? Math.min(1, Math.max(0.4, body.intensity))
+      : Math.min(1, 0.6 + (prNumber > 0 ? Math.min(0.3, prNumber / 10000) : 0))
+
+    const now = Date.now()
+    const VICTORY_COLORS: Record<string, string> = {
+      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+    }
+    const STALE_MS = 10 * 60 * 1000
+    const WAVE_STAGGER_MS = 350  // gold wave propagates orb-to-orb
+
+    // Emit canvas_victory event immediately — client uses this for the gold flash
+    eventBus.emit({
+      id: `victory-${now}`,
+      type: 'canvas_expression' as const,
+      timestamp: now,
+      data: {
+        agentId,
+        channels: {
+          visual: { flash: '#f59e0b', ambientCue: 'celebration', particles: 'surge' },
+          sound: { kind: 'resolve', intensity },
+          haptic: { preset: 'complete' },
+          narrative: prTitle,
+        },
+        _victory: true,
+        _prUrl: prUrl,
+        _prNumber: prNumber,
+        _intensity: intensity,
+      },
+    })
+
+    // Gold wave: each active agent acknowledges in turn (350ms stagger)
+    const activeAgents = [...canvasStateMap.entries()]
+      .filter(([, e]) => now - e.updatedAt < STALE_MS)
+      .map(([id]) => id)
+
+    const wave: Array<{ agentId: string; delay: number }> = []
+    for (let i = 0; i < activeAgents.length; i++) {
+      const waveAgentId = activeAgents[i]!
+      const delay = i * WAVE_STAGGER_MS
+      wave.push({ agentId: waveAgentId, delay })
+      setTimeout(() => {
+        eventBus.emit({
+          id: `victory-wave-${now}-${waveAgentId}`,
+          type: 'canvas_expression' as const,
+          timestamp: Date.now(),
+          data: {
+            agentId: waveAgentId,
+            channels: {
+              visual: { flash: VICTORY_COLORS[waveAgentId] ?? '#f59e0b', particles: 'surge' },
+              haptic: { preset: 'acknowledge' },
+            },
+            _victoryWave: true,
+            _waveIndex: i,
+          },
+        })
+      }, delay + WAVE_STAGGER_MS) // first wave after initial gold flash
+    }
+
+    return { success: true, prNumber, intensity, wave }
+  })
+
+  // GET /canvas/flow-score — real-time team flow metric (0–1).
+  // Drives sub-bass amplitude, particle density, breathing rate on the canvas.
+  // Factors: active agents, state distribution, expression velocity, time of day.
+  // <50ms response. Safe to poll at 30s intervals.
+  // Returns: { score, factors: { agents, velocity, expressions, timeOfDay }, label }
+  const flowExpressionLog: Array<{ t: number }> = []
+
+  // Hook into eventBus to track expression velocity
+  ;(function trackExpressionVelocity() {
+    const listenerId = 'flow-score-tracker'
+    eventBus.on(listenerId, (event) => {
+      if (event.type === 'canvas_expression') {
+        flowExpressionLog.push({ t: Date.now() })
+        // Keep only last 10 minutes
+        const cutoff = Date.now() - 10 * 60 * 1000
+        while (flowExpressionLog.length > 0 && flowExpressionLog[0]!.t < cutoff) {
+          flowExpressionLog.shift()
+        }
+      }
+    })
+  })()
+
+  app.get('/canvas/flow-score', async () => {
+    const now = Date.now()
+    const STALE_MS = 10 * 60 * 1000
+    const WINDOW_5M = 5 * 60 * 1000
+
+    // Factor 1: active agents (normalized — 4 agents = 1.0)
+    const activeEntries = [...canvasStateMap.entries()].filter(([, e]) => now - e.updatedAt < STALE_MS)
+    const agentScore = Math.min(1.0, activeEntries.length / 4)
+
+    // Factor 2: state distribution — working/rendering/thinking = high flow, idle = low
+    const HIGH_FLOW_STATES = new Set(['working', 'rendering', 'thinking', 'decision'])
+    const flowingCount = activeEntries.filter(([, e]) => HIGH_FLOW_STATES.has(e.state)).length
+    const velocityFromStates = activeEntries.length > 0 ? flowingCount / activeEntries.length : 0
+
+    // Factor 3: expression velocity — how many canvas_expressions in last 5 min
+    const recent = flowExpressionLog.filter(e => e.t > now - WINDOW_5M).length
+    const expressionScore = Math.min(1.0, recent / 20) // 20 expressions in 5min = max
+
+    // Factor 4: time of day — peak hours 9am-10pm, low late night
+    const hour = new Date(now).getHours()
+    const timeScore = hour >= 9 && hour <= 22 ? 1.0 : hour >= 6 && hour <= 8 ? 0.5 : 0.2
+
+    // Weighted composite
+    const score = Math.round((
+      agentScore        * 0.30 +
+      velocityFromStates * 0.35 +
+      expressionScore   * 0.25 +
+      timeScore         * 0.10
+    ) * 100) / 100
+
+    const label =
+      score >= 0.8 ? 'surge' :
+      score >= 0.6 ? 'flow' :
+      score >= 0.4 ? 'grinding' :
+      score >= 0.2 ? 'quiet' : 'idle'
+
+    return {
+      score,
+      label,
+      factors: {
+        agents: Math.round(agentScore * 100) / 100,
+        velocity: Math.round(velocityFromStates * 100) / 100,
+        expressions: Math.round(expressionScore * 100) / 100,
+        timeOfDay: timeScore,
+      },
+      activeAgents: activeEntries.length,
+      expressionsLast5m: recent,
+    }
   })
 
   app.get('/canvas/slots', async () => {
