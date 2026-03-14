@@ -9998,6 +9998,22 @@ export async function createServer(): Promise<FastifyInstance> {
     return id
   }
 
+  // Auto-expression listener: when tasks.ts fires canvas_spark { kind:'auto_expression' },
+  // route it into the Reality Mixer so the canvas hears the agent speak.
+  eventBus.on('auto-expression-router', (event) => {
+    if (event.type !== 'canvas_spark') return
+    const data = event.data as Record<string, unknown>
+    if (data?.kind !== 'auto_expression') return
+    const agentId = String(data.agentId ?? 'unknown')
+    const line = String(data.line ?? '')
+    const voiceId = data.voiceId ? String(data.voiceId) : undefined
+    if (!line) return
+    // Fire speak command through Reality Mixer — the agent's voice in the room
+    broadcastRenderCommand(agentId, { type: 'speak', content: line, voiceId, agentId })
+    // Also fire a visual exhale so the room settles after completion
+    broadcastRenderCommand(agentId, { type: 'visual', preset: 'exhale' })
+  })
+
   // POST /canvas/express — agent fires a real-time medium command at the canvas
   // The command broadcasts instantly to all subscribed surfaces.
   app.post('/canvas/express', async (request, reply) => {
