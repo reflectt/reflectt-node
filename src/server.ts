@@ -7181,6 +7181,102 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Validating-lane health: reviewer inactivity vs evidence mismatch breakdown ──
+  // GET /tasks/validating-health?reviewer_stale_threshold_ms=7200000
+  // Returns per-task breakdown for all validating tasks + summary counts.
+  app.get<{ Querystring: { reviewer_stale_threshold_ms?: string; include_test?: string } }>(
+    '/tasks/validating-health',
+    async (request) => {
+      const query = request.query
+      const reviewerStaleThresholdMs = query.reviewer_stale_threshold_ms
+        ? Math.max(0, Number(query.reviewer_stale_threshold_ms))
+        : 2 * 60 * 60 * 1000 // default 2h
+      const includeTest = query.include_test === '1' || query.include_test === 'true'
+
+      const now = Date.now()
+      const validatingTasks = taskManager.listTasks({ status: 'validating', includeTest })
+
+      const taskDetails = validatingTasks.map(task => {
+        const meta = (task.metadata ?? {}) as Record<string, unknown>
+        const qaBundle = meta.qa_bundle as Record<string, unknown> | undefined
+        const reviewPacket = qaBundle?.review_packet as Record<string, unknown> | undefined
+        const reviewHandoff = meta.review_handoff as Record<string, unknown> | undefined
+
+        // PR link presence
+        const prUrl = (reviewPacket?.pr_url ?? reviewHandoff?.pr_url ?? null) as string | null
+        const hasPrLink = Boolean(prUrl && typeof prUrl === 'string' && prUrl.includes('github.com'))
+
+        // Merged evidence: canonical_commit set = PR merged and stamped
+        const canonicalCommit = (meta.canonical_commit ?? reviewPacket?.commit ?? null) as string | null
+        const prMerged = Boolean(canonicalCommit && typeof canonicalCommit === 'string' && canonicalCommit.length >= 7)
+
+        // Artifact path presence
+        const artifactPath = (reviewPacket?.artifact_path ?? reviewHandoff?.artifact_path ?? null) as string | null
+        const hasArtifact = Boolean(artifactPath)
+
+        // Evidence missing: no PR link or no merged evidence and no artifact
+        const evidenceMissing = !hasPrLink && !hasArtifact
+
+        // Reviewer activity: look for a comment from the reviewer
+        const reviewer = task.reviewer ?? null
+        let reviewerLastActiveAt: number | null = null
+        if (reviewer) {
+          const comments = taskManager.getTaskComments(task.id)
+          const reviewerComments = comments.filter(c => c.author === reviewer && !c.suppressed)
+          if (reviewerComments.length > 0) {
+            reviewerLastActiveAt = Math.max(...reviewerComments.map(c => c.timestamp))
+          }
+        }
+
+        const taskAgeMs = now - (task.updatedAt ?? task.createdAt ?? now)
+        const reviewerStale = reviewer !== null
+          && reviewerLastActiveAt === null
+          && taskAgeMs > reviewerStaleThresholdMs
+
+        // Failure mode classification
+        const failureMode: 'reviewer_stale' | 'evidence_missing' | 'both' | 'ok' =
+          reviewerStale && evidenceMissing ? 'both'
+            : reviewerStale ? 'reviewer_stale'
+              : evidenceMissing ? 'evidence_missing'
+                : 'ok'
+
+        return {
+          task_id: task.id,
+          title: task.title,
+          reviewer,
+          age_ms: now - (task.createdAt ?? now),
+          updated_age_ms: taskAgeMs,
+          has_pr_link: hasPrLink,
+          pr_url: prUrl,
+          pr_merged: prMerged,
+          has_artifact: hasArtifact,
+          reviewer_last_active_at: reviewerLastActiveAt,
+          reviewer_active_recently: reviewerLastActiveAt !== null
+            && (now - reviewerLastActiveAt) <= reviewerStaleThresholdMs,
+          reviewer_stale: reviewerStale,
+          evidence_missing: evidenceMissing,
+          failure_mode: failureMode,
+        }
+      })
+
+      // Summary counts
+      const summary = {
+        total: taskDetails.length,
+        ok: taskDetails.filter(t => t.failure_mode === 'ok').length,
+        reviewer_stale: taskDetails.filter(t => t.failure_mode === 'reviewer_stale' || t.failure_mode === 'both').length,
+        evidence_missing: taskDetails.filter(t => t.failure_mode === 'evidence_missing' || t.failure_mode === 'both').length,
+        both: taskDetails.filter(t => t.failure_mode === 'both').length,
+      }
+
+      return {
+        success: true,
+        reviewer_stale_threshold_ms: reviewerStaleThresholdMs,
+        summary,
+        tasks: taskDetails,
+      }
+    },
+  )
+
   // ── Board health execution worker endpoints ─────────────────────────
 
   // Worker status + config
