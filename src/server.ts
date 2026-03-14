@@ -9417,7 +9417,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // GET /canvas/team/mood — derived collective mood of all active agents
-  // Not numbers. Mood. Rhythm. Tension. Used by living canvas to shift background atmosphere.
+  // Returns teamRhythm, tension, ambientPulse, dominantColor. Used by living canvas for atmosphere shifts.
   app.get('/canvas/team/mood', async () => {
     const now = Date.now()
     const STALE_MS = 10 * 60 * 1000 // ignore agents silent >10m
@@ -9587,7 +9587,7 @@ export async function createServer(): Promise<FastifyInstance> {
         sensor_consent_transferred: false,
         // In-progress streams cannot freeze — target joins at next complete block
         stream_in_progress: activeEntry.state === 'rendering',
-        // Summary for handoff banner ("Kai is rendering a code review")
+        // Summary for handoff banner (e.g. "Agent is rendering a code review")
         summary: (() => {
           const name = payload.agentLabel ?? activeAgentId
           if (activeEntry!.state === 'rendering') return `${name} is rendering${payload.activeTask ? ` — ${(payload.activeTask as any).title}` : ''}`
