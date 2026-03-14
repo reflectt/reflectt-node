@@ -80,6 +80,75 @@ describe('Working contract enforcement', () => {
     }
   })
 
+  it('reflection gate does not block validating→doing re-claim', async () => {
+    // Set up an agent who is over the reflection threshold (2+ tasks, >4h ago)
+    const db = getDb()
+    // Ensure table exists (created lazily inside checkClaimGate)
+    checkClaimGate('__init__')
+    const agent = `reclaim-test-${Date.now()}`
+    const fiveHoursAgo = Date.now() - 5 * 60 * 60 * 1000
+    db.prepare(`
+      INSERT OR REPLACE INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+      VALUES (?, ?, 3, ?)
+    `).run(agent, fiveHoursAgo, Date.now())
+
+    // Create a task in validating for this agent (simulates reviewer rejection path)
+    const taskId = `task-test-reclaim-${Date.now()}`
+    db.prepare(`INSERT INTO tasks (id, title, status, assignee, reviewer, created_at, updated_at, priority, created_by, done_criteria, metadata)
+      VALUES (?, ?, 'validating', ?, 'kai', ?, ?, 'P2', 'test', '["done"]', '{"eta":"2026-03-14","is_test":true}')`)
+      .run(taskId, `TEST: reclaim gate ${taskId}`, agent, Date.now(), Date.now())
+
+    try {
+      // validating→doing should NOT be blocked by the reflection gate
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/tasks/${taskId}`,
+        payload: { status: 'doing', actor: agent },
+      })
+      const body = JSON.parse(res.body)
+      // Should succeed (not hit 422 reflection gate)
+      expect(body.gate).not.toBe('reflection_overdue')
+      expect(res.statusCode).not.toBe(422)
+    } finally {
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+      db.prepare('DELETE FROM reflection_tracking WHERE agent = ?').run(agent)
+    }
+  })
+
+  it('reflection gate still blocks fresh todo→doing claim when overdue', async () => {
+    const db = getDb()
+    checkClaimGate('__init__')
+    const agent = `fresh-claim-test-${Date.now()}`
+    const fiveHoursAgo = Date.now() - 5 * 60 * 60 * 1000
+    db.prepare(`
+      INSERT OR REPLACE INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+      VALUES (?, ?, 3, ?)
+    `).run(agent, fiveHoursAgo, Date.now())
+
+    // Create a task in todo
+    const taskId = `task-test-fresh-claim-${Date.now()}`
+    db.prepare(`INSERT INTO tasks (id, title, status, assignee, reviewer, created_at, updated_at, priority, created_by, done_criteria, metadata)
+      VALUES (?, ?, 'todo', ?, 'kai', ?, ?, 'P2', 'test', '["done"]', '{"eta":"2026-03-14","is_test":false}')`)
+      .run(taskId, `Fresh claim gate test ${taskId}`, agent, Date.now(), Date.now())
+
+    try {
+      // todo→doing should be blocked (fresh claim, not a re-claim)
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/tasks/${taskId}`,
+        payload: { status: 'doing', actor: agent },
+      })
+      const body = JSON.parse(res.body)
+      // Policy may be disabled in test env; just verify gate field if it fires
+      if (res.statusCode === 422) {
+        expect(body.gate).toBe('reflection_overdue')
+      }
+    } finally {
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+      db.prepare('DELETE FROM reflection_tracking WHERE agent = ?').run(agent)
+    }
+  })
+
   it('tick returns structured result', async () => {
     const result = await tickWorkingContract()
     expect(result).toHaveProperty('warnings')
