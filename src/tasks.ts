@@ -1662,20 +1662,95 @@ class TaskManager {
       const ageBonus = Math.min(0.3, ageDays * 0.1)
       const intensity = Math.min(1.0, baseIntensity + ageBonus)
 
+      const completedAgentId = updates.assignee ?? task.assignee ?? 'system'
+      const taskTitle = task.title?.slice(0, 80) ?? 'task completed'
+
       eventBus.emit({
         id: `milestone-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
         type: 'canvas_milestone' as const,
         timestamp: Date.now(),
         data: {
           kind: 'task_complete',
-          agentId: updates.assignee ?? task.assignee ?? 'system',
+          agentId: completedAgentId,
           taskId: id,
-          title: task.title?.slice(0, 80) ?? 'task completed',
+          title: taskTitle,
           priority: task.priority ?? 'P2',
           intensity,
           ageMs,
         },
       })
+
+      // Auto-expression: agent speaks a one-line completion moment via the Reality Mixer.
+      // Fire-and-forget — non-fatal, never delays task completion.
+      // Uses LLM if ANTHROPIC_API_KEY available; falls back to concise templates.
+      void (async () => {
+        try {
+          const VOICE_IDS: Record<string, string> = {
+            link:  'pNInz6obpgDQGcFmaJgB',
+            kai:   'onwK4e9ZLuTAKqWW03F9',
+            pixel: 'EXAVITQu4vr4xnSDxMaL',
+            sage:  'yoZ06aMxZJJ28mfd3POQ',
+            scout: '3XbDmaS0mwj3WIVTUxWa',
+            echo:  'MF3mGyEYCl7XYWbV9V6O',
+          }
+
+          let line: string
+          const openaiKey = process.env.ANTHROPIC_API_KEY
+          if (openaiKey) {
+            // LLM-generated expression — one authentic sentence, no boilerplate
+            const ageHours = Math.round(ageMs / (1000 * 60 * 60))
+            const prompt = `You are ${completedAgentId}, an AI agent on a product team. You just finished a task: "${taskTitle}". It took ${ageHours > 0 ? `${ageHours} hours` : 'less than an hour'}. Write exactly ONE short sentence (max 15 words) expressing this completion moment in your voice — not robotic, not corporate. No quotes. Just the sentence.`
+            try {
+              const res = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                  'x-api-key': openaiKey,
+                  'anthropic-version': '2023-06-01',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: 'claude-haiku-4-5',
+                  max_tokens: 60,
+                  messages: [{ role: 'user', content: prompt }],
+                }),
+                signal: AbortSignal.timeout(8000),
+              })
+              if (res.ok) {
+                const data = await res.json() as { content?: Array<{ text?: string }> }
+                const text = data.content?.[0]?.text?.trim()
+                if (text && text.length < 120) line = text
+              }
+            } catch { /* fall through to template */ }
+          }
+
+          // Template fallback — short, character-driven
+          if (!line!) {
+            const TEMPLATES: Record<string, string[]> = {
+              link:  ['Shipped.', 'Done. On to the next one.', 'Clean.'],
+              kai:   ['Merged and moving.', 'That one\'s done.', 'Clear.'],
+              pixel: ['Live on the canvas.', 'Painted and done.', 'Beautiful.'],
+              sage:  ['Validated. Closed.', 'The numbers check out.', 'Done.'],
+            }
+            const opts = TEMPLATES[completedAgentId] ?? ['Done.', 'Shipped.', 'Complete.']
+            line = opts[Math.floor(Math.random() * opts.length)]!
+          }
+
+          // Fire Reality Mixer speak command
+          // We use eventBus internal listener to avoid circular import on server.ts broadcastRenderCommand
+          eventBus.emit({
+            id: `expr-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+            type: 'canvas_spark' as const,  // repurpose spark channel for auto-expression trigger
+            timestamp: Date.now(),
+            data: {
+              kind: 'auto_expression',
+              agentId: completedAgentId,
+              line,
+              voiceId: VOICE_IDS[completedAgentId],
+              intensity,
+            },
+          })
+        } catch { /* never fail a task close */ }
+      })()
     }
     
     return updated
