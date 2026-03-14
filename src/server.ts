@@ -6052,6 +6052,59 @@ export async function createServer(): Promise<FastifyInstance> {
         }).catch(() => { /* knowledge indexing is best-effort */ })
       }
 
+      // ── Review auto-close bridge ──────────────────────────────────────────
+      // If the assigned reviewer posts a structured [review] approved/rejected comment,
+      // auto-fire the review decision without requiring a separate API call.
+      // Safety: validating-only, reviewer-identity-gated, idempotent, audited.
+      {
+        const taskForReview = taskManager.getTask(resolved.resolvedId)
+        if (taskForReview) {
+          const { evaluateAutoClose } = await import('./review-autoclose.js')
+          const autoClose = evaluateAutoClose({
+            taskId: resolved.resolvedId,
+            taskStatus: taskForReview.status,
+            taskReviewer: taskForReview.reviewer,
+            taskAssignee: taskForReview.assignee,
+            commentAuthor: data.author,
+            commentContent: data.content,
+          })
+          if (autoClose.fired && autoClose.decision) {
+            // Self-review detection (non-blocking — just emits trust event)
+            if (
+              taskForReview.reviewer &&
+              taskForReview.assignee &&
+              taskForReview.reviewer.trim().toLowerCase() === taskForReview.assignee.trim().toLowerCase()
+            ) {
+              import('./trust-events.js').then(({ emitTrustEvent }) => {
+                emitTrustEvent({
+                  agentId: data.author,
+                  eventType: 'self_review_violation',
+                  context: { taskId: resolved.resolvedId, taskTitle: taskForReview.title, reviewer: taskForReview.reviewer, assignee: taskForReview.assignee, decision: autoClose.decision, source: 'review-autoclose' },
+                })
+              }).catch(() => {})
+            }
+            // Fire the review decision by injecting into the existing /tasks/:id/review route.
+            // Using inject() keeps all guards (duplicate closure, QA bundle gate, etc.) intact.
+            const reviewComment = `[auto-close] ${autoClose.decision === 'approve' ? 'Approved' : 'Rejected'} via structured [review] comment (comment ID: ${comment.id})`
+            setImmediate(() => {
+              app.inject({
+                method: 'POST',
+                url: `/tasks/${resolved.resolvedId}/review`,
+                payload: { reviewer: data.author, decision: autoClose.decision, comment: reviewComment },
+              }).then(res => {
+                if (res.statusCode >= 400) {
+                  console.warn(`[review-autoclose] Review injection failed for ${resolved.resolvedId}: ${res.statusCode} ${res.body.slice(0, 120)}`)
+                } else {
+                  console.log(`[review-autoclose] ${autoClose.decision} fired for ${resolved.resolvedId} by ${data.author}`)
+                }
+              }).catch((err: unknown) => {
+                console.warn(`[review-autoclose] inject error for ${resolved.resolvedId}:`, err)
+              })
+            })
+          }
+        }
+      }
+
       // Task-comments are now primary execution comms:
       // fan out inbox-visible notifications to assignee/reviewer + explicit @mentions.
       // Notification routing respects per-agent preferences (quiet hours, mute, filters).
