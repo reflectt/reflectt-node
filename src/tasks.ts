@@ -14,6 +14,7 @@ import { getDb, importJsonlIfNeeded, safeJsonStringify, safeJsonParse } from './
 import { isTestHarnessTask, TEST_TASK_EXCLUDE_SQL } from './test-task-filter.js'
 import { assertDuplicateClosureHasCanonicalRefs } from './duplicateClosureGuard.js'
 import { closeInsightById } from './insight-mutation.js'
+import { maybeCreateSuccessor } from './lane-template-successor.js'
 import { getAgentAliases } from './assignment.js'
 import { getAgentLane } from './lane-config.js'
 import type Database from 'better-sqlite3'
@@ -1778,6 +1779,15 @@ class TaskManager {
           }
         })()
       }
+    }
+
+    // ── Lane template successor hook ─────────────────────────────────────
+    // Fire-and-forget: never blocks the task-done response.
+    // Loads lane template, checks idempotency, creates successor if applicable.
+    if (updates.status === 'done' && task.status !== 'done') {
+      void maybeCreateSuccessor(updated).catch(err =>
+        console.error('[lane-template] successor creation failed:', err)
+      )
     }
 
     return updated
