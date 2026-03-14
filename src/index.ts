@@ -553,7 +553,7 @@ async function main() {
         const BROADCAST_DEDUP_WINDOW_MS = 60_000
         const db = getDb()
         const recentBroadcast = db.prepare(
-          "SELECT 1 FROM chat_messages WHERE sender = 'system' AND content LIKE '%Server restarted%' AND timestamp > ? LIMIT 1",
+          "SELECT 1 FROM chat_messages WHERE \"from\" = 'system' AND content LIKE '%Server restarted%' AND timestamp > ? LIMIT 1",
         ).get(Date.now() - BROADCAST_DEDUP_WINDOW_MS)
         if (recentBroadcast) {
           console.log('🔔 Auto-wake: skipped (duplicate within 60s)')
