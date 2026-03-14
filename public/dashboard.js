@@ -2466,7 +2466,7 @@ async function refresh() {
   if (refreshCount === 1 || forceFull) await refreshAgentRegistry();
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadAgentApprovals(), loadFeedback(), loadPauseStatus(), loadIntensityControl(), loadPolls()]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadAgentApprovals(), loadFeedback(), checkPauseBanner(), loadIntensityControl(), loadPolls()]);
   await renderPromotionSSOT();
 }
 
