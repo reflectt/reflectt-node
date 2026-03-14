@@ -10197,8 +10197,8 @@ export async function createServer(): Promise<FastifyInstance> {
                     timestamp: Date.now(),
                     data: {
                       agentId,
-                      channels: { typography: { text: fullLine, size: 'xl' as const, weight: 100, position: 'center' as const }, narrative: `${agentId} noticed` },
-                      _gaze: true, _gazeAgentId: agentId, _stream: true,
+                      channels: { voice: fullLine, narrative: `${agentId} noticed` },
+                      _gaze: true, _gazeAgentId: agentId, _partial: true,
                     },
                   })
                   // Also stream the token to the HTTP caller
@@ -10228,7 +10228,7 @@ export async function createServer(): Promise<FastifyInstance> {
             typography: { text: activeTask?.title?.slice(0, 60) ?? fullLine, size: 'xl', weight: 100, durationMs: 4000, position: 'center' },
             narrative: `${agentId} noticed`,
           },
-          _gaze: true, _gazeAgentId: agentId, _streamFinal: true,
+          _gaze: true, _gazeAgentId: agentId,
         },
       })
 
