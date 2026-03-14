@@ -9870,6 +9870,84 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // GET /canvas/session/mode — inferred presence mode for the current session
+  // Mode is derived from: time of day + active canvas states + team rhythm.
+  // Human never selects a mode — surface adapts silently.
+  // Returns: { mode, reason, narrative }
+  app.get('/canvas/session/mode', async () => {
+    const now = Date.now()
+    const hour = new Date(now).getHours()
+    const STALE_MS = 10 * 60 * 1000
+
+    const activeStates: string[] = []
+    const activeAgents: Array<{ id: string; state: string; payload: unknown }> = []
+    for (const [agentId, entry] of canvasStateMap) {
+      if (now - entry.updatedAt > STALE_MS) continue
+      activeStates.push(entry.state)
+      activeAgents.push({ id: agentId, state: entry.state, payload: entry.payload })
+    }
+
+    const hasUrgent = activeStates.includes('urgent')
+    const hasDecision = activeStates.includes('decision')
+    const hasRendering = activeStates.includes('rendering')
+    const hasThinking = activeStates.includes('thinking')
+    const activeCount = activeAgents.length
+    const isLateNight = hour >= 22 || hour < 6
+
+    // Mode inference — priority cascade
+    // immersive: urgent or decision — human needs full attention
+    // operational: rendering/thinking agents, human is watching work happen
+    // conversational: active agents but nothing critical — human may want to talk
+    // ambient: nothing active or late night — canvas breathing quietly
+
+    let mode: 'ambient' | 'conversational' | 'operational' | 'immersive'
+    let reason: string
+
+    if (hasUrgent || hasDecision) {
+      mode = 'immersive'
+      reason = hasDecision ? 'decision awaiting human input' : 'urgent state active'
+    } else if (hasRendering || (hasThinking && activeCount > 1)) {
+      mode = 'operational'
+      reason = hasRendering ? 'agent is rendering output' : 'multiple agents processing'
+    } else if (activeCount > 0 && !isLateNight) {
+      mode = 'conversational'
+      reason = 'agents active during working hours'
+    } else {
+      mode = 'ambient'
+      reason = isLateNight ? 'late night — quiet watch' : 'no active agents'
+    }
+
+    // One-line narrative — what's happening right now
+    const agentPhrases: string[] = []
+    for (const a of activeAgents.slice(0, 3)) {
+      const payload = a.payload as Record<string, unknown>
+      const presState = (payload as any)?.presenceState ?? a.state
+      const task = (payload as any)?.activeTask?.title
+      const phrase = presState === 'thinking' ? `${a.id} is thinking`
+        : presState === 'rendering' ? (task ? `${a.id} is rendering${task ? ` — ${task.slice(0, 30)}` : ''}` : `${a.id} is rendering`)
+        : presState === 'working' ? (task ? `${a.id} on ${task.slice(0, 30)}` : `${a.id} is working`)
+        : presState === 'urgent' ? `${a.id} needs attention`
+        : presState === 'decision' ? `${a.id} awaits your decision`
+        : presState === 'handoff' ? `${a.id} is handing off`
+        : presState === 'waiting' ? `${a.id} is ready`
+        : null
+      if (phrase) agentPhrases.push(phrase)
+    }
+
+    const narrative = agentPhrases.length > 0
+      ? agentPhrases.join(', ')
+      : isLateNight ? 'The team is quiet. You can rest.'
+      : 'Nothing active right now.'
+
+    return {
+      mode,
+      reason,
+      narrative,
+      context: { hour, activeCount, hasUrgent, hasDecision, hasRendering, isLateNight },
+      generated_at: new Date(now).toISOString(),
+    }
+  })
+
   // GET /canvas/session/snapshot — resumable session state for cross-device continuity
   // Returns the minimal snapshot needed for a second surface to resume from the same point.
   // Spec: /Users/ryan/.openclaw/workspace-pixel/design/interface-os-v0-continuity.html
