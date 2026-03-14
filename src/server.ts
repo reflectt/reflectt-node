@@ -157,6 +157,7 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
 import { createVoiceSession, getVoiceSession, processVoiceTranscript, subscribeVoiceSession } from './voice-sessions.js'
+import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, listPendingRuns, listRuns } from './agent-interface.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { requestImmediateCanvasSync } from './cloud.js'
@@ -7469,6 +7470,147 @@ export async function createServer(): Promise<FastifyInstance> {
       unsubscribe()
       clearInterval(heartbeat)
     })
+  })
+
+  // ── Agent Interface routes — software actions on behalf of the human ──────
+
+  // POST /agent-interface/runs — create and start a new agent action run
+  app.post('/agent-interface/runs', async (request, reply) => {
+    const body = request.body as { kind?: string; repo?: string; title?: string; body?: string; dryRun?: boolean }
+    if (!body?.kind) { reply.status(400); return { success: false, message: 'kind is required' } }
+    if (body.kind !== 'github_issue_create') { reply.status(400); return { success: false, message: `Unknown kind: ${body.kind}` } }
+
+    const run = createRun('github_issue_create', {
+      repo: body.repo ?? '',
+      title: body.title ?? '',
+      body: body.body ?? '',
+      dryRun: body.dryRun ?? false,
+    })
+
+    // Subscribe to run events — push canvas 'decision' state immediately when awaiting_approval
+    // so the presence canvas decision card appears via SSE without waiting for the poll cycle.
+    const runUnsub = subscribeRun(run.id, (event) => {
+      if (event.type !== 'state_changed') return
+      const to = (event.payload as any).to as string
+      if (to === 'awaiting_approval') {
+        // Push decision state to all agents watching the canvas SSE stream
+        const decisionPayload = {
+          title: `Agent action: ${(run.input as any).title ?? run.kind}`,
+          description: `${run.kind} — ${(run.input as any).repo ?? ''}`,
+          runId: run.id,
+          approvalId: run.id,
+          expiresAt: run.createdAt + 10 * 60 * 1000,
+        }
+        eventBus.emit({
+          id: `ai-decision-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'canvas_render' as const,
+          timestamp: Date.now(),
+          data: {
+            state: 'decision' as const,
+            sensors: null,
+            agentId: 'agent-interface',
+            payload: decisionPayload,
+            presence: {
+              name: 'agent-interface',
+              identityColor: '#60a5fa',
+              state: 'decision',
+              activeTask: { id: run.id, title: (run.input as any).title ?? run.kind },
+              recency: 'just now',
+              attention: { type: 'approval', taskId: run.id, label: (run.input as any).title ?? 'Agent action' },
+            },
+          },
+        })
+        requestImmediateCanvasSync()
+      } else if (['completed', 'failed', 'rejected'].includes(to)) {
+        runUnsub()
+      }
+    })
+
+    // Execute async — non-blocking
+    executeGithubIssueCreate(run.id, {
+      repo: body.repo ?? '',
+      title: body.title ?? '',
+      body: body.body ?? '',
+      dryRun: body.dryRun,
+    }).catch(err => { console.error('[agent-interface] run error:', err); runUnsub() })
+
+    return reply.code(201).send({ runId: run.id, status: run.status })
+  })
+
+  // GET /agent-interface/runs — list runs, optionally filtered by status
+  // e.g. ?status=awaiting_approval — used by presence canvas to surface pending decisions
+  app.get('/agent-interface/runs', async (request) => {
+    const { status } = request.query as { status?: string }
+    return { runs: listRuns(status) }
+  })
+
+  // GET /agent-interface/runs/:runId — get run state + log
+  app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+    return { run }
+  })
+
+  // GET /agent-interface/runs/:runId/events — SSE stream of run events
+  app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId/events', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Replay existing log events first
+    for (const event of run.log) {
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
+
+    // If run is already terminal, close immediately
+    if (['completed', 'failed', 'rejected'].includes(run.status)) {
+      reply.raw.write(`data: ${JSON.stringify({ type: 'run_end', timestamp: Date.now(), payload: { status: run.status } })}\n\n`)
+      reply.raw.end()
+      return reply
+    }
+
+    const unsub = subscribeRun(request.params.runId, (event) => {
+      try {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+        if (event.type === 'state_changed') {
+          const to = (event.payload as any).to as string
+          if (['completed', 'failed', 'rejected'].includes(to)) {
+            reply.raw.write(`data: ${JSON.stringify({ type: 'run_end', timestamp: Date.now(), payload: { status: to } })}\n\n`)
+            reply.raw.end()
+          }
+        }
+      } catch { /* connection closed */ }
+    })
+
+    const heartbeat = setInterval(() => { try { reply.raw.write(': ping\n\n') } catch { clearInterval(heartbeat); unsub() } }, 15_000)
+    request.raw.on('close', () => { unsub(); clearInterval(heartbeat) })
+    return reply
+  })
+
+  // POST /agent-interface/runs/:runId/approve — human approves the pending action
+  app.post<{ Params: { runId: string } }>('/agent-interface/runs/:runId/approve', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+    if (run.status !== 'awaiting_approval') { reply.status(409); return { success: false, message: `Run is ${run.status}, not awaiting_approval` } }
+    const ok = approveRun(request.params.runId)
+    if (!ok) { reply.status(409); return { success: false, message: 'No pending approval for this run' } }
+    return { success: true, runId: request.params.runId }
+  })
+
+  // POST /agent-interface/runs/:runId/reject — human rejects the pending action
+  app.post<{ Params: { runId: string } }>('/agent-interface/runs/:runId/reject', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+    if (run.status !== 'awaiting_approval') { reply.status(409); return { success: false, message: `Run is ${run.status}, not awaiting_approval` } }
+    const ok = rejectRun(request.params.runId)
+    if (!ok) { reply.status(409); return { success: false, message: 'No pending approval for this run' } }
+    return { success: true, runId: request.params.runId }
   })
 
   // ── Preflight Check endpoint ────────────────────────────────────────
@@ -15505,10 +15647,30 @@ If your heartbeat shows **no active task** and **no next task**:
       includeExpired: query.includeExpired === 'true',
       limit: query.limit ? parseInt(query.limit, 10) : undefined,
     })
+
+    // Also surface agent-interface runs awaiting approval — they appear in the same decision card
+    const pendingRuns = listPendingRuns()
+    const agentInterfaceItems = pendingRuns.map(run => ({
+      id: run.id,
+      category: 'agent_action' as const,
+      agentId: 'agent-interface',
+      runId: run.id,
+      title: `Agent action: ${(run.input as any).title ?? run.kind}`,
+      description: `${run.kind} — ${(run.input as any).repo ?? ''}: ${(run.input as any).title ?? ''}`.trim(),
+      urgency: 'normal',
+      owner: 'human',
+      expiresAt: run.createdAt + 10 * 60 * 1000,
+      autoAction: 'reject',
+      createdAt: run.createdAt,
+      isExpired: Date.now() > run.createdAt + 10 * 60 * 1000,
+      event: { id: run.id, event_type: 'approval_requested', payload: run.input },
+    }))
+
+    const allItems = [...items, ...agentInterfaceItems]
     return {
-      items,
-      count: items.length,
-      hasExpired: items.some(i => i.isExpired),
+      items: allItems,
+      count: allItems.length,
+      hasExpired: allItems.some(i => i.isExpired),
     }
   })
 
@@ -15585,10 +15747,10 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // POST /run-approvals/:eventId/decide — iOS lock screen action buttons
+  // POST /run-approvals/:eventId/decide — iOS lock screen action buttons + agent-interface approval bridge
   // Accepts approve/reject decisions from mobile clients directly.
-  // Mirrors /approval-queue/:id/decide but uses the run-approvals URL shape
-  // so iOS can construct the path from the eventId in the push payload.
+  // Also handles agent-interface run approvals — if eventId matches a pending agent-interface run,
+  // routes to approveRun/rejectRun instead of the legacy event system.
   app.post<{ Params: { eventId: string } }>('/run-approvals/:eventId/decide', async (request, reply) => {
     const { eventId } = request.params
     const body = request.body as {
@@ -15603,6 +15765,25 @@ If your heartbeat shows **no active task** and **no next task**:
     if (!body?.actor) {
       return reply.code(400).send({ error: 'actor is required' })
     }
+
+    // Check if this is an agent-interface run approval (eventId = runId)
+    const agentInterfaceRun = getRun(eventId)
+    if (agentInterfaceRun) {
+      if (agentInterfaceRun.status !== 'awaiting_approval') {
+        return reply.code(409).send({ error: `Run is ${agentInterfaceRun.status}, not awaiting_approval` })
+      }
+      const ok = body.decision === 'approve' ? approveRun(eventId) : rejectRun(eventId)
+      if (!ok) return reply.code(409).send({ error: 'No pending approval for this run' })
+      // Emit canvas_input so Presence Layer reflects the decision
+      eventBus.emit({
+        id: `ai-decide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_input' as const,
+        timestamp: Date.now(),
+        data: { action: 'decision', approvalId: eventId, decision: body.decision, actor: body.actor },
+      })
+      return { success: true, runId: eventId, decision: body.decision }
+    }
+
     try {
       const rationale = body.rationale ?? {
         choice: body.decision === 'approve' ? 'Approved' : 'Rejected',
