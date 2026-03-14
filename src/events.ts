@@ -25,9 +25,10 @@ export type EventType =
   | 'insight_created'
   | 'canvas_input'
   | 'canvas_render'
-  | 'canvas_burst'     // dramatic state transition burst (thought_manifest, urgency_spike, tension_release…)
-  | 'canvas_spark'     // agent-to-agent arc (collaboration, handoff, decision)
-  | 'canvas_milestone' // completion moment — task done, PR merged, streak broken
+  | 'canvas_burst'      // dramatic state transition burst (thought_manifest, urgency_spike, tension_release…)
+  | 'canvas_spark'      // agent-to-agent arc (collaboration, handoff, decision)
+  | 'canvas_milestone'  // completion moment — task done, PR merged, streak broken
+  | 'canvas_expression' // Reality Mixer — agent fires multi-channel expression (voice+visual+haptic+sound+text)
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -43,6 +44,7 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'canvas_burst',
   'canvas_spark',
   'canvas_milestone',
+  'canvas_expression',
 ])
 
 export interface Event {
@@ -194,7 +196,7 @@ class EventBus {
 
   /**
    * Emit an event to all matching subscriptions (with batching).
-   * Canvas events (canvas_render, canvas_burst, canvas_spark, canvas_milestone)
+   * Canvas events (canvas_render, canvas_burst, canvas_spark, canvas_milestone, canvas_expression)
    * are flushed immediately — they drive live visual experiences and must feel instant.
    */
   emit(event: Event): void {
@@ -217,7 +219,7 @@ class EventBus {
     }
 
     // Canvas events bypass batching — flush immediately for sub-100ms render latency
-    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone'])
+    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression'])
     if (IMMEDIATE_TYPES.has(event.type)) {
       if (this.batchTimer) { clearTimeout(this.batchTimer); this.batchTimer = null }
       this.pendingEvents.push(event)
