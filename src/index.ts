@@ -8,6 +8,7 @@
  */
 import { createServer } from './server.js'
 import { serverConfig, isDev, openclawConfig, DATA_DIR, REFLECTT_HOME } from './config.js'
+import { execSync } from 'node:child_process'
 import { acquirePidLock, releasePidLock, getPidPath } from './pidlock.js'
 import { startCloudIntegration, stopCloudIntegration, isCloudConfigured, watchConfigForCloudChanges, stopConfigWatcher } from './cloud.js'
 import { stopConfigWatch } from './assignment.js'
@@ -213,6 +214,18 @@ async function main() {
   // Docker bootstrap guidance (non-blocking)
   checkDockerBootstrap()
 
+  // ── CLI --port flag: overrides PORT env var and config ───────────────
+  // Usage: reflectt --port 4446
+  // task-1773529415342-eput9xcq1
+  const cliPortArg = process.argv.indexOf('--port')
+  if (cliPortArg !== -1 && process.argv[cliPortArg + 1]) {
+    const cliPort = parseInt(process.argv[cliPortArg + 1]!, 10)
+    if (!isNaN(cliPort) && cliPort > 0 && cliPort < 65536) {
+      serverConfig.port = cliPort
+      console.log(`ℹ Port override via --port flag: ${cliPort}`)
+    }
+  }
+
   // Dev-mode port guard: prevent dev servers from hijacking production port
   const PRODUCTION_PORT = 4445
   if (isDev && serverConfig.port === PRODUCTION_PORT) {
@@ -270,11 +283,56 @@ async function main() {
 
     const app = await createServer()
 
-    
-    await app.listen({
-      port: serverConfig.port,
-      host: serverConfig.host,
-    })
+    // ── Port auto-detect — SIGNAL-ROUTING / activation fix ───────────
+    // If the requested port (default 4445) is occupied by a non-reflectt process
+    // that the pidlock couldn't kill, try 4446–4455 sequentially.
+    // First available port wins. Logs which port was selected and what owns the conflict.
+    // task-1773529415342-eput9xcq1
+    const PORT_FALLBACK_START = 4446
+    const PORT_FALLBACK_END   = 4455
+
+    let boundPort = serverConfig.port
+    let bindError: Error | null = null
+
+    const tryListen = (port: number): Promise<void> =>
+      app.listen({ port, host: serverConfig.host }) as unknown as Promise<void>
+
+    try {
+      await tryListen(serverConfig.port)
+    } catch (err: any) {
+      if (err?.code !== 'EADDRINUSE') throw err   // not a port conflict — propagate
+
+      // Describe what owns the conflicted port
+      let ownerInfo = ''
+      try {
+        ownerInfo = execSync(`lsof -i :${serverConfig.port} 2>/dev/null | tail -n +2 | head -3`, { encoding: 'utf8', timeout: 3000 }).trim()
+      } catch { /* lsof unavailable */ }
+
+      console.warn(`\n⚠  Port ${serverConfig.port} is in use.${ownerInfo ? `\n   Occupied by:\n   ${ownerInfo.replace(/\n/g, '\n   ')}` : ''}`)
+      console.warn(`   Scanning fallback ports ${PORT_FALLBACK_START}–${PORT_FALLBACK_END}...`)
+
+      bindError = err
+      for (let port = PORT_FALLBACK_START; port <= PORT_FALLBACK_END; port++) {
+        try {
+          await tryListen(port)
+          boundPort = port
+          bindError = null
+          console.log(`✅ Bound to fallback port ${port} (${serverConfig.port} was occupied)`)
+          // Persist selected port so downstream code (cloud registration, logs) uses it
+          serverConfig.port = port
+          break
+        } catch (fallbackErr: any) {
+          if (fallbackErr?.code !== 'EADDRINUSE') throw fallbackErr
+          console.warn(`   Port ${port} also occupied, trying next...`)
+        }
+      }
+
+      if (bindError) {
+        console.error(`\n🚫 All ports ${serverConfig.port}–${PORT_FALLBACK_END} are occupied.`)
+        console.error(`   Free a port and restart, or use --port <n> to specify an available port.\n`)
+        process.exit(1)
+      }
+    }
 
     // If the underlying HTTP server closes unexpectedly, crash so the supervisor restarts us.
     // NOTE: shutdown() sets shuttingDown=true so intentional closes don't trigger fatal exit.
