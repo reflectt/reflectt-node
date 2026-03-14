@@ -7412,13 +7412,52 @@ export async function createServer(): Promise<FastifyInstance> {
       dryRun: body.dryRun ?? false,
     })
 
+    // Subscribe to run events — push canvas 'decision' state immediately when awaiting_approval
+    // so the presence canvas decision card appears via SSE without waiting for the poll cycle.
+    const runUnsub = subscribeRun(run.id, (event) => {
+      if (event.type !== 'state_changed') return
+      const to = (event.payload as any).to as string
+      if (to === 'awaiting_approval') {
+        // Push decision state to all agents watching the canvas SSE stream
+        const decisionPayload = {
+          title: `Agent action: ${(run.input as any).title ?? run.kind}`,
+          description: `${run.kind} — ${(run.input as any).repo ?? ''}`,
+          runId: run.id,
+          approvalId: run.id,
+          expiresAt: run.createdAt + 10 * 60 * 1000,
+        }
+        eventBus.emit({
+          id: `ai-decision-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'canvas_render' as const,
+          timestamp: Date.now(),
+          data: {
+            state: 'decision' as const,
+            sensors: null,
+            agentId: 'agent-interface',
+            payload: decisionPayload,
+            presence: {
+              name: 'agent-interface',
+              identityColor: '#60a5fa',
+              state: 'decision',
+              activeTask: { id: run.id, title: (run.input as any).title ?? run.kind },
+              recency: 'just now',
+              attention: { type: 'approval', taskId: run.id, label: (run.input as any).title ?? 'Agent action' },
+            },
+          },
+        })
+        requestImmediateCanvasSync()
+      } else if (['completed', 'failed', 'rejected'].includes(to)) {
+        runUnsub()
+      }
+    })
+
     // Execute async — non-blocking
     executeGithubIssueCreate(run.id, {
       repo: body.repo ?? '',
       title: body.title ?? '',
       body: body.body ?? '',
       dryRun: body.dryRun,
-    }).catch(err => console.error('[agent-interface] run error:', err))
+    }).catch(err => { console.error('[agent-interface] run error:', err); runUnsub() })
 
     return reply.code(201).send({ runId: run.id, status: run.status })
   })
