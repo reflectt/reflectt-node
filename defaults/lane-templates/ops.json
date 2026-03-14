@@ -1,0 +1,32 @@
+{
+  "lane": "ops",
+  "description": "Template for ops-lane tasks. On completion, auto-generates the next ops health check or process-improvement task.",
+  "done_criteria_template": [
+    "Artifact committed at {{artifact_path}}",
+    "No regressions in existing tests",
+    "Status posted to task comments with shipped/blocker/next"
+  ],
+  "successor_rule": {
+    "strategy": "insight_or_default",
+    "insight_pool": "ops",
+    "default_task": {
+      "title": "ops: board health sweep — verify ready floors and stale task cleanup",
+      "priority": "P3",
+      "assignee": "rhythm",
+      "tags": ["ops", "board-health", "auto-generated"],
+      "done_criteria": [
+        "All lanes at or above ready floor",
+        "No tasks stale in doing > 24h without comment",
+        "Placeholder tasks purged or rescoped"
+      ]
+    },
+    "idempotency_key_template": "successor:ops:{{parent_task_id}}",
+    "max_successors_per_parent": 1
+  },
+  "transition_hook": "onTaskDone",
+  "transition_guard": {
+    "require_artifact": true,
+    "require_reviewer_approval": false,
+    "skip_if_successor_exists": true
+  }
+}
