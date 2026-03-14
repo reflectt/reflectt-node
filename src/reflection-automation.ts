@@ -322,43 +322,71 @@ export function getReflectionSLAs(): ReflectionSLA[] {
   })
 }
 
+// ── Batch-before-post gate (SIGNAL-ROUTING Change 4) ─────────────────────────
+// All per-agent nags (reflection reminders, idle alerts) go through batchNag()
+// before any channel post. A 5-minute batch window accumulates messages; the
+// flush posts a single Noise Budget Digest instead of N individual posts.
+//
+// Window duration controlled by WATCHDOG_BATCH_WINDOW_MS env var (default 5min).
+// Tests can set WATCHDOG_BATCH_WINDOW_MS to a small value (e.g. 50ms).
+//
+// task-1773525646527-rgpsta72u
+
+export function getBatchWindowMs(): number {
+  const envVal = process.env.WATCHDOG_BATCH_WINDOW_MS
+  if (envVal) return Number(envVal)
+  return 5 * 60 * 1000 // 5 minutes (production default)
+}
+
+// Exported for testing — allows tests to flush the batch manually
+export const _nagBatch: Map<string, string[]> = new Map() // channel → messages
+let _batchTimer: ReturnType<typeof setTimeout> | null = null
+
+export function _flushNagBatch(): void {
+  for (const [channel, messages] of _nagBatch.entries()) {
+    if (messages.length === 0) continue
+    const content = `📋 **Reflection & Idle Digest** (${messages.length} reminder${messages.length !== 1 ? 's' : ''}):\n${messages.map(m => `• ${m}`).join('\n')}`
+    routeMessage({
+      from: 'system',
+      content,
+      category: 'watchdog-alert',
+      severity: 'info',
+      forceChannel: channel,
+    }).catch(() => { /* non-fatal */ })
+  }
+  _nagBatch.clear()
+  _batchTimer = null
+}
+
+function batchNag(channel: string, message: string): void {
+  const existing = _nagBatch.get(channel)
+  if (existing) {
+    existing.push(message)
+  } else {
+    _nagBatch.set(channel, [message])
+  }
+
+  if (!_batchTimer) {
+    _batchTimer = setTimeout(_flushNagBatch, getBatchWindowMs())
+  }
+}
+
 // ── Nudge messages ──
 
 async function sendPostTaskNudge(agent: string, taskId: string, taskTitle: string, config: ReflectionNudgeConfig, taskStatus?: string): Promise<void> {
   const isBlocked = taskStatus === 'blocked'
   const msg = isBlocked
-    ? `🪞 Reflection nudge: @${agent}, "${taskTitle}" (${taskId}) is blocked. ` +
-      `Take 2 min to reflect — what's blocking you, what did you try, and what would unblock it? ` +
-      `Submit via POST /reflections with your observations.`
-    : `🪞 Reflection nudge: @${agent}, you just completed "${taskTitle}" (${taskId}). ` +
-      `Take 2 min to reflect — what went well, what was painful, and what would you change? ` +
-      `Submit via POST /reflections with your observations.`
+    ? `🪞 @${agent}: "${taskTitle}" (${taskId}) is blocked — reflect on what's blocking you`
+    : `🪞 @${agent}: completed "${taskTitle}" (${taskId}) — what went well, what was painful?`
 
-  try {
-    await routeMessage({
-      from: 'system',
-      content: msg,
-      category: 'watchdog-alert',
-      severity: 'info',
-      forceChannel: config.channel || 'general',
-    })
-  } catch { /* chat may not be available */ }
+  batchNag(config.channel || 'general', msg)
 }
 
 async function sendIdleNudge(agent: string, hoursSince: number, tasksDone: number, config: ReflectionNudgeConfig): Promise<void> {
-  const taskNote = tasksDone > 0 ? ` You've completed ${tasksDone} task(s) since your last reflection.` : ''
-  const msg = `🪞 Reflection due: @${agent}, it's been ${hoursSince}h since your last reflection.${taskNote} ` +
-    `Take a moment to capture what you've learned. Submit via POST /reflections.`
+  const taskNote = tasksDone > 0 ? ` (${tasksDone} task(s) done since last reflection)` : ''
+  const msg = `🪞 @${agent}: ${hoursSince}h since last reflection${taskNote} — capture what you've learned`
 
-  try {
-    await routeMessage({
-      from: 'system',
-      content: msg,
-      category: 'watchdog-alert',
-      severity: 'warning',
-      forceChannel: config.channel || 'general',
-    })
-  } catch { /* chat may not be available */ }
+  batchNag(config.channel || 'general', msg)
 }
 
 // ── Helpers ──
