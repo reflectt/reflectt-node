@@ -155,6 +155,7 @@ import { registerManageRoutes } from './manage.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
+import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { requestImmediateCanvasSync } from './cloud.js'
@@ -7218,6 +7219,32 @@ export async function createServer(): Promise<FastifyInstance> {
       mentions: body.mentions as string[] | undefined,
     })
     return { success: true, decision }
+  })
+
+  // Comms routing policy simulator — evaluate scenarios against a policy
+  // POST /routing/simulate
+  // Body: { policy: CommsRoutingPolicy, scenarios: RoutingScenario[] }
+  // Returns: { success, count, results: CommsRouteResult[] }
+  app.post('/routing/simulate', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const policy = body.policy as CommsRoutingPolicy | undefined
+    const scenarios = body.scenarios as RoutingScenario[] | undefined
+
+    if (!policy || typeof policy !== 'object') {
+      reply.status(400)
+      return { success: false, message: 'Missing required field: policy (CommsRoutingPolicy)' }
+    }
+    if (!Array.isArray(scenarios) || scenarios.length === 0) {
+      reply.status(400)
+      return { success: false, message: 'Missing required field: scenarios (non-empty array)' }
+    }
+    if (scenarios.length > 100) {
+      reply.status(400)
+      return { success: false, message: 'Too many scenarios: max 100 per request' }
+    }
+
+    const results = simulateRoutingScenarios(scenarios, policy)
+    return { success: true, count: results.length, results }
   })
 
   // ── Preflight Check endpoint ────────────────────────────────────────
