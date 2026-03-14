@@ -7411,6 +7411,153 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, sessionId: session.id }
   })
 
+  // POST /voice/audio — accept an audio blob, transcribe via STT, pipe to voice pipeline
+  // Completes the full speak→STT→LLM→TTS loop.
+  // Form fields: agentId (string), audio (file: wav/mp3/webm/ogg/m4a)
+  // Returns: { sessionId }
+  app.post('/voice/audio', async (request, reply) => {
+    let agentId = ''
+    let audioBuffer: Buffer | null = null
+    let audioMimeType = 'audio/webm'
+
+    try {
+      const parts = (request as any).parts()
+      for await (const part of parts) {
+        if (part.type === 'field' && part.fieldname === 'agentId') {
+          agentId = String(part.value ?? '').trim()
+        } else if (part.type === 'file' && part.fieldname === 'audio') {
+          audioMimeType = part.mimetype ?? 'audio/webm'
+          const chunks: Buffer[] = []
+          for await (const chunk of part.file) chunks.push(chunk)
+          audioBuffer = Buffer.concat(chunks)
+        }
+      }
+    } catch {
+      reply.status(400); return { success: false, message: 'Invalid multipart body' }
+    }
+
+    if (!agentId) { reply.status(400); return { success: false, message: 'agentId is required' } }
+    if (!audioBuffer || audioBuffer.length === 0) { reply.status(400); return { success: false, message: 'audio file is required' } }
+    if (audioBuffer.length > 25 * 1024 * 1024) { reply.status(413); return { success: false, message: 'Audio exceeds 25MB limit' } }
+
+    // Transcribe via OpenAI Whisper
+    const openAiKey = process.env.OPENAI_API_KEY
+    let transcript = ''
+    if (openAiKey) {
+      try {
+        // Determine file extension from mime type
+        const ext = audioMimeType.includes('mp4') || audioMimeType.includes('m4a') ? 'm4a'
+          : audioMimeType.includes('mp3') ? 'mp3'
+          : audioMimeType.includes('ogg') ? 'ogg'
+          : audioMimeType.includes('wav') ? 'wav'
+          : 'webm'
+
+        const form = new FormData()
+        form.append('file', new Blob([audioBuffer], { type: audioMimeType }), `audio.${ext}`)
+        form.append('model', 'whisper-1')
+        form.append('language', 'en')
+
+        const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${openAiKey}` },
+          body: form,
+          signal: AbortSignal.timeout(30000),
+        })
+
+        if (res.ok) {
+          const data = await res.json() as { text?: string }
+          transcript = data.text?.trim() ?? ''
+        } else {
+          const err = await res.text()
+          console.error(`[voice/audio] Whisper error ${res.status}: ${err.slice(0, 200)}`)
+        }
+      } catch (err) {
+        console.error('[voice/audio] STT error:', err)
+      }
+    }
+
+    if (!transcript) {
+      // STT unavailable or failed — return session but with empty transcript flag
+      reply.status(503); return { success: false, message: 'STT unavailable — set OPENAI_API_KEY for Whisper transcription' }
+    }
+
+    if (transcript.length > 4000) transcript = transcript.slice(0, 4000)
+
+    // Delegate to the same voice pipeline as POST /voice/input
+    // Inline the pipeline logic (mirrors /voice/input handler)
+    const session = createVoiceSession(agentId)
+    const agentRole = getAgentRole(agentId)
+    const agentSystemPrompt = agentRole
+      ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+      : `You are ${agentId}, a team agent. Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+
+    const identityColor = AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af'
+
+    const setActiveSpeakerAudio = (active: boolean) => {
+      const existing = canvasStateMap.get(agentId)
+      if (existing) {
+        canvasStateMap.set(agentId, { ...existing, payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active }, updatedAt: Date.now() })
+        requestImmediateCanvasSync()
+      }
+    }
+
+    const agentResponder = async (respAgentId: string, text: string, _sessionId: string): Promise<string | null> => {
+      setActiveSpeakerAudio(false)
+      const anthropicKey = process.env.ANTHROPIC_API_KEY
+      if (anthropicKey) {
+        try {
+          const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 256, system: agentSystemPrompt, messages: [{ role: 'user', content: text }] }),
+            signal: AbortSignal.timeout(15000),
+          })
+          if (resp.ok) {
+            const data = await resp.json() as { content?: Array<{ text?: string }> }
+            const reply2 = data.content?.[0]?.text?.trim()
+            if (reply2) return reply2
+          }
+        } catch (err) { console.error(`[voice/audio] LLM call failed:`, err) }
+      }
+      await new Promise(resolve => setTimeout(resolve, 400))
+      return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
+    }
+
+    const NODE_AGENT_VOICE_IDS_AUDIO: Record<string, string> = {
+      link: 'pNInz6obpgDQGcFmaJgB', kai: 'onwK4e9ZLuTAKqWW03F9', pixel: 'EXAVITQu4vr4xnSDxMaL',
+      sage: 'yoZ06aMxZJJ28mfd3POQ', scout: '3XbDmaS0mwj3WIVTUxWa', echo: 'MF3mGyEYCl7XYWbV9V6O',
+    }
+    const synthesizeTtsAudio = async (text: string, forAgentId: string): Promise<string | null> => {
+      const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
+      if (!elevenKey) return null
+      const voiceId = NODE_AGENT_VOICE_IDS_AUDIO[forAgentId] ?? NODE_AGENT_VOICE_IDS_AUDIO['link']
+      try {
+        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+          method: 'POST',
+          headers: { 'xi-api-key': elevenKey, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
+          body: JSON.stringify({ text: text.slice(0, 500), model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+          signal: AbortSignal.timeout(20000),
+        })
+        if (!res.ok) return null
+        const buf = Buffer.from(await res.arrayBuffer())
+        return `data:audio/mpeg;base64,${buf.toString('base64')}`
+      } catch { return null }
+    }
+
+    const unsubVoiceAudio = subscribeVoiceSession(session.id, (event) => {
+      if (event.type === 'tts.ready') setActiveSpeakerAudio(true)
+      else if (event.type === 'session.end' || event.type === 'error') { setActiveSpeakerAudio(false); unsubVoiceAudio() }
+    })
+
+    processVoiceTranscript(session.id, transcript, agentResponder, synthesizeTtsAudio).catch(err => {
+      console.error('[voice/audio] processVoiceTranscript error:', err)
+      unsubVoiceAudio()
+    })
+
+    void identityColor // suppress unused warning
+    return reply.code(201).send({ success: true, sessionId: session.id, transcript })
+  })
+
   // GET /voice/session/:id/events — SSE stream of voice pipeline state events
   // Events: transcript.final, agent.thinking, agent.done, tts.ready, error, session.end
   app.get<{ Params: { id: string } }>('/voice/session/:id/events', async (request, reply) => {
