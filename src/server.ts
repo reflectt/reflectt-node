@@ -157,7 +157,7 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
 import { createVoiceSession, getVoiceSession, processVoiceTranscript, subscribeVoiceSession } from './voice-sessions.js'
-import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, listPendingRuns } from './agent-interface.js'
+import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, listPendingRuns, listRuns } from './agent-interface.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { requestImmediateCanvasSync } from './cloud.js'
@@ -7496,6 +7496,13 @@ export async function createServer(): Promise<FastifyInstance> {
     }).catch(err => console.error('[agent-interface] run error:', err))
 
     return reply.code(201).send({ runId: run.id, status: run.status })
+  })
+
+  // GET /agent-interface/runs — list runs, optionally filtered by status
+  // e.g. ?status=awaiting_approval — used by presence canvas to surface pending decisions
+  app.get('/agent-interface/runs', async (request) => {
+    const { status } = request.query as { status?: string }
+    return { runs: listRuns(status) }
   })
 
   // GET /agent-interface/runs/:runId — get run state + log

@@ -299,6 +299,17 @@ export function listPendingRuns(): AgentInterfaceRun[] {
   return result
 }
 
+/**
+ * List all runs with optional status filter.
+ */
+export function listRuns(status?: string): AgentInterfaceRun[] {
+  const result: AgentInterfaceRun[] = []
+  for (const run of runs.values()) {
+    if (!status || run.status === status) result.push(run)
+  }
+  return result.sort((a, b) => b.createdAt - a.createdAt)
+}
+
 export function _clearRunsForTest(): void {
   runs.clear()
   subscribers.clear()
