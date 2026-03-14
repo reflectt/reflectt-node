@@ -157,6 +157,7 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
 import { createVoiceSession, getVoiceSession, processVoiceTranscript, subscribeVoiceSession } from './voice-sessions.js'
+import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate } from './agent-interface.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { requestImmediateCanvasSync } from './cloud.js'
@@ -7469,6 +7470,101 @@ export async function createServer(): Promise<FastifyInstance> {
       unsubscribe()
       clearInterval(heartbeat)
     })
+  })
+
+  // ── Agent Interface routes — software actions on behalf of the human ──────
+
+  // POST /agent-interface/runs — create and start a new agent action run
+  app.post('/agent-interface/runs', async (request, reply) => {
+    const body = request.body as { kind?: string; repo?: string; title?: string; body?: string; dryRun?: boolean }
+    if (!body?.kind) { reply.status(400); return { success: false, message: 'kind is required' } }
+    if (body.kind !== 'github_issue_create') { reply.status(400); return { success: false, message: `Unknown kind: ${body.kind}` } }
+
+    const run = createRun('github_issue_create', {
+      repo: body.repo ?? '',
+      title: body.title ?? '',
+      body: body.body ?? '',
+      dryRun: body.dryRun ?? false,
+    })
+
+    // Execute async — non-blocking
+    executeGithubIssueCreate(run.id, {
+      repo: body.repo ?? '',
+      title: body.title ?? '',
+      body: body.body ?? '',
+      dryRun: body.dryRun,
+    }).catch(err => console.error('[agent-interface] run error:', err))
+
+    return reply.code(201).send({ runId: run.id, status: run.status })
+  })
+
+  // GET /agent-interface/runs/:runId — get run state + log
+  app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+    return { run }
+  })
+
+  // GET /agent-interface/runs/:runId/events — SSE stream of run events
+  app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId/events', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Replay existing log events first
+    for (const event of run.log) {
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
+
+    // If run is already terminal, close immediately
+    if (['completed', 'failed', 'rejected'].includes(run.status)) {
+      reply.raw.write(`data: ${JSON.stringify({ type: 'run_end', timestamp: Date.now(), payload: { status: run.status } })}\n\n`)
+      reply.raw.end()
+      return reply
+    }
+
+    const unsub = subscribeRun(request.params.runId, (event) => {
+      try {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+        if (event.type === 'state_changed') {
+          const to = (event.payload as any).to as string
+          if (['completed', 'failed', 'rejected'].includes(to)) {
+            reply.raw.write(`data: ${JSON.stringify({ type: 'run_end', timestamp: Date.now(), payload: { status: to } })}\n\n`)
+            reply.raw.end()
+          }
+        }
+      } catch { /* connection closed */ }
+    })
+
+    const heartbeat = setInterval(() => { try { reply.raw.write(': ping\n\n') } catch { clearInterval(heartbeat); unsub() } }, 15_000)
+    request.raw.on('close', () => { unsub(); clearInterval(heartbeat) })
+    return reply
+  })
+
+  // POST /agent-interface/runs/:runId/approve — human approves the pending action
+  app.post<{ Params: { runId: string } }>('/agent-interface/runs/:runId/approve', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+    if (run.status !== 'awaiting_approval') { reply.status(409); return { success: false, message: `Run is ${run.status}, not awaiting_approval` } }
+    const ok = approveRun(request.params.runId)
+    if (!ok) { reply.status(409); return { success: false, message: 'No pending approval for this run' } }
+    return { success: true, runId: request.params.runId }
+  })
+
+  // POST /agent-interface/runs/:runId/reject — human rejects the pending action
+  app.post<{ Params: { runId: string } }>('/agent-interface/runs/:runId/reject', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+    if (run.status !== 'awaiting_approval') { reply.status(409); return { success: false, message: `Run is ${run.status}, not awaiting_approval` } }
+    const ok = rejectRun(request.params.runId)
+    if (!ok) { reply.status(409); return { success: false, message: 'No pending approval for this run' } }
+    return { success: true, runId: request.params.runId }
   })
 
   // ── Preflight Check endpoint ────────────────────────────────────────
