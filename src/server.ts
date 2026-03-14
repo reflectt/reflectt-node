@@ -7305,11 +7305,48 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Build agent system context for the LLM responder
+    const agentRole = getAgentRole(agentId)
+    const agentSystemPrompt = agentRole
+      ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+      : `You are ${agentId}, a team agent. Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+
     // Kick off async processing — do not await so we return sessionId immediately
-    const agentResponder = async (_agentId: string, text: string, _sessionId: string): Promise<string | null> => {
-      // Emit thinking state to canvas
+    const agentResponder = async (respAgentId: string, text: string, _sessionId: string): Promise<string | null> => {
       setActiveSpeaker(false)
-      await new Promise(resolve => setTimeout(resolve, 400)) // simulate brief think time
+
+      // Try real LLM call if ANTHROPIC_API_KEY is set
+      const anthropicKey = process.env.ANTHROPIC_API_KEY
+      if (anthropicKey) {
+        try {
+          const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': anthropicKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5',
+              max_tokens: 256,
+              system: agentSystemPrompt,
+              messages: [{ role: 'user', content: text }],
+            }),
+            signal: AbortSignal.timeout(15000),
+          })
+          if (resp.ok) {
+            const data = await resp.json() as { content?: Array<{ text?: string }> }
+            const reply = data.content?.[0]?.text?.trim()
+            if (reply) return reply
+          }
+        } catch (err) {
+          console.error(`[voice] LLM call failed for ${respAgentId}:`, err)
+          // fall through to stub
+        }
+      }
+
+      // Stub fallback — always available, no key required
+      await new Promise(resolve => setTimeout(resolve, 400))
       return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
     }
 
