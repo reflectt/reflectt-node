@@ -9646,20 +9646,20 @@ export async function createServer(): Promise<FastifyInstance> {
         state === 'thinking' ? 0.4 : 0.25
       const ghostParticles =
         ghostIntensity > 0.7 ? 'surge' : ghostIntensity > 0.4 ? 'drift' : 'scatter'
+      const identityColor = GHOST_COLORS[agentId] ?? '#60a5fa'
       eventBus.emit({
         id: `ghost-${now}-${Math.random().toString(36).slice(2, 6)}`,
         type: 'canvas_expression' as const,
         timestamp: now,
         data: {
           agentId,
+          identityColor,
+          _ghost: true,
+          _ghostIntensity: ghostIntensity,
           channels: {
-            visual: {
-              flash: GHOST_COLORS[agentId] ?? '#60a5fa',
-              particles: ghostParticles,
-            },
+            visual: { flash: identityColor, particles: ghostParticles },
             narrative: `${agentId} → ${state}`,
           },
-          _ghost: true,
         },
       })
     }
@@ -10041,7 +10041,11 @@ export async function createServer(): Promise<FastifyInstance> {
       }))
 
     const anthropicKey = process.env.ANTHROPIC_API_KEY
-    const results: Array<{ agentId: string; queued: boolean }> = []
+    const BRIEFING_ID_COLORS: Record<string, string> = {
+      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+    }
+    const results: Array<{ name: string; agentId: string; voiceLine: string; state: string; identityColor: string; task?: string; queued: boolean }> = []
 
     for (let i = 0; i < activeAgents.length; i++) {
       const agent = activeAgents[i]!
@@ -10097,7 +10101,15 @@ export async function createServer(): Promise<FastifyInstance> {
         })
       }, stagger)
 
-      results.push({ agentId: agent.agentId, queued: true })
+      results.push({
+        name: agent.agentId,
+        agentId: agent.agentId,
+        voiceLine,
+        state: agent.state,
+        identityColor: BRIEFING_ID_COLORS[agent.agentId] ?? '#94a3b8',
+        task: agent.task,
+        queued: true,
+      })
     }
 
     return { success: true, agents: results, totalMs: activeAgents.length * BRIEFING_STAGGER_MS }
@@ -10185,8 +10197,8 @@ export async function createServer(): Promise<FastifyInstance> {
                     timestamp: Date.now(),
                     data: {
                       agentId,
-                      channels: { voice: fullLine, narrative: `${agentId} noticed` },
-                      _gaze: true, _gazeAgentId: agentId, _partial: true,
+                      channels: { typography: { text: fullLine, size: 'xl' as const, weight: 100, position: 'center' as const }, narrative: `${agentId} noticed` },
+                      _gaze: true, _gazeAgentId: agentId, _stream: true,
                     },
                   })
                   // Also stream the token to the HTTP caller
@@ -10216,7 +10228,7 @@ export async function createServer(): Promise<FastifyInstance> {
             typography: { text: activeTask?.title?.slice(0, 60) ?? fullLine, size: 'xl', weight: 100, durationMs: 4000, position: 'center' },
             narrative: `${agentId} noticed`,
           },
-          _gaze: true, _gazeAgentId: agentId,
+          _gaze: true, _gazeAgentId: agentId, _streamFinal: true,
         },
       })
 
