@@ -8968,6 +8968,42 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      // ── Approval card: proactively surface approval card on canvas when task enters validating ──
+      if (parsed.status === 'validating' && existing.status !== 'validating') {
+        const taskMetaForCard = task.metadata as Record<string, unknown> | undefined
+        const prUrlForCard = (taskMetaForCard?.pr_url as string | undefined)
+          ?? (taskMetaForCard?.review_handoff as Record<string, unknown> | undefined)?.pr_url as string | undefined
+          ?? (taskMetaForCard?.qa_bundle as Record<string, unknown> | undefined)?.pr_url as string | undefined
+        const qaSummary = (taskMetaForCard?.qa_bundle as Record<string, unknown> | undefined)?.summary as string | undefined
+        const CANVAS_AGENT_COLORS: Record<string, string> = {
+          link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+          sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+          rhythm: '#a3e635', swift: '#38bdf8', kotlin: '#f97316',
+        }
+        const assigneeIdForCard = (task.assignee ?? '').toLowerCase()
+        const approvalNow = Date.now()
+        eventBus.emit({
+          id: `approval-${approvalNow}-${Math.random().toString(36).slice(2, 6)}`,
+          type: 'canvas_push',
+          timestamp: approvalNow,
+          data: {
+            type: 'approval_requested',
+            agentId: assigneeIdForCard,
+            agentColor: CANVAS_AGENT_COLORS[assigneeIdForCard] ?? '#94a3b8',
+            data: {
+              taskId: task.id,
+              taskTitle: task.title,
+              reviewer: task.reviewer,
+              prUrl: prUrlForCard || undefined,
+              qaSummary: qaSummary || undefined,
+              priority: task.priority,
+            },
+            ttl: 120000,
+            t: approvalNow,
+          },
+        })
+      }
+
       // ── Activation funnel: track first_task_started / first_task_completed ──
       {
         const funnelUserId = (task.metadata as any)?.userId || task.assignee || ''
@@ -11019,6 +11055,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const isTasksQuery = /working on|team doing|team status|happening|active|shipping|tasks|who.?s|what.?s the team/.test(lower)
     const isRevenueQuery = /revenue|mrr|arr|money|sales|customers|paid|billing/.test(lower)
     const isOnboardingQuery = /onboard|get started|how do i|where do i start|first step/.test(lower)
+    const isHostsQuery = /show me hosts|host status|server status|machine|node/.test(lower)
 
     let card: { type: string; data: Record<string, unknown> }
 
@@ -11069,6 +11106,17 @@ export async function createServer(): Promise<FastifyInstance> {
           ctaAction: 'https://reflectt.ai/docs',
         },
       }
+    } else if (isHostsQuery) {
+      const rawHosts = listHosts({})
+      const hosts = rawHosts.map((h: any) => ({
+        id: h.id,
+        name: h.hostname ?? h.id,
+        status: h.status,
+        version: h.version ?? null,
+        agentCount: Array.isArray(h.agents) ? h.agents.length : 0,
+        lastSeen: h.last_seen_at,
+      }))
+      card = { type: 'hosts', data: { hosts } }
     } else {
       // General info card — LLM answers with team context injected
       const anthropicKey = process.env.ANTHROPIC_API_KEY
