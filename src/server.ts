@@ -9484,6 +9484,15 @@ export async function createServer(): Promise<FastifyInstance> {
     payload: z.object({
       text: z.string().optional(),
       media: z.unknown().optional(),
+      // Explicit content type — eliminates heuristic inference on the canvas
+      content: z.object({
+        type: z.enum(['text', 'markdown', 'code', 'image']).optional(),
+        lang: z.string().optional(),  // syntax hint for code blocks (e.g. "typescript", "bash")
+        progress: z.array(z.object({
+          label: z.string(),
+          state: z.enum(['pending', 'active', 'done', 'failed']),
+        })).optional(),
+      }).optional(),
       decision: z.object({
         question: z.string(),
         context: z.string().optional(),
@@ -9575,6 +9584,14 @@ export async function createServer(): Promise<FastifyInstance> {
       colorHint: z.string().optional(),
       particleIntensity: z.number().min(0).max(1).optional(),
       pulseRate: z.enum(['slow', 'normal', 'fast']).optional(),
+    }).optional(),
+    content: z.object({                                   // explicit content-type for deterministic rendering
+      type: z.enum(['text', 'markdown', 'code', 'image']).optional(),
+      lang: z.string().optional(),                        // code syntax hint (e.g. "typescript", "bash")
+      progress: z.array(z.object({
+        label: z.string(),
+        state: z.enum(['pending', 'active', 'done', 'failed']),
+      })).optional(),
     }).optional(),
   })
 
