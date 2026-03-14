@@ -147,6 +147,7 @@ import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATU
 import { queryActivity, ACTIVITY_SOURCES } from './activity.js'
 import { patchInsightById, cooldownInsightById, closeInsightById } from './insight-mutation.js'
 import { runStaleCandidateReconcileSweep } from './stale-candidate-reconciler.js'
+import { runCanvasAutoStateSweep, SYNC_INTERVAL_MS, PUSH_PRIORITY_WINDOW_MS } from './canvas-auto-state.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
 import { listLineage, getLineage, lineageStats } from './lineage.js'
@@ -9826,6 +9827,66 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Current state per agent — in-memory, not persisted
   const canvasStateMap = new Map<string, { state: CanvasState; sensors: string | null; payload: unknown; updatedAt: number }>()
+
+  // ── Canvas auto-state sweep ──
+  // Derives canvas state from task board for agents who haven't pushed recently.
+  // Prevents blank canvas when agents are working but not calling POST /canvas/state.
+  ;(async () => {
+    const AGENT_IDENTITY_COLORS: Record<string, string> = {
+      kai: '#fb923c', pixel: '#a78bfa', link: '#60a5fa',
+      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+    }
+
+    function doCanvasAutoStateSweep() {
+      try {
+        runCanvasAutoStateSweep({
+          listTasks: (opts) => taskManager.listTasks(opts as any),
+          getCanvasState: (agentId) => {
+            const entry = canvasStateMap.get(agentId)
+            return entry ? { state: entry.state, updatedAt: entry.updatedAt } : null
+          },
+          emitSyntheticState: (agentId, state, sourceTasks) => {
+            const now = Date.now()
+            // Write into canvasStateMap so pulse tick picks it up
+            const prev = canvasStateMap.get(agentId)
+            canvasStateMap.set(agentId, {
+              state,
+              sensors: null,
+              payload: { _auto: true, sourceTasks: sourceTasks.slice(0, 2).map(t => ({ id: t.id, title: t.title, status: t.status })) },
+              updatedAt: now,
+            })
+            // Emit canvas_render so SSE consumers get immediate update
+            eventBus.emit({
+              id: `auto-state-${agentId}-${now}`,
+              type: 'canvas_render' as const,
+              timestamp: now,
+              data: {
+                state,
+                sensors: null,
+                agentId,
+                payload: { _auto: true },
+                presence: {
+                  name: agentId,
+                  color: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
+                  state,
+                  canvasState: state,
+                  task: sourceTasks[0]?.title ?? null,
+                  _auto: true,
+                },
+                previousState: prev?.state ?? 'floor',
+              },
+            })
+          },
+        })
+      } catch (err) {
+        // Non-fatal — canvas auto-state is best-effort
+        console.warn('[canvas-auto-state] Sweep error:', err)
+      }
+    }
+
+    const autoStateTimer = setInterval(doCanvasAutoStateSweep, SYNC_INTERVAL_MS)
+    autoStateTimer.unref()
+  })().catch(() => { /* never fail startup */ })
 
   // POST /canvas/state — agent emits a state transition
   app.post('/canvas/state', async (request, reply) => {
