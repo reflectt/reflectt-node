@@ -1103,6 +1103,7 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | POST | `/agents/:agentId/runs` | Create a new agent run. Body: `{ objective, teamId?, taskId?, parentRunId? }` |
 | GET | `/agents/:agentId/runs` | List runs. Query: `?status=&teamId=&limit=` |
 | GET | `/agents/:agentId/runs/current` | Get active (non-terminal) run. Query: `?teamId=` |
+| GET | `/agents/:agentId/runs/current/pending-reviews` | List unresolved `review_requested` events for this reviewer agent — tasks in validating awaiting their decision. Query: `?teamId=` |
 | PATCH | `/agents/:agentId/runs/:runId` | Update run. Body: `{ status?, contextSnapshot?, artifacts? }` |
 | POST | `/agents/:agentId/events` | Append an event (immutable). Body: `{ eventType, runId?, payload? }`. Routing enforced: actionable event types require `action_required` (review\|unblock\|approve\|fyi) and `urgency` (blocking\|normal\|low). |
 | POST | `/runs/:runId/events` | Append an event to a run by runId (resolves agentId automatically). Same routing enforcement as `/agents/:agentId/events`. Body: `{ eventType, payload? }`. |
