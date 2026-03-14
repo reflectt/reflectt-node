@@ -7364,6 +7364,27 @@ export async function createServer(): Promise<FastifyInstance> {
     // Synthesize TTS via ElevenLabs if key is set
     const synthesizeTts = async (text: string, forAgentId: string): Promise<string | null> => {
       const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
+
+      // Fire canvas_expression alongside TTS — the room responds when an agent speaks.
+      // Non-blocking: emit first, synthesize in parallel.
+      const IDENTITY_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      eventBus.emit({
+        id: `voice-expr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_expression' as const,
+        timestamp: Date.now(),
+        data: {
+          agentId: forAgentId,
+          channels: {
+            voice: text.slice(0, 300),
+            visual: { flash: IDENTITY_COLORS[forAgentId] ?? '#60a5fa', particles: 'surge' },
+            narrative: `${forAgentId} responds`,
+          },
+        },
+      })
+
       if (!elevenKey) return null
       const voiceId = NODE_AGENT_VOICE_IDS[forAgentId] ?? NODE_AGENT_VOICE_IDS['link']
       try {
@@ -7529,6 +7550,24 @@ export async function createServer(): Promise<FastifyInstance> {
     }
     const synthesizeTtsAudio = async (text: string, forAgentId: string): Promise<string | null> => {
       const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
+      // canvas_expression fires whether or not ElevenLabs is configured
+      const IDENTITY_COLORS_AUDIO: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      eventBus.emit({
+        id: `voice-expr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_expression' as const,
+        timestamp: Date.now(),
+        data: {
+          agentId: forAgentId,
+          channels: {
+            voice: text.slice(0, 300),
+            visual: { flash: IDENTITY_COLORS_AUDIO[forAgentId] ?? '#60a5fa', particles: 'surge' },
+            narrative: `${forAgentId} responds`,
+          },
+        },
+      })
       if (!elevenKey) return null
       const voiceId = NODE_AGENT_VOICE_IDS_AUDIO[forAgentId] ?? NODE_AGENT_VOICE_IDS_AUDIO['link']
       try {
