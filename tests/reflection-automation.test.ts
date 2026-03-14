@@ -226,7 +226,7 @@ describe('tickReflectionNudges', () => {
 
       // Backdate last reflection to be overdue.
       const db = getDb()
-      const past = Date.now() - 2 * 60 * 60 * 1000
+      const past = Date.now() - 15 * 60 * 60 * 1000
       db.prepare('UPDATE reflection_tracking SET last_reflection_at = ?, updated_at = ? WHERE agent = ?')
         .run(past, past, 'tracked-idle')
 
