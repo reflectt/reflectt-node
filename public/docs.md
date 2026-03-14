@@ -219,6 +219,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | POST | `/browser/sessions/:id/navigate` | Navigate to a URL. Body: `{ url }`. |
 | GET | `/browser/sessions/:id/screenshot` | Take a screenshot of the current page. Returns `{ base64, mimeType }`. |
 | GET | `/capabilities` | Agent-facing endpoint discovery. Lists all endpoints grouped by purpose, compact support flags, and usage recommendations. |
+| GET | `/capabilities/readiness` | Per-capability readiness status for Browser/Email/SMS/Calendar. Returns `overall` + per-capability `status` (ready\|degraded\|not_ready\|unknown), `dependencies[]`, `last_error`, and `hint`. |
 | GET | `/version` | Current version + latest available from GitHub releases. Includes `update_available` boolean. Caches GitHub check for 15 minutes. |
 | GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action. Supports `compact`. |
 | GET | `/tasks/intake-schema` | Task intake schema discovery — returns required/optional fields and per-type templates |
