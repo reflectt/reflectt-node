@@ -287,6 +287,18 @@ export function rejectRun(runId: string): boolean {
   return true
 }
 
+/**
+ * List runs currently awaiting human approval — surfaced in /approval-queue
+ * so the presence canvas decision card can show them.
+ */
+export function listPendingRuns(): AgentInterfaceRun[] {
+  const result: AgentInterfaceRun[] = []
+  for (const run of runs.values()) {
+    if (run.status === 'awaiting_approval') result.push(run)
+  }
+  return result
+}
+
 export function _clearRunsForTest(): void {
   runs.clear()
   subscribers.clear()
