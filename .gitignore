@@ -37,3 +37,6 @@ process/*
 !process/TASK-5mlkqadzh.md
 !process/TASK-3z83jzley.md
 !process/CANVAS-STATE-CONTRACT-v1.md
+
+# Build artifacts
+commit.txt
