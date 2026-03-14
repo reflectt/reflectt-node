@@ -50,6 +50,28 @@ export interface ClaimGateResult {
   reflectionsDue?: number
 }
 
+// ── Startup grace period ──
+
+/**
+ * After a process restart, doing tasks that were already in-flight should
+ * not be immediately eligible for auto-requeue. Agents need time to reconnect
+ * and post a status update. During this window Phase 1 warnings are also
+ * suppressed to avoid thundering-herd noise.
+ *
+ * Root cause of the "restart re-queues doing tasks" bug:
+ * - boardHealthWorker calls tickWorkingContract() on every health tick.
+ * - On restart, doing tasks may have been stale for hours (agent was offline).
+ * - Without a grace period, the contract fires immediately and requeues them.
+ * - This clears the agent's active task, breaking their work context.
+ *
+ * Fix: suppress Phase 1 + Phase 2 enforcement for STARTUP_GRACE_MS after
+ * module load (which proxies server start time).
+ */
+export const STARTUP_GRACE_MS = 15 * 60 * 1000 // 15 minutes
+
+/** Timestamp when this module was first loaded (proxy for server start) */
+const moduleLoadedAt = Date.now()
+
 // ── State: track warnings ──
 
 /**
@@ -113,14 +135,30 @@ function clearWarning(key: string): void {
  * Called periodically. Checks all 'doing' tasks for stale status.
  * Phase 1: warn. Phase 2 (after grace): auto-requeue.
  */
-export async function tickWorkingContract(): Promise<TickResult> {
+export async function tickWorkingContract(opts: {
+  /** @internal test-only: override Date.now() */
+  _nowOverride?: number
+  /** @internal test-only: override moduleLoadedAt */
+  _moduleLoadedAtOverride?: number
+} = {}): Promise<TickResult> {
   const config = getConfig()
   if (!config.enabled) return { warnings: 0, requeued: 0, actions: [] }
 
   // Seed warningTimestamps from DB on first tick (survives process restarts)
   seedWarningTimestamps()
 
-  const now = Date.now()
+  const now = opts._nowOverride ?? Date.now()
+  const effectiveModuleLoadedAt = opts._moduleLoadedAtOverride ?? moduleLoadedAt
+
+  // Startup grace period: suppress auto-requeue for STARTUP_GRACE_MS after server start.
+  // Agents need time to reconnect and post a status update after a restart.
+  // Without this, doing tasks that were in-flight before the restart get immediately
+  // re-queued on the first board health tick, wiping agents' active work context.
+  const uptimeMs = now - effectiveModuleLoadedAt
+  const inGracePeriod = uptimeMs < STARTUP_GRACE_MS
+  if (inGracePeriod) {
+    return { warnings: 0, requeued: 0, actions: [] }
+  }
   const staleThresholdMs = config.staleAutoRequeueMin * 60_000
   const graceMs = config.graceAfterWarningMin * 60_000
   const actions: EnforcementAction[] = []
