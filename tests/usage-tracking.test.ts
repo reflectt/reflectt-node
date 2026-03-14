@@ -205,4 +205,68 @@ describe('Usage Tracking API', () => {
       expect(Array.isArray(body.suggestions)).toBe(true)
     })
   })
+
+  describe('POST /usage/ingest', () => {
+    it('ingests a single external usage record (no auth configured)', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/usage/ingest',
+        payload: {
+          agent: 'swift',
+          model: 'claude-sonnet-4-6',
+          input_tokens: 500,
+          output_tokens: 200,
+          cost_usd: 0.0045,
+          session_id: 'sess-abc123',
+          timestamp: Date.now(),
+        },
+      })
+      expect(res.statusCode).toBe(201)
+      const body = JSON.parse(res.body)
+      expect(body.success).toBe(true)
+      expect(body.event).toBeDefined()
+      expect(body.event.agent).toBe('swift')
+      expect(body.event.api_source).toBe('openclaw:sess-abc123')
+    })
+
+    it('ingests a batch of external usage records', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/usage/ingest',
+        payload: {
+          events: [
+            { agent: 'kotlin', model: 'gpt-5.4', input_tokens: 1000, output_tokens: 400, cost_usd: 0.006 },
+            { agent: 'qa', model: 'claude-sonnet-4-6', input_tokens: 300, output_tokens: 100 },
+          ],
+        },
+      })
+      expect(res.statusCode).toBe(201)
+      const body = JSON.parse(res.body)
+      expect(body.success).toBe(true)
+      expect(body.count).toBe(2)
+    })
+
+    it('returns 400 when agent or model is missing', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/usage/ingest',
+        payload: { model: 'gpt-5.4', input_tokens: 100, output_tokens: 50 },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(JSON.parse(res.body).success).toBe(false)
+    })
+
+    it('ingest records appear in /usage/by-agent', async () => {
+      await app.inject({
+        method: 'POST',
+        url: '/usage/ingest',
+        payload: { agent: 'shield', model: 'gpt-5.3', input_tokens: 200, output_tokens: 80, cost_usd: 0.001 },
+      })
+      const res = await app.inject({ method: 'GET', url: '/usage/by-agent' })
+      expect(res.statusCode).toBe(200)
+      const body = JSON.parse(res.body)
+      const agents = (body.usage ?? body).map((a: { agent: string }) => a.agent)
+      expect(agents).toContain('shield')
+    })
+  })
 })

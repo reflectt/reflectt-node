@@ -14969,6 +14969,67 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, count: events.length }
   })
 
+  // POST /usage/ingest — accept external usage records from OpenClaw sessions
+  // Bridges agents not connected via node heartbeat (swift, kotlin, qa, etc.)
+  // into the model_usage table so the cloud dashboard captures all agent spend.
+  // Auth: REFLECTT_HOST_HEARTBEAT_TOKEN (Bearer / x-heartbeat-token / body.token).
+  // Supports single record or batch (body.events array).
+  app.post('/usage/ingest', async (request, reply) => {
+    const auth = verifyHeartbeatAuth(request as any)
+    if (!auth.ok) {
+      reply.code(401)
+      return { success: false, error: auth.error }
+    }
+
+    const body = request.body as Record<string, unknown>
+
+    // Batch path: { events: [...] }
+    if (Array.isArray(body.events)) {
+      const items = body.events as Record<string, unknown>[]
+      if (items.length === 0) {
+        reply.code(400)
+        return { success: false, error: 'events array must not be empty' }
+      }
+      const events = items.map(item => {
+        if (!item.agent || !item.model) throw Object.assign(new Error('agent and model are required in every event'), { statusCode: 400 })
+        return recordUsageTracking({
+          agent: item.agent as string,
+          model: item.model as string,
+          provider: (item.provider as string | undefined) ?? 'openclaw',
+          input_tokens: Number(item.input_tokens) || 0,
+          output_tokens: Number(item.output_tokens) || 0,
+          estimated_cost_usd: item.cost_usd != null ? Number(item.cost_usd) : undefined,
+          category: (item.category as UsageEvent['category'] | undefined) ?? 'other',
+          timestamp: Number(item.timestamp) || Date.now(),
+          api_source: (item.session_id as string | undefined) ? `openclaw:${item.session_id}` : 'openclaw',
+          metadata: item.session_id ? { session_id: item.session_id } : undefined,
+        })
+      })
+      reply.code(201)
+      return { success: true, count: events.length }
+    }
+
+    // Single record path: { agent, model, input_tokens, output_tokens, cost_usd, session_id?, timestamp? }
+    if (!body.agent || !body.model) {
+      reply.code(400)
+      return { success: false, error: 'agent and model are required' }
+    }
+    const event = recordUsageTracking({
+      agent: body.agent as string,
+      model: body.model as string,
+      provider: (body.provider as string | undefined) ?? 'openclaw',
+      input_tokens: Number(body.input_tokens) || 0,
+      output_tokens: Number(body.output_tokens) || 0,
+      estimated_cost_usd: body.cost_usd != null ? Number(body.cost_usd) : undefined,
+      category: (body.category as UsageEvent['category'] | undefined) ?? 'other',
+      timestamp: Number(body.timestamp) || Date.now(),
+      api_source: (body.session_id as string | undefined) ? `openclaw:${body.session_id}` : 'openclaw',
+      metadata: body.session_id ? { session_id: body.session_id } : undefined,
+    })
+    reply.code(201)
+    return { success: true, event }
+  })
+
   // Usage summary (total cost by period)
   app.get('/usage/summary', async (request) => {
     const q = request.query as Record<string, string>
