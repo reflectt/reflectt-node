@@ -885,6 +885,7 @@ Set via `reflectionNudge` in policy config:
 |--------|----------|-------------|
 | POST | `/usage/report` | Record model usage event. Body: `{ agent, model, provider?, input_tokens, output_tokens, estimated_cost_usd?, category?, task_id?, team_id? }`. Auto-estimates cost if not provided. |
 | POST | `/usage/report/batch` | Record batch of usage events. Body: `{ events: [...] }`. |
+| POST | `/usage/ingest` | Accept external usage records from OpenClaw sessions. Auth: `REFLECTT_HOST_HEARTBEAT_TOKEN` (Bearer / x-heartbeat-token). Single: `{ agent, model, input_tokens, output_tokens, cost_usd?, session_id?, timestamp? }`. Batch: `{ events: [...] }`. Returns `{ success, event }` or `{ success, count }`. |
 | GET | `/usage/summary` | Aggregated usage totals. Query: `since`, `until`, `agent`, `team_id`. |
 | GET | `/usage/by-agent` | Per-agent cost breakdown. Query: `since`, `until`. |
 | GET | `/usage/by-model` | Per-model cost breakdown. Query: `since`, `until`. |
