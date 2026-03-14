@@ -13,6 +13,7 @@ data/
 process/*
 !process/TASK-7xyi88v7x.md
 !process/TASK-hoy64vgsq.md
+!process/agent-interface-mvp-execution-v1.md
 # Allow committing specific task artifacts needed for review/proof
 !process/TASK-47sxe374r.md
 !process/TASK-iwphjvsrl.md
