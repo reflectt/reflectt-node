@@ -61,6 +61,7 @@ export type MacOSIntent = {
   target?: string    // element description or window title
   text?: string      // text to type / reminder title / note ref
   listName?: string  // for Reminders
+  dryRun?: boolean   // skip AppleScript execution (test/preview mode)
 }
 
 export type StepRecord = {
@@ -208,13 +209,14 @@ export async function executeIntent(intent: MacOSIntent): Promise<MacOSRunResult
     return { ok: false, error: validation.reason, steps }
   }
 
-  // Flag if approval is required (caller is responsible for gating)
-  if (requiresApproval(intent)) {
-    return { ok: false, requiresApproval: true, error: 'Human approval required before this action', steps }
-  }
-
   const app = intent.app ?? 'Notes'
   steps.push({ step: 'start', timestamp: Date.now(), ok: true, detail: `${intent.action} on ${app}` })
+
+  // Dry run: skip AppleScript, return success proof
+  if (intent.dryRun) {
+    steps.push({ step: 'dry_run', timestamp: Date.now(), ok: true, detail: `[dry-run] would execute ${intent.action} on ${app}` })
+    return { ok: true, output: `[dry-run] ${intent.action} on ${app}`, steps }
+  }
 
   switch (intent.action) {
     case 'open_app':     return execOpenApp(app, steps)

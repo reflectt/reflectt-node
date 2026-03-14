@@ -10,6 +10,7 @@
  */
 
 import { checkActionAllowed } from "./agent-exec-guardrail.js";
+import { executeIntent as macOSExecuteIntent, requiresApproval as macOSRequiresApproval, validateIntent as macOSValidateIntent } from "./macos-accessibility.js";
 
 export type RunKind = 'github_issue_create'
 export type RunStatus = 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'rejected'
@@ -343,10 +344,8 @@ export async function executeMacOSUIAction(
   runId: string,
   intent: Record<string, unknown>,
 ): Promise<void> {
-  const { executeIntent, requiresApproval, validateIntent } = await import('./macos-accessibility.js')
-
   // Validate
-  const validation = validateIntent(intent as any)
+  const validation = macOSValidateIntent(intent as any)
   if (!validation.ok) {
     emit(runId, { type: 'step_failed', timestamp: Date.now(), payload: { step: 'validate', error: validation.reason } })
     transition(runId, 'failed')
@@ -357,36 +356,42 @@ export async function executeMacOSUIAction(
   emit(runId, { type: 'step_started', timestamp: Date.now(), payload: { step: 'validate', action: (intent as any).action } })
   emit(runId, { type: 'step_succeeded', timestamp: Date.now(), payload: { step: 'validate', action: (intent as any).action } })
 
-  // Irreversible: request approval
-  if (requiresApproval(intent as any)) {
+  // Irreversible: request human approval before executing
+  if (macOSRequiresApproval(intent as any)) {
     transition(runId, 'awaiting_approval')
     emit(runId, { type: 'approval_requested', timestamp: Date.now(), payload: {
-      message: `macOS action "${(intent as any).action}" requires human approval`,
+      message: `macOS action "${(intent as any).action}" requires human approval (pilot safety gate)`,
+      action: (intent as any).action,
+      app: (intent as any).app,
+      preview: ((intent as any).text ?? '').slice(0, 200),
     }})
-    // Wait for approval or timeout
-    await new Promise<void>((resolve, reject) => {
-      const TIMEOUT_MS = 10 * 60 * 1000
-      const timer = setTimeout(() => {
-        emit(runId, { type: 'step_failed', timestamp: Date.now(), payload: { step: 'approval', error: 'Approval timeout (10m) — auto-rejected' } })
-        transition(runId, 'failed')
-        reject(new Error('Approval timeout'))
-      }, TIMEOUT_MS)
-      const unsub = subscribeRun(runId, (event) => {
-        if (event.type !== 'state_changed') return
-        const { to } = event.payload as { to: string }
-        if (to === 'running') { clearTimeout(timer); unsub(); resolve() }
-        else if (to === 'failed') { clearTimeout(timer); unsub(); reject(new Error('Run rejected')) }
-      })
-    }).catch(() => { /* handled inline */ })
 
-    // Bail if not running after approval gate
-    const run = runs.get(runId)
-    if (!run || run.status !== 'running') return
+    // Wait for approve/reject (10m timeout → auto-reject, matching github_issue_create pattern)
+    const approved = await new Promise<boolean>((resolve) => {
+      pendingApprovals.set(runId, { runId, resolve })
+      setTimeout(() => {
+        if (pendingApprovals.has(runId)) {
+          pendingApprovals.delete(runId)
+          resolve(false)
+        }
+      }, 10 * 60 * 1000)
+    })
+
+    emit(runId, { type: 'approval_resolved', timestamp: Date.now(), payload: { approved, runId } })
+
+    if (!approved) {
+      const run = runs.get(runId)
+      if (run) run.result = { outcome: 'rejected', recoveryHint: 'Re-submit and approve when ready.' } as any
+      transition(runId, 'rejected')
+      return
+    }
+
+    transition(runId, 'running')
   }
 
   // Execute
   emit(runId, { type: 'step_started', timestamp: Date.now(), payload: { step: 'execute', action: (intent as any).action } })
-  const result = await executeIntent(intent as any)
+  const result = await macOSExecuteIntent(intent as any)
 
   if (result.ok) {
     emit(runId, { type: 'step_succeeded', timestamp: Date.now(), payload: {

@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   createRun, getRun, subscribeRun,
   approveRun, rejectRun,
-  executeGithubIssueCreate,
+  executeGithubIssueCreate, executeMacOSUIAction,
   _clearRunsForTest,
   type RunEvent,
 } from '../src/agent-interface.js'
@@ -248,5 +248,68 @@ describe('run log completeness', () => {
     expect(types.has('approval_resolved')).toBe(true)
     // All log entries have timestamps
     for (const e of r.log) expect(e.timestamp).toBeGreaterThan(0)
+  })
+})
+
+// ── macOS UI Action tests ──────────────────────────────────────────────────
+
+describe('macOS UI action approval gate', () => {
+  beforeEach(() => { _clearRunsForTest() })
+
+  it('create_reminder runs without approval (dry run)', async () => {
+    const run = createRun('macos_ui_action' as any, { intent: { action: 'create_reminder', text: 'Buy milk', dryRun: true } })
+    const execPromise = executeMacOSUIAction(run.id, { action: 'create_reminder', text: 'Buy milk', dryRun: true })
+    await execPromise
+    const r = getRun(run.id)!
+    expect(r.status).toBe('completed')
+    const types = new Set(r.log.map(e => e.type))
+    expect(types.has('approval_requested')).toBe(false) // no approval for reversible action
+  })
+
+  it('draft_email (dry run) transitions to awaiting_approval and rejects on reject', async () => {
+    const run = createRun('macos_ui_action' as any, { intent: { action: 'draft_email', text: 'Hello world', dryRun: true } })
+    const execPromise = executeMacOSUIAction(run.id, { action: 'draft_email', text: 'Hello world', dryRun: true })
+
+    await vi.waitFor(() => getRun(run.id)?.status === 'awaiting_approval', { timeout: 2000 })
+    rejectRun(run.id)
+    await execPromise
+
+    const r = getRun(run.id)!
+    expect(r.status).toBe('rejected')
+    const types = new Set(r.log.map(e => e.type))
+    expect(types.has('approval_requested')).toBe(true)
+    expect(types.has('approval_resolved')).toBe(true)
+  })
+
+  it('draft_email (dry run) transitions to awaiting_approval and completes on approve', async () => {
+    const run = createRun('macos_ui_action' as any, { intent: { action: 'draft_email', text: 'Hello world', dryRun: true } })
+    const execPromise = executeMacOSUIAction(run.id, { action: 'draft_email', text: 'Hello world', dryRun: true })
+
+    await vi.waitFor(() => getRun(run.id)?.status === 'awaiting_approval', { timeout: 2000 })
+    approveRun(run.id)
+    await execPromise
+
+    const r = getRun(run.id)!
+    expect(r.status).toBe('completed')
+    const types = new Set(r.log.map(e => e.type))
+    expect(types.has('approval_requested')).toBe(true)
+    expect(types.has('approval_resolved')).toBe(true)
+    expect(types.has('step_succeeded')).toBe(true) // validate step always succeeds
+  })
+
+  it('rejects action not on allowlist', async () => {
+    const run = createRun('macos_ui_action' as any, { intent: { action: 'delete_file', text: '/etc/passwd' } })
+    const execPromise = executeMacOSUIAction(run.id, { action: 'delete_file', text: '/etc/passwd' })
+    await execPromise
+    const r = getRun(run.id)!
+    expect(r.status).toBe('failed')
+  })
+
+  it('rejects app not on allowlist', async () => {
+    const run = createRun('macos_ui_action' as any, { intent: { action: 'open_app', app: 'Terminal' } })
+    const execPromise = executeMacOSUIAction(run.id, { action: 'open_app', app: 'Terminal' })
+    await execPromise
+    const r = getRun(run.id)!
+    expect(r.status).toBe('failed')
   })
 })

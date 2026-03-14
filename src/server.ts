@@ -163,7 +163,8 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
 import { createVoiceSession, getVoiceSession, processVoiceTranscript, subscribeVoiceSession } from './voice-sessions.js'
-import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, listPendingRuns, listRuns } from './agent-interface.js'
+import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, executeMacOSUIAction, listPendingRuns, listRuns } from './agent-interface.js'
+import { validateIntent as macOSValidateIntent, isKillSwitchEngaged, engageKillSwitch, resetKillSwitch } from './macos-accessibility.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { requestImmediateCanvasSync } from './cloud.js'
@@ -7734,12 +7735,11 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // macos_ui_action: validate intent + kill-switch before creating run
     if (body.kind === 'macos_ui_action') {
-      const { validateIntent, isKillSwitchEngaged } = await import('./macos-accessibility.js')
       if (isKillSwitchEngaged()) {
         reply.status(503); return { success: false, message: 'Kill-switch engaged — macOS accessibility control disabled' }
       }
       const intent = body.intent as any
-      const validation = validateIntent(intent ?? {})
+      const validation = macOSValidateIntent(intent ?? {})
       if (!validation.ok) {
         reply.status(400); return { success: false, message: validation.reason }
       }
@@ -7762,9 +7762,17 @@ export async function createServer(): Promise<FastifyInstance> {
       const to = (event.payload as any).to as string
       if (to === 'awaiting_approval') {
         // Push decision state to all agents watching the canvas SSE stream
+        const inp = run.input as any
+        const isMAC = (run.kind as string) === 'macos_ui_action'
+        const actionLabel = isMAC
+          ? `macOS: ${inp.intent?.action ?? 'ui action'} in ${inp.intent?.app ?? 'app'}`
+          : (inp.title ?? run.kind)
+        const descLabel = isMAC
+          ? `Pilot — ${inp.intent?.action}${inp.intent?.text ? `: "${String(inp.intent.text).slice(0, 60)}"` : ''}`
+          : `${run.kind} — ${inp.repo ?? ''}`
         const decisionPayload = {
-          title: `Agent action: ${(run.input as any).title ?? run.kind}`,
-          description: `${run.kind} — ${(run.input as any).repo ?? ''}`,
+          title: `Approval required: ${actionLabel}`,
+          description: descLabel,
           runId: run.id,
           approvalId: run.id,
           expiresAt: run.createdAt + 10 * 60 * 1000,
@@ -7782,9 +7790,9 @@ export async function createServer(): Promise<FastifyInstance> {
               name: 'agent-interface',
               identityColor: '#60a5fa',
               state: 'decision',
-              activeTask: { id: run.id, title: (run.input as any).title ?? run.kind },
+              activeTask: { id: run.id, title: actionLabel },
               recency: 'just now',
-              attention: { type: 'approval', taskId: run.id, label: (run.input as any).title ?? 'Agent action' },
+              attention: { type: 'approval', taskId: run.id, label: actionLabel },
             },
           },
         })
@@ -7796,16 +7804,8 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // Execute async — non-blocking
     if (body.kind === 'macos_ui_action') {
-      import('./macos-accessibility.js').then(({ executeIntent, requiresApproval }) => {
-        const intent = (body.intent ?? {}) as any
-        // If this intent needs approval, the run is already in awaiting_approval state;
-        // the approval gate will call approveRun which re-invokes execution.
-        if (!requiresApproval(intent)) {
-          import('./agent-interface.js').then(({ executeMacOSUIAction }) => {
-            executeMacOSUIAction(run.id, intent).catch(err => { console.error('[agent-interface] macos run error:', err); runUnsub() })
-          }).catch(() => { console.error('[agent-interface] failed to import executeMacOSUIAction') })
-        }
-      }).catch(() => { console.error('[agent-interface] failed to import macos-accessibility') })
+      const intent = (body.intent ?? {}) as Record<string, unknown>
+      executeMacOSUIAction(run.id, intent).catch(err => { console.error('[agent-interface] macos run error:', err); runUnsub() })
     } else {
       executeGithubIssueCreate(run.id, {
         repo: body.repo ?? '',
@@ -7895,9 +7895,8 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // POST /agent-interface/kill-switch — instantly disable all macOS accessibility control
-  app.post('/agent-interface/kill-switch', async (request) => {
+  app.post('/agent-interface/kill-switch', (request) => {
     const body = request.body as { engage?: boolean }
-    const { engageKillSwitch, resetKillSwitch, isKillSwitchEngaged } = await import('./macos-accessibility.js')
     if (body?.engage === false) {
       resetKillSwitch()
       return { success: true, killSwitch: false, message: 'Kill-switch reset — macOS accessibility control re-enabled' }
@@ -7907,8 +7906,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // GET /agent-interface/kill-switch — check kill-switch state
-  app.get('/agent-interface/kill-switch', async () => {
-    const { isKillSwitchEngaged } = await import('./macos-accessibility.js')
+  app.get('/agent-interface/kill-switch', () => {
     return { killSwitch: isKillSwitchEngaged() }
   })
 

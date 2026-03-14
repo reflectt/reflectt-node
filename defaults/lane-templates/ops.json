@@ -1,0 +1,29 @@
+{
+  "lane": "ops",
+  "version": 1,
+  "defaultReviewer": "coo",
+  "successor": {
+    "enabled": true,
+    "onStatus": "done",
+    "titlePattern": "ops follow-up: {{parent.title}}",
+    "descriptionPattern": "Follow-up for {{parent.id}}. Scope: {{next.scope}}",
+    "priority": "P2",
+    "tags": ["autogen", "lane:ops"],
+    "doneCriteriaTemplate": [
+      "Follow-up scope validated",
+      "Artifact shipped and linked",
+      "Reviewer sign-off captured"
+    ],
+    "metadata": {
+      "source": "lane-template",
+      "generated_by": "lane-template-successor"
+    }
+  },
+  "rules": [
+    {
+      "id": "require-next-scope",
+      "when": { "parentMetadataKeyPresent": "next_scope" },
+      "action": "create"
+    }
+  ]
+}
