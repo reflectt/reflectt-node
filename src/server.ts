@@ -10225,6 +10225,108 @@ export async function createServer(): Promise<FastifyInstance> {
     return new Promise<void>(() => {})
   })
 
+  // GET /canvas/flow-score — real-time team flow state (0–1)
+  // Reflects live agent activity: presence states, task velocity, canvas expression events, time-of-day.
+  // Polled by the client at 30s intervals. Responds in <50ms (pure in-memory).
+  // Returns: { score: 0-1, label, factors: { agents, velocity, expressions, timeOfDay }, updatedAt }
+  app.get('/canvas/flow-score', async () => {
+    const now = Date.now()
+    const STALE_MS = 10 * 60 * 1000 // 10 min canvas stale threshold
+
+    // ── Factor 1: agent presence states ──────────────────────────────
+    // Active states (working/thinking/rendering) → higher flow; idle/floor → lower
+    const STATE_FLOW_WEIGHT: Record<string, number> = {
+      urgent: 0.6,     // focused but stressed — some flow
+      decision: 0.5,   // deliberating — moderate flow
+      working: 0.9,    // peak flow state
+      rendering: 0.85,
+      thinking: 0.8,
+      handoff: 0.6,
+      waiting: 0.2,
+      idle: 0.1,
+      ambient: 0.1,
+      floor: 0.0,
+    }
+    const liveAgents: Array<{ id: string; state: string; weight: number }> = []
+    for (const [agentId, entry] of canvasStateMap) {
+      if (now - entry.updatedAt > STALE_MS) continue
+      const payload = entry.payload as Record<string, unknown> ?? {}
+      const presState = String((payload as any).presenceState ?? entry.state)
+      const w = STATE_FLOW_WEIGHT[presState] ?? STATE_FLOW_WEIGHT[entry.state] ?? 0.1
+      liveAgents.push({ id: agentId, state: presState, weight: w })
+    }
+    const agentScore = liveAgents.length === 0
+      ? 0
+      : liveAgents.reduce((s, a) => s + a.weight, 0) / liveAgents.length
+
+    // ── Factor 2: task velocity (tasks moved to done in last 24h) ─────
+    // 0 done tasks → 0; ≥5 done tasks in 24h → 1.0
+    const oneDayAgo = now - 24 * 60 * 60 * 1000
+    const allTasks = taskManager.getStats()
+    let recentDone = 0
+    try {
+      const doneTasks = taskManager.listTasks({ status: 'done' })
+      recentDone = doneTasks.filter(
+        (t: { updatedAt?: number; completedAt?: number }) =>
+          (t.updatedAt ?? 0) >= oneDayAgo || (t.completedAt ?? 0) >= oneDayAgo
+      ).length
+    } catch { recentDone = 0 }
+    const velocityScore = Math.min(1.0, recentDone / 5)
+
+    // ── Factor 3: expression activity in last 5 min ───────────────────
+    // Canvas expressions (speak, pulse, gaze) fired recently = team is engaged
+    const fiveMinAgo = now - 5 * 60 * 1000
+    let expressionCount = 0
+    try {
+      const { listAgentEvents } = await import('./agent-runs.js')
+      const recentEvents = listAgentEvents({ since: fiveMinAgo, limit: 50 })
+      expressionCount = recentEvents.filter(
+        (e: { eventType: string }) => e.eventType.startsWith('canvas_')
+      ).length
+    } catch { expressionCount = 0 }
+    // 0 expressions → 0; ≥6 expressions in 5 min → 1.0
+    const expressionScore = Math.min(1.0, expressionCount / 6)
+
+    // ── Factor 4: time of day ─────────────────────────────────────────
+    // Peak hours (9AM-6PM local) score higher; off-hours lower
+    const localHour = new Date().getHours()
+    const timeOfDayScore = localHour >= 9 && localHour < 18
+      ? 1.0
+      : localHour >= 7 && localHour < 9
+      ? 0.5
+      : localHour >= 18 && localHour < 21
+      ? 0.4
+      : 0.15
+
+    // ── Composite score (weighted average) ────────────────────────────
+    const score = Math.round(
+      (agentScore * 0.45 + velocityScore * 0.30 + expressionScore * 0.15 + timeOfDayScore * 0.10) * 100
+    ) / 100
+
+    const label = score >= 0.75 ? 'flow'
+      : score >= 0.5 ? 'active'
+      : score >= 0.25 ? 'building'
+      : 'quiet'
+
+    return {
+      score,
+      label,
+      factors: {
+        agents: Math.round(agentScore * 100) / 100,
+        velocity: Math.round(velocityScore * 100) / 100,
+        expressions: Math.round(expressionScore * 100) / 100,
+        timeOfDay: Math.round(timeOfDayScore * 100) / 100,
+      },
+      meta: {
+        liveAgentCount: liveAgents.length,
+        recentDoneCount: recentDone,
+        recentExpressionCount: expressionCount,
+        localHour,
+      },
+      updatedAt: now,
+    }
+  })
+
   // POST /canvas/pulse — agent pushes urgency + optional burst without a full canvas/state update
   // Lighter-weight than POST /canvas/state; fires canvas_burst if burst=true.
   // Body: { agentId: string, urgency?: 0–1, burst?: boolean, label?: string }
