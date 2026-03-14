@@ -97,12 +97,12 @@
     {
       "pathPattern": "^src/email-sms-send.test.ts$",
       "pattern": "reflectt.ai",
-      "reason": "Agent email domain in integration tests — from address is agent@reflectt.ai, intentional and matches relay config"
+      "reason": "Agent email domain in integration tests \u2014 from address is agent@reflectt.ai, intentional and matches relay config"
     },
     {
       "pathPattern": "^src/cloud\\.ts$",
       "pattern": "(?:api\\.)?reflectt\\.ai",
-      "reason": "Default cloud API URL — configurable via REFLECTT_CLOUD_URL env var"
+      "reason": "Default cloud API URL \u2014 configurable via REFLECTT_CLOUD_URL env var"
     },
     {
       "pathPattern": "^src/preflight\\.ts$",
@@ -112,7 +112,17 @@
     {
       "pathPattern": "^src/doctor\\.ts$",
       "pattern": "(?:api\\.)?reflectt\\.ai",
-      "reason": "Doctor output — public cloud URL for user guidance"
+      "reason": "Doctor output \u2014 public cloud URL for user guidance"
+    },
+    {
+      "pathPattern": "^src/server\\.ts$",
+      "pattern": "reflectt\\.ai/docs",
+      "reason": "Canvas query onboarding CTA docs link \u2014 intentional public-facing URL"
+    },
+    {
+      "pathPattern": "^src/server\\.ts$",
+      "pattern": "building reflectt\\.ai",
+      "reason": "Canvas query LLM prompt context \u2014 intentional product description string"
     }
   ]
 }

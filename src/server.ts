@@ -10918,6 +10918,159 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // POST /canvas/query — human asks the canvas a question; agent responds with a typed card
+  // The response is emitted as a canvas_message event on the pulse SSE stream (no reload needed).
+  //
+  // Body: { query: string, agentId?: string }
+  // Response: { success, card: { type, data, agentId, agentColor } }
+  // Card types: "tasks" | "info" | "revenue" | "onboarding"
+  // SSE event: canvas_message { type, data, agentId, agentColor, query }
+  app.post('/canvas/query', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    if (!query || query.length > 500) {
+      reply.status(400)
+      return { success: false, message: 'query is required (max 500 chars)' }
+    }
+
+    // Default answering agent is link (builder — knows the codebase + task board)
+    const responderId = typeof body.agentId === 'string' ? body.agentId.trim() : 'link'
+    const IDENTITY_COLORS_Q: Record<string, string> = {
+      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+    }
+    const agentColor = IDENTITY_COLORS_Q[responderId] ?? '#60a5fa'
+
+    // Gather live context to inject into LLM
+    const allTasksForQuery = taskManager.listTasks({})
+    const activeTasks: Array<{ id: string; title: string; assignee: string; status: string; priority: string }> = []
+    const doingTasks = allTasksForQuery.filter((t: any) => t.status === 'doing').slice(0, 10)
+    const validatingTasks = allTasksForQuery.filter((t: any) => t.status === 'validating').slice(0, 5)
+    for (const t of [...doingTasks, ...validatingTasks] as any[]) {
+      activeTasks.push({ id: t.id, title: t.title ?? '', assignee: t.assignee ?? 'unassigned', status: t.status, priority: t.priority ?? 'P2' })
+    }
+
+    const todoCount = allTasksForQuery.filter((t: any) => t.status === 'todo').length
+    const doingCount = doingTasks.length
+    const validatingCount = validatingTasks.length
+
+    // Build agent orb context
+    const now = Date.now()
+    const STALE_AGENT_MS = 10 * 60 * 1000
+    const activeAgentSummary: string[] = []
+    for (const [agentId, entry] of canvasStateMap) {
+      if (now - entry.updatedAt > STALE_AGENT_MS) continue
+      const payload = entry.payload as Record<string, unknown> ?? {}
+      const state = String((payload as any).presenceState ?? entry.state)
+      const task = (payload as any).activeTask?.title ?? null
+      activeAgentSummary.push(`${agentId}: ${state}${task ? ` — working on "${task.slice(0, 50)}"` : ''}`)
+    }
+
+    // Classify query intent to choose card type
+    const lower = query.toLowerCase()
+    const isTasksQuery = /working on|team doing|team status|happening|active|shipping|tasks|who.?s|what.?s the team/.test(lower)
+    const isRevenueQuery = /revenue|mrr|arr|money|sales|customers|paid|billing/.test(lower)
+    const isOnboardingQuery = /onboard|get started|how do i|where do i start|first step/.test(lower)
+
+    let card: { type: string; data: Record<string, unknown> }
+
+    // Build tasks card from live data (no LLM needed — deterministic)
+    if (isTasksQuery) {
+      const items = activeTasks.slice(0, 5).map(t => ({
+        agentId: t.assignee,
+        agentColor: IDENTITY_COLORS_Q[t.assignee] ?? '#94a3b8',
+        title: t.title,
+        state: t.status,
+      }))
+      const overflow = Math.max(0, activeTasks.length - 5)
+      card = {
+        type: 'tasks',
+        data: { items, overflow, todoCount, doingCount, validatingCount },
+      }
+    } else if (isRevenueQuery) {
+      // Revenue card — LLM generates honest answer about current state
+      const anthropicKey = process.env.ANTHROPIC_API_KEY
+      let text = 'Revenue tracking not yet wired. Check Stripe directly.'
+      if (anthropicKey) {
+        try {
+          const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5',
+              max_tokens: 80,
+              messages: [{ role: 'user', content: `Team Reflectt is a small AI agent team building reflectt.ai (no paid users yet). User asked: "${query}". Honest 1-sentence answer about revenue status. Be direct.` }],
+            }),
+            signal: AbortSignal.timeout(8000),
+          })
+          if (resp.ok) {
+            const d = await resp.json() as { content?: Array<{ text?: string }> }
+            text = d.content?.[0]?.text?.trim() ?? text
+          }
+        } catch { /* use default */ }
+      }
+      card = { type: 'info', data: { text } }
+    } else if (isOnboardingQuery) {
+      card = {
+        type: 'onboarding',
+        data: {
+          step: 1, totalSteps: 3,
+          title: 'Welcome to Reflectt',
+          body: 'Your agents run on reflectt-node. Install it on any machine and your team appears here in the canvas.',
+          ctaLabel: 'Install reflectt-node',
+          ctaAction: 'https://reflectt.ai/docs',
+        },
+      }
+    } else {
+      // General info card — LLM answers with team context injected
+      const anthropicKey = process.env.ANTHROPIC_API_KEY
+      let text = `"${query}" — I don't have enough context to answer that right now.`
+      if (anthropicKey) {
+        try {
+          const context = [
+            `You are ${responderId}, an AI agent on Team Reflectt. Answer the user's canvas question concisely.`,
+            `Current team state: ${activeAgentSummary.length > 0 ? activeAgentSummary.join('; ') : 'no agents active'}`,
+            `Task board: ${doingCount} doing, ${validatingCount} validating, ${todoCount} todo`,
+            `Active tasks: ${activeTasks.slice(0, 3).map(t => `${t.assignee}: ${t.title.slice(0, 40)}`).join('; ') || 'none'}`,
+            `User asked: "${query}"`,
+            `Reply in 1-2 sentences max. Be specific and honest. No fluff.`,
+          ].join('\n')
+
+          const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5',
+              max_tokens: 120,
+              messages: [{ role: 'user', content: context }],
+            }),
+            signal: AbortSignal.timeout(10000),
+          })
+          if (resp.ok) {
+            const d = await resp.json() as { content?: Array<{ text?: string }> }
+            text = d.content?.[0]?.text?.trim() ?? text
+          }
+        } catch { /* use default */ }
+      }
+      card = { type: 'info', data: { text } }
+    }
+
+    // Emit canvas_message on event bus — pulse stream forwards it to all subscribers
+    eventBus.emit({
+      id: `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_message' as const,
+      timestamp: Date.now(),
+      data: {
+        ...card,
+        agentId: responderId,
+        agentColor,
+        query,
+      },
+    })
+
+    return { success: true, card: { ...card, agentId: responderId, agentColor } }
+  })
+
   // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
   // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
   // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
@@ -11007,7 +11160,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const listenerId = `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     eventBus.on(listenerId, (event) => {
       if (closed) return
-      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression') return
+      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression' && event.type !== 'canvas_message') return
       try {
         reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event.data as object, t: event.timestamp })}\n\n`)
       } catch { closed = true }
