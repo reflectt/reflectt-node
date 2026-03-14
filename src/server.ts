@@ -8709,7 +8709,10 @@ export async function createServer(): Promise<FastifyInstance> {
       // ── done_criteria gate on doing transition ──
       // Prevent tasks from entering active work without verifiable exit conditions.
       // Effective criteria = incoming update (if provided) or existing task value.
-      if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
+      // Only fires for fresh claims (todo→doing, blocked→doing), not re-claims
+      // (validating→doing = reviewer rejection/rework on the agent's own task).
+      const isFreshClaim = parsed.status === 'doing' && existing.status !== 'doing' && existing.status !== 'validating'
+      if (isFreshClaim && !isTestTask) {
         const effectiveDoneCriteria = (parsed.done_criteria && parsed.done_criteria.length > 0)
           ? parsed.done_criteria
           : (existing.done_criteria ?? [])
