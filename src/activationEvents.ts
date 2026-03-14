@@ -32,10 +32,23 @@ export type ActivationEventType =
   | 'host_preflight_passed'
   | 'host_preflight_failed'
   | 'workspace_ready'
+  | 'workspace_not_ready'
   | 'first_task_started'
   | 'first_task_completed'
   | 'first_team_message_sent'
   | 'day2_return_action'
+
+/**
+ * Reason codes for workspace_not_ready events.
+ * Used to categorise funnel drop-off during workspace setup.
+ * task-1773529423279-8htqicvom
+ */
+export type WorkspaceNotReadyReason =
+  | 'permissions_error'
+  | 'disk_full'
+  | 'path_not_found'
+  | 'timeout'
+  | 'unknown'
 
 export interface ActivationEvent {
   type: ActivationEventType
@@ -186,6 +199,16 @@ export async function emitActivationEvent(
     )
   }
 
+  // Warn at ingestion time if workspace_not_ready arrives without a reason code.
+  // reason should be one of: permissions_error | disk_full | path_not_found | timeout | unknown
+  // task-1773529423279-8htqicvom
+  if (type === 'workspace_not_ready' && (!metadata || !metadata.reason)) {
+    console.warn(
+      `[ActivationFunnel] workspace_not_ready for userId=${userId} has no reason code. ` +
+      `Set metadata.reason to one of: permissions_error, disk_full, path_not_found, timeout, unknown.`
+    )
+  }
+
   const timestamp = Date.now()
   userMap.set(type, timestamp)
 
@@ -217,6 +240,7 @@ export function getUserFunnelState(userId: string): UserFunnelState {
     host_preflight_passed: null,
     host_preflight_failed: null,
     workspace_ready: null,
+    workspace_not_ready: null,  // tracked but not a forward funnel step
     first_task_started: null,
     first_task_completed: null,
     first_team_message_sent: null,
@@ -274,6 +298,7 @@ export function getFunnelSummary(opts?: { raw?: boolean }): {
     host_preflight_passed: 0,
     host_preflight_failed: 0,
     workspace_ready: 0,
+    workspace_not_ready: 0,
     first_task_started: 0,
     first_task_completed: 0,
     first_team_message_sent: 0,
@@ -521,10 +546,21 @@ export function getFailureDistribution(): FailureDistribution[] {
           }
         }
 
-        // Workspace-ready drops: we don't have a dedicated failure event type yet.
-        // Provide an actionable bucket instead of leaving everything "unspecified".
+        // Workspace-ready drops: check for workspace_not_ready events first.
+        // If the user emitted workspace_not_ready, use its reason code for attribution.
+        // task-1773529423279-8htqicvom
         if (step === 'workspace_ready') {
-          reasonCounts.set('workspace_ready_not_emitted', (reasonCounts.get('workspace_ready_not_emitted') || 0) + 1)
+          const notReadyEvents = eventLog.filter(
+            e => e.userId === u.userId && e.type === 'workspace_not_ready'
+          )
+          if (notReadyEvents.length > 0) {
+            for (const nre of notReadyEvents) {
+              const reason = String((nre.metadata as any)?.reason || 'unknown')
+              reasonCounts.set(`workspace_not_ready:${reason}`, (reasonCounts.get(`workspace_not_ready:${reason}`) || 0) + 1)
+            }
+          } else {
+            reasonCounts.set('workspace_ready_not_emitted', (reasonCounts.get('workspace_ready_not_emitted') || 0) + 1)
+          }
         }
 
         // Generic: check for explicit failure metadata on any events for this user.
@@ -582,6 +618,7 @@ export function getWeeklyTrends(weekCount = 12): WeeklyTrend[] {
       host_preflight_passed: 0,
       host_preflight_failed: 0,
       workspace_ready: 0,
+      workspace_not_ready: 0,
       first_task_started: 0,
       first_task_completed: 0,
       first_team_message_sent: 0,

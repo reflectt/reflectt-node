@@ -14866,7 +14866,8 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const validTypes = [
       'signup_completed', 'host_preflight_passed', 'host_preflight_failed',
-      'workspace_ready', 'first_task_started',
+      'workspace_ready', 'workspace_not_ready',
+      'first_task_started',
       'first_task_completed', 'first_team_message_sent', 'day2_return_action',
     ]
 
