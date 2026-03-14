@@ -9012,16 +9012,52 @@ export async function createServer(): Promise<FastifyInstance> {
       {
         const canvasAgent = (task.assignee || 'unknown').toLowerCase()
         const canvasNow = Date.now()
-        const AGENT_COLORS: Record<string, string> = {
-          kai: '#6366f1', link: '#22d3ee', sage: '#a78bfa', pixel: '#ec4899',
+        // Identity colors (canonical — match AGENT_IDENTITY_COLORS used by canvas render path)
+        const CANVAS_AGENT_ID_COLORS: Record<string, string> = {
+          link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
           echo: '#f472b6', rhythm: '#a3e635', spark: '#fb923c', scout: '#fbbf24',
-          harmony: '#34d399', swift: '#38bdf8', kotlin: '#f97316',
+          harmony: '#34c45c', swift: '#06b6d4', kotlin: '#7c3aed',
         }
-        const agentColor = AGENT_COLORS[canvasAgent] ?? '#94a3b8'
+        const agentColor = CANVAS_AGENT_ID_COLORS[canvasAgent] ?? '#94a3b8'
         const taskSnippet = (task.title ?? '').slice(0, 60)
 
+        // Helper: emit canvas_render to update agent orb state (presence layer).
+        // canvas_push carries the utterance/work_released visual; canvas_render updates
+        // the orb's state ring so browsers show the right idle/working/handoff/etc ring.
+        // Note: canvasStateMap is in a nested scope below; we emit without updating the map
+        // here — the auto-state sweep keeps the map eventually consistent.
+        // task: task-1773525394065-f13ucg8ir
+        const emitOrbState = (presState: string, activeTaskPayload?: { id: string; title: string }) => {
+          eventBus.emit({
+            id: `canvas-orb-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_render' as const,
+            timestamp: canvasNow,
+            data: {
+              state: presState === 'working' ? 'thinking'
+                   : presState === 'handoff' ? 'handoff'
+                   : presState === 'needs-attention' ? 'decision'
+                   : 'ambient',
+              sensors: null,
+              agentId: canvasAgent,
+              payload: { presenceState: presState, activeTask: activeTaskPayload },
+              presence: {
+                name: canvasAgent,
+                identityColor: agentColor,
+                state: presState,
+                ...(activeTaskPayload ? { activeTask: activeTaskPayload } : {}),
+                recency: 'just now',
+                urgency: presState === 'working' ? 0.2
+                       : presState === 'needs-attention' ? 0.75
+                       : presState === 'handoff' ? 0.5
+                       : 0.0,
+              },
+            },
+          })
+          requestImmediateCanvasSync()
+        }
+
         if (parsed.status === 'doing' && existing.status !== 'doing') {
-          // Agent picks up work → utterance on canvas
+          // Agent picks up work → utterance on canvas + orb flips to working
           eventBus.emit({
             id: `canvas-doing-${canvasNow}-${task.id.slice(-6)}`,
             type: 'canvas_push',
@@ -9034,8 +9070,9 @@ export async function createServer(): Promise<FastifyInstance> {
               t: canvasNow,
             },
           })
+          emitOrbState('working', { id: task.id, title: task.title ?? '' })
         } else if (parsed.status === 'validating' && existing.status !== 'validating') {
-          // Agent submits for review → work_released on canvas
+          // Agent submits for review → work_released on canvas + orb flips to handoff
           const prUrl = (mergedMeta as any)?.review_handoff?.pr_url || (mergedMeta as any)?.pr_url || undefined
           eventBus.emit({
             id: `canvas-validating-${canvasNow}-${task.id.slice(-6)}`,
@@ -9050,8 +9087,9 @@ export async function createServer(): Promise<FastifyInstance> {
               t: canvasNow,
             },
           })
+          emitOrbState('handoff', { id: task.id, title: task.title ?? '' })
         } else if (parsed.status === 'done' && existing.status !== 'done') {
-          // Agent closes task — burst from their orb
+          // Agent closes task — burst from their orb + orb returns to idle
           eventBus.emit({
             id: `canvas-done-${canvasNow}-${task.id.slice(-6)}`,
             type: 'canvas_push',
@@ -9066,8 +9104,9 @@ export async function createServer(): Promise<FastifyInstance> {
               t: canvasNow,
             },
           })
+          emitOrbState('idle')
         } else if (parsed.status === 'blocked' && existing.status !== 'blocked') {
-          // Agent is blocked — utterance from their orb
+          // Agent is blocked — utterance from their orb + orb flips to needs-attention
           eventBus.emit({
             id: `canvas-blocked-${canvasNow}-${task.id.slice(-6)}`,
             type: 'canvas_push',
@@ -9081,6 +9120,7 @@ export async function createServer(): Promise<FastifyInstance> {
               t: canvasNow,
             },
           })
+          emitOrbState('needs-attention', { id: task.id, title: task.title ?? '' })
         }
       }
       // ── End canvas push ──
