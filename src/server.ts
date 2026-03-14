@@ -182,6 +182,7 @@ import { startKeepalive, stopKeepalive, getKeepaliveStatus, triggerKeepalivePing
 import { startSelfKeepalive, stopSelfKeepalive, getSelfKeepaliveStatus, detectWarmBoot, getBootInfo } from './cf-keepalive.js'
 // polls.ts imported dynamically where needed
 import { pauseTarget, unpauseTarget, checkPauseStatus, listPauseEntries } from './pause-controls.js'
+import { isLocalWhisperAvailable, transcribeLocally } from './local-whisper.js'
 
 // Schemas
 const ChatAttachmentSchema = z.object({
@@ -7678,46 +7679,68 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!audioBuffer || audioBuffer.length === 0) { reply.status(400); return { success: false, message: 'audio file is required' } }
     if (audioBuffer.length > 25 * 1024 * 1024) { reply.status(413); return { success: false, message: 'Audio exceeds 25MB limit' } }
 
-    // Transcribe via OpenAI Whisper
-    const openAiKey = process.env.OPENAI_API_KEY
+    // Transcribe audio — priority: local whisper.cpp → OpenAI Whisper cloud → 503
+    // Local whisper runs on-device (no API key, ~1.8s for tiny model on Apple Silicon)
     let transcript = ''
-    if (openAiKey) {
+    let sttProvider = 'none'
+
+    // 1. Try local whisper (no API key needed)
+    if (await isLocalWhisperAvailable()) {
       try {
-        // Determine file extension from mime type
-        const ext = audioMimeType.includes('mp4') || audioMimeType.includes('m4a') ? 'm4a'
-          : audioMimeType.includes('mp3') ? 'mp3'
-          : audioMimeType.includes('ogg') ? 'ogg'
-          : audioMimeType.includes('wav') ? 'wav'
-          : 'webm'
-
-        const form = new FormData()
-        form.append('file', new Blob([audioBuffer], { type: audioMimeType }), `audio.${ext}`)
-        form.append('model', 'whisper-1')
-        form.append('language', 'en')
-
-        const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${openAiKey}` },
-          body: form,
-          signal: AbortSignal.timeout(30000),
-        })
-
-        if (res.ok) {
-          const data = await res.json() as { text?: string }
-          transcript = data.text?.trim() ?? ''
-        } else {
-          const err = await res.text()
-          console.error(`[voice/audio] Whisper error ${res.status}: ${err.slice(0, 200)}`)
+        const localResult = await transcribeLocally(audioBuffer, audioMimeType)
+        if (localResult) {
+          transcript = localResult
+          sttProvider = 'local-whisper'
         }
       } catch (err) {
-        console.error('[voice/audio] STT error:', err)
+        console.error('[voice/audio] local-whisper failed, trying cloud fallback:', err instanceof Error ? err.message : err)
+      }
+    }
+
+    // 2. Fall back to OpenAI Whisper cloud if local failed or unavailable
+    if (!transcript) {
+      const openAiKey = process.env.OPENAI_API_KEY
+      if (openAiKey) {
+        try {
+          const ext = audioMimeType.includes('mp4') || audioMimeType.includes('m4a') ? 'm4a'
+            : audioMimeType.includes('mp3') ? 'mp3'
+            : audioMimeType.includes('ogg') ? 'ogg'
+            : audioMimeType.includes('wav') ? 'wav'
+            : 'webm'
+
+          const form = new FormData()
+          form.append('file', new Blob([audioBuffer], { type: audioMimeType }), `audio.${ext}`)
+          form.append('model', 'whisper-1')
+          form.append('language', 'en')
+
+          const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${openAiKey}` },
+            body: form,
+            signal: AbortSignal.timeout(30000),
+          })
+
+          if (res.ok) {
+            const data = await res.json() as { text?: string }
+            transcript = data.text?.trim() ?? ''
+            if (transcript) sttProvider = 'openai-whisper'
+          } else {
+            const err = await res.text()
+            console.error(`[voice/audio] OpenAI Whisper error ${res.status}: ${err.slice(0, 200)}`)
+          }
+        } catch (err) {
+          console.error('[voice/audio] OpenAI Whisper error:', err)
+        }
       }
     }
 
     if (!transcript) {
-      // STT unavailable or failed — return session but with empty transcript flag
-      reply.status(503); return { success: false, message: 'STT unavailable — set OPENAI_API_KEY for Whisper transcription' }
+      reply.status(503)
+      return { success: false, message: 'STT unavailable — install openai-whisper locally or set OPENAI_API_KEY' }
     }
+
+    console.log(`[voice/audio] STT via ${sttProvider}: "${transcript.slice(0, 80)}"`)
+
 
     if (transcript.length > 4000) transcript = transcript.slice(0, 4000)
 
