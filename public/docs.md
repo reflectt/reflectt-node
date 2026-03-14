@@ -407,6 +407,8 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/pulse` | Team pulse snapshot: board counts + per-agent doing tasks + pending reviews + focus + deploy info + alert-preflight mode. Use `?compact=true` for <2000 char version |
+| POST | `/pr-link-reconciler/sweep` | Manually trigger PR-link reconcile sweep. Finds validating tasks with merged PRs and stamps `canonical_pr` + `canonical_commit`. Returns `{ swept, stamped, skipped, errors, results[], durationMs }`. |
+| GET | `/pr-link-reconciler/preview` | Dry-run: list validating tasks that would be updated by next sweep (PR URL present, no canonical refs yet). Returns `{ candidates[], total }`. |
 | POST | `/scope-overlap` | Scan for task scope overlap after PR merge. Body: `{ "prNumber": 707, "prTitle": "...", "prBranch": "kai/task-...", "mergedTaskId?": "...", "repo?": "owner/repo", "mergeCommit?": "abc123", "notify?": true }`. Idempotency key includes repo+prNumber+mergedTaskId+mergeCommit. Failed notifications allow retry (no-drop). |
 | GET | `/focus` | Current team focus directive (included in heartbeat) |
 | POST | `/focus` | Set team focus. Body: `{ "directive": "...", "setBy": "kai", "expiresAt?": 1234, "tags?": ["shipping"] }` |
