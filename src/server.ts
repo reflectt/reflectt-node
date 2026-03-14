@@ -10124,23 +10124,23 @@ export async function createServer(): Promise<FastifyInstance> {
     const STALE_MS = 10 * 60 * 1000
     const WAVE_STAGGER_MS = 350  // gold wave propagates orb-to-orb
 
-    // Emit canvas_victory event immediately — client uses this for the gold flash
+    // Emit canvas_victory SSE event — dedicated type for client gold-wave handler
     eventBus.emit({
       id: `victory-${now}`,
-      type: 'canvas_expression' as const,
+      type: 'canvas_victory' as const,
       timestamp: now,
       data: {
         agentId,
+        prTitle,
+        prNumber,
+        prUrl,
+        intensity,
         channels: {
           visual: { flash: '#f59e0b', ambientCue: 'celebration', particles: 'surge' },
           sound: { kind: 'resolve', intensity },
           haptic: { preset: 'complete' },
           narrative: prTitle,
         },
-        _victory: true,
-        _prUrl: prUrl,
-        _prNumber: prNumber,
-        _intensity: intensity,
       },
     })
 
@@ -10652,7 +10652,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const listenerId = `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     eventBus.on(listenerId, (event) => {
       if (closed) return
-      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression') return
+      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression' && event.type !== 'canvas_victory') return
       try {
         reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event.data as object, t: event.timestamp })}\n\n`)
       } catch { closed = true }
@@ -15450,6 +15450,65 @@ If your heartbeat shows **no active task** and **no next task**:
           console.warn(`[PR-Event] Could not auto-block task ${taskId} after PR close`)
         }
       }
+    }
+
+    // Auto-fire canvas_victory on PR merge (best-effort, non-blocking)
+    if (prState === 'merged') {
+      const mergedTask = taskManager.resolveTaskId(taskId).task
+      const victorAgentId = mergedTask?.assignee ?? 'team'
+      const prNumber = prUrl ? parseInt(prUrl.split('/').pop() ?? '0', 10) || 0 : 0
+      const prTitle = mergedTask?.title ?? 'PR merged'
+      const now = Date.now()
+      const VICTORY_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      const intensity = Math.min(1, 0.6 + Math.min(0.3, prNumber / 10000))
+
+      // Initial gold flash — canvas_victory event on SSE stream
+      eventBus.emit({
+        id: `victory-webhook-${now}`,
+        type: 'canvas_victory' as const,
+        timestamp: now,
+        data: {
+          agentId: victorAgentId,
+          prTitle,
+          prNumber,
+          prUrl: prUrl ?? '',
+          intensity,
+          channels: {
+            visual: { flash: '#f59e0b', ambientCue: 'celebration', particles: 'surge' },
+            sound: { kind: 'resolve', intensity },
+            haptic: { preset: 'complete' },
+            narrative: prTitle,
+          },
+        },
+      })
+
+      // Gold wave: stagger across active agents
+      const WAVE_STAGGER_MS = 350
+      const STALE_MS = 10 * 60 * 1000
+      const activeAgents = [...canvasStateMap.entries()]
+        .filter(([, e]) => now - e.updatedAt < STALE_MS)
+        .map(([id]) => id)
+      activeAgents.forEach((waveAgentId, i) => {
+        setTimeout(() => {
+          eventBus.emit({
+            id: `victory-wave-webhook-${now}-${waveAgentId}`,
+            type: 'canvas_expression' as const,
+            timestamp: Date.now(),
+            data: {
+              agentId: waveAgentId,
+              channels: {
+                visual: { flash: VICTORY_COLORS[waveAgentId] ?? '#f59e0b', particles: 'surge' },
+                haptic: { preset: 'acknowledge' },
+              },
+              _victoryWave: true,
+              _waveIndex: i,
+            },
+          })
+        }, (i + 1) * WAVE_STAGGER_MS)
+      })
     }
 
     return {

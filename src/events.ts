@@ -29,6 +29,7 @@ export type EventType =
   | 'canvas_spark'      // agent-to-agent arc (collaboration, handoff, decision)
   | 'canvas_milestone'  // completion moment — task done, PR merged, streak broken
   | 'canvas_expression' // Reality Mixer — agent fires multi-channel expression (voice+visual+haptic+sound+text)
+  | 'canvas_victory'    // gold wave on PR merge — agentId, prTitle, prNumber, prUrl, intensity
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -45,6 +46,7 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'canvas_spark',
   'canvas_milestone',
   'canvas_expression',
+  'canvas_victory',
 ])
 
 export interface Event {
@@ -219,7 +221,7 @@ class EventBus {
     }
 
     // Canvas events bypass batching — flush immediately for sub-100ms render latency
-    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression'])
+    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression', 'canvas_victory'])
     if (IMMEDIATE_TYPES.has(event.type)) {
       if (this.batchTimer) { clearTimeout(this.batchTimer); this.batchTimer = null }
       this.pendingEvents.push(event)
