@@ -9046,6 +9046,37 @@ export async function createServer(): Promise<FastifyInstance> {
               t: canvasNow,
             },
           })
+        } else if (parsed.status === 'done' && existing.status !== 'done') {
+          // Agent closes task — burst from their orb
+          eventBus.emit({
+            id: `canvas-done-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_push',
+            timestamp: canvasNow,
+            data: {
+              type: 'work_released',
+              agentId: canvasAgent,
+              agentColor,
+              text: 'shipped',
+              taskTitle: taskSnippet,
+              intensity: 0.8,
+              t: canvasNow,
+            },
+          })
+        } else if (parsed.status === 'blocked' && existing.status !== 'blocked') {
+          // Agent is blocked — utterance from their orb
+          eventBus.emit({
+            id: `canvas-blocked-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_push',
+            timestamp: canvasNow,
+            data: {
+              type: 'utterance',
+              agentId: canvasAgent,
+              agentColor,
+              text: `blocked on: ${taskSnippet}`,
+              ttl: 4000,
+              t: canvasNow,
+            },
+          })
         }
       }
       // ── End canvas push ──
