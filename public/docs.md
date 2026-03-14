@@ -594,6 +594,8 @@ Multi-host management: remote hosts register via heartbeat and are tracked by st
 | GET | `/routing/log` | Recent routing decisions. Query: `?limit=50&since=timestamp&category=watchdog-alert&severity=warning`. |
 | POST | `/routing/resolve` | Dry-run route resolution. Body: `{ from, content, severity?, category?, taskId?, mentions? }`. Returns where message would go. |
 | POST | `/routing/simulate` | Comms routing policy simulator. Body: `{ policy: CommsRoutingPolicy, scenarios: RoutingScenario[] }` (max 100 scenarios). Returns `{ success, count, results: CommsRouteResult[] }`. Each result includes `owner`, `assignee`, `fallback`, `escalate`, `reasonCode`, `rationale`. |
+| POST | `/voice/input` | Create a voice session and begin processing. Body: `{ agentId: string, transcript: string }`. Returns `{ sessionId }`. Connect to `GET /voice/session/:id/events` immediately to receive state events. |
+| GET | `/voice/session/:id/events` | SSE stream of voice pipeline events for a session. Events: `transcript.final`, `agent.thinking`, `agent.done`, `tts.ready`, `error`, `session.end`. Each event is `data: { type, timestamp, text?, url?, stage?, message? }`. Replays past events on connect. |
 | POST | `/routing/overrides` | Create a routing override. Body: `CreateOverrideInput` with target, target_type, override config, TTL. Returns created override. |
 | GET | `/routing/overrides` | List routing overrides. Query: `?target=agent&target_type=agent|role&status=active|expired&limit=N`. |
 | GET | `/routing/overrides/:id` | Get a specific routing override by ID. |
