@@ -9887,6 +9887,97 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
+  // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
+  // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
+  app.get('/canvas/pulse', async (request, reply) => {
+    const STALE_MS = 10 * 60 * 1000
+    const IDENTITY_COLORS: Record<string, string> = {
+      kai: '#fb923c',
+      pixel: '#a78bfa',
+      link: '#60a5fa',
+    }
+    const STATE_URGENCY: Record<string, number> = {
+      urgent: 1.0, decision: 0.85, needs_attention: 0.75,
+      rendering: 0.5, thinking: 0.45, working: 0.3,
+      waiting: 0.15, handoff: 0.2, idle: 0.0, floor: 0.0, ambient: 0.05,
+    }
+
+    reply.raw.setHeader('Content-Type', 'text/event-stream')
+    reply.raw.setHeader('Cache-Control', 'no-cache')
+    reply.raw.setHeader('Connection', 'keep-alive')
+    reply.raw.flushHeaders?.()
+
+    let closed = false
+    request.raw.on('close', () => { closed = true })
+
+    const emitTick = () => {
+      if (closed) return
+      const now = Date.now()
+
+      // Per-agent orb data
+      const agents: Array<{
+        id: string; state: string; urgency: number;
+        activeSpeaker: boolean; color: string; age: number
+      }> = []
+
+      for (const [agentId, entry] of canvasStateMap) {
+        if (now - entry.updatedAt > STALE_MS) continue
+        const payload = entry.payload as Record<string, unknown> ?? {}
+        const presState = String((payload as any).presenceState ?? entry.state)
+        const explicitUrgency = typeof (payload as any).urgency === 'number' ? (payload as any).urgency : null
+        const urgency = explicitUrgency ?? (STATE_URGENCY[presState] ?? STATE_URGENCY[entry.state] ?? 0)
+        agents.push({
+          id: agentId,
+          state: presState,
+          urgency,
+          activeSpeaker: !!(payload as any).activeSpeaker,
+          color: IDENTITY_COLORS[agentId] ?? '#94a3b8',
+          age: now - entry.updatedAt,
+        })
+      }
+
+      // Team mood (inline mini-derivation from canvasStateMap)
+      const states = agents.map(a => a.state)
+      const urgentCount = states.filter(s => s === 'urgent').length
+      const decisionCount = states.filter(s => s === 'decision').length
+      const renderingCount = states.filter(s => s === 'rendering').length
+      const thinkingCount = states.filter(s => s === 'thinking').length
+      const idleCount = states.filter(s => s === 'floor' || s === 'ambient' || s === 'idle').length
+      const activeCount = agents.length
+      const workingCount = activeCount - idleCount
+      const tension = Math.min(1.0, (urgentCount * 0.35) + (decisionCount * 0.25) + (activeCount > 0 ? (workingCount / activeCount) * 0.15 : 0))
+      const rhythm = urgentCount > 0 ? 'surge' : activeCount === 0 ? 'quiet' : decisionCount > 0 ? 'tense' : renderingCount + thinkingCount >= Math.max(1, activeCount * 0.6) ? 'flow' : 'grinding'
+      const ambientPulse = rhythm === 'surge' ? 'fast' : rhythm === 'flow' ? 'normal' : 'slow'
+      let dominantColor = '#60a5fa'
+      for (const a of agents) {
+        if (a.state !== 'floor' && a.state !== 'ambient') { dominantColor = a.color; break }
+      }
+
+      const tick = {
+        t: now,
+        agents,
+        team: { rhythm, tension, ambientPulse, dominantColor },
+      }
+
+      try {
+        reply.raw.write(`data: ${JSON.stringify(tick)}\n\n`)
+      } catch { closed = true }
+    }
+
+    // Emit immediately + every 2s
+    emitTick()
+    const interval = setInterval(() => {
+      if (closed) { clearInterval(interval); return }
+      emitTick()
+    }, 2000)
+
+    request.raw.on('close', () => { clearInterval(interval) })
+
+    // Keep connection alive — never resolve
+    return new Promise<void>(() => {})
+  })
+
   // GET /canvas/session/mode — inferred presence mode for the current session
   // Mode is derived from: time of day + active canvas states + team rhythm.
   // Human never selects a mode — surface adapts silently.
