@@ -9631,6 +9631,37 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Ghost trail: every state transition leaves a faint particle exhale in the agent's color.
+    // By midnight you can read the entire night's work like sediment layers.
+    if (prevState !== state) {
+      const IDENTITY_COLORS_TRAIL: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      const trailIntensity =
+        state === 'urgent' ? 0.9 :
+        state === 'decision' ? 0.75 :
+        state === 'rendering' ? 0.6 :
+        state === 'thinking' ? 0.4 :
+        0.25
+      eventBus.emit({
+        id: `ghost-${now}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_expression' as const,
+        timestamp: now,
+        data: {
+          agentId,
+          channels: {
+            visual: {
+              flash: IDENTITY_COLORS_TRAIL[agentId] ?? '#60a5fa',
+              particles: trailIntensity > 0.7 ? 'surge' : trailIntensity > 0.4 ? 'drift' : 'scatter',
+            },
+            narrative: `${agentId} → ${state}`,
+          },
+          _ghost: true,  // client can render ghost trails differently (faint, no TTS)
+        },
+      })
+    }
+
     // Trigger immediate cloud sync for real-time presence
     requestImmediateCanvasSync()
 
