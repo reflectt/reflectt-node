@@ -9963,6 +9963,99 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, from, to, kind, intensity }
   })
 
+  // ── Reality Mixer — agent-driven real-time medium control ──────────────────
+  // Agents call POST /canvas/express and the command fires immediately on every
+  // subscribed canvas via GET /canvas/render/stream SSE.
+  // Supports: text overlay, speak (TTS), visual preset, agent color push, haptic, sound.
+
+  type RealityMixerCommand =
+    | { type: 'text';    content: string; style?: Record<string, unknown>; durationMs?: number }
+    | { type: 'speak';   content: string; voiceId?: string; agentId?: string }
+    | { type: 'visual';  preset: 'urgency' | 'celebration' | 'thinking' | 'flow' | 'tension' | 'exhale' | 'spark' }
+    | { type: 'color';   agent: string; color: string }
+    | { type: 'sound';   src: string; volume?: number }
+    | { type: 'haptic';  pattern: 'light' | 'medium' | 'heavy' | 'success' | 'warning' | 'error' }
+    | { type: 'clear' }
+
+  // In-memory command queue — new subscribers get last 20 commands for replay
+  const renderCommandLog: Array<{ id: string; ts: number; agentId: string; cmd: RealityMixerCommand }> = []
+  const MAX_RENDER_LOG = 20
+
+  // Subscriber set for GET /canvas/render/stream
+  const renderStreamSubscribers = new Map<string, { send: (data: string) => void; closed: boolean }>()
+
+  function broadcastRenderCommand(agentId: string, cmd: RealityMixerCommand): string {
+    const id = `rc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const entry = { id, ts: Date.now(), agentId, cmd }
+    renderCommandLog.push(entry)
+    if (renderCommandLog.length > MAX_RENDER_LOG) renderCommandLog.shift()
+
+    const payload = JSON.stringify(entry)
+    for (const [subId, sub] of renderStreamSubscribers) {
+      if (sub.closed) { renderStreamSubscribers.delete(subId); continue }
+      try { sub.send(payload) } catch { sub.closed = true; renderStreamSubscribers.delete(subId) }
+    }
+    return id
+  }
+
+  // POST /canvas/express — agent fires a real-time medium command at the canvas
+  // The command broadcasts instantly to all subscribed surfaces.
+  app.post('/canvas/express', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : 'unknown'
+    const cmd = body.cmd ?? body.command ?? body
+
+    if (!cmd || typeof cmd !== 'object') {
+      reply.status(400)
+      return { success: false, message: 'cmd is required (or pass command fields at root)' }
+    }
+
+    const type = (cmd as any).type
+    const VALID_TYPES = ['text', 'speak', 'visual', 'color', 'sound', 'haptic', 'clear']
+    if (!VALID_TYPES.includes(type)) {
+      reply.status(400)
+      return { success: false, message: `cmd.type must be one of: ${VALID_TYPES.join(', ')}` }
+    }
+
+    const id = broadcastRenderCommand(agentId, cmd as RealityMixerCommand)
+    return { success: true, id, subscriberCount: renderStreamSubscribers.size }
+  })
+
+  // GET /canvas/render/stream — SSE stream for the Reality Mixer
+  // Agents push commands via POST /canvas/express; surfaces subscribe here and execute.
+  // New subscribers receive last 20 commands for catch-up.
+  app.get('/canvas/render/stream', async (request, reply) => {
+    reply.raw.setHeader('Content-Type', 'text/event-stream')
+    reply.raw.setHeader('Cache-Control', 'no-cache')
+    reply.raw.setHeader('Connection', 'keep-alive')
+    reply.raw.flushHeaders?.()
+
+    let closed = false
+    request.raw.on('close', () => { closed = true })
+
+    const subId = `rsub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    renderStreamSubscribers.set(subId, {
+      closed: false,
+      send: (data: string) => {
+        if (closed) return
+        reply.raw.write(`data: ${data}\n\n`)
+      },
+    })
+
+    // Replay last 20 commands so late joiners catch up
+    for (const entry of renderCommandLog) {
+      if (closed) break
+      try { reply.raw.write(`event: replay\ndata: ${JSON.stringify(entry)}\n\n`) } catch { break }
+    }
+
+    request.raw.on('close', () => {
+      closed = true
+      renderStreamSubscribers.delete(subId)
+    })
+
+    return new Promise<void>(() => {})
+  })
+
   // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
   // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
   // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
