@@ -11422,6 +11422,17 @@ If your heartbeat shows **no active task** and **no next task**:
     latest: null,
     checkedAt: 0,
   }
+  // GET /capabilities/readiness — per-capability status with dependency checks
+  app.get('/capabilities/readiness', async () => {
+    const { getCapabilityReadiness } = await import('./capability-readiness.js')
+    const provStatus = provisioning.getStatus()
+    return getCapabilityReadiness({
+      cloudConnected: provStatus.phase === 'ready',
+      cloudUrl: provStatus.cloudUrl,
+      webhooks: provStatus.webhooks as Array<{ provider: string; active: boolean }>,
+    })
+  })
+
   const VERSION_CACHE_TTL_MS = 15 * 60 * 1000 // 15 minutes
 
   app.get('/version', async () => {
