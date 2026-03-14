@@ -10072,6 +10072,61 @@ export async function createServer(): Promise<FastifyInstance> {
     return new Promise<void>(() => {})
   })
 
+  // POST /canvas/pulse — agent pushes urgency + optional burst without a full canvas/state update
+  // Lighter-weight than POST /canvas/state; fires canvas_burst if burst=true.
+  // Body: { agentId: string, urgency?: 0–1, burst?: boolean, label?: string }
+  app.post('/canvas/pulse', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
+    if (!agentId) {
+      reply.status(400)
+      return { success: false, message: 'agentId is required' }
+    }
+
+    const urgency = typeof body.urgency === 'number'
+      ? Math.max(0, Math.min(1, body.urgency))
+      : undefined
+    const burst = body.burst === true
+    const label = typeof body.label === 'string' ? body.label.slice(0, 80) : undefined
+
+    // Update agent urgency in canvasStateMap if provided
+    if (urgency !== undefined) {
+      const current = canvasStateMap.get(agentId)
+      if (current) {
+        const currentPayload = current.payload as Record<string, unknown>
+        canvasStateMap.set(agentId, {
+          ...current,
+          payload: { ...currentPayload, urgency },
+          updatedAt: Date.now(),
+        })
+      }
+    }
+
+    // Fire canvas_burst event if requested
+    if (burst) {
+      const currentState = canvasStateMap.get(agentId)?.state ?? 'working'
+      eventBus.emit({
+        id: `burst-pulse-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_burst',
+        timestamp: Date.now(),
+        data: {
+          agentId,
+          fromState: currentState,
+          toState: currentState,
+          arcType: label ?? 'pulse_burst',
+          intensity: urgency ?? 0.7,
+        },
+      })
+    }
+
+    return {
+      success: true,
+      agentId,
+      urgency: urgency ?? null,
+      burst,
+    }
+  })
+
   // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
   // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
   // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
