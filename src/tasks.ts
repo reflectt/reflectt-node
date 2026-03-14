@@ -1651,6 +1651,31 @@ class TaskManager {
     // If task completed, check for unblocked tasks
     if (updates.status === 'done' && task.status !== 'done') {
       this.checkUnblockedTasks(id)
+
+      // Cinematic completion moment — emit canvas_milestone for the living canvas
+      // Intensity scales with how long the task was in-flight and how high the priority
+      const ageMs = Date.now() - (task.createdAt ?? Date.now())
+      const ageDays = ageMs / (1000 * 60 * 60 * 24)
+      const priorityBoost: Record<string, number> = { P0: 1.0, P1: 0.9, P2: 0.7, P3: 0.5 }
+      const baseIntensity = priorityBoost[task.priority ?? 'P2'] ?? 0.6
+      // Age bonus: tasks > 1 day feel more significant (caps at 3 days)
+      const ageBonus = Math.min(0.3, ageDays * 0.1)
+      const intensity = Math.min(1.0, baseIntensity + ageBonus)
+
+      eventBus.emit({
+        id: `milestone-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+        type: 'canvas_milestone' as const,
+        timestamp: Date.now(),
+        data: {
+          kind: 'task_complete',
+          agentId: updates.assignee ?? task.assignee ?? 'system',
+          taskId: id,
+          title: task.title?.slice(0, 80) ?? 'task completed',
+          priority: task.priority ?? 'P2',
+          intensity,
+          ageMs,
+        },
+      })
     }
     
     return updated
