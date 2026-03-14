@@ -1030,7 +1030,8 @@ Full calendar event system with iCal-compatible fields, attendees, RSVP, recurre
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/calendar/events` | Create event. Body: `{ summary, dtstart, dtend, organizer, description?, timezone?, rrule?, attendees?, location?, categories?, reminders?, status? }` |
+| GET | `/calendar/upcoming` | Next N days of events (agent execution surface). Query: `days` (default 7). Returns `{ events: [{ id, title, start, end, attendees, calendar, description, location, provider }] }` sorted chronologically. |
+| POST | `/calendar/events` | Create event. Spec format: `{ title, start, duration_minutes?, attendees?, calendar?, description? }` — returns 422 for past dates, 409 for duplicates. Legacy: `{ summary, dtstart, dtend, organizer, ... }`. |
 | GET | `/calendar/events` | List events. Query: `organizer`, `attendee`, `status`, `from`, `to` (epoch ms), `categories` (comma-separated), `limit`. |
 | GET | `/calendar/events/:id` | Get single event. |
 | PATCH | `/calendar/events/:id` | Update event fields. |
