@@ -1123,7 +1123,7 @@ async function syncChat(): Promise<void> {
   // CRITICAL: use oldestFirst=true so the cursor walks forward through ALL
   // messages without skipping. Default getMessages returns newest-N (DESC
   // then reversed), which drops older messages in high-traffic windows.
-  // This was the root cause of cloud chat sync gaps Ryan reported.
+  // This was the root cause of cloud chat sync gaps reported.
   const recentMessages = chatManager.getMessages({
     after: chatSyncCursor,
     limit: 100,

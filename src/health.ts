@@ -1775,7 +1775,7 @@ class TeamHealthMonitor {
 
       // ── Thread-level idempotency ─────────────────────────────────────
       // Build a thread key that groups mentions by channel + thread + mentioned agents.
-      // This prevents duplicate rescues when Ryan sends multiple messages in the
+      // This prevents duplicate rescues when a human sends multiple messages in the
       // same thread mentioning the same agents.
       const threadKey = this.buildMentionThreadKey(mention as unknown as Record<string, unknown>)
 
