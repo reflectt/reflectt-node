@@ -1,6 +1,6 @@
 import type { RunKind } from "./agent-interface.js";
 
-export const ALLOWED_ACTIONS: RunKind[] = ["github_issue_create"];
+export const ALLOWED_ACTIONS: RunKind[] = ["github_issue_create", "macos_ui_action"];
 export const ALLOWED_DOMAINS: string[] = ["github.com"];
 
 export function checkActionAllowed(

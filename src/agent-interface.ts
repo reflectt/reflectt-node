@@ -12,8 +12,20 @@
 import { checkActionAllowed } from "./agent-exec-guardrail.js";
 import { executeIntent as macOSExecuteIntent, requiresApproval as macOSRequiresApproval, validateIntent as macOSValidateIntent } from "./macos-accessibility.js";
 
-export type RunKind = 'github_issue_create'
-export type RunStatus = 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'rejected'
+export type RunKind = 'github_issue_create' | 'macos_ui_action'
+export type RunStatus = 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'rejected' | 'aborted'
+
+/**
+ * Approval timeout in ms.
+ * In production: 10 minutes (never hardcoded — reads from env).
+ * In CI/tests: set APPROVAL_TIMEOUT_MS_TEST to a smaller value (e.g. 200).
+ * The test env var ONLY applies when running tests — never override in production code.
+ */
+export function getApprovalTimeoutMs(): number {
+  const testOverride = process.env.APPROVAL_TIMEOUT_MS_TEST
+  if (testOverride) return Number(testOverride)
+  return 10 * 60 * 1000 // 10 minutes (production default)
+}
 
 export interface RunEvent {
   type:
@@ -184,7 +196,7 @@ export async function executeGithubIssueCreate(runId: string, input: GithubIssue
         pendingApprovals.delete(runId)
         resolve(false) // auto-reject on timeout
       }
-    }, 10 * 60 * 1000)
+    }, getApprovalTimeoutMs())
   })
 
   emit(runId, {
@@ -306,6 +318,31 @@ export function rejectRun(runId: string): boolean {
 }
 
 /**
+ * Abort a run — emergency kill for kill-switch or out-of-band termination.
+ * Works on any active state: awaiting_approval (rejects pending gate),
+ * running (forces abort), or queued (cancels before execution).
+ *
+ * @param actor  identity invoking the abort (for audit log)
+ */
+export function abortRun(runId: string, actor = 'kill-switch'): boolean {
+  const run = runs.get(runId)
+  if (!run) return false
+  if (['completed', 'failed', 'rejected', 'aborted', 'cancelled'].includes(run.status)) return false
+
+  // If waiting for approval — resolve the gate with rejection first
+  const pending = pendingApprovals.get(runId)
+  if (pending) {
+    pendingApprovals.delete(runId)
+    pending.resolve(false)
+  }
+
+  run.result = { outcome: 'aborted', actor, abortedAt: Date.now() } as unknown as typeof run.result
+  transition(runId, 'aborted', { actor, abortedAt: Date.now() })
+  emit(runId, { type: 'step_failed', timestamp: Date.now(), payload: { step: 'execute', error: `aborted by ${actor}` } })
+  return true
+}
+
+/**
  * List runs currently awaiting human approval — surfaced in /approval-queue
  * so the presence canvas decision card can show them.
  */
@@ -391,7 +428,7 @@ export function buildReplayPacket(runId: string): ReplayPacket | null {
   let pendingApproval: Partial<ReplayPacket['approvals'][0]> | null = null
   for (const event of run.log) {
     if (event.type === 'approval_requested') {
-      pendingApproval = { requestedAt: event.timestamp, resolvedAt: null, approved: null, timeoutMs: 10 * 60 * 1000 }
+      pendingApproval = { requestedAt: event.timestamp, resolvedAt: null, approved: null, timeoutMs: getApprovalTimeoutMs() }
     } else if (event.type === 'approval_resolved' && pendingApproval) {
       pendingApproval.resolvedAt = event.timestamp
       pendingApproval.approved = (event.payload as any).approved ?? null
@@ -506,7 +543,7 @@ export async function executeMacOSUIAction(
           pendingApprovals.delete(runId)
           resolve(false)
         }
-      }, 10 * 60 * 1000)
+      }, getApprovalTimeoutMs())
     })
 
     emit(runId, { type: 'approval_resolved', timestamp: Date.now(), payload: { approved, runId } })
@@ -524,6 +561,10 @@ export async function executeMacOSUIAction(
   // Execute
   emit(runId, { type: 'step_started', timestamp: Date.now(), payload: { step: 'execute', action: (intent as any).action } })
   const result = await macOSExecuteIntent(intent as any)
+
+  // Check if aborted while executing — kill-switch may have fired during the await
+  const runAfterExec = runs.get(runId)
+  if (!runAfterExec || runAfterExec.status === 'aborted') return
 
   if (result.ok) {
     emit(runId, { type: 'step_succeeded', timestamp: Date.now(), payload: {
