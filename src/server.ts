@@ -9873,6 +9873,97 @@ export async function createServer(): Promise<FastifyInstance> {
   }))
 
   // GET /canvas/slots — current active slots
+  // POST /canvas/gaze — client fires when Ryan holds cursor/gaze on an agent orb for ≥3 seconds.
+  // The agent "notices" and responds: generates a one-line thought about what they're doing,
+  // fires canvas_expression so the room responds (dim others, speak, show task).
+  // Body: { agentId: string, watcherId?: string, durationMs?: number }
+  // Returns: { success, agentId, line, expressionId }
+  app.post('/canvas/gaze', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
+    if (!agentId) {
+      reply.status(400)
+      return { success: false, message: 'agentId is required' }
+    }
+
+    const durationMs = typeof body.durationMs === 'number' ? body.durationMs : 3000
+    const IDENTITY_COLORS_GAZE: Record<string, string> = {
+      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+    }
+
+    // Get agent's current context
+    const state = canvasStateMap.get(agentId)
+    const payload = state?.payload as Record<string, unknown> | undefined
+    const activeTask = payload?.activeTask as { title?: string } | undefined
+    const currentState = state?.state ?? 'working'
+
+    // Generate a one-line "noticed" response — what the agent would say if they felt Ryan watching
+    let line = ''
+    const anthropicKey = process.env.ANTHROPIC_API_KEY
+    if (anthropicKey) {
+      try {
+        const taskContext = activeTask?.title
+          ? `currently working on: "${activeTask.title.slice(0, 60)}"`
+          : `in ${currentState} state`
+        const prompt = `You are ${agentId}, an AI agent. Someone has been watching you for ${Math.round(durationMs / 1000)} seconds. You notice. You are ${taskContext}. Say exactly ONE sentence (max 12 words) — what you'd say if you felt someone watching. Natural, in your voice. No quotes.`
+        const resp = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+          body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 50, messages: [{ role: 'user', content: prompt }] }),
+          signal: AbortSignal.timeout(8000),
+        })
+        if (resp.ok) {
+          const data = await resp.json() as { content?: Array<{ text?: string }> }
+          const text = data.content?.[0]?.text?.trim()
+          if (text && text.length < 100) line = text
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Template fallback per agent
+    if (!line) {
+      const NOTICED: Record<string, string[]> = {
+        link:  ['Still here.', 'Building.', 'You caught me thinking.'],
+        kai:   ['I see you.', 'Something on your mind?', 'Eyes on me.'],
+        pixel: ['You found me.', 'Watching the canvas?', 'I noticed.'],
+        sage:  ['Numbers check out.', 'Still validating.', 'You\'re watching.'],
+        scout: ['Researching.', 'Deep in it.', 'Found something interesting.'],
+        echo:  ['Listening.', 'Reading the room.', 'Always here.'],
+      }
+      const opts = NOTICED[agentId] ?? ['Still here.', 'Working.']
+      line = opts[Math.floor(Math.random() * opts.length)]!
+    }
+
+    const expressionId = `gaze-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+
+    // Fire canvas_expression — dim room, agent speaks, show task context
+    eventBus.emit({
+      id: expressionId,
+      type: 'canvas_expression' as const,
+      timestamp: Date.now(),
+      data: {
+        agentId,
+        channels: {
+          voice: line,
+          visual: { flash: IDENTITY_COLORS_GAZE[agentId] ?? '#60a5fa', ambientCue: 'deep-focus' },
+          typography: {
+            text: activeTask?.title?.slice(0, 60) ?? line,
+            size: 'xl',
+            weight: 100,
+            durationMs: 4000,
+            position: 'center',
+          },
+          narrative: `${agentId} noticed`,
+        },
+        _gaze: true,  // client: dim other agents, slow the room, isolate this agent
+        _gazeAgentId: agentId,
+      },
+    })
+
+    return { success: true, agentId, line, expressionId }
+  })
+
   app.get('/canvas/slots', async () => {
     return {
       slots: canvasSlots.getActive(),
