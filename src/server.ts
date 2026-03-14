@@ -8894,13 +8894,10 @@ export async function createServer(): Promise<FastifyInstance> {
           if (mirrorResult?.mirrored) {
             console.log(`[ArtifactMirror] Mirrored ${mirrorResult.filesCopied} file(s) for ${task.id} → ${mirrorResult.destination}`)
           } else if (mirrorResult && !mirrorResult.mirrored) {
-            // "Source artifact not found" is expected in prod installs where process/*.md
-            // files live only in the dev workspace, not the npm package directory.
-            // Downgrade to debug-level (no console output) for source-not-found; keep
-            // warn only for genuine I/O failures (permissions, disk full, etc.).
-            const isSourceNotFound = mirrorResult.error?.includes('not found') || mirrorResult.error?.includes('Not a process/')
-            if (!isSourceNotFound) {
-              console.warn(`[ArtifactMirror] FAILED for ${task.id}: ${mirrorResult.error || 'unknown error'} (source=${mirrorResult.source})`)
+            // Skip silently when no error — source simply not found (expected in prod installs).
+            // Only warn on genuine I/O failures (permissions, disk full, etc.).
+            if (mirrorResult.error) {
+              console.warn(`[ArtifactMirror] FAILED for ${task.id}: ${mirrorResult.error} (source=${mirrorResult.source})`)
             }
           }
         } catch (err) {

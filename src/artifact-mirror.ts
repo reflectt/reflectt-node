@@ -125,12 +125,15 @@ export async function mirrorArtifacts(artifactPath: string): Promise<MirrorResul
   try {
     const lookup = await findArtifactSource(artifactPath)
     if (!lookup) {
+      // Normal in prod installs (e.g. /opt/homebrew/lib/node_modules/reflectt-node/):
+      // process/TASK-*.md files live in dev workspaces, not the global install.
+      // Return mirrored=false with no error — caller should skip silently.
       return {
         mirrored: false,
         source: sourcePath,
         destination: destPath,
         filesCopied: 0,
-        error: 'Source artifact not found (checked all ~/.openclaw/workspace* roots)',
+        // no error field — "not found" is expected in prod, not an error condition
       }
     }
 
