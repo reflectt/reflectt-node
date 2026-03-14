@@ -91,7 +91,7 @@ import { getBuildInfo } from './buildInfo.js'
 import { appendStoredLog, readStoredLogs, getStoredLogPath } from './logStore.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases, setAgentDisplayName, resolveAgentMention } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
-import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, getDailySpendByModel, getAvgCostByLane, getAvgCostByAgent, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
+import { recordUsage as recordUsageTracking, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, getDailySpendByModel, getAvgCostByLane, getAvgCostByAgent, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import { initGitHubActorAuth, resolveGitHubTokenForActor } from './github-actor-auth.js'
@@ -14282,12 +14282,14 @@ If your heartbeat shows **no active task** and **no next task**:
       reply.code(400)
       return { success: false, error: 'agent and model are required' }
     }
-    const event = recordUsage({
-      agentId: body.agent as string,
+    const event = recordUsageTracking({
+      agent: body.agent as string,
       model: body.model as string,
-      inputTokens: Number(body.input_tokens) || 0,
-      outputTokens: Number(body.output_tokens) || 0,
-      cost: body.estimated_cost_usd != null ? Number(body.estimated_cost_usd) : 0,
+      provider: (body.provider as string | undefined) ?? 'unknown',
+      input_tokens: Number(body.input_tokens) || 0,
+      output_tokens: Number(body.output_tokens) || 0,
+      estimated_cost_usd: body.estimated_cost_usd != null ? Number(body.estimated_cost_usd) : undefined,
+      category: (body.category as UsageEvent['category'] | undefined) ?? 'other',
       timestamp: Number(body.timestamp) || Date.now(),
     })
     return { success: true, event }
@@ -17326,6 +17328,9 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   // POST /usage/record — record a usage event
+  // Writes to BOTH usage_log (cost-enforcement) AND model_usage (usage-tracking → cloud sync).
+  // Previously only wrote to usage_log, causing all models (gpt-5.4, etc.) to appear as $0
+  // in the cloud usage dashboard which reads from model_usage via syncUsage().
   app.post('/usage/record', async (request, reply) => {
     const body = request.body as {
       agentId?: string; model?: string
@@ -17336,14 +17341,36 @@ If your heartbeat shows **no active task** and **no next task**:
     if (!body?.model) return reply.code(400).send({ error: 'model is required' })
     if (typeof body.cost !== 'number') return reply.code(400).send({ error: 'cost is required (number)' })
 
+    const now = Date.now()
+    const inputTokens = body.inputTokens ?? 0
+    const outputTokens = body.outputTokens ?? 0
+    const cost = body.cost
+
+    // Write to cost-enforcement usage_log (existing path — enforces caps)
     recordUsage({
       agentId: body.agentId,
       model: body.model,
-      inputTokens: body.inputTokens ?? 0,
-      outputTokens: body.outputTokens ?? 0,
-      cost: body.cost,
-      timestamp: Date.now(),
+      inputTokens,
+      outputTokens,
+      cost,
+      timestamp: now,
     })
+
+    // Bridge to model_usage (usage-tracking) so syncUsage() picks it up for cloud dashboard.
+    // Best-effort: never block the response if this fails.
+    try {
+      recordUsageTracking({
+        agent: body.agentId as string,
+        model: body.model as string,
+        provider: 'unknown',
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        estimated_cost_usd: cost,
+        category: 'other' as const,
+        timestamp: now,
+      })
+    } catch { /* non-fatal: cost-enforcement path already succeeded */ }
+
     return reply.code(201).send({ ok: true })
   })
 
