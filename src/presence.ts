@@ -72,6 +72,8 @@ interface DailyActivity {
 export class PresenceManager {
   private presence = new Map<string, AgentPresence>()
   private activity = new Map<string, DailyActivity>() // agent -> today's activity
+  /** Debounce map: `agent:status` → last emit timestamp (ms). Prevents SSE flood on restart. */
+  private _lastEmit = new Map<string, number>()
   private expiryCheckInterval?: NodeJS.Timeout
 
   constructor() {
@@ -426,10 +428,29 @@ export class PresenceManager {
       }
     }
 
-    // Emit presence_updated event
-    eventBus.emitPresenceUpdated(presence)
+    // Emit presence_updated — but debounce to prevent broadcast floods on rapid restarts.
+    // Skip if nothing actually changed (same status + same task) to avoid SSE noise.
+    // Also enforce a minimum interval between emissions for the same agent+status pair
+    // to prevent cadence degradation when updatePresence is called in a tight loop
+    // (e.g., seeding all agents to 'idle' on each restart).
+    // task-1773516754378-6pyxtkuzt (COO signal #5)
+    const prevStatus = existing?.status
+    const prevTask = existing?.task
+    const statusChanged = prevStatus !== status
+    const taskChanged = prevTask !== presence.task
+    const shouldEmit = statusChanged || taskChanged
 
-    console.log(`[Presence] ${agent} → ${status}${task ? ` (${task})` : ''}`)
+    if (shouldEmit) {
+      const lastEmitKey = `${agent}:${status}`
+      const lastEmitAt = this._lastEmit.get(lastEmitKey) ?? 0
+      const MIN_EMIT_INTERVAL_MS = 60_000 // 1 min debounce for same-agent+same-status
+      if (statusChanged || Date.now() - lastEmitAt >= MIN_EMIT_INTERVAL_MS) {
+        this._lastEmit.set(lastEmitKey, Date.now())
+        eventBus.emitPresenceUpdated(presence)
+      }
+    }
+
+    console.log(`[Presence] ${agent} → ${status}${presence.task ? ` (${presence.task})` : ''}${shouldEmit ? '' : ' [no-op]'}`)
 
     return presence
   }
