@@ -7305,12 +7305,87 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Build agent system context for the LLM responder
+    const agentRole = getAgentRole(agentId)
+    const agentSystemPrompt = agentRole
+      ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+      : `You are ${agentId}, a team agent. Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+
     // Kick off async processing — do not await so we return sessionId immediately
-    const agentResponder = async (_agentId: string, text: string, _sessionId: string): Promise<string | null> => {
-      // Emit thinking state to canvas
+    const agentResponder = async (respAgentId: string, text: string, _sessionId: string): Promise<string | null> => {
       setActiveSpeaker(false)
-      await new Promise(resolve => setTimeout(resolve, 400)) // simulate brief think time
+
+      // Try real LLM call if ANTHROPIC_API_KEY is set
+      const anthropicKey = process.env.ANTHROPIC_API_KEY
+      if (anthropicKey) {
+        try {
+          const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': anthropicKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5',
+              max_tokens: 256,
+              system: agentSystemPrompt,
+              messages: [{ role: 'user', content: text }],
+            }),
+            signal: AbortSignal.timeout(15000),
+          })
+          if (resp.ok) {
+            const data = await resp.json() as { content?: Array<{ text?: string }> }
+            const reply = data.content?.[0]?.text?.trim()
+            if (reply) return reply
+          }
+        } catch (err) {
+          console.error(`[voice] LLM call failed for ${respAgentId}:`, err)
+          // fall through to stub
+        }
+      }
+
+      // Stub fallback — always available, no key required
+      await new Promise(resolve => setTimeout(resolve, 400))
       return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
+    }
+
+    // Agent voice IDs (ElevenLabs) — per-agent identity, same mapping as cloud
+    const NODE_AGENT_VOICE_IDS: Record<string, string> = {
+      link: 'pNInz6obpgDQGcFmaJgB',    // Adam
+      kai: 'onwK4e9ZLuTAKqWW03F9',     // Daniel
+      pixel: 'EXAVITQu4vr4xnSDxMaL',   // Sarah
+      sage: 'yoZ06aMxZJJ28mfd3POQ',    // Rachel
+      scout: '3XbDmaS0mwj3WIVTUxWa',   // Charlie
+      echo: 'MF3mGyEYCl7XYWbV9V6O',    // Elli
+    }
+
+    // Synthesize TTS via ElevenLabs if key is set
+    const synthesizeTts = async (text: string, forAgentId: string): Promise<string | null> => {
+      const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
+      if (!elevenKey) return null
+      const voiceId = NODE_AGENT_VOICE_IDS[forAgentId] ?? NODE_AGENT_VOICE_IDS['link']
+      try {
+        const res = await fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+          {
+            method: 'POST',
+            headers: {
+              'xi-api-key': elevenKey,
+              'Content-Type': 'application/json',
+              'Accept': 'audio/mpeg',
+            },
+            body: JSON.stringify({ text: text.slice(0, 500), model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+            signal: AbortSignal.timeout(20000),
+          }
+        )
+        if (!res.ok) return null
+        const buf = Buffer.from(await res.arrayBuffer())
+        // Return as data URI so the client can play it without a second request
+        return `data:audio/mpeg;base64,${buf.toString('base64')}`
+      } catch {
+        return null
+      }
     }
 
     // Subscribe to voice events to drive canvas state
@@ -7327,7 +7402,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     })
 
-    processVoiceTranscript(session.id, transcript, agentResponder).catch(err => {
+    processVoiceTranscript(session.id, transcript, agentResponder, synthesizeTts).catch(err => {
       console.error('[voice] processVoiceTranscript error:', err)
       unsubVoice()
     })
