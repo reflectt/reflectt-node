@@ -13,6 +13,7 @@ import { createTaskStateAdapterFromEnv, type TaskStateAdapter } from './taskStat
 import { getDb, importJsonlIfNeeded, safeJsonStringify, safeJsonParse } from './db.js'
 import { isTestHarnessTask, TEST_TASK_EXCLUDE_SQL } from './test-task-filter.js'
 import { assertDuplicateClosureHasCanonicalRefs } from './duplicateClosureGuard.js'
+import { closeInsightById } from './insight-mutation.js'
 import { getAgentAliases } from './assignment.js'
 import { getAgentLane } from './lane-config.js'
 import type Database from 'better-sqlite3'
@@ -1752,7 +1753,33 @@ class TaskManager {
         } catch { /* never fail a task close */ }
       })()
     }
-    
+
+    // ── Insight lifecycle sync ────────────────────────────────────────────
+    // When a task with metadata.insight_id is closed (status→done), auto-close
+    // the linked insight so candidate backlog reflects true unresolved work.
+    // Safety: best-effort (never blocks task completion), audit-logged by closeInsightById.
+    if (updates.status === 'done' && task.status !== 'done') {
+      const meta = task.metadata as Record<string, unknown> | null | undefined
+      const insightId = typeof meta?.insight_id === 'string' ? meta.insight_id.trim() : null
+      if (insightId) {
+        void (async () => {
+          try {
+            const actor = updates.assignee ?? task.assignee ?? 'system'
+            const result = closeInsightById(insightId, {
+              actor,
+              reason: `Task ${id} closed (${task.title?.slice(0, 60) ?? 'no title'}) — auto lifecycle sync`,
+              notes: `Linked task ${id} transitioned to done. Insight auto-closed by lifecycle sync.`,
+            })
+            if (!result.success) {
+              console.warn(`[insight-lifecycle-sync] Failed to close insight ${insightId} for task ${id}: ${result.error}`)
+            }
+          } catch (err) {
+            console.warn(`[insight-lifecycle-sync] Unexpected error closing insight ${insightId}:`, err)
+          }
+        })()
+      }
+    }
+
     return updated
   }
 
