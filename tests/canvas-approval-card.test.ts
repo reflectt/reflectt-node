@@ -335,3 +335,53 @@ describe('Hosts query card', () => {
     expect(body.card.type).toBe('hosts')
   })
 })
+
+describe('Canvas push on task transitions', () => {
+  it('emits canvas_push utterance when task moves todo→doing', async () => {
+    const res = await app.inject({ method: 'POST', url: '/tasks', payload: { title: `Transition test ${Date.now()}`, assignee: 'kai', reviewer: 'coo', priority: 'P2', status: 'todo', done_criteria: ['done'] } })
+    const taskId: string = JSON.parse(res.body).task?.id ?? JSON.parse(res.body).id
+    createdIds.push(taskId)
+
+    const captured: unknown[] = []
+    const listenerId = `test-doing-${Date.now()}`
+    eventBus.on(listenerId, (event) => { if (event.type === 'canvas_push') captured.push(event) })
+    try {
+      await app.inject({ method: 'PATCH', url: `/tasks/${taskId}`, payload: { status: 'doing' } })
+    } finally {
+      eventBus.off(listenerId)
+    }
+
+    const utterance = (captured as any[]).find(e => (e.data as any)?.type === 'utterance')
+    expect(utterance).toBeDefined()
+    expect((utterance as any).data.text).toContain('picking up')
+  })
+
+  it('emits canvas_push work_released when task moves doing→validating', async () => {
+    const taskId = await createDoingTask()
+
+    const captured: unknown[] = []
+    const listenerId = `test-validating-push-${Date.now()}`
+    eventBus.on(listenerId, (event) => { if (event.type === 'canvas_push') captured.push(event) })
+    try {
+      const shortId = taskId.split('-').slice(-1)[0]
+      await app.inject({
+        method: 'PATCH', url: `/tasks/${taskId}`,
+        payload: {
+          status: 'validating',
+          metadata: {
+            pr_integrity_override: true,
+            pr_integrity_override_reason: 'test',
+            review_handoff: { task_id: taskId, artifact_path: `process/TASK-${shortId}.md`, known_caveats: 'none', pr_url: 'https://github.com/reflectt/reflectt-node/pull/999', commit_sha: 'abc1234' },
+            qa_bundle: { lane: 'engineering', summary: 'test', review_packet: { task_id: taskId, pr_url: 'https://github.com/reflectt/reflectt-node/pull/999', commit: 'abc1234', changed_files: ['src/server.ts'], artifact_path: `process/TASK-${shortId}.md`, what_changed: 'test', how_tested: 'vitest', caveats: 'none' } },
+          },
+        },
+      })
+    } finally {
+      eventBus.off(listenerId)
+    }
+
+    const wr = (captured as any[]).find(e => (e.data as any)?.type === 'work_released')
+    expect(wr).toBeDefined()
+    expect((wr as any).data.summary).toContain('ready for review')
+  })
+})

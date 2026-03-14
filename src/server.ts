@@ -9004,6 +9004,52 @@ export async function createServer(): Promise<FastifyInstance> {
         })
       }
 
+      // ── Canvas push: self-emit utterance on task state transitions ──
+      {
+        const canvasAgent = (task.assignee || 'unknown').toLowerCase()
+        const canvasNow = Date.now()
+        const AGENT_COLORS: Record<string, string> = {
+          kai: '#6366f1', link: '#22d3ee', sage: '#a78bfa', pixel: '#ec4899',
+          echo: '#f472b6', rhythm: '#a3e635', spark: '#fb923c', scout: '#fbbf24',
+          harmony: '#34d399', swift: '#38bdf8', kotlin: '#f97316',
+        }
+        const agentColor = AGENT_COLORS[canvasAgent] ?? '#94a3b8'
+        const taskSnippet = (task.title ?? '').slice(0, 60)
+
+        if (parsed.status === 'doing' && existing.status !== 'doing') {
+          // Agent picks up work → utterance on canvas
+          eventBus.emit({
+            id: `canvas-doing-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_push',
+            timestamp: canvasNow,
+            data: {
+              type: 'utterance',
+              agentId: canvasAgent,
+              agentColor,
+              text: `picking up: ${taskSnippet}`,
+              t: canvasNow,
+            },
+          })
+        } else if (parsed.status === 'validating' && existing.status !== 'validating') {
+          // Agent submits for review → work_released on canvas
+          const prUrl = (mergedMeta as any)?.review_handoff?.pr_url || (mergedMeta as any)?.pr_url || undefined
+          eventBus.emit({
+            id: `canvas-validating-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_push',
+            timestamp: canvasNow,
+            data: {
+              type: 'work_released',
+              agentId: canvasAgent,
+              agentColor,
+              summary: `ready for review: ${taskSnippet}`,
+              prUrl,
+              t: canvasNow,
+            },
+          })
+        }
+      }
+      // ── End canvas push ──
+
       // ── Activation funnel: track first_task_started / first_task_completed ──
       {
         const funnelUserId = (task.metadata as any)?.userId || task.assignee || ''
