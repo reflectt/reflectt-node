@@ -1121,6 +1121,11 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/canvas/presence` | All agents as AgentPresence[]. Returns: `{ agents: AgentPresence[], count }`. |
 | GET | `/canvas/session/snapshot` | Cross-device continuity: resumable session snapshot for the active agent. Params: `agentId?` (defaults to most-recently-updated non-floor agent). Returns: `{ snapshot: { agent_id, canvas_state, active_task?, active_decision?, content_snapshot?, handoff: { summary, stream_in_progress, sensor_consent_transferred } } \| null, generated_at }`. |
 | GET | `/canvas/team/mood` | Collective team mood — derived from all active agent states. Returns: `{ mood: { teamRhythm: 'quiet'\|'flow'\|'grinding'\|'tense'\|'surge', dominantState, tension: 0.0–1.0, ambientPulse: 'slow'\|'normal'\|'fast', dominantColor: hex, activeAgents: string[], counts } }`. Living canvas uses this to shift background atmosphere. |
+| POST | `/agent-interface/runs` | Create an agent action run. Body: `{ kind: "github_issue_create", repo, title, body, dryRun? }`. Returns `{ runId, status }`. Run lifecycle: `queued→running→awaiting_approval→completed\|failed\|rejected`. |
+| GET | `/agent-interface/runs/:runId` | Get run state + full log. |
+| GET | `/agent-interface/runs/:runId/events` | SSE stream of run events: `state_changed`, `step_started`, `step_succeeded`, `step_failed`, `approval_requested`, `approval_resolved`, `run_end`. |
+| POST | `/agent-interface/runs/:runId/approve` | Human approves the pending irreversible action (run must be in `awaiting_approval`). |
+| POST | `/agent-interface/runs/:runId/reject` | Human rejects the pending action. |
 | GET | `/agents/:agentId/config` | Get agent config (model preference, cost caps, settings). |
 | PUT | `/agents/:agentId/config` | Upsert agent config. Body: `{ model?, fallbackModel?, costCapDaily?, costCapMonthly?, maxTokensPerCall?, teamId?, settings? }`. |
 | DELETE | `/agents/:agentId/config` | Remove agent config. |
