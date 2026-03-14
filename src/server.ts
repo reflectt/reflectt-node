@@ -9354,6 +9354,101 @@ export async function createServer(): Promise<FastifyInstance> {
     return { slots: canvasSlots.getAll() }
   })
 
+  // GET /canvas/session/snapshot — resumable session state for cross-device continuity
+  // Returns the minimal snapshot needed for a second surface to resume from the same point.
+  // Spec: /Users/ryan/.openclaw/workspace-pixel/design/interface-os-v0-continuity.html
+  app.get('/canvas/session/snapshot', async (request) => {
+    const query = request.query as { agentId?: string }
+
+    // Determine the "active" agent: explicitly requested, or the most-recently-updated
+    let activeAgentId: string | null = query.agentId ?? null
+    let activeEntry: { state: string; sensors: string | null; payload: unknown; updatedAt: number } | null = null
+
+    if (activeAgentId) {
+      activeEntry = canvasStateMap.get(activeAgentId) ?? null
+    } else {
+      // Pick the most recently updated non-floor agent
+      for (const [id, entry] of canvasStateMap) {
+        if (entry.state !== 'floor') {
+          if (!activeEntry || entry.updatedAt > activeEntry.updatedAt) {
+            activeAgentId = id
+            activeEntry = entry
+          }
+        }
+      }
+    }
+
+    const now = Date.now()
+
+    if (!activeAgentId || !activeEntry) {
+      return {
+        snapshot: null,
+        reason: 'no_active_session',
+        generated_at: new Date(now).toISOString(),
+      }
+    }
+
+    const payload = activeEntry.payload as Record<string, unknown> | null ?? {}
+
+    // Last complete content block from canvas history
+    const recentHistory = canvasSlots.getHistory(undefined, 5)
+    const lastContent = recentHistory.find(h => h.agentId === activeAgentId) ?? null
+
+    // Active decision payload (if in decision/urgent state)
+    const isDecision = activeEntry.state === 'decision' || activeEntry.state === 'urgent'
+
+    const snapshot = {
+      // Core session identity
+      agent_id: activeAgentId,
+      agent_label: payload.agentLabel ?? activeAgentId,
+      identity_color: AGENT_IDENTITY_COLORS[activeAgentId] ?? '#9ca3af',
+
+      // Canvas state (transferable)
+      canvas_state: activeEntry.state,
+      presence_state: payload.presenceState ?? null,
+      sensors: activeEntry.sensors ?? null,
+
+      // Active task context
+      active_task: payload.activeTask ?? null,
+      progress_pills: (payload as any).progressPills ?? null,
+
+      // Last completed content block (not mid-stream)
+      content_snapshot: lastContent
+        ? { type: lastContent.slot, body: lastContent.content, slot_id: lastContent.id }
+        : null,
+
+      // Decision payload — must follow the human to the next surface
+      active_decision: isDecision ? (payload.decision ?? payload.attention ?? null) : null,
+
+      // Attention / approval context
+      attention: payload.attention ?? null,
+
+      // Timing
+      session_age_ms: now - activeEntry.updatedAt,
+      updated_at: new Date(activeEntry.updatedAt).toISOString(),
+      generated_at: new Date(now).toISOString(),
+
+      // Handoff metadata
+      handoff: {
+        // Sensor consent is per-device — new device must re-consent
+        sensor_consent_transferred: false,
+        // In-progress streams cannot freeze — target joins at next complete block
+        stream_in_progress: activeEntry.state === 'rendering',
+        // Summary for handoff banner ("Kai is rendering a code review")
+        summary: (() => {
+          const name = payload.agentLabel ?? activeAgentId
+          if (activeEntry!.state === 'rendering') return `${name} is rendering${payload.activeTask ? ` — ${(payload.activeTask as any).title}` : ''}`
+          if (activeEntry!.state === 'decision' || activeEntry!.state === 'urgent') return `${name} needs a decision`
+          if (activeEntry!.state === 'thinking') return `${name} is thinking`
+          if (activeEntry!.state === 'waiting') return `${name} is waiting`
+          return `${name} is active`
+        })(),
+      },
+    }
+
+    return { snapshot, generated_at: snapshot.generated_at }
+  })
+
   // GET /canvas/history — recent render history
   app.get('/canvas/history', async (request) => {
     const query = request.query as any
