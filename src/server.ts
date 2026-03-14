@@ -146,6 +146,7 @@ import { createReflection, getReflection, listReflections, countReflections, ref
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary, sweepShippedCandidates } from './insights.js'
 import { queryActivity, ACTIVITY_SOURCES } from './activity.js'
 import { patchInsightById, cooldownInsightById, closeInsightById } from './insight-mutation.js'
+import { runStaleCandidateReconcileSweep } from './stale-candidate-reconciler.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
 import { listLineage, getLineage, lineageStats } from './lineage.js'
@@ -11931,6 +11932,32 @@ export async function createServer(): Promise<FastifyInstance> {
     return insightStats()
   })
 
+  // POST /insights/stale-candidates/reconcile — run stale candidate reconcile sweep
+  // Closes candidate insights where post-incident recovery evidence exists and guardrails pass.
+  app.post<{ Body: { dry_run?: boolean; insight_ids?: string[]; actor?: string } }>(
+    '/insights/stale-candidates/reconcile',
+    async (request, reply) => {
+      const body = request.body ?? {}
+      const dryRun = body.dry_run !== false // default: true (safe)
+      const actor = typeof body.actor === 'string' ? body.actor : 'api-reconcile'
+      const insightIds = Array.isArray(body.insight_ids) ? body.insight_ids : undefined
+
+      try {
+        const result = runStaleCandidateReconcileSweep({ dryRun, actor, insightIds })
+        return { success: true, ...result }
+      } catch (err: unknown) {
+        reply.status(500)
+        return { success: false, error: String(err) }
+      }
+    },
+  )
+
+  // GET /insights/stale-candidates/preview — dry-run reconcile (GET for convenience)
+  app.get('/insights/stale-candidates/preview', async () => {
+    const result = runStaleCandidateReconcileSweep({ dryRun: true, actor: 'preview' })
+    return { success: true, ...result }
+  })
+
   // ── Loop summary: top signals from the reflection loop ──
   app.get('/loop/summary', async (request) => {
     const query = request.query as Record<string, string>
@@ -16650,6 +16677,32 @@ If your heartbeat shows **no active task** and **no next task**:
   try { applyRunRetention({ policy: { maxAgeDays: serverConfig.runRetentionDays } }) } catch { /* non-fatal */ }
 
   // Schedule daily webhook payload purge — removes stored payloads older than 90 days.
+  // ── Stale candidate reconciler scheduler ──
+  // Runs at startup (after 90s) + every 4 hours. Dry-run unless REFLECTT_AUTO_RECONCILE_CANDIDATES=true.
+  ;(async () => {
+    function doStaleCandidateSweep() {
+      try {
+        const result = runStaleCandidateReconcileSweep({
+          dryRun: process.env.REFLECTT_AUTO_RECONCILE_CANDIDATES !== 'true',
+          actor: 'stale-candidate-reconciler-scheduler',
+        })
+        if (result.eligible > 0 || result.closed > 0) {
+          const mode = result.dryRun ? '[dry-run]' : '[live]'
+          console.log(
+            `[stale-candidate-reconciler] ${mode} swept=${result.swept} eligible=${result.eligible} ` +
+            `closed=${result.closed} blocked=${result.blocked} (${result.durationMs}ms)`,
+          )
+        }
+      } catch (err) {
+        console.warn('[stale-candidate-reconciler] Sweep error:', err)
+      }
+    }
+    const scStartupTimer = setTimeout(doStaleCandidateSweep, 90_000)
+    scStartupTimer.unref()
+    const scTimer = setInterval(doStaleCandidateSweep, 4 * 60 * 60 * 1000)
+    scTimer.unref()
+  })().catch(() => { /* never fail startup */ })
+
   // Dynamic import mirrors the best-effort pattern from the inbound webhook handler (PR #926 caveat resolved).
   const WEBHOOK_PAYLOAD_RETENTION_DAYS = 90
   ;(async () => {
