@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   createRun, getRun, subscribeRun,
   approveRun, rejectRun,
-  executeGithubIssueCreate, executeMacOSUIAction,
+  executeGithubIssueCreate, executeMacOSUIAction, buildReplayPacket,
   _clearRunsForTest,
   type RunEvent,
 } from '../src/agent-interface.js'
@@ -311,5 +311,60 @@ describe('macOS UI action approval gate', () => {
     await execPromise
     const r = getRun(run.id)!
     expect(r.status).toBe('failed')
+  })
+})
+
+// ── Replay packet tests ────────────────────────────────────────────────────
+
+describe('buildReplayPacket', () => {
+  beforeEach(() => { _clearRunsForTest() })
+
+  it('returns null for unknown run', () => {
+    expect(buildReplayPacket('nonexistent')).toBe(null)
+  })
+
+  it('produces schema-tagged packet for completed macOS create_reminder run', async () => {
+    const run = createRun('macos_ui_action' as any, { intent: { action: 'create_reminder', text: 'Test', dryRun: true } })
+    await executeMacOSUIAction(run.id, { action: 'create_reminder', text: 'Test', dryRun: true })
+
+    const packet = buildReplayPacket(run.id)!
+    expect(packet.schema).toBe('agent-interface-replay-v1')
+    expect(packet.runId).toBe(run.id)
+    expect(packet.run.status).toBe('completed')
+    expect(packet.intent.action).toBe('create_reminder')
+    expect(packet.stepTimeline.length).toBeGreaterThan(0)
+    expect(packet.outcome.status).toBe('completed')
+    expect(packet.rollbackHints.length).toBeGreaterThan(0)
+    expect(packet.rollbackHints[0]).toContain('Reminders')
+    // All steps have offsetMs
+    for (const step of packet.stepTimeline) {
+      expect(step.offsetMs).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('captures approval events in replay packet', async () => {
+    const run = createRun('macos_ui_action' as any, { intent: { action: 'draft_email', text: 'Hello', dryRun: true } })
+    const execPromise = executeMacOSUIAction(run.id, { action: 'draft_email', text: 'Hello', dryRun: true })
+    await vi.waitFor(() => getRun(run.id)?.status === 'awaiting_approval', { timeout: 2000 })
+    approveRun(run.id)
+    await execPromise
+
+    const packet = buildReplayPacket(run.id)!
+    expect(packet.approvals.length).toBe(1)
+    expect(packet.approvals[0].approved).toBe(true)
+    expect(packet.approvals[0].requestedAt).toBeGreaterThan(0)
+    expect(packet.rollbackHints[0]).toContain('Draft')
+  })
+
+  it('records rejection in replay packet', async () => {
+    const run = createRun('macos_ui_action' as any, { intent: { action: 'draft_email', text: 'Hi', dryRun: true } })
+    const execPromise = executeMacOSUIAction(run.id, { action: 'draft_email', text: 'Hi', dryRun: true })
+    await vi.waitFor(() => getRun(run.id)?.status === 'awaiting_approval', { timeout: 2000 })
+    rejectRun(run.id)
+    await execPromise
+
+    const packet = buildReplayPacket(run.id)!
+    expect(packet.run.status).toBe('rejected')
+    expect(packet.approvals[0].approved).toBe(false)
   })
 })

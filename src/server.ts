@@ -163,7 +163,7 @@ import { createOverride, getOverride, listOverrides, findActiveOverride, validat
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
 import { createVoiceSession, getVoiceSession, processVoiceTranscript, subscribeVoiceSession } from './voice-sessions.js'
-import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, executeMacOSUIAction, listPendingRuns, listRuns } from './agent-interface.js'
+import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, executeMacOSUIAction, buildReplayPacket, listPendingRuns, listRuns } from './agent-interface.js'
 import { validateIntent as macOSValidateIntent, isKillSwitchEngaged, engageKillSwitch, resetKillSwitch } from './macos-accessibility.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
@@ -7830,6 +7830,13 @@ export async function createServer(): Promise<FastifyInstance> {
     const run = getRun(request.params.runId)
     if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
     return { run }
+  })
+
+  // GET /agent-interface/runs/:runId/replay — immutable audit + replay packet
+  app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId/replay', (request, reply) => {
+    const packet = buildReplayPacket(request.params.runId)
+    if (!packet) { reply.status(404); return { success: false, message: 'Run not found' } }
+    return { packet }
   })
 
   // GET /agent-interface/runs/:runId/events — SSE stream of run events

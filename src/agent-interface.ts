@@ -334,6 +334,138 @@ export function _clearRunsForTest(): void {
   pendingApprovals.clear()
 }
 
+// ── Immutable audit + replay packet ─────────────────────────────────────────
+
+/**
+ * Structured audit packet for a completed run.
+ * Includes intent, step timeline, approval decisions, outcome, and rollback hints.
+ *
+ * task-1773486840057-e92leqnr1
+ */
+export interface ReplayPacket {
+  schema: 'agent-interface-replay-v1'
+  runId: string
+  kind: string
+  generatedAt: number
+  run: {
+    id: string
+    kind: string
+    status: RunStatus
+    createdAt: number
+    completedAt: number | null
+    durationMs: number | null
+  }
+  intent: Record<string, unknown>
+  stepTimeline: Array<{
+    type: string
+    timestamp: number
+    offsetMs: number  // ms from run start
+    payload: Record<string, unknown>
+  }>
+  approvals: Array<{
+    requestedAt: number
+    resolvedAt: number | null
+    approved: boolean | null
+    timeoutMs: number
+  }>
+  outcome: {
+    status: RunStatus
+    result: Record<string, unknown> | null
+    errorMessage: string | null
+  }
+  rollbackHints: string[]
+}
+
+/**
+ * Build an immutable audit/replay packet for the given run.
+ * Safe to call at any run lifecycle stage.
+ */
+export function buildReplayPacket(runId: string): ReplayPacket | null {
+  const run = runs.get(runId)
+  if (!run) return null
+
+  const startMs = run.createdAt
+
+  // Find approval events
+  const approvals: ReplayPacket['approvals'] = []
+  let pendingApproval: Partial<ReplayPacket['approvals'][0]> | null = null
+  for (const event of run.log) {
+    if (event.type === 'approval_requested') {
+      pendingApproval = { requestedAt: event.timestamp, resolvedAt: null, approved: null, timeoutMs: 10 * 60 * 1000 }
+    } else if (event.type === 'approval_resolved' && pendingApproval) {
+      pendingApproval.resolvedAt = event.timestamp
+      pendingApproval.approved = (event.payload as any).approved ?? null
+      approvals.push(pendingApproval as ReplayPacket['approvals'][0])
+      pendingApproval = null
+    }
+  }
+  if (pendingApproval) approvals.push(pendingApproval as ReplayPacket['approvals'][0])
+
+  // Determine completion time
+  const terminalEvent = [...run.log].reverse().find(e =>
+    e.type === 'state_changed' && ['completed', 'failed', 'rejected'].includes((e.payload as any).to),
+  )
+  const completedAt = terminalEvent?.timestamp ?? null
+
+  // Rollback hints based on intent action
+  const intent = (run.input as any).intent ?? run.input
+  const rollbackHints = buildRollbackHints(run.kind as string, intent)
+
+  return {
+    schema: 'agent-interface-replay-v1',
+    runId,
+    kind: run.kind as string,
+    generatedAt: Date.now(),
+    run: {
+      id: run.id,
+      kind: run.kind as string,
+      status: run.status,
+      createdAt: run.createdAt,
+      completedAt,
+      durationMs: completedAt ? completedAt - startMs : null,
+    },
+    intent,
+    stepTimeline: run.log.map(event => ({
+      type: event.type,
+      timestamp: event.timestamp,
+      offsetMs: event.timestamp - startMs,
+      payload: event.payload,
+    })),
+    approvals,
+    outcome: {
+      status: run.status,
+      result: run.result ? { ...run.result } : null,
+      errorMessage: run.result?.errorMessage ?? null,
+    },
+    rollbackHints,
+  }
+}
+
+function buildRollbackHints(kind: string, intent: Record<string, unknown>): string[] {
+  if (kind === 'github_issue_create') {
+    return ['Close the created GitHub issue via the issue URL in the run result.']
+  }
+  if (kind === 'macos_ui_action') {
+    const action = String(intent?.action ?? '')
+    switch (action) {
+      case 'create_reminder':
+        return ['Open Reminders app → find and delete the created reminder manually.']
+      case 'draft_email':
+        return ['Open Mail app → Drafts → delete the draft before sending.']
+      case 'summarize_note':
+        return ['Read-only — no rollback needed.']
+      case 'open_app':
+      case 'focus_window':
+        return ['Reversible — close the application if needed.']
+      case 'type_text':
+        return ['Undo via Cmd+Z in the focused application.']
+      default:
+        return ['Review the target application manually for any unintended changes.']
+    }
+  }
+  return ['Review output carefully; consult the run log for step-by-step details.']
+}
+
 /**
  * Execute a macOS UI action run.
  * Handles the awaiting_approval gate for irreversible intents.

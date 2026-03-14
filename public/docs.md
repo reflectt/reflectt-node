@@ -1135,6 +1135,7 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | POST | `/agent-interface/runs` | Create an agent action run. Body: `{ kind: "github_issue_create"\|"macos_ui_action", repo?, title?, body?, dryRun?, intent? }`. Returns `{ runId, status }`. Run lifecycle: `queued→running→awaiting_approval→completed\|failed\|rejected`. |
 | GET | `/agent-interface/runs` | List runs. Params: `status?` (e.g. `awaiting_approval`). Used by presence canvas to surface pending decisions. |
 | GET | `/agent-interface/runs/:runId` | Get run state + full log. |
+| GET | `/agent-interface/runs/:runId/replay` | Immutable audit + replay packet (`agent-interface-replay-v1`): intent, step timeline, approval decisions, outcome, rollback hints. |
 | GET | `/agent-interface/runs/:runId/events` | SSE stream of run events: `state_changed`, `step_started`, `step_succeeded`, `step_failed`, `approval_requested`, `approval_resolved`, `run_end`. |
 | POST | `/agent-interface/runs/:runId/approve` | Human approves the pending irreversible action (run must be in `awaiting_approval`). |
 | POST | `/agent-interface/runs/:runId/reject` | Human rejects the pending action. |
