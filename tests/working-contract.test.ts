@@ -22,6 +22,67 @@ beforeEach(() => {
 })
 
 describe('Working contract enforcement', () => {
+  it('reflection gate does not block validating→doing re-claim', async () => {
+    const db = getDb()
+    checkClaimGate('__init__') // ensure reflection_tracking table exists
+    const agent = `reclaim-test-${Date.now()}`
+    const fiveHoursAgo = Date.now() - 5 * 60 * 60 * 1000
+    db.prepare(`
+      INSERT OR REPLACE INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+      VALUES (?, ?, 3, ?)
+    `).run(agent, fiveHoursAgo, Date.now())
+
+    const taskId = `task-test-reclaim-${Date.now()}`
+    db.prepare(`INSERT INTO tasks (id, title, status, assignee, reviewer, created_at, updated_at, priority, created_by, done_criteria, metadata)
+      VALUES (?, ?, 'validating', ?, 'kai', ?, ?, 'P2', 'test', '["done"]', '{"eta":"2026-03-14","is_test":true}')`)
+      .run(taskId, `TEST: reclaim gate ${taskId}`, agent, Date.now(), Date.now())
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/tasks/${taskId}`,
+        payload: { status: 'doing', actor: agent },
+      })
+      const body = JSON.parse(res.body)
+      expect(body.gate).not.toBe('reflection_overdue')
+      expect(res.statusCode).not.toBe(422)
+    } finally {
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+      db.prepare('DELETE FROM reflection_tracking WHERE agent = ?').run(agent)
+    }
+  })
+
+  it('reflection gate still blocks fresh todo→doing claim when overdue', async () => {
+    const db = getDb()
+    checkClaimGate('__init__')
+    const agent = `fresh-claim-test-${Date.now()}`
+    const fiveHoursAgo = Date.now() - 5 * 60 * 60 * 1000
+    db.prepare(`
+      INSERT OR REPLACE INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+      VALUES (?, ?, 3, ?)
+    `).run(agent, fiveHoursAgo, Date.now())
+
+    const taskId = `task-test-fresh-claim-${Date.now()}`
+    db.prepare(`INSERT INTO tasks (id, title, status, assignee, reviewer, created_at, updated_at, priority, created_by, done_criteria, metadata)
+      VALUES (?, ?, 'todo', ?, 'kai', ?, ?, 'P2', 'test', '["done"]', '{"eta":"2026-03-14","is_test":false}')`)
+      .run(taskId, `Fresh claim gate test ${taskId}`, agent, Date.now(), Date.now())
+
+    try {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/tasks/${taskId}`,
+        payload: { status: 'doing', actor: agent },
+      })
+      const body = JSON.parse(res.body)
+      if (res.statusCode === 422) {
+        expect(body.gate).toBe('reflection_overdue')
+      }
+    } finally {
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+      db.prepare('DELETE FROM reflection_tracking WHERE agent = ?').run(agent)
+    }
+  })
+
   it('tick returns structured result', async () => {
     const result = await tickWorkingContract()
     expect(result).toHaveProperty('warnings')

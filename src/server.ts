@@ -8748,7 +8748,10 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       // ── Working contract: reflection gate on claim ──
-      if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
+      // Only fires for fresh claims (todo→doing, blocked→doing), not re-claims
+      // (validating→doing = reviewer rejection/rework on the agent's own task).
+      const isFreshClaim = parsed.status === 'doing' && existing.status !== 'doing' && existing.status !== 'validating'
+      if (isFreshClaim && !isTestTask) {
         try {
           const { checkClaimGate } = await import('./working-contract.js')
           const claimAgent = parsed.assignee || existing.assignee || 'unknown'
