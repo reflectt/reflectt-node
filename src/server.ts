@@ -156,6 +156,7 @@ import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
 import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
+import { createVoiceSession, getVoiceSession, processVoiceTranscript, subscribeVoiceSession } from './voice-sessions.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
 import { requestImmediateCanvasSync } from './cloud.js'
@@ -7245,6 +7246,109 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const results = simulateRoutingScenarios(scenarios, policy)
     return { success: true, count: results.length, results }
+  })
+
+  // ── Voice API ──────────────────────────────────────────────────────────────
+
+  // POST /voice/input — create a voice session + begin processing
+  // Body: { agentId: string, transcript?: string }
+  // Returns: { sessionId }
+  app.post('/voice/input', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
+    const transcript = typeof body.transcript === 'string' ? body.transcript.trim() : ''
+
+    if (!agentId) {
+      reply.status(400)
+      return { success: false, message: 'agentId is required' }
+    }
+    if (!transcript) {
+      reply.status(400)
+      return { success: false, message: 'transcript is required (audio STT not yet supported)' }
+    }
+    if (transcript.length > 4000) {
+      reply.status(400)
+      return { success: false, message: 'transcript too long (max 4000 chars)' }
+    }
+
+    const session = createVoiceSession(agentId)
+
+    // Kick off async processing — do not await so we return sessionId immediately
+    // agentResponder: stub that sends transcript as a task comment and returns a canned ACK
+    // Real LLM call can be wired here in a follow-up task
+    const agentResponder = async (_agentId: string, text: string, _sessionId: string): Promise<string | null> => {
+      // MVP stub: echo the transcript back as a simple acknowledgement.
+      // Replace with real agent call (e.g., POST /agents/:id/runs) in future iteration.
+      await new Promise(resolve => setTimeout(resolve, 400)) // simulate brief think time
+      return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
+    }
+
+    processVoiceTranscript(session.id, transcript, agentResponder).catch(err => {
+      console.error('[voice] processVoiceTranscript error:', err)
+    })
+
+    return { success: true, sessionId: session.id }
+  })
+
+  // GET /voice/session/:id/events — SSE stream of voice pipeline state events
+  // Events: transcript.final, agent.thinking, agent.done, tts.ready, error, session.end
+  app.get<{ Params: { id: string } }>('/voice/session/:id/events', async (request, reply) => {
+    const { id } = request.params
+    const session = getVoiceSession(id)
+
+    if (!session) {
+      reply.status(404)
+      return { success: false, message: 'Voice session not found' }
+    }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Replay past events for late-joining clients
+    for (const event of session.events) {
+      try {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+      } catch {
+        return
+      }
+    }
+
+    // Short-circuit if session already ended
+    if (session.status === 'done' || session.status === 'error') {
+      reply.raw.end()
+      return
+    }
+
+    // Subscribe to new events
+    const unsubscribe = subscribeVoiceSession(id, (event) => {
+      try {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+        if (event.type === 'session.end') {
+          reply.raw.end()
+        }
+      } catch {
+        // Connection closed
+      }
+    })
+
+    // Keepalive
+    const heartbeat = setInterval(() => {
+      try {
+        reply.raw.write(`:heartbeat\n\n`)
+      } catch {
+        clearInterval(heartbeat)
+      }
+    }, 15_000)
+
+    // Cleanup on disconnect
+    request.raw.on('close', () => {
+      unsubscribe()
+      clearInterval(heartbeat)
+    })
   })
 
   // ── Preflight Check endpoint ────────────────────────────────────────
