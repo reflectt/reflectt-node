@@ -9,6 +9,8 @@
  * Task: task-1773257734617-6fvzfl52z
  */
 
+import { checkActionAllowed } from "./agent-exec-guardrail.js";
+
 export type RunKind = 'github_issue_create'
 export type RunStatus = 'queued' | 'running' | 'awaiting_approval' | 'completed' | 'failed' | 'rejected'
 
@@ -60,6 +62,21 @@ export function createRun(kind: RunKind, input: Record<string, unknown>): AgentI
     log: [],
   }
   runs.set(run.id, run)
+
+  // Guardrail check: deny non-approved actions or out-of-scope domains immediately
+  const target = typeof input.repo === 'string' ? input.repo : undefined
+  const guard = checkActionAllowed(kind, target)
+  if (!guard.allowed) {
+    run.status = 'failed'
+    run.result = { outcome: 'failed', errorMessage: guard.reason, recoveryHint: 'Only approved actions and domains are permitted.' }
+    run.log.push({
+      type: 'step_failed',
+      timestamp: Date.now(),
+      payload: { step: 'guardrail', reason: guard.reason },
+    })
+    run.updatedAt = Date.now()
+  }
+
   return run
 }
 
