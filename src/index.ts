@@ -641,7 +641,7 @@ async function main() {
           await chatManager.sendMessage({
             from: 'system',
             content: `${mentions} Server restarted. Resume your work.\n📍 ${nodeName} · v${version} · ${ts}`,
-            channel: 'general',
+            channel: 'ops',
           })
           console.log(`🔔 Auto-wake: seeded presence + pinged ${agents.length} agents (${nodeName} v${version})`)
         }
