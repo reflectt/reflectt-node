@@ -11397,18 +11397,37 @@ export async function createServer(): Promise<FastifyInstance> {
   const canvasSessionHistory = new Map<string, { turns: CanvasSessionTurn[]; lastAt: number }>()
 
   function getCanvasSession(sessionId: string): CanvasSessionTurn[] {
-    const s = canvasSessionHistory.get(sessionId)
-    if (!s) return []
-    // Evict stale sessions
-    if (Date.now() - s.lastAt > CANVAS_SESSION_TTL_MS) {
-      canvasSessionHistory.delete(sessionId)
+    const now = Date.now()
+    const cached = canvasSessionHistory.get(sessionId)
+    if (cached) {
+      // Evict stale from memory
+      if (now - cached.lastAt > CANVAS_SESSION_TTL_MS) {
+        canvasSessionHistory.delete(sessionId)
+        return []
+      }
+      return cached.turns
+    }
+    // Cache miss — load from SQLite, prune stale rows
+    try {
+      const db = getDb()
+      const cutoff = now - CANVAS_SESSION_TTL_MS
+      db.prepare('DELETE FROM canvas_sessions WHERE session_id = ? AND ts < ?').run(sessionId, cutoff)
+      const rows = db.prepare(
+        'SELECT role, content, ts FROM canvas_sessions WHERE session_id = ? ORDER BY ts ASC LIMIT ?'
+      ).all(sessionId, CANVAS_SESSION_MAX_TURNS * 2) as Array<{ role: string; content: string; ts: number }>
+      if (rows.length === 0) return []
+      const turns = rows.map(r => ({ role: r.role as 'user' | 'assistant', content: r.content, ts: r.ts }))
+      const lastAt = turns[turns.length - 1]!.ts
+      canvasSessionHistory.set(sessionId, { turns, lastAt })
+      return turns
+    } catch {
       return []
     }
-    return s.turns
   }
 
   function pushCanvasSession(sessionId: string, role: 'user' | 'assistant', content: string): void {
     const now = Date.now()
+    // Update in-memory Map
     const existing = canvasSessionHistory.get(sessionId) ?? { turns: [], lastAt: now }
     existing.turns.push({ role, content, ts: now })
     if (existing.turns.length > CANVAS_SESSION_MAX_TURNS * 2) {
@@ -11416,6 +11435,19 @@ export async function createServer(): Promise<FastifyInstance> {
     }
     existing.lastAt = now
     canvasSessionHistory.set(sessionId, existing)
+    // Write-through to SQLite for restart durability
+    try {
+      const db = getDb()
+      db.prepare('INSERT INTO canvas_sessions (session_id, role, content, ts) VALUES (?, ?, ?, ?)').run(sessionId, role, content, now)
+      // Prune rows beyond max turns (keep newest CANVAS_SESSION_MAX_TURNS*2)
+      db.prepare(`
+        DELETE FROM canvas_sessions WHERE session_id = ? AND ts NOT IN (
+          SELECT ts FROM canvas_sessions WHERE session_id = ? ORDER BY ts DESC LIMIT ?
+        )
+      `).run(sessionId, sessionId, CANVAS_SESSION_MAX_TURNS * 2)
+    } catch {
+      // SQLite failure is non-fatal — in-memory session still works
+    }
   }
 
   //
@@ -11492,6 +11524,11 @@ export async function createServer(): Promise<FastifyInstance> {
         type: 'tasks',
         data: { items, overflow, todoCount, doingCount, validatingCount },
       }
+      // Store summary for session continuity across all card types
+      if (sessionId) {
+        pushCanvasSession(sessionId, 'user', query)
+        pushCanvasSession(sessionId, 'assistant', `${doingCount} tasks in progress, ${validatingCount} validating, ${todoCount} todo.${items.length > 0 ? ` Active: ${items.map(t => t.title.slice(0, 30)).join('; ')}.` : ''}`)
+      }
     } else if (isRevenueQuery) {
       // Revenue card — LLM generates honest answer about current state
       const anthropicKey = process.env.ANTHROPIC_API_KEY
@@ -11515,6 +11552,10 @@ export async function createServer(): Promise<FastifyInstance> {
         } catch { /* use default */ }
       }
       card = { type: 'info', data: { text } }
+      if (sessionId) {
+        pushCanvasSession(sessionId, 'user', query)
+        pushCanvasSession(sessionId, 'assistant', text)
+      }
     } else if (isOnboardingQuery) {
       card = {
         type: 'onboarding',
@@ -11525,6 +11566,10 @@ export async function createServer(): Promise<FastifyInstance> {
           ctaLabel: 'Install reflectt-node',
           ctaAction: 'https://reflectt.ai/docs',
         },
+      }
+      if (sessionId) {
+        pushCanvasSession(sessionId, 'user', query)
+        pushCanvasSession(sessionId, 'assistant', 'Showing onboarding: install reflectt-node to bring your team to the canvas.')
       }
     } else if (isHostsQuery) {
       const rawHosts = listHosts({})
@@ -11537,6 +11582,13 @@ export async function createServer(): Promise<FastifyInstance> {
         lastSeen: h.last_seen_at,
       }))
       card = { type: 'hosts', data: { hosts } }
+      if (sessionId) {
+        pushCanvasSession(sessionId, 'user', query)
+        const hostSummary = hosts.length > 0
+          ? `${hosts.length} host${hosts.length > 1 ? 's' : ''}: ${hosts.map((h: any) => `${h.name} (${h.status})`).join(', ')}.`
+          : 'No hosts connected yet.'
+        pushCanvasSession(sessionId, 'assistant', hostSummary)
+      }
     } else {
       // General info card — LLM answers with team context + session history injected
       const anthropicKey = process.env.ANTHROPIC_API_KEY

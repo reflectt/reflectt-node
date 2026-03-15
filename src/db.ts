@@ -647,6 +647,19 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_webhook_payloads_agent ON webhook_payloads(agent_id, created_at) WHERE agent_id IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_webhook_payloads_unprocessed ON webhook_payloads(processed, created_at) WHERE processed = 0;      `,
     },
+    {
+      version: 26,
+      sql: `
+        -- Canvas session turns: write-through from in-memory Map for restart durability
+        CREATE TABLE IF NOT EXISTS canvas_sessions (
+          session_id  TEXT NOT NULL,
+          role        TEXT NOT NULL CHECK(role IN ('user','assistant')),
+          content     TEXT NOT NULL,
+          ts          INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_canvas_sessions_id_ts ON canvas_sessions(session_id, ts);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
@@ -686,6 +699,7 @@ export function runMigrations(db: Database.Database): void {
     { version: 23, tables: ['agent_config'] },
     { version: 24, tables: ['agent_messages', 'artifacts'] },
     { version: 25, tables: ['webhook_payloads'] },
+    { version: 26, tables: ['canvas_sessions'] },
   ]
   const existingTables = new Set(
     (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>)
