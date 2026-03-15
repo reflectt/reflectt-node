@@ -11,6 +11,7 @@ data/
 
 # Task artifacts
 process/*
+!process/TASK-jc5b2ygux.md
 !process/TASK-7xyi88v7x.md
 !process/TASK-hoy64vgsq.md
 !process/agent-interface-mvp-execution-v1.md

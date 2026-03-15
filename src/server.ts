@@ -153,6 +153,7 @@ import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from '.
 import { listLineage, getLineage, lineageStats } from './lineage.js'
 import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
 import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats } from './shipped-heartbeat.js'
+import { startOpenClawUsageSync, stopOpenClawUsageSync, syncOpenClawUsage } from './openclaw-usage-sync.js'
 import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
@@ -2424,6 +2425,10 @@ export async function createServer(): Promise<FastifyInstance> {
   // Deploy monitor — alert within 5m when production deploys fail (Vercel + health URL)
   startDeployMonitor()
 
+  // OpenClaw usage sync — ingest token/cost data from ~/.openclaw/agents sessions
+  // Bridges agents not reporting via node heartbeat into the cloud usage dashboard
+  startOpenClawUsageSync()
+
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
     clearInterval(cadenceWatchdogTimer)
@@ -2434,6 +2439,7 @@ export async function createServer(): Promise<FastifyInstance> {
     stopTeamPulse()
     stopReminderEngine()
     stopDeployMonitor()
+    stopOpenClawUsageSync()
     stopKeepalive()
     stopSelfKeepalive()
     wsHeartbeat.stop()
@@ -15246,6 +15252,24 @@ If your heartbeat shows **no active task** and **no next task**:
     })
     reply.code(201)
     return { success: true, event }
+  })
+
+  // POST /usage/sync/openclaw — on-demand trigger for OpenClaw session sync
+  // Reads ~/.openclaw/agents/*/sessions/sessions.json and ingests new sessions.
+  app.post('/usage/sync/openclaw', async (request, reply) => {
+    const auth = verifyHeartbeatAuth(request as any)
+    if (!auth.ok) {
+      reply.code(401)
+      return { success: false, error: auth.error }
+    }
+    try {
+      const result = await syncOpenClawUsage()
+      reply.code(200)
+      return { success: true, ...result }
+    } catch (err) {
+      reply.code(500)
+      return { success: false, error: (err as Error).message }
+    }
   })
 
   // Usage summary (total cost by period)
