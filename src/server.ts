@@ -7102,6 +7102,87 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Bulk-close — maintenance cycle + board cleanup ──────────────────────────
+  // Closes tasks that are in validating with reviewer_approved=true, or already done.
+  // Skips tasks requiring manual gate work; returns granular per-task result.
+  app.post('/tasks/bulk-close', async (request, reply) => {
+    try {
+      const { ids, reason } = z.object({
+        ids: z.array(z.string().min(1)).min(1).max(100),
+        reason: z.string().trim().optional(),
+      }).parse(request.body)
+
+      const closed: string[] = []
+      const skipped: Array<{ id: string; reason: string }> = []
+      const errors: Array<{ id: string; error: string }> = []
+
+      for (const rawId of ids) {
+        const lookup = taskManager.resolveTaskId(rawId)
+        if (lookup.matchType === 'ambiguous') {
+          errors.push({ id: rawId, error: `Ambiguous task ID — use a longer prefix` })
+          continue
+        }
+        const task = lookup.task
+        if (!task || !lookup.resolvedId) {
+          errors.push({ id: rawId, error: 'Task not found' })
+          continue
+        }
+
+        if (task.status === 'done' || task.status === 'cancelled') {
+          skipped.push({ id: lookup.resolvedId, reason: `already ${task.status}` })
+          continue
+        }
+
+        if (task.status !== 'validating') {
+          skipped.push({ id: lookup.resolvedId, reason: `status is "${task.status}" — only validating tasks can be bulk-closed` })
+          continue
+        }
+
+        // Require explicit reviewer approval flag OR a close_reason override (duplicate/superseded)
+        const meta = (task.metadata || {}) as Record<string, unknown>
+        const closeReason = reason ?? (typeof meta.close_reason === 'string' ? meta.close_reason : '')
+        const reviewerApproved = meta.reviewer_approved === true
+        const isDupOrSuperseded = closeReason === 'duplicate' || closeReason === 'superseded'
+
+        if (!reviewerApproved && !isDupOrSuperseded) {
+          skipped.push({
+            id: lookup.resolvedId,
+            reason: 'no reviewer_approved=true and no close_reason=duplicate/superseded — manual gate required',
+          })
+          continue
+        }
+
+        try {
+          const closeMeta: Record<string, unknown> = {
+            ...meta,
+            bulk_closed: true,
+            bulk_closed_at: Date.now(),
+          }
+          if (closeReason) closeMeta.close_reason = closeReason
+
+          await taskManager.updateTask(lookup.resolvedId, {
+            status: 'done',
+            metadata: closeMeta,
+          })
+          closed.push(lookup.resolvedId)
+        } catch (err: any) {
+          errors.push({ id: lookup.resolvedId, error: err.message ?? 'update failed' })
+        }
+      }
+
+      return {
+        success: true,
+        closed,
+        skipped,
+        errors,
+        summary: { total: ids.length, closed: closed.length, skipped: skipped.length, errors: errors.length },
+      }
+    } catch (err: any) {
+      reply.code(400)
+      return { success: false, error: err.message || 'Bulk close failed' }
+    }
+  })
+
   // Board health: low-watermark detection
   app.get('/tasks/board-health', async (request) => {
     const query = request.query as Record<string, string>
