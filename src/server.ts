@@ -6325,7 +6325,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // POST /tasks/:id/block-external — mark a task as externally blocked
   // Suppresses idle-detection, suggest-close, and auto-requeue while the flag is set.
-  // Required: reason (e.g. "Apple Developer credentials — Ryan required")
+  // Required: reason (e.g. "Apple Developer credentials — human action required")
   // Sets metadata.blocked_external=true + metadata.blocked_external_reason
   app.post<{ Params: { id: string } }>('/tasks/:id/block-external', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
@@ -6335,7 +6335,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
     if (!reason) {
       reply.code(400)
-      return { success: false, error: 'reason is required — describe the external dependency (e.g. "Apple Developer credentials — Ryan required")' }
+      return { success: false, error: 'reason is required — describe the external dependency (e.g. "Apple Developer credentials — human action required")' }
     }
 
     const task = resolved.task
