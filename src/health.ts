@@ -2372,6 +2372,102 @@ class TeamHealthMonitor {
       errorRate: Math.round(errorRate * 10000) / 100, // percentage
     }
   }
+
+  /**
+   * Validating-stall nudge tick.
+   *
+   * Fires a single direct message to the reviewer when:
+   *   - Task has been in validating for > nudgeThresholdMs (default 30m)
+   *   - No formal review decision exists (review_state !== approved/rejected, reviewer_approved !== true)
+   *   - metadata.validating_nudge_sent_at is not already set (one nudge per task lifetime)
+   *
+   * Sends as a DM to the reviewer agent (not broadcast). Sets metadata.validating_nudge_sent_at.
+   */
+  async runValidatingNudgeTick(
+    now = Date.now(),
+    options?: { dryRun?: boolean; nudgeThresholdMs?: number },
+  ): Promise<{ nudged: string[]; skipped: string[] }> {
+    const dryRun = options?.dryRun === true
+    const nudgeThresholdMs = options?.nudgeThresholdMs ?? 30 * 60 * 1000 // 30m default
+
+    recordSystemLoopTick('validating_nudge', now)
+
+    const nudged: string[] = []
+    const skipped: string[] = []
+
+    const validatingTasks = taskManager.listTasks({ status: 'validating' })
+    for (const task of validatingTasks) {
+      const meta = (task.metadata ?? {}) as Record<string, unknown>
+
+      // Skip if nudge already sent for this task
+      if (meta.validating_nudge_sent_at) {
+        skipped.push(`${task.id}:already_nudged`)
+        continue
+      }
+
+      // Skip if no reviewer assigned
+      const reviewer = task.reviewer
+      if (!reviewer) {
+        skipped.push(`${task.id}:no_reviewer`)
+        continue
+      }
+
+      // Skip if formal review decision already exists
+      const reviewState = meta.review_state as string | undefined
+      if (reviewState === 'approved' || reviewState === 'rejected' || meta.reviewer_approved === true) {
+        skipped.push(`${task.id}:review_decided`)
+        continue
+      }
+
+      // Skip if isWaitingOnAuthor (reviewer already acted)
+      const reviewerDecision = meta.reviewer_decision as Record<string, unknown> | undefined
+      if (reviewerDecision && typeof reviewerDecision === 'object') {
+        skipped.push(`${task.id}:waiting_on_author`)
+        continue
+      }
+
+      // Check age since task entered validating
+      const enteredAt = (meta.entered_validating_at as number) || task.updatedAt || task.createdAt || now
+      const ageMs = now - enteredAt
+      if (ageMs < nudgeThresholdMs) {
+        skipped.push(`${task.id}:too_young(${Math.round(ageMs / 60_000)}m)`)
+        continue
+      }
+
+      const ageMin = Math.round(ageMs / 60_000)
+      const content = `[reviewer-nudge] **${task.title}** (${task.id}) has been in validating for ${ageMin}m with no formal review decision.\n\nFormal review needed: \`POST /tasks/${task.id}/review\` with \`{ decision: "approve"|"reject", reviewer: "${reviewer}", comment: "..." }\``
+
+      if (!dryRun) {
+        try {
+          // DM the reviewer directly (bypasses channel noise budget)
+          await chatManager.sendMessage({
+            from: 'system',
+            to: reviewer,
+            channel: 'task-notifications',
+            content,
+            metadata: {
+              kind: 'validating_nudge',
+              taskId: task.id,
+              reviewer,
+              bypass_budget: true,
+            },
+          })
+
+          // Stamp the task so we don't re-nudge
+          taskManager.patchTaskMetadata(task.id, { validating_nudge_sent_at: now })
+        } catch (err) {
+          console.warn(`[validating-nudge] failed to nudge reviewer ${reviewer} for ${task.id}:`, (err as Error).message)
+          skipped.push(`${task.id}:send_error`)
+          continue
+        }
+      }
+
+      nudged.push(`${task.id}→${reviewer}(${ageMin}m)`)
+      console.log(`[validating-nudge] ${dryRun ? '[dry-run] ' : ''}nudged @${reviewer} for ${task.id} (${ageMin}m in validating)`)
+    }
+
+    return { nudged, skipped }
+  }
 }
 
 export const healthMonitor = new TeamHealthMonitor()

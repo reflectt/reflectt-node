@@ -2276,6 +2276,13 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 30 * 1000)
   mentionRescueTimer.unref()
 
+  // Validating-stall nudge (single DM to reviewer after 30m with no formal review action)
+  const validatingNudgeTimer = setInterval(() => {
+    if (isQuietHours(Date.now())) return
+    healthMonitor.runValidatingNudgeTick().catch(() => {})
+  }, 5 * 60 * 1000) // check every 5 minutes
+  validatingNudgeTimer.unref()
+
   // Reflection→Insight pipeline health monitor
   const reflectionPipelineHealth = {
     lastCheckedAt: 0,
@@ -3286,6 +3293,52 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Validating-stall nudge tick — DMs reviewer when task stalls in validating with no formal review action
+  app.post('/health/validating-nudge/tick', async (request, reply) => {
+    const parsedQuery = HealthTickQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const query = parsedQuery.data
+    const dryRun = query.dryRun === 'true'
+    const force = query.force === 'true'
+    const now = parseEpochMs(query.nowMs) || Date.now()
+
+    if (!force && isQuietHours(now)) {
+      return {
+        success: true,
+        dryRun,
+        force,
+        suppressed: true,
+        reason: 'quiet-hours',
+        nudged: [],
+        skipped: [],
+        timestamp: now,
+      }
+    }
+
+    // Optional: override nudge threshold via query param (default 30m)
+    const nudgeThresholdMs = request.query && typeof (request.query as any).nudge_threshold_ms === 'string'
+      ? Math.max(60_000, Number((request.query as any).nudge_threshold_ms))
+      : 30 * 60 * 1000
+
+    const result = await healthMonitor.runValidatingNudgeTick(now, { dryRun, nudgeThresholdMs })
+    return {
+      success: true,
+      dryRun,
+      force,
+      suppressed: false,
+      nudge_threshold_ms: nudgeThresholdMs,
+      ...result,
+      timestamp: now,
+    }
+  })
+
   // Working contract enforcement tick (auto-requeue stale doing tasks)
   app.post('/health/working-contract/tick', async (request, reply) => {
     try {
@@ -3295,6 +3348,58 @@ export async function createServer(): Promise<FastifyInstance> {
     } catch (err) {
       reply.code(500)
       return { success: false, error: (err as Error).message }
+    }
+  })
+
+  // Validating-stall nudge tick — sends a single direct nudge to reviewer
+  // when a task has been in validating >30m with no formal review decision.
+  // Idempotent: sets metadata.validating_nudge_sent_at to prevent repeat fires.
+  app.post('/health/validating-nudge/tick', async (request, reply) => {
+    const parsedQuery = HealthTickQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const query = parsedQuery.data
+    const dryRun = query.dryRun === 'true'
+    const force = query.force === 'true'
+    const now = parseEpochMs(query.nowMs) || Date.now()
+
+    if (!force && isQuietHours(now)) {
+      return {
+        success: true,
+        dryRun,
+        force,
+        suppressed: true,
+        reason: 'quiet-hours',
+        nudged: [],
+        skipped: [],
+        timestamp: now,
+      }
+    }
+
+    // Optional override: ?threshold_ms=1800000 (default: 30m)
+    const rawThreshold = typeof (request.query as any)?.threshold_ms === 'string'
+      ? Number((request.query as any).threshold_ms)
+      : NaN
+    const nudgeThresholdMs = Number.isFinite(rawThreshold) && rawThreshold > 0
+      ? rawThreshold
+      : undefined // let healthMonitor use its own default (30m)
+
+    const result = await healthMonitor.runValidatingNudgeTick(now, { dryRun, nudgeThresholdMs })
+
+    return {
+      success: true,
+      dryRun,
+      force,
+      suppressed: false,
+      threshold_ms: nudgeThresholdMs ?? 30 * 60 * 1000,
+      ...result,
+      timestamp: now,
     }
   })
 
@@ -3366,6 +3471,7 @@ export async function createServer(): Promise<FastifyInstance> {
         mentionRescue: { registered: Boolean(mentionRescueTimer), lastTickAt: ticks.mention_rescue, lastTickAgeSec: ageSec(ticks.mention_rescue) },
         reflectionPipeline: { registered: Boolean(reflectionPipelineTimer), lastTickAt: ticks.reflection_pipeline, lastTickAgeSec: ageSec(ticks.reflection_pipeline) },
         boardHealthWorker: { registered: board.running, lastTickAt: ticks.board_health || board.lastTickAt, lastTickAgeSec: ageSec(ticks.board_health || board.lastTickAt) },
+        validatingNudge: { registered: Boolean(validatingNudgeTimer), lastTickAt: ticks.validating_nudge, lastTickAgeSec: ageSec(ticks.validating_nudge) },
       },
       reviewHandoffValidation: {
         ...reviewHandoffValidationStats,
