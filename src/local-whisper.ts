@@ -5,7 +5,10 @@
  * Uses the `tiny` model for ~1.8s latency on Apple Silicon CPU.
  *
  * Model priority: tiny (fast) → base (if tiny missing)
- * Binary: /opt/homebrew/Cellar/openai-whisper/.../whisper or first `whisper` on PATH
+ * Binary resolution order:
+ *   1. LOCAL_WHISPER_BIN env var (explicit override)
+ *   2. `which whisper` — picks up brew-installed binary via PATH
+ *   3. `brew --prefix openai-whisper` — resolves keg path even when PATH is restricted
  */
 
 import { execFile } from 'node:child_process'
@@ -17,12 +20,47 @@ import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
-/** Path to openai-whisper Python CLI. Override with LOCAL_WHISPER_BIN env var. */
+/** Resolved binary path — populated on first successful detection. */
+let _whisperBin: string | null = null
+
+/**
+ * Detect the whisper binary path at startup.
+ *
+ * Resolution order:
+ *   1. `LOCAL_WHISPER_BIN` env var (explicit operator override)
+ *   2. `which whisper` (PATH lookup — works after normal brew install)
+ *   3. `brew --prefix openai-whisper` + `/bin/whisper` (survives PATH restrictions
+ *      and version-directory churn — the prefix symlink always points to the current keg)
+ *
+ * Returns null if whisper cannot be located.
+ */
+async function detectWhisperBin(): Promise<string | null> {
+  // 1. Explicit env var override — highest priority
+  if (process.env.LOCAL_WHISPER_BIN) return process.env.LOCAL_WHISPER_BIN
+
+  // 2. PATH lookup
+  try {
+    const { stdout } = await execFileAsync('which', ['whisper'], { timeout: 3000 })
+    const p = stdout.trim()
+    if (p) return p
+  } catch { /* not on PATH */ }
+
+  // 3. brew prefix — stable across keg upgrades (resolves to /opt/homebrew/opt/openai-whisper/…)
+  try {
+    const { stdout } = await execFileAsync('brew', ['--prefix', 'openai-whisper'], { timeout: 5000 })
+    const prefix = stdout.trim()
+    if (prefix) return join(prefix, 'bin', 'whisper')
+  } catch { /* brew not available or formula not installed */ }
+
+  return null
+}
+
+/** Return the resolved whisper binary path (must call after isLocalWhisperAvailable). */
 function getWhisperBin(): string {
-  return (
-    process.env.LOCAL_WHISPER_BIN ??
-    '/opt/homebrew/Cellar/openai-whisper/20250625_3/libexec/bin/whisper'
-  )
+  // _whisperBin is populated by isLocalWhisperAvailable(); should always be set here.
+  if (_whisperBin) return _whisperBin
+  // Fallback: respect env var even if availability check was skipped
+  return process.env.LOCAL_WHISPER_BIN ?? 'whisper'
 }
 
 /** Model to use. Override with LOCAL_WHISPER_MODEL (tiny|base|small). Default: tiny. */
@@ -36,8 +74,13 @@ let _available: boolean | null = null
 export async function isLocalWhisperAvailable(): Promise<boolean> {
   if (_available !== null) return _available
   try {
-    const bin = getWhisperBin()
+    const bin = await detectWhisperBin()
+    if (!bin) {
+      _available = false
+      return false
+    }
     await execFileAsync(bin, ['--help'], { timeout: 5000 })
+    _whisperBin = bin
     _available = true
   } catch {
     _available = false
