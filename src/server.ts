@@ -6323,6 +6323,81 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // POST /tasks/:id/block-external — mark a task as externally blocked
+  // Suppresses idle-detection, suggest-close, and auto-requeue while the flag is set.
+  // Required: reason (e.g. "Apple Developer credentials — human action required")
+  // Sets metadata.blocked_external=true + metadata.blocked_external_reason
+  app.post<{ Params: { id: string } }>('/tasks/:id/block-external', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) return
+
+    const body = request.body as Record<string, unknown>
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+    if (!reason) {
+      reply.code(400)
+      return { success: false, error: 'reason is required — describe the external dependency (e.g. "Apple Developer credentials — human action required")' }
+    }
+
+    const task = resolved.task
+    if (!task) {
+      reply.code(404)
+      return { success: false, error: 'Task not found' }
+    }
+
+    const updatedMetadata = {
+      ...(task.metadata || {}),
+      blocked_external: true,
+      blocked_external_reason: reason,
+      blocked_external_at: Date.now(),
+    }
+
+    const updated = await taskManager.updateTask(resolved.resolvedId, { metadata: updatedMetadata })
+    if (!updated) {
+      reply.code(500)
+      return { success: false, error: 'Failed to update task' }
+    }
+
+    reply.code(200)
+    return {
+      success: true,
+      task: { id: updated.id, status: updated.status, blocked_external: true, reason },
+      message: `Task marked as externally blocked. Idle detection and auto-requeue suppressed until unblocked.`,
+    }
+  })
+
+  // POST /tasks/:id/unblock-external — remove the externally-blocked flag
+  app.post<{ Params: { id: string } }>('/tasks/:id/unblock-external', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) return
+
+    const task = resolved.task
+    if (!task) {
+      reply.code(404)
+      return { success: false, error: 'Task not found' }
+    }
+
+    if (!task.metadata?.blocked_external) {
+      reply.code(400)
+      return { success: false, error: 'Task is not marked as externally blocked' }
+    }
+
+    const { blocked_external, blocked_external_reason, blocked_external_at, ...restMetadata } = (task.metadata || {}) as Record<string, unknown>
+    void blocked_external; void blocked_external_reason; void blocked_external_at
+
+    const updated = await taskManager.updateTask(resolved.resolvedId, { metadata: restMetadata })
+    if (!updated) {
+      reply.code(500)
+      return { success: false, error: 'Failed to update task' }
+    }
+
+    reply.code(200)
+    return {
+      success: true,
+      task: { id: updated.id, status: updated.status },
+      message: 'External block removed. Task is now eligible for idle detection and auto-requeue.',
+    }
+  })
+
   // Build normalized reviewer packet (PR + CI + artifacts)
   app.post<{ Params: { id: string } }>('/tasks/:id/review-bundle', async (request, reply) => {
     const task = taskManager.getTask(request.params.id)

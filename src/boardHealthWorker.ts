@@ -430,6 +430,9 @@ export class BoardHealthWorker {
     return candidates.filter(task => {
       // Verify task still exists (guards against stale cache)
       if (!verifyTaskExists(task.id)) return false
+      // Skip externally-blocked tasks — they are waiting on a human dependency
+      // (e.g. API credentials, Apple Developer enrollment) and are NOT abandoned.
+      if (task.metadata?.blocked_external === true) return false
       const lastActivity = this.getTaskLastActivityAt(task)
       if (!lastActivity) {
         // If no activity at all, check createdAt with validation
@@ -966,13 +969,25 @@ export class BoardHealthWorker {
       .filter(a => a.kind === 'suggest-close' && a.taskId)
       .map(a => a.taskId!)
 
+    // Partition blocked tasks: external (human-dependency) vs internal
+    const externallyBlocked = blockedTasks.filter(t => t.metadata?.blocked_external === true)
+    const internallyBlocked = blockedTasks.filter(t => t.metadata?.blocked_external !== true)
+
     const lines = [
       `📊 **Board Health Digest**`,
       ``,
-      `**Board:** ${todoTasks.length} todo · ${doingTasks.length} doing · ${validatingTasks.length} validating · ${blockedTasks.length} blocked`,
+      `**Board:** ${todoTasks.length} todo · ${doingTasks.length} doing · ${validatingTasks.length} validating · ${internallyBlocked.length} blocked · ${externallyBlocked.length} blocked-external`,
       `**Stale doing:** ${staleDoingCount} tasks (>${this.config.staleDoingThresholdMin}m threshold)`,
       `**Abandoned candidates:** ${suggestedCloseCount} tasks (>${Math.floor(this.config.suggestCloseThresholdMin / 60)}h threshold)`,
     ]
+
+    if (externallyBlocked.length > 0) {
+      lines.push(``, `**Externally blocked** (idle detection suppressed):`)
+      for (const t of externallyBlocked) {
+        const reason = t.metadata?.blocked_external_reason || 'no reason provided'
+        lines.push(`- ${t.id} — ${(t.title || '').slice(0, 60)} · *${reason}*`)
+      }
+    }
 
     if (recentActions.length > 0) {
       lines.push(``, `**Actions this cycle:** ${recentActions.length}`)
