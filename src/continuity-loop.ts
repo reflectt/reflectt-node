@@ -19,6 +19,7 @@ import { routeMessage } from './messageRouter.js'
 import { getDb, safeJsonStringify, safeJsonParse } from './db.js'
 import { presenceManager } from './presence.js'
 import { getAgentRolesSource, getAgentRole } from './assignment.js'
+import { runProductObservation } from './product-observation-source.js'
 
 // ── Types ──
 
@@ -296,6 +297,18 @@ export async function tickContinuityLoop(): Promise<{
         actions.push(action)
         // No full cooldown when nothing was created — allow retry on next tick.
         // Nudge spam is handled by the separate lastNudgeAt cooldown above.
+
+        // Product observation: when queue is empty + no insights, probe the live
+        // product and emit findings as reflections to seed the insight pipeline.
+        // Gated on: recent ship in last 4h + 30m cooldown per agent.
+        try {
+          const obsResult = await runProductObservation(agent)
+          if (!obsResult.skipped && obsResult.reflectionsCreated > 0) {
+            console.log(`[continuity-loop] product-observation: ${agent} — ${obsResult.reflectionsCreated} reflection(s) created from ${obsResult.findings.length} finding(s)`)
+          }
+        } catch (err) {
+          console.warn(`[continuity-loop] product-observation failed for ${agent}:`, (err as Error).message)
+        }
       }
     }
   }
