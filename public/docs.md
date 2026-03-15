@@ -136,6 +136,7 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/idle-nudge/debug` | Idle-nudge watchdog debug state |
 | GET | `/admin/task-comment-rejects` | Reject ledger for phantom task-comment IDs. Query: `limit` (max 200), `reason` (task_not_found\|invalid_task_refs), `author`, `since` (timestamp). Each row includes provenance (integration, sender_id, original_message_id). |
 | POST | `/health/idle-nudge/tick` | Trigger idle-nudge evaluation |
+| POST | `/health/validating-nudge/tick` | Trigger validating-stall nudge evaluation |
 | POST | `/health/cadence-watchdog/tick` | Trigger cadence watchdog |
 | POST | `/health/mention-rescue/tick` | Trigger mention-rescue fallback |
 | POST | `/health/working-contract/tick` | Evaluate working-contract enforcement: auto-requeue stale doing tasks (90m warning → 15m grace → auto todo) and fire alerts. |

@@ -145,6 +145,23 @@ export function _registerImmediateSync(fn: () => void): void {
   immediateSyncFn = fn
 }
 
+// ── canvas_push relay buffer ─────────────────────────────────────────────────
+// canvas_push events (utterance, work_released, approval_requested) are emitted
+// on the node event bus but never reached the cloud SSE stream. This buffer
+// collects them and flushes them in the next syncCanvas POST as push_events[].
+// The cloud then broadcasts each as a `canvas_push` SSE event to all subscribers.
+const MAX_PENDING_PUSH_EVENTS = 20
+const pendingPushEvents: Array<Record<string, unknown>> = []
+
+/** Queue a canvas_push event for relay to cloud in the next sync cycle. */
+export function queueCanvasPushEvent(event: Record<string, unknown>): void {
+  pendingPushEvents.push({ ...event, _queuedAt: Date.now() })
+  // Cap buffer to prevent unbounded growth between syncs
+  while (pendingPushEvents.length > MAX_PENDING_PUSH_EVENTS) pendingPushEvents.shift()
+  // Trigger immediate sync so the event reaches browsers quickly
+  requestImmediateCanvasSync()
+}
+
 /** Check if the system is idle */
 function isIdle(): boolean {
   return Date.now() - lastActivityAt > IDLE_THRESHOLD_MS
@@ -1395,10 +1412,11 @@ async function syncCanvas(): Promise<void> {
     checkNeedsAttentionTransitions(agents, state.hostId, config.cloudUrl, state.credential)
   }
 
-  // Push to cloud — include both slots and agent states
+  // Push to cloud — include slots, agent states, and any buffered canvas_push events
+  const pushEventsToSend = pendingPushEvents.splice(0, pendingPushEvents.length)
   const result = await cloudPost<{ ok: boolean; slotCount: number }>(
     `/api/hosts/${state.hostId}/canvas`,
-    { slots: activeSlots, agents }
+    { slots: activeSlots, agents, push_events: pushEventsToSend.length > 0 ? pushEventsToSend : undefined }
   )
 
   if (result.success && result.data) {
@@ -1411,6 +1429,10 @@ async function syncCanvas(): Promise<void> {
     canvasSyncErrors++
     if (canvasSyncErrors <= 3 || canvasSyncErrors % 20 === 0) {
       console.warn(`☁️  [Canvas] Sync failed (${canvasSyncErrors}): ${result.error}`)
+    }
+    // Re-queue events that failed to send (up to cap)
+    if (pushEventsToSend.length > 0) {
+      pendingPushEvents.unshift(...pushEventsToSend.slice(-MAX_PENDING_PUSH_EVENTS))
     }
   }
 }
