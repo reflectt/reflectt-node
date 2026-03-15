@@ -51,12 +51,21 @@ export interface BridgeConfig {
   ownershipGuardrail: OwnershipGuardrailConfig
 }
 
+export interface SuppressedDuplicate {
+  insightId: string
+  insightTitle: string
+  matchedTaskId: string
+  matchReason: string
+  suppressedAt: number
+}
+
 export interface BridgeStats {
   tasksAutoCreated: number
   insightsTriaged: number
   duplicatesSkipped: number
   errors: number
   lastEventAt: number | null
+  suppressedLog: SuppressedDuplicate[]
 }
 
 // ── State ──
@@ -69,6 +78,7 @@ let stats: BridgeStats = {
   duplicatesSkipped: 0,
   errors: 0,
   lastEventAt: null,
+  suppressedLog: [],
 }
 
 let config: BridgeConfig = {
@@ -112,6 +122,13 @@ async function handlePromotedInsight(event: Event): Promise<void> {
   // Idempotency: skip if insight already has a linked task
   if (insight.task_id) {
     stats.duplicatesSkipped++
+    stats.suppressedLog.push({
+      insightId: insight.id,
+      insightTitle: insight.title,
+      matchedTaskId: insight.task_id,
+      matchReason: 'insight.task_id already set (idempotency)',
+      suppressedAt: Date.now(),
+    })
     return
   }
 
@@ -159,6 +176,7 @@ interface ExistingTaskMatch {
   title: string
   status: string
   alreadyAddressed: boolean  // true if done or validating
+  matchReason: string
 }
 
 export function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch | null {
@@ -183,6 +201,7 @@ export function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch 
           title: task.title,
           status: task.status,
           alreadyAddressed: task.status === 'done' || task.status === 'validating',
+          matchReason: 'evidence-ref:task-id',
         }
       }
     }
@@ -204,6 +223,7 @@ export function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch 
           title: task.title,
           status: task.status,
           alreadyAddressed: task.status === 'done' || task.status === 'validating',
+          matchReason: 'evidence-ref:pr-url',
         }
       }
     }
@@ -219,6 +239,7 @@ export function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch 
         title: task.title,
         status: task.status,
         alreadyAddressed: task.status === 'done' || task.status === 'validating',
+        matchReason: 'direct:insight-id',
       }
     }
 
@@ -229,6 +250,7 @@ export function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch 
         title: task.title,
         status: task.status,
         alreadyAddressed: task.status === 'done' || task.status === 'validating',
+        matchReason: 'title-match',
       }
     }
 
@@ -248,6 +270,7 @@ export function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch 
               title: task.title,
               status: task.status,
               alreadyAddressed: task.status === 'done' || task.status === 'validating',
+              matchReason: `cluster-key:${insight.cluster_key}`,
             }
           }
 
@@ -259,21 +282,36 @@ export function findExistingTaskForInsight(insight: Insight): ExistingTaskMatch 
               title: task.title,
               status: task.status,
               alreadyAddressed: task.status === 'done' || task.status === 'validating',
+              matchReason: `reflection-overlap:${Math.round(overlap * 100)}%`,
             }
           }
         }
       } catch { /* ignore lookup failures */ }
     }
 
-    // 4. Same source reflection — two insights from the same reflection are duplicates
-    if (meta.source === 'insight-task-bridge' && typeof meta.source_reflection === 'string') {
-      const insightReflectionIds = insight.reflection_ids || []
-      if (insightReflectionIds.includes(meta.source_reflection as string)) {
+    // 5. Same source reflection(s) — two insights from the same reflection(s) are duplicates.
+    // Checks both the legacy scalar source_reflection and the newer source_reflection_ids array.
+    // A single shared reflection ID is sufficient (any overlap = duplicate, not ≥50%).
+    if (meta.source === 'insight-task-bridge') {
+      const insightReflectionIds = new Set(insight.reflection_ids || [])
+      const storedIds: string[] = []
+
+      // Collect stored reflection IDs: legacy scalar + new array
+      if (typeof meta.source_reflection === 'string') storedIds.push(meta.source_reflection)
+      if (Array.isArray(meta.source_reflection_ids)) {
+        for (const id of meta.source_reflection_ids) {
+          if (typeof id === 'string') storedIds.push(id)
+        }
+      }
+
+      const sharedId = storedIds.find(id => insightReflectionIds.has(id))
+      if (sharedId) {
         return {
           id: task.id,
           title: task.title,
           status: task.status,
           alreadyAddressed: task.status === 'done' || task.status === 'validating',
+          matchReason: `shared-reflection:${sharedId}`,
         }
       }
     }
@@ -337,10 +375,17 @@ async function autoCreateTask(insight: Insight): Promise<void> {
   const existing = findExistingTaskForInsight(insight)
   if (existing) {
     stats.duplicatesSkipped++
+    stats.suppressedLog.push({
+      insightId: insight.id,
+      insightTitle: insight.title,
+      matchedTaskId: existing.id,
+      matchReason: existing.matchReason,
+      suppressedAt: Date.now(),
+    })
     // Link this insight to the existing task regardless of status
     updateInsightStatus(insight.id, 'task_created', existing.id)
     const addressedNote = existing.alreadyAddressed ? ` (already ${existing.status})` : ''
-    console.log(`[InsightTaskBridge] Dedup: insight ${insight.id} linked to existing task ${existing.id} ("${existing.title}")${addressedNote}`)
+    console.log(`[InsightTaskBridge] Dedup: insight ${insight.id} linked to existing task ${existing.id} ("${existing.title}") — reason: ${existing.matchReason}${addressedNote}`)
     return
   }
 
@@ -364,7 +409,8 @@ async function autoCreateTask(insight: Insight): Promise<void> {
       metadata: {
         insight_id: insight.id,
         source_insight: insight.id,
-        source_reflection: insight.reflection_ids[0] || undefined,
+        source_reflection: insight.reflection_ids[0] || undefined,  // legacy scalar (kept for backward compat)
+        source_reflection_ids: insight.reflection_ids.length > 0 ? [...insight.reflection_ids] : undefined,
         promotion_reason: insight.promotion_readiness,
         severity: insight.severity_max,
         source: 'insight-task-bridge',
@@ -731,7 +777,7 @@ export function getInsightTaskBridgeStats(): BridgeStats {
 }
 
 export function _resetBridgeStats(): void {
-  stats = { tasksAutoCreated: 0, insightsTriaged: 0, duplicatesSkipped: 0, errors: 0, lastEventAt: null }
+  stats = { tasksAutoCreated: 0, insightsTriaged: 0, duplicatesSkipped: 0, errors: 0, lastEventAt: null, suppressedLog: [] }
 }
 
 export function getBridgeConfig(): BridgeConfig {
