@@ -481,6 +481,7 @@ export async function startCloudIntegration(): Promise<void> {
   state.approvalSyncTimer = setInterval(() => {
     syncRunApprovals().catch(() => {})
     pollAgentDecisions().catch(() => {}) // poll queued relay decisions (NAT-behind hosts)
+    pollCanvasQueryRelay().catch(() => {}) // poll canvas/query relay queue (NAT-behind hosts)
   }, APPROVAL_SYNC_INTERVAL_MS)
 
   // Run event sync — every 5s
@@ -1538,6 +1539,61 @@ async function pollAgentDecisions(): Promise<void> {
     }
   } catch {
     // Non-critical — decisions will be retried next cycle
+  }
+}
+
+// ── Canvas query relay polling ────────────────────────────────────────────────
+// When canvas/query is called from a NAT-behind node, the cloud queues the query
+// at GET /api/hosts/:id/canvas/query/pending. We poll here, POST each query to
+// the local node, and ACK. The node emits canvas_message via eventBus → canvas_push
+// relay → cloud → browser pulse subscribers.
+
+let lastCanvasQueryPollAt = 0
+const CANVAS_QUERY_POLL_INTERVAL_MS = 8_000 // 8s — faster than decisions (user-facing)
+
+async function pollCanvasQueryRelay(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  const now = Date.now()
+  if (now - lastCanvasQueryPollAt < CANVAS_QUERY_POLL_INTERVAL_MS) return
+  lastCanvasQueryPollAt = now
+
+  try {
+    const result = await cloudGet<{ queries: Array<{ queryId: string; query: string; sessionId?: string; enqueuedAt: number }> }>(
+      `/api/hosts/${state.hostId}/canvas/query/pending`
+    )
+    if (!result.success) return
+
+    const queries = Array.isArray(result.data?.queries) ? result.data.queries : []
+    if (queries.length === 0) return
+
+    const acked: string[] = []
+
+    for (const q of queries) {
+      try {
+        // POST to local node — canvas/query processes it and emits canvas_message via eventBus.
+        // The canvas_message flows through canvas_push relay to cloud → browser subscribers.
+        const res = await fetch('http://127.0.0.1:4445/canvas/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: q.query, sessionId: q.sessionId ?? undefined }),
+          signal: AbortSignal.timeout(12000), // LLM calls can take ~10s
+        })
+        if (res.ok || res.status === 400) {
+          // 400 means query was invalid — still ACK to remove from queue
+          acked.push(q.queryId)
+        }
+      } catch {
+        // Individual failure — leave in queue, retry next cycle
+      }
+    }
+
+    if (acked.length > 0) {
+      await cloudPost(`/api/hosts/${state.hostId}/canvas/query/ack`, { queryIds: acked })
+      console.log(`☁️  [CanvasQueryRelay] Processed ${acked.length}/${queries.length} relay queries`)
+    }
+  } catch {
+    // Non-critical — queries will be retried next cycle
   }
 }
 
