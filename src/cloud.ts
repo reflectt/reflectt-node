@@ -480,6 +480,7 @@ export async function startCloudIntegration(): Promise<void> {
   syncRunApprovals().catch(() => {})
   state.approvalSyncTimer = setInterval(() => {
     syncRunApprovals().catch(() => {})
+    pollAgentDecisions().catch(() => {}) // poll queued relay decisions (NAT-behind hosts)
   }, APPROVAL_SYNC_INTERVAL_MS)
 
   // Run event sync — every 5s
@@ -1485,6 +1486,58 @@ async function syncRunApprovals(): Promise<void> {
     if (approvalSyncErrors <= 3) {
       console.warn(`☁️  [RunApprovals] Sync error: ${err?.message}`)
     }
+  }
+}
+
+// ---- Agent Decision Relay Poll ----
+// When decisions are made via the cloud canvas while the node is behind NAT,
+// they are queued at GET /api/hosts/:id/agent-interface/decisions.
+// This function polls that queue and processes each decision locally.
+
+let lastDecisionPollAt = 0
+const DECISION_POLL_INTERVAL_MS = 10_000 // 10s — same cadence as approval sync
+
+async function pollAgentDecisions(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  const now = Date.now()
+  if (now - lastDecisionPollAt < DECISION_POLL_INTERVAL_MS) return
+  lastDecisionPollAt = now
+
+  try {
+    const result = await cloudGet<{ decisions: Array<{ eventId: string; decision: 'approve' | 'reject'; decidedAt: number }> }>(
+      `/api/hosts/${state.hostId}/agent-interface/decisions`
+    )
+    if (!result.success) return
+
+    const decisions = Array.isArray(result.data?.decisions) ? result.data.decisions : []
+    if (decisions.length === 0) return
+
+    const acked: string[] = []
+
+    for (const d of decisions) {
+      try {
+        const endpoint = `/agent-interface/runs/${d.eventId}/${d.decision === 'approve' ? 'approve' : 'reject'}`
+        const res = await fetch(`http://127.0.0.1:4445${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(3000),
+        })
+        // ACK on success OR 404/409 (run already decided / not found — still remove from queue)
+        if (res.ok || res.status === 404 || res.status === 409) {
+          acked.push(d.eventId)
+        }
+      } catch {
+        // Individual failure — leave in queue, retry next cycle
+      }
+    }
+
+    if (acked.length > 0) {
+      await cloudPost(`/api/hosts/${state.hostId}/agent-interface/decisions/ack`, { eventIds: acked })
+      console.log(`☁️  [DecisionRelay] Processed ${acked.length}/${decisions.length} queued decisions`)
+    }
+  } catch {
+    // Non-critical — decisions will be retried next cycle
   }
 }
 
