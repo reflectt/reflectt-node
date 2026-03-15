@@ -2027,12 +2027,12 @@ class TeamHealthMonitor {
 
       // Engagement nudge: if agent is idle and has no active doing lane, prompt them to pull/claim work.
       if (lane.laneReason === 'no-active-lane') {
-        // Queue-empty gate: suppress idle nudge when the ready queue is empty.
-        // An agent with nothing to pull is compliant, not idle — nudging them is noise.
-        // Check both unassigned todo tasks and tasks assigned to this agent.
-        const readyForAgent = taskManager.listTasks({ status: 'todo' })
-          .filter(t => !t.assignee || (t.assignee || '').toLowerCase() === agent.toLowerCase())
-        if (readyForAgent.length === 0) {
+        // Queue-empty gate (COO-endorsed spec): suppress idle nudge when the agent-scoped
+        // ready queue returns nothing. Uses same logic as GET /tasks/next?agent=<id> —
+        // respects WIP limits, lane matching, assignment, and blocked-by rules.
+        // An agent with nothing pullable is compliant, not idle.
+        const nextAvailable = taskManager.getNextTask(agent)
+        if (!nextAvailable) {
           decisions.push({ ...baseDecision, decision: 'none', reason: 'queue-empty-suppressed', renderedMessage: null })
           continue
         }
