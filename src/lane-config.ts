@@ -31,11 +31,12 @@ export interface LaneConfig {
 // These are the fallback when TEAM-ROLES.yaml has no `lanes:` section.
 
 export const DEFAULT_LANES: LaneConfig[] = [
-  { name: 'engineering', agents: ['link', 'pixel'], readyFloor: 2, wipLimit: 2 },
-  { name: 'content',     agents: ['echo'],          readyFloor: 2, wipLimit: 2 },
-  { name: 'operations',  agents: ['kai', 'sage'],   readyFloor: 1, wipLimit: 2 },
-  { name: 'research',    agents: ['scout'],         readyFloor: 1, wipLimit: 2 },
-  { name: 'rhythm',      agents: ['rhythm'],        readyFloor: 1, wipLimit: 2 },
+  { name: 'engineering', agents: ['link', 'pixel'],           readyFloor: 2, wipLimit: 2 },
+  { name: 'design',      agents: ['artdirector', 'uipolish'], readyFloor: 1, wipLimit: 2 },
+  { name: 'content',     agents: ['echo'],                    readyFloor: 2, wipLimit: 2 },
+  { name: 'operations',  agents: ['kai', 'sage'],             readyFloor: 1, wipLimit: 2 },
+  { name: 'research',    agents: ['scout'],                   readyFloor: 1, wipLimit: 2 },
+  { name: 'rhythm',      agents: ['rhythm'],                  readyFloor: 1, wipLimit: 2 },
 ]
 
 // ── Config paths ────────────────────────────────────────────────────────────

@@ -105,3 +105,41 @@ describe('idle nudge lane-aware suppression', () => {
     await taskManager.deleteTask(task.id)
   })
 })
+
+// ── Lane-scoped suppression: artdirector / design lane (task-1773617908405) ──
+
+describe('artdirector lane-scoped idle suppression', () => {
+  it('getNextTask returns undefined for artdirector when only engineering tasks exist', async () => {
+    const engTask = await taskManager.createTask({
+      title: 'Engineering task — not for design lane',
+      assignee: 'link',
+      status: 'todo',
+      priority: 'P2',
+      createdBy: 'link',
+      done_criteria: ['n/a'],
+    })
+
+    // artdirector is in design lane — should not see engineering tasks
+    const next = taskManager.getNextTask('artdirector')
+    expect(next).toBeUndefined()
+
+    await taskManager.deleteTask(engTask.id)
+  })
+
+  it('getNextTask returns task for artdirector when a design task is assigned', async () => {
+    const designTask = await taskManager.createTask({
+      title: 'Design task for artdirector',
+      assignee: 'artdirector',
+      status: 'todo',
+      priority: 'P2',
+      createdBy: 'system',
+      done_criteria: ['n/a'],
+    })
+
+    const next = taskManager.getNextTask('artdirector')
+    expect(next).toBeDefined()
+    expect(next?.id).toBe(designTask.id)
+
+    await taskManager.deleteTask(designTask.id)
+  })
+})
