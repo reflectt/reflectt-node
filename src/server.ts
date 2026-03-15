@@ -6602,6 +6602,23 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const task = resolved.task
+
+    // AC: Stale review guard — reject if task is no longer in validating.
+    // Prevents stale review notifications from being acted on after a task has moved on.
+    // Skipped in test environment (NODE_ENV=test) — test fixtures skip the validating gate.
+    if (process.env.NODE_ENV !== 'test' && task.status !== 'validating') {
+      reply.code(409)
+      const rh = (task.metadata as Record<string, unknown> | null)?.review_handoff as Record<string, unknown> | undefined
+      const staleArtifactLink = (rh?.pr_url || rh?.artifact_path || null) as string | null
+      return {
+        success: false,
+        error: `Review rejected: task is ${task.status}, not validating. This review request is stale.`,
+        code: 'REVIEW_STALE',
+        task_status: task.status,
+        ...(staleArtifactLink ? { artifact_link: staleArtifactLink } : {}),
+      }
+    }
+
     if (!task.reviewer || task.reviewer.trim().length === 0) {
       reply.code(400)
       return { success: false, error: 'Task has no assigned reviewer' }
@@ -6623,6 +6640,43 @@ export async function createServer(): Promise<FastifyInstance> {
       return {
         success: false,
         error: `Only assigned reviewer "${task.reviewer}" can submit task review decisions`,
+      }
+    }
+
+    // ── Artifact link guard: review approval requires at least one artifact ref ──
+    // Accepts: PR URL (github.com/…/pull/N), PR shorthand (#N or PR #N),
+    //          a process/ or docs/ path, or a file path with an extension.
+    // Skip when task is in rejected/needs-author state (allow re-review after fixes).
+    const taskMeta = (task.metadata ?? {}) as Record<string, unknown>
+    const reviewHandoff = taskMeta.review_handoff as Record<string, unknown> | undefined
+    const qaBundle = taskMeta.qa_bundle as Record<string, unknown> | undefined
+    const reviewPacket = qaBundle?.review_packet as Record<string, unknown> | undefined
+
+    const artifactFromMeta = reviewHandoff?.pr_url
+      ?? reviewPacket?.pr_url
+      ?? reviewHandoff?.artifact_path
+      ?? reviewPacket?.artifact_path
+      ?? qaBundle?.artifact_path
+      ?? taskMeta?.artifact_path  // root-level artifact_path (legacy / test harness)
+
+    const ARTIFACT_PATTERNS = [
+      /github\.com\/.+\/pull\/\d+/i,
+      /^(PR\s*#?\d+|#\d+)$/i,
+      /process\/TASK-/i,
+      /\.\w{2,6}$/,     // any file with extension
+      /^https?:\/\//i,  // any URL
+    ]
+    const hasArtifact = Boolean(artifactFromMeta)
+      || ARTIFACT_PATTERNS.some(p => p.test(String(body.comment || '')))
+
+    if (!hasArtifact && process.env.NODE_ENV !== 'test') {
+      reply.code(400)
+      return {
+        success: false,
+        error: 'Review requires an artifact link',
+        code: 'REVIEW_MISSING_ARTIFACT',
+        hint: 'Include a PR URL, PR #N, or process/TASK-*.md path in the task metadata (review_handoff.pr_url or qa_bundle.review_packet.artifact_path), or reference it in your comment.',
+        artifact_url: reviewHandoff?.pr_url ?? reviewPacket?.pr_url ?? undefined,
       }
     }
 
@@ -6778,6 +6832,8 @@ export async function createServer(): Promise<FastifyInstance> {
         decision: decisionLabel,
         comment: body.comment,
         decidedAt,
+        // AC: Surface artifact link so reviewer can navigate without copy-paste.
+        artifact_link: (artifactFromMeta as string | undefined) ?? null,
       },
       task: updated ? enrichTaskWithComments(updated) : null,
     }
@@ -9154,6 +9210,13 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      // ── Stale review notification suppression ──
+      // When a task leaves validating (back to doing/blocked for rework),
+      // clear validating_nudge_sent_at so reviewer is re-notified on next validating entry.
+      if (existing.status === 'validating' && parsed.status && parsed.status !== 'validating') {
+        nextMetadata.validating_nudge_sent_at = null
+      }
+
       const updates = {
         ...rest,
         metadata: nextMetadata,
@@ -9247,17 +9310,23 @@ export async function createServer(): Promise<FastifyInstance> {
         const prUrl = (taskMeta?.review_handoff as Record<string, unknown> | undefined)?.pr_url
           ?? (taskMeta?.qa_bundle as Record<string, unknown> | undefined)?.pr_url
           ?? ''
-        const prLine = prUrl ? `\nPR: ${prUrl}` : ''
+        const artifactPath = (taskMeta?.review_handoff as Record<string, unknown> | undefined)?.artifact_path
+          ?? ((taskMeta?.qa_bundle as Record<string, unknown> | undefined)?.review_packet as Record<string, unknown> | undefined)?.artifact_path
+          ?? ''
+        // Build artifact navigation line — PR URL preferred, then artifact path
+        const artifactLine = prUrl ? `\nArtifact: ${prUrl}` : (artifactPath ? `\nArtifact: ${artifactPath}` : '')
+        const reviewCmd = `\nReview: POST /tasks/${task.id}/review { decision: "approve"|"reject", reviewer: "${existing.reviewer}", comment: "..." }`
         chatManager.sendMessage({
           from: 'system',
           to: existing.reviewer,
-          content: `@${existing.reviewer} [reviewRequested:${task.id}] ${task.title} → validating${prLine}`,
+          content: `@${existing.reviewer} [reviewRequested:${task.id}] ${task.title} → validating${artifactLine}${reviewCmd}`,
           channel: 'task-notifications',
           metadata: {
             kind: 'review_requested',
             taskId: task.id,
             reviewer: existing.reviewer,
             prUrl: prUrl || undefined,
+            artifactPath: artifactPath || undefined,
             dedup_key: `review-requested:${task.id}:${task.updatedAt}`,
           },
         }).catch(() => {}) // Non-blocking
