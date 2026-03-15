@@ -2421,6 +2421,63 @@ export async function createServer(): Promise<FastifyInstance> {
   const doneCriteriaDigestTimer = setInterval(runDoneCriteriaDigest, DONE_CRITERIA_DIGEST_INTERVAL_MS)
   doneCriteriaDigestTimer.unref()
 
+  // Approval card expiry sweep — run on startup to prune stale cards before any canvas queries.
+  // Undecided approval_requested/review_requested events older than 24h get a synthetic
+  // rejection event, preventing them from reappearing after node restarts.
+  import('./agent-runs.js').then(({ sweepExpiredApprovalCards }) => {
+    const pruned = sweepExpiredApprovalCards()
+    if (pruned > 0) console.log(`[ApprovalSweep] Pruned ${pruned} expired approval card(s) on startup`)
+  }).catch(err => console.warn('[ApprovalSweep] Startup sweep failed:', err))
+
+  // Approval card restore — re-emit canvas_push for undecided validating tasks on startup.
+  // Ensures approval cards survive node restarts without re-emitting already-decided cards.
+  const APPROVAL_CARD_TTL_MS = 24 * 60 * 60 * 1000 // 24h
+  const CANVAS_AGENT_COLORS_RESTART: Record<string, string> = {
+    link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+    sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+    rhythm: '#a3e635', swift: '#38bdf8', kotlin: '#f97316',
+  }
+  try {
+    const validatingTasks = taskManager.listTasks({ status: 'validating' })
+    const cutoff = Date.now() - APPROVAL_CARD_TTL_MS
+    for (const task of validatingTasks) {
+      const meta = (task.metadata ?? {}) as Record<string, unknown>
+      // Skip if already decided
+      if (meta.review_decided === true || meta.reviewer_approved === true || meta.review_state === 'approved' || meta.review_state === 'rejected') continue
+      // Skip if card is older than TTL (sweep handled it)
+      const enteredValidatingAt = typeof meta.entered_validating_at === 'number' ? meta.entered_validating_at : task.updatedAt
+      if (enteredValidatingAt < cutoff) continue
+      const prUrl = (meta.review_handoff as Record<string, unknown> | undefined)?.pr_url as string | undefined
+        ?? (meta.qa_bundle as Record<string, unknown> | undefined)?.pr_url as string | undefined
+      const assigneeId = (task.assignee ?? '').toLowerCase()
+      const restoreNow = Date.now()
+      const restoreData = {
+        type: 'approval_requested',
+        agentId: assigneeId,
+        agentColor: CANVAS_AGENT_COLORS_RESTART[assigneeId] ?? '#94a3b8',
+        data: {
+          taskId: task.id,
+          taskTitle: task.title,
+          reviewer: task.reviewer,
+          prUrl: prUrl || undefined,
+          priority: task.priority,
+          restored: true, // mark as restored on restart
+        },
+        ttl: 120000,
+        t: restoreNow,
+      }
+      eventBus.emit({
+        id: `approval-restore-${restoreNow}-${task.id.slice(-6)}`,
+        type: 'canvas_push',
+        timestamp: restoreNow,
+        data: restoreData,
+      })
+      queueCanvasPushEvent(restoreData)
+    }
+  } catch (err) {
+    console.warn('[ApprovalRestore] Failed to restore approval cards on startup:', (err as Error).message)
+  }
+
   // Load unified policy config (file + env overrides)
   const policy = policyManager.load()
 
@@ -16350,6 +16407,37 @@ If your heartbeat shows **no active task** and **no next task**:
           metadata: { source: 'github-webhook', eventType: ghEventType, delivery: request.headers['x-github-delivery'] },
         }).catch(() => {}) // non-blocking
       }
+
+      // canvas_artifact(type=test) on CI workflow_run completed
+      if (ghEventType === 'workflow_run' && (enrichedBody as any)?.action === 'completed') {
+        const wfRun = (enrichedBody as any)?.workflow_run as Record<string, unknown> | undefined
+        if (wfRun) {
+          const conclusion = (wfRun.conclusion as string) ?? 'unknown'
+          const ciNow = Date.now()
+          const agentId = (enrichedBody as any)?._reflectt_attribution?.agent ?? 'system'
+          // Derive passed/failed/skipped from check_runs when available, else infer from conclusion
+          const checkRunsArr = Array.isArray((enrichedBody as any)?.check_runs) ? (enrichedBody as any).check_runs : []
+          const passed = checkRunsArr.filter((c: any) => c.conclusion === 'success').length
+          const failed = checkRunsArr.filter((c: any) => c.conclusion === 'failure').length
+          const skipped = checkRunsArr.filter((c: any) => c.conclusion === 'skipped' || c.conclusion === 'neutral').length
+          eventBus.emit({
+            id: `artifact-ci-${ciNow}-${String(wfRun.id ?? ciNow).slice(-6)}`,
+            type: 'canvas_artifact' as const,
+            timestamp: ciNow,
+            data: {
+              type: 'test' as const,
+              agentId,
+              title: `CI: ${String(wfRun.name ?? 'workflow')} — ${conclusion}`,
+              url: (wfRun.html_url as string) ?? undefined,
+              conclusion,
+              passed: checkRunsArr.length > 0 ? passed : conclusion === 'success' ? 1 : 0,
+              failed: checkRunsArr.length > 0 ? failed : conclusion === 'failure' ? 1 : 0,
+              skipped: checkRunsArr.length > 0 ? skipped : 0,
+              timestamp: ciNow,
+            },
+          })
+        }
+      }
     }
 
     reply.code(202)
@@ -17615,6 +17703,29 @@ If your heartbeat shows **no active task** and **no next task**:
         artifacts: body?.artifacts,
       })
       if (!run) return reply.code(404).send({ error: 'Run not found' })
+
+      // canvas_artifact(type=run) on agent run completion
+      const terminalStatuses = ['completed', 'failed', 'cancelled']
+      if (body?.status && terminalStatuses.includes(body.status)) {
+        const completedAt = Date.now()
+        const durationMs = run.startedAt ? completedAt - run.startedAt : null
+        eventBus.emit({
+          id: `artifact-run-${completedAt}-${runId.slice(-6)}`,
+          type: 'canvas_artifact' as const,
+          timestamp: completedAt,
+          data: {
+            type: 'run' as const,
+            agentId: request.params.agentId,
+            title: run.objective?.slice(0, 80) ?? `Run ${body.status}`,
+            runId,
+            status: body.status,
+            durationMs,
+            exitCode: run.artifacts?.find((a: any) => a.exitCode !== undefined)?.exitCode ?? null,
+            timestamp: completedAt,
+          },
+        })
+      }
+
       return run
     } catch (err: any) {
       return reply.code(500).send({ error: err.message })
