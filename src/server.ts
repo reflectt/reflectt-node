@@ -262,9 +262,17 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
     problems.push('done_criteria is required and must contain at least one verifiable criterion. Tasks without acceptance criteria cannot be validated or closed.')
   }
 
+  // Done criteria quality: reject placeholder text (TBD, TODO, placeholder, etc.)
+  const DONE_CRITERIA_PLACEHOLDER_RE = /^\s*(tbd|todo|to-do|to do|placeholder|n\/a|na|none|fix later|coming soon|see description|wip|tbh|tbw)\s*$/i
+  for (const criterion of data.done_criteria) {
+    if (DONE_CRITERIA_PLACEHOLDER_RE.test(criterion)) {
+      problems.push(`Done criterion "${criterion}" is a placeholder. Replace with a concrete, verifiable outcome.`)
+    }
+  }
+
   // Done criteria quality: reject single-word criteria
   for (const criterion of data.done_criteria) {
-    if (criterion.split(/\s+/).length < 3) {
+    if (criterion.split(/\s+/).length < 3 && !DONE_CRITERIA_PLACEHOLDER_RE.test(criterion)) {
       problems.push(`Done criterion "${criterion}" is too vague. Use a full sentence describing the verifiable outcome.`)
     }
   }
@@ -2385,6 +2393,33 @@ export async function createServer(): Promise<FastifyInstance> {
   // Sweep stale inbox delivery dedup records every 15 minutes to prevent unbounded growth
   const inboxDeliveryDedupSweep = setInterval(sweepDeliveryRecords, 15 * 60 * 1000)
   inboxDeliveryDedupSweep.unref()
+
+  // Daily digest: surface active tasks with empty or placeholder done_criteria.
+  // Warns via #ops — does not hard-error (legacy tasks may predate the gate).
+  const DONE_CRITERIA_DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1000
+  const DONE_CRITERIA_PLACEHOLDER_DIGEST_RE = /^\s*(tbd|todo|to-do|to do|placeholder|n\/a|na|none|fix later|coming soon|see description|wip)\s*$/i
+  const runDoneCriteriaDigest = () => {
+    try {
+      const active = taskManager.listTasks({}).filter(t =>
+        !['done', 'cancelled', 'resolved_externally'].includes(t.status)
+      )
+      const missing = active.filter(t =>
+        !t.done_criteria
+        || t.done_criteria.length === 0
+        || t.done_criteria.every(c => DONE_CRITERIA_PLACEHOLDER_DIGEST_RE.test(c))
+      )
+      if (missing.length === 0) return
+      const lines = missing.map(t => `• \`${t.id}\` [${t.status}] ${t.title} (@${t.assignee ?? 'unassigned'})`)
+      chatManager.sendMessage({
+        channel: 'ops',
+        from: 'system',
+        content: `📋 **Done-criteria digest** — ${missing.length} active task${missing.length === 1 ? '' : 's'} missing verifiable done_criteria:\n${lines.join('\n')}\nAdd at least 1 concrete criterion to each before moving to validating.`,
+      }).catch(() => {})
+    } catch { /* non-fatal */ }
+  }
+  runDoneCriteriaDigest() // eager run on startup to surface existing debt immediately
+  const doneCriteriaDigestTimer = setInterval(runDoneCriteriaDigest, DONE_CRITERIA_DIGEST_INTERVAL_MS)
+  doneCriteriaDigestTimer.unref()
 
   // Load unified policy config (file + env overrides)
   const policy = policyManager.load()
@@ -6978,24 +7013,40 @@ export async function createServer(): Promise<FastifyInstance> {
       if (!skipDoR) {
         const readinessProblems = checkDefinitionOfReady(data)
         if (readinessProblems.length > 0) {
-          // Emit trust event if done_criteria is the specific blocker
-          if (!data.done_criteria || data.done_criteria.length === 0) {
-            const createdBy = typeof data.createdBy === 'string' ? data.createdBy : 'unknown'
-            import('./trust-events.js').then(({ emitTrustEvent }) => {
-              emitTrustEvent({
-                agentId: createdBy,
-                eventType: 'missing_acceptance_criteria_block',
-                context: { taskTitle: data.title, assignee: data.assignee, createdBy },
-              })
-            }).catch(() => {})
-          }
-          reply.code(400)
-          return {
-            success: false,
-            error: 'Task does not meet definition of ready',
-            code: 'DEFINITION_OF_READY',
-            problems: readinessProblems,
-            hint: 'Fix the listed problems and retry. Tasks must have specific titles, verifiable done criteria, priority, and reviewer.',
+          const isUserCreated = !data.createdBy || data.createdBy === 'user'
+          const hasEmptyCriteria = !data.done_criteria || data.done_criteria.length === 0
+          const PLACEHOLDER_RE = /^\s*(tbd|todo|to-do|to do|placeholder|n\/a|na|none|fix later|coming soon|see description|wip|tbh|tbw)\s*$/i
+          const hasOnlyPlaceholders = data.done_criteria?.length > 0
+            && data.done_criteria.every((c: string) => PLACEHOLDER_RE.test(c))
+
+          // Human-created tasks with only empty done_criteria: warn-and-allow (not block).
+          // Placeholder text always blocks (for both humans and agents).
+          // Agent-created tasks (createdBy != 'user') always block on any DoR failure.
+          if (isUserCreated && hasEmptyCriteria && !hasOnlyPlaceholders) {
+            // Warn only — pass through to creation with warnings appended below
+            // (readinessProblems will be added to creationWarnings)
+          } else {
+            // Block: agent-created tasks, placeholder criteria, or other DoR failures
+            if (hasEmptyCriteria || hasOnlyPlaceholders) {
+              const createdBy = typeof data.createdBy === 'string' ? data.createdBy : 'unknown'
+              import('./trust-events.js').then(({ emitTrustEvent }) => {
+                emitTrustEvent({
+                  agentId: createdBy,
+                  eventType: 'missing_acceptance_criteria_block',
+                  context: { taskTitle: data.title, assignee: data.assignee, createdBy },
+                })
+              }).catch(() => {})
+            }
+            reply.code(400)
+            return {
+              success: false,
+              error: 'Task does not meet definition of ready',
+              code: 'DEFINITION_OF_READY',
+              problems: readinessProblems,
+              hint: isUserCreated
+                ? 'Placeholder done_criteria not accepted. Replace with concrete, verifiable outcomes.'
+                : 'Fix the listed problems and retry. Tasks must have specific titles, verifiable done criteria, priority, and reviewer.',
+            }
           }
         }
       }
@@ -7004,6 +7055,20 @@ export async function createServer(): Promise<FastifyInstance> {
       // Warn-only: encourage lane/surface metadata for routing discipline.
       // (Do not block creation yet; onboarding still needs to be lightweight.)
       const creationWarnings: string[] = []
+
+      // For human-created tasks with empty done_criteria: warn-and-allow path
+      // (agent-created tasks were blocked above; this only runs for createdBy='user')
+      if (!skipDoR) {
+        const isUserCreated = !data.createdBy || data.createdBy === 'user'
+        const hasEmptyCriteria = !data.done_criteria || data.done_criteria.length === 0
+        if (isUserCreated && hasEmptyCriteria) {
+          creationWarnings.push(
+            'done_criteria is empty. Add at least 1 verifiable outcome before moving to doing. ' +
+            'Tasks without acceptance criteria cannot be validated or closed.'
+          )
+        }
+      }
+
       const metaIn = (data.metadata || {}) as Record<string, unknown>
       const lane = String((metaIn as any).lane || '').trim()
       const surface = String((metaIn as any).surface || '').trim()
