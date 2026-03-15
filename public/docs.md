@@ -210,6 +210,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/manage/config` | Remote management: config introspection with secrets redacted. Auth required. |
 | GET | `/manage/logs` | Remote management: bounded log tail. Query: `level`, `since`, `limit`, `format=text`. Auth required. |
 | POST | `/manage/restart` | Remote management: graceful restart (Docker/systemd/CLI). Auth required. |
+| GET | `/manage/restart-context` | Read last restart context snapshot written on graceful restart. Auth required. Returns 404 if no snapshot exists. |
 | GET | `/manage/disk` | Remote management: data directory sizes. Auth required. |
 | GET | `/browser/config` | Browser capability configuration (max sessions, rate limits, viewport). |
 | POST | `/browser/sessions` | Create a new isolated browser session. Body: `{ agent, url?, headless?, viewport? }`. Returns session object. |
