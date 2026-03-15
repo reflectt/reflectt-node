@@ -1644,7 +1644,7 @@ async function loadDoctorPage() {
     const rows = [
       ['Status', data.status ?? '—'],
       ['Version', data.version ?? '—'],
-      ['Uptime', data.uptime != null ? `${Math.floor(data.uptime / 60)}m ${data.uptime % 60}s` : '—'],
+      ['Uptime', data.uptime_seconds != null ? `${Math.floor(data.uptime_seconds / 60)}m ${data.uptime_seconds % 60}s` : '—'],
       ['PID', data.pid ?? data.runtime?.pid ?? '—'],
       ['Node', data.nodeVersion ?? data.runtime?.nodeVersion ?? '—'],
       ['Port', data.port ?? data.runtime?.port ?? '—'],

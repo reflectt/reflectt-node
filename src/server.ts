@@ -2486,6 +2486,9 @@ export async function createServer(): Promise<FastifyInstance> {
       version: BUILD_VERSION,
       commit: BUILD_COMMIT,
       uptime_seconds: uptimeSeconds,
+      pid: process.pid,
+      nodeVersion: process.version,
+      port: Number(process.env['PORT'] || process.env['REFLECTT_PORT'] || 4445),
       cold_start: uptimeSeconds < 60, // Flag recent restarts for monitoring
       openclaw: openclawConfig.gatewayToken
         ? { status: 'configured', gateway: openclawConfig.gatewayUrl }
