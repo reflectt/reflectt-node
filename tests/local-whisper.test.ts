@@ -31,8 +31,10 @@ afterEach(() => {
 
 describe('local-whisper availability check', () => {
   it('returns true when whisper CLI exits successfully', async () => {
+    // Pin LOCAL_WHISPER_BIN so detectWhisperBin() skips `which`/`brew` lookups
+    // (those return empty stdout from the mock, causing null detection).
+    process.env.LOCAL_WHISPER_BIN = '/mock/whisper'
     const { execFile } = await import('node:child_process')
-    const { promisify } = await import('node:util')
     // Mock execFile to call callback with no error
     vi.mocked(execFile).mockImplementation((_bin: any, _args: any, _opts: any, cb: any) => {
       if (typeof cb === 'function') cb(null, '', '')
@@ -45,6 +47,7 @@ describe('local-whisper availability check', () => {
   })
 
   it('returns false when whisper CLI is not found', async () => {
+    process.env.LOCAL_WHISPER_BIN = '/mock/whisper'
     const { execFile } = await import('node:child_process')
     vi.mocked(execFile).mockImplementation((_bin: any, _args: any, _opts: any, cb: any) => {
       if (typeof cb === 'function') cb(new Error('ENOENT'), '', '')
