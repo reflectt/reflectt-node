@@ -42,7 +42,7 @@ const BUILD_STARTED_AT = Date.now()
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { detectApproval, applyApproval } from './chat-approval-detector.js'
-import { inboxManager } from './inbox.js'
+import { inboxManager, clearDeliveryRecord, sweepDeliveryRecords } from './inbox.js'
 import { getFocus, setFocus, clearFocus, getFocusSummary } from './focus.js'
 import { generatePulse, generateCompactPulse } from './pulse.js'
 import { scanScopeOverlap, scanAndNotify } from './scopeOverlap.js'
@@ -2370,6 +2370,10 @@ export async function createServer(): Promise<FastifyInstance> {
   const webhookPurgeTimer = setInterval(runWebhookPurge, WEBHOOK_PURGE_INTERVAL_MS)
   webhookPurgeTimer.unref()
 
+  // Sweep stale inbox delivery dedup records every 15 minutes to prevent unbounded growth
+  const inboxDeliveryDedupSweep = setInterval(sweepDeliveryRecords, 15 * 60 * 1000)
+  inboxDeliveryDedupSweep.unref()
+
   // Load unified policy config (file + env overrides)
   const policy = policyManager.load()
 
@@ -4507,6 +4511,8 @@ export async function createServer(): Promise<FastifyInstance> {
     }
     
     await inboxManager.ackMessages(request.params.agent, body.messageIds, body.timestamp)
+    // Clear delivery records so re-delivery is possible if the message resurfaces
+    for (const id of body.messageIds) clearDeliveryRecord(request.params.agent, id)
     return { success: true, count: body.messageIds.length }
   })
 
