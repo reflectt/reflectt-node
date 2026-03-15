@@ -126,16 +126,19 @@ export const DEFAULT_AUTO_TAG_RULES: AutoTagRule[] = [
     patterns: [
       '\\bdeploy(ment|ed)?\\b',
       // release/build only match when paired with infra/CI context words
-      'release.+(?:pipeline|ci|cd|fly|vercel|docker|infra)',
-      '(?:pipeline|ci|cd|fly|vercel|docker|infra).+release',
-      'build.+(?:fail|ci|cd|pipeline|infra|docker)',
-      '(?:ci|cd|pipeline|docker).+build',
+      // NOTE: \bci\b and \bcd\b require word boundaries — bare "ci"/"cd" match
+      // as substrings in words like "velocity", "decisions", "decide", etc.
+      'release.+(?:pipeline|\\bci\\b|\\bcd\\b|fly|vercel|docker|infra)',
+      '(?:pipeline|\\bci\\b|\\bcd\\b|fly|vercel|docker|infra).+release',
+      'build.+(?:fail|\\bci\\b|\\bcd\\b|pipeline|infra|docker)',
+      '(?:\\bci\\b|\\bcd\\b|pipeline|docker).+build',
       '\\bci\\b.+(?:fail|block|broken|pass)',
       '(?:fail|block|broken).+\\bci\\b',
-      'pr.+stall',
-      'stall.+pr',
-      'distribution.+pr',
-      'merged.+pr',
+      '\\bprs?\\b.+stall',
+      'stall.+\\bprs?\\b',
+      'distribution.+\\bprs?\\b',
+      '\\bprs?\\b.+merged',
+      'merged.+\\bprs?\\b',
       '\\bpipeline\\b',
     ],
   },
