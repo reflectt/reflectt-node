@@ -2519,6 +2519,17 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Version summary — used by cloud dashboard + ops tooling ──────────────
+  app.get('/health/version', async () => {
+    return {
+      version: BUILD_VERSION,
+      commit: BUILD_COMMIT,
+      uptime_ms: Date.now() - BUILD_STARTED_AT,
+      host_id: process.env.REFLECTT_HOST_ID ?? process.env.HOSTNAME ?? 'unknown',
+      node_env: process.env.NODE_ENV ?? 'production',
+    }
+  })
+
   app.get('/health/reflection-pipeline', async () => {
     const health = computeReflectionPipelineHealth(Date.now())
     return {
