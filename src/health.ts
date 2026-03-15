@@ -278,6 +278,7 @@ export type IdleNudgeDecision = {
     | 'recent-task-comment'
     | 'task-focus-window'
     | 'queue-empty-suppressed'
+    | 'blocked-external-suppressed'
     | 'queue-clear'
     | 'queue-clear-restart-window'
     | 'eligible'
@@ -2022,6 +2023,17 @@ class TeamHealthMonitor {
       const hasValidatingTask = tasks.some((t: any) => (t.assignee || '').toLowerCase() === agent && t.status === 'validating')
       if (hasValidatingTask) {
         decisions.push({ ...baseDecision, decision: 'none', reason: 'validating-task-suppressed', renderedMessage: null })
+        continue
+      }
+
+      // Explicit blocked_external gate: agent has a task waiting on a human dependency.
+      // This is a hard signal — suppress all idle nudges regardless of queue state.
+      // Fires even if getNextTask() would return a task (a new task doesn't unblock the dependency).
+      const hasBlockedExternal = tasks.some(
+        (t: any) => (t.assignee || '').toLowerCase() === agent && (t.metadata as any)?.blocked_external === true
+      )
+      if (hasBlockedExternal) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'blocked-external-suppressed', renderedMessage: null })
         continue
       }
 
