@@ -206,8 +206,17 @@ describe('tickReflectionNudges', () => {
     // Expected: tracked agent is still eligible and gets nudged when overdue.
 
     // Force no active tasks by stubbing listTasks (avoids DB-wide deletes).
+    // The stub returns [] for most calls but returns a mock todo task when the
+    // lane-aware nudge suppression check asks for in-lane todo items — ensuring
+    // the agent is suppressed only when their lane is truly empty, not as an
+    // artifact of the stub. Scenario: agent has todo work but no in-progress tasks.
     const originalListTasks = (taskManager as any).listTasks
-    ;(taskManager as any).listTasks = () => []
+    ;(taskManager as any).listTasks = (filter?: any) => {
+      if (filter?.status === 'todo' && filter?.assigneeIn?.includes('tracked-idle')) {
+        return [{ id: 'mock-todo-lane', status: 'todo', assignee: 'tracked-idle' }]
+      }
+      return []
+    }
 
     const prev = (policyManager.get() as any).reflectionNudge
     policyManager.patch({
