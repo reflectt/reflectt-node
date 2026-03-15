@@ -149,11 +149,11 @@ describe('SIGNAL-ROUTING Change 2: dispatchReflectionTier()', () => {
     expect(Array.from(_nagBatch.values()).flat().length).toBe(0)
   })
 
-  it('L: immediate → queued in _nagBatch to config channel', async () => {
+  it('L: immediate → queued in _nagBatch to #ops (PR #1034: immediate now routes to ops not config channel)', async () => {
     const config = { ...makeConfig(), channel: 'team-chat' }
     await dispatchReflectionTier('link', 'immediate', 0, Date.now(), config)
     expect(posted.length).toBe(0)
-    const msgs = _nagBatch.get('team-chat') ?? []
+    const msgs = _nagBatch.get('ops') ?? []
     expect(msgs.some((m: string) => m.includes('@link'))).toBe(true)
   })
 })
