@@ -9,6 +9,27 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Living canvas — agents are alive on screen**: Task state machine now drives canvas state; when an agent picks up a task their orb moves, when they finish it settles. (#1018)
+- **Canvas auto-state sweep**: Agents with active tasks show working state on canvas load — no cold starts with blank orbs. (#992)
+- **`POST /canvas/briefing`**: Fires a coordinated expression sweep across all agents simultaneously. (#994)
+- **Rate-limited restart/presence broadcasts**: Prevents broadcast storms on server restart. (#1014)
+- **Agent orbs with identity colors + ring segments**: Colored ring segments show task progress; hover cards surface current task and state detail. (cloud)
+- **Canvas onboarding card**: Clean first impression on first open instead of a blank canvas. (PR #1169, cloud)
+- **Day-summary card renderer**: Agents narrate what they shipped, visible on the canvas. (PR #1176, cloud)
+- **Ghost trail sediment layer + proof cards**: Completed work leaves a visual trace; commit/PR/test/approval proof cards float as artifacts. (PRs #1131, #1135, cloud)
+- **Canvas hover states, transitions, responsive layout**: Canvas feels like a product, not a prototype. (PR #1185, cloud)
+- **iOS: Dynamic Island agent bar**: Live agent state persistent in the Dynamic Island while the app is backgrounded.
+- **iOS: Push-to-talk routing**: Hold an agent, speak, message routes to their inbox. (PR #17, iOS)
+- **Android: ARCore world anchor presence cards**: Agent presence as AR spatial overlays. (PR #25, Android)
+- **Android: Canvas floor state**: Ambient idle orbs visible even when unauthenticated. (PR #31, Android)
+
+### Fixed
+- **CORS on `/api/presence/config`**: Agents were invisible in cloud deployments. (cloud)
+- **Canvas API routing migrated to `api.reflectt.ai`**: HTTP/2 SSE now works correctly; Vercel routing caused stream failures. (cloud)
+- **Canvas 401 now shows ambient floor state**: Soft sign-in hint instead of a broken screen. (cloud)
+- **SSE refresh crash on dashboard** (`loadPauseStatus` error): Fixed.
+
 ---
 
 ## [0.1.6] — 2026-03-07
