@@ -136,7 +136,7 @@ export const DEFAULT_AUTO_TAG_RULES: AutoTagRule[] = [
       '\\bci\\b.+(?:fail|block|broken|pass)',
       '(?:fail|block|broken).+\\bci\\b',
       'pr.+stall',
-      'stall.+pr',
+      'stall.+\bpr\b',
       'distribution.+pr',
       'merged.+pr',
       '\\bpipeline\\b',
