@@ -42,4 +42,9 @@ process/*
 
 # Build artifacts
 commit.txt
+<<<<<<< HEAD
 !process/TASK-bxedz440z.md
+=======
+!process/TASK-r33yx9ise.md
+>>>>>>> 331e92b (docs: process doc for task-r33yx9ise)
+!process/TASK-r33yx9ise.md
