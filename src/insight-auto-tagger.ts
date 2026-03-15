@@ -300,7 +300,7 @@ export function backfillUncategorizedInsights(dryRun = false): AutoTagSummary {
       summary.results.push({
         id: row.id,
         title: row.title.slice(0, 80),
-        old_family: row.family ?? row.failure_family,
+        old_family: row.failure_family,
         new_family: 'uncategorized',
       })
       continue
