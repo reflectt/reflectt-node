@@ -41,3 +41,4 @@ process/*
 
 # Build artifacts
 commit.txt
+!process/TASK-bxedz440z.md
