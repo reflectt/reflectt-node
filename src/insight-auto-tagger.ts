@@ -121,7 +121,10 @@ export const DEFAULT_AUTO_TAG_RULES: AutoTagRule[] = [
   },
   {
     // deployment requires infra/CI context — generic "build" or "release" alone is too broad
+
     // (e.g. "product decisions deferred to founder" has "release" but is a process insight)
+    // (e.g. "product decisions defer to Ryan" has "release" but is a process insight)
+
     family: 'deployment',
     patterns: [
       '\\bdeploy(ment|ed)?\\b',
@@ -192,8 +195,8 @@ export const DEFAULT_AUTO_TAG_RULES: AutoTagRule[] = [
       '\\bvelocity\\b',
       'team.+stall',
       'stall.+team',
-      'defers?.+to.+founder',
-      'defers?.+to.+human',
+      'defers?.+to.+ryan',
+
       'defer.+decision',
       'decision.+defer',
       'product.+decision',
