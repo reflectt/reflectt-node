@@ -285,7 +285,7 @@ function findingToReflection(finding: ProbeResult, agent: string): Parameters<ty
     suspected_why: `${finding.probe} endpoint is either degraded or a background condition is unresolved`,
     proposed_fix: `Investigate ${finding.probe} endpoint and resolve the underlying condition`,
     confidence: 6,
-    role_type: 'infra',
+    role_type: 'agent',
     author: `product-observation:${agent}`,
     severity,
     tags: [`probe:${finding.probe}`, 'automated', 'product-observation'],
