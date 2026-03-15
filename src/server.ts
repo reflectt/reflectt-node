@@ -207,6 +207,10 @@ const SendMessageSchema = z.object({
 
 // Task type determines required fields beyond the base schema
 const TASK_TYPES = ['bug', 'feature', 'process', 'docs', 'chore'] as const
+
+// Shared placeholder pattern for done_criteria validation.
+// Used in checkDefinitionOfReady (DoR gate) and POST /tasks creator-type gating.
+const DONE_CRITERIA_PLACEHOLDER_RE = /^\s*(tbd|todo|to-do|to do|placeholder|n\/a|na|none|fix later|coming soon|see description|wip|tbh|tbw)\s*$/i
 type TaskType = typeof TASK_TYPES[number]
 
 const CreateTaskSchema = z.object({
@@ -263,7 +267,6 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
   }
 
   // Done criteria quality: reject placeholder text (TBD, TODO, placeholder, etc.)
-  const DONE_CRITERIA_PLACEHOLDER_RE = /^\s*(tbd|todo|to-do|to do|placeholder|n\/a|na|none|fix later|coming soon|see description|wip|tbh|tbw)\s*$/i
   for (const criterion of data.done_criteria) {
     if (DONE_CRITERIA_PLACEHOLDER_RE.test(criterion)) {
       problems.push(`Done criterion "${criterion}" is a placeholder. Replace with a concrete, verifiable outcome.`)
@@ -7071,9 +7074,8 @@ export async function createServer(): Promise<FastifyInstance> {
         if (readinessProblems.length > 0) {
           const isUserCreated = !data.createdBy || data.createdBy === 'user'
           const hasEmptyCriteria = !data.done_criteria || data.done_criteria.length === 0
-          const PLACEHOLDER_RE = /^\s*(tbd|todo|to-do|to do|placeholder|n\/a|na|none|fix later|coming soon|see description|wip|tbh|tbw)\s*$/i
           const hasOnlyPlaceholders = data.done_criteria?.length > 0
-            && data.done_criteria.every((c: string) => PLACEHOLDER_RE.test(c))
+            && data.done_criteria.every((c: string) => DONE_CRITERIA_PLACEHOLDER_RE.test(c))
 
           // Human-created tasks with only empty done_criteria: warn-and-allow (not block).
           // Placeholder text always blocks (for both humans and agents).
