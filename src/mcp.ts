@@ -13,6 +13,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod"
 import { chatManager } from "./chat.js"
 import { taskManager } from "./tasks.js"
+import { calendarEvents } from "./calendar-events.js"
 import { PKG_VERSION } from "./version.js"
 import type { AgentMessage, Task } from "./types.js"
 
@@ -575,6 +576,129 @@ function initToolHandlers() {
         return { content: [{ type: "text", text: JSON.stringify({ task: null, message: "No available tasks" }) }] }
       }
       return { content: [{ type: "text", text: JSON.stringify({ task }) }] }
+    },
+  })
+
+  // ── Calendar tools ────────────────────────────────────────────────────────
+
+  toolHandlers.set("calendar_upcoming", {
+    schema: {
+      description: "Get upcoming calendar events. Use when someone asks 'what's on my calendar', 'what's happening this week', etc. Returns events sorted chronologically.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          days: { type: "number", description: "Number of days ahead to look (1–90, default 7)" },
+        },
+      },
+    },
+    handler: async (args) => {
+      const days = Math.max(1, Math.min(90, Number(args.days) || 7))
+      const now = Date.now()
+      const to = now + days * 24 * 60 * 60 * 1000
+      const events = calendarEvents.listEvents({ from: now, to, status: 'confirmed' })
+      const result = events.map(e => ({
+        id: e.id,
+        title: e.summary,
+        start: new Date(e.dtstart).toISOString(),
+        end: new Date(e.dtend).toISOString(),
+        attendees: e.attendees.map(a => a.name),
+        description: e.description || null,
+        location: e.location || null,
+      }))
+      return { content: [{ type: "text", text: JSON.stringify({ events: result, count: result.length, days }) }] }
+    },
+  })
+
+  toolHandlers.set("calendar_create", {
+    schema: {
+      description: "Create a calendar event. Use when someone says 'schedule', 'book', 'add a meeting', 'set up a standup', etc. Start time must be in the future.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Event title (e.g. 'Standup', 'Team sync')" },
+          start: { type: "string", description: "Start time as ISO-8601 (e.g. '2026-03-15T10:00:00-07:00')" },
+          duration_minutes: { type: "number", description: "Duration in minutes (default 60)" },
+          attendees: {
+            type: "array",
+            items: { type: "string" },
+            description: "Attendee names or emails (max 50)",
+          },
+          description: { type: "string", description: "Optional event description" },
+          location: { type: "string", description: "Optional location" },
+        },
+        required: ["title", "start"],
+      },
+    },
+    handler: async (args) => {
+      const title = String(args.title || '').trim()
+      const startStr = String(args.start || '')
+      if (!title) return { content: [{ type: "text", text: JSON.stringify({ error: "title is required" }) }] }
+      if (!startStr) return { content: [{ type: "text", text: JSON.stringify({ error: "start is required" }) }] }
+
+      const dtstart = Date.parse(startStr)
+      if (isNaN(dtstart)) return { content: [{ type: "text", text: JSON.stringify({ error: "start must be a valid ISO-8601 datetime" }) }] }
+      if (dtstart < Date.now()) return { content: [{ type: "text", text: JSON.stringify({ error: "start must be in the future", code: "PAST_DATE" }) }] }
+
+      const durationMinutes = typeof args.duration_minutes === 'number' ? args.duration_minutes : 60
+      const dtend = dtstart + durationMinutes * 60 * 1000
+
+      // Duplicate check
+      const existing = calendarEvents.listEvents({ from: dtstart - 1000, to: dtstart + 1000 })
+      const duplicate = existing.find(e => e.summary.toLowerCase() === title.toLowerCase() && e.dtstart === dtstart)
+      if (duplicate) return { content: [{ type: "text", text: JSON.stringify({ error: "Duplicate: same title and start time already exists", existing_id: duplicate.id }) }] }
+
+      const rawAttendees = Array.isArray(args.attendees) ? args.attendees.slice(0, 50) : []
+      const event = calendarEvents.createEvent({
+        summary: title,
+        description: typeof args.description === 'string' ? args.description : undefined,
+        dtstart,
+        dtend,
+        organizer: 'agent',
+        attendees: rawAttendees.map((a: unknown) => ({
+          name: typeof a === 'string' ? a : String(a),
+          email: typeof a === 'string' && a.includes('@') ? a : undefined,
+          status: 'needs-action' as const,
+        })),
+        categories: [],
+      })
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            id: event.id,
+            title: event.summary,
+            start: new Date(event.dtstart).toISOString(),
+            end: new Date(event.dtend).toISOString(),
+          }),
+        }],
+      }
+    },
+  })
+
+  toolHandlers.set("calendar_cancel", {
+    schema: {
+      description: "Cancel (delete) a calendar event by ID. Use when someone says 'cancel', 'remove', 'delete a meeting'. Get the event ID from calendar_upcoming first if needed.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          event_id: { type: "string", description: "Event ID to cancel" },
+        },
+        required: ["event_id"],
+      },
+    },
+    handler: async (args) => {
+      const eventId = String(args.event_id || '').trim()
+      if (!eventId) return { content: [{ type: "text", text: JSON.stringify({ error: "event_id is required" }) }] }
+      const event = calendarEvents.getEvent(eventId)
+      if (!event) return { content: [{ type: "text", text: JSON.stringify({ error: "Event not found", event_id: eventId }) }] }
+      const deleted = calendarEvents.deleteEvent(eventId)
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ success: deleted, event_id: eventId, title: event.summary }),
+        }],
+      }
     },
   })
 
