@@ -277,6 +277,7 @@ export type IdleNudgeDecision = {
     | 'presence-task-mismatch'
     | 'recent-task-comment'
     | 'task-focus-window'
+    | 'queue-empty-suppressed'
     | 'queue-clear'
     | 'queue-clear-restart-window'
     | 'eligible'
@@ -2026,6 +2027,16 @@ class TeamHealthMonitor {
 
       // Engagement nudge: if agent is idle and has no active doing lane, prompt them to pull/claim work.
       if (lane.laneReason === 'no-active-lane') {
+        // Queue-empty gate: suppress idle nudge when the ready queue is empty.
+        // An agent with nothing to pull is compliant, not idle — nudging them is noise.
+        // Check both unassigned todo tasks and tasks assigned to this agent.
+        const readyForAgent = taskManager.listTasks({ status: 'todo' })
+          .filter(t => !t.assignee || (t.assignee || '').toLowerCase() === agent.toLowerCase())
+        if (readyForAgent.length === 0) {
+          decisions.push({ ...baseDecision, decision: 'none', reason: 'queue-empty-suppressed', renderedMessage: null })
+          continue
+        }
+
         const signature = `queue-clear:${agent}`
         if (state && state.lastSignature === signature && state.unchangedNudgeCount >= 2) {
           decisions.push({ ...baseDecision, decision: 'none', reason: 'max-repeat-reached', renderedMessage: null })
