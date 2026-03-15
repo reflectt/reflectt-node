@@ -11701,7 +11701,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
   // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
   app.get('/canvas/pulse', async (request, reply) => {
-    const STALE_MS = 10 * 60 * 1000
+    const STALE_MS = 60 * 60 * 1000 // 60min — agents stay visible as long as they heartbeat
     const IDENTITY_COLORS: Record<string, string> = {
       kai: '#fb923c',
       pixel: '#a78bfa',
@@ -13831,6 +13831,26 @@ export async function createServer(): Promise<FastifyInstance> {
       ...(t.scheduledFor ? { scheduledFor: t.scheduledFor } : {}),
     } : null
     presenceManager.recordActivity(agent, 'heartbeat')
+
+    // Keep canvasStateMap fresh — agents visible on canvas as long as they heartbeat.
+    // Derive canvas state from task activity (same logic as emitOrbState).
+    {
+      const derivedState = activeTask
+        ? (activeTask.status === 'blocked' ? 'working' : 'working')
+        : (nextTask ? 'idle' : 'idle')
+      const prevEntry = canvasStateMap.get(agent)
+      canvasStateMap.set(agent, {
+        state: derivedState as any,
+        sensors: null,
+        payload: {
+          ...(prevEntry?.payload as Record<string, unknown> ?? {}),
+          presenceState: activeTask ? 'working' : 'idle',
+          sourceTasks: activeTask ? [{ id: activeTask.id, title: activeTask.title, status: activeTask.status }] : [],
+          _auto: true,
+        },
+        updatedAt: Date.now(),
+      })
+    }
 
     // Check pause status
     const pauseStatus = checkPauseStatus(agent)
