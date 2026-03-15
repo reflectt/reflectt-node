@@ -14,6 +14,7 @@ export type SystemLoopName =
   | 'reflection_pipeline'
   | 'board_health'
   | 'deploy_monitor'
+  | 'validating_nudge'
 
 export function recordSystemLoopTick(name: SystemLoopName, now = Date.now()): void {
   const db = getDb()
@@ -37,6 +38,7 @@ export function getSystemLoopTicks(): Record<SystemLoopName, number> {
     reflection_pipeline: 0,
     board_health: 0,
     deploy_monitor: 0,
+    validating_nudge: 0,
   }
 
   try {

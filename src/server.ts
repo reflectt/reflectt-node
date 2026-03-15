@@ -171,7 +171,7 @@ import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIs
 import { validateIntent as macOSValidateIntent, isKillSwitchEngaged, engageKillSwitch, resetKillSwitch } from './macos-accessibility.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
-import { requestImmediateCanvasSync } from './cloud.js'
+import { requestImmediateCanvasSync, queueCanvasPushEvent } from './cloud.js'
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
 import { startDeployMonitor, stopDeployMonitor } from './deploy-monitor.js'
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
@@ -3348,58 +3348,6 @@ export async function createServer(): Promise<FastifyInstance> {
     } catch (err) {
       reply.code(500)
       return { success: false, error: (err as Error).message }
-    }
-  })
-
-  // Validating-stall nudge tick — sends a single direct nudge to reviewer
-  // when a task has been in validating >30m with no formal review decision.
-  // Idempotent: sets metadata.validating_nudge_sent_at to prevent repeat fires.
-  app.post('/health/validating-nudge/tick', async (request, reply) => {
-    const parsedQuery = HealthTickQuerySchema.safeParse(request.query ?? {})
-    if (!parsedQuery.success) {
-      reply.code(400)
-      return {
-        error: 'Invalid query params',
-        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
-      }
-    }
-
-    const query = parsedQuery.data
-    const dryRun = query.dryRun === 'true'
-    const force = query.force === 'true'
-    const now = parseEpochMs(query.nowMs) || Date.now()
-
-    if (!force && isQuietHours(now)) {
-      return {
-        success: true,
-        dryRun,
-        force,
-        suppressed: true,
-        reason: 'quiet-hours',
-        nudged: [],
-        skipped: [],
-        timestamp: now,
-      }
-    }
-
-    // Optional override: ?threshold_ms=1800000 (default: 30m)
-    const rawThreshold = typeof (request.query as any)?.threshold_ms === 'string'
-      ? Number((request.query as any).threshold_ms)
-      : NaN
-    const nudgeThresholdMs = Number.isFinite(rawThreshold) && rawThreshold > 0
-      ? rawThreshold
-      : undefined // let healthMonitor use its own default (30m)
-
-    const result = await healthMonitor.runValidatingNudgeTick(now, { dryRun, nudgeThresholdMs })
-
-    return {
-      success: true,
-      dryRun,
-      force,
-      suppressed: false,
-      threshold_ms: nudgeThresholdMs ?? 30 * 60 * 1000,
-      ...result,
-      timestamp: now,
     }
   })
 
@@ -9278,26 +9226,28 @@ export async function createServer(): Promise<FastifyInstance> {
         }
         const assigneeIdForCard = (task.assignee ?? '').toLowerCase()
         const approvalNow = Date.now()
+        const approvalPushData = {
+          type: 'approval_requested',
+          agentId: assigneeIdForCard,
+          agentColor: CANVAS_AGENT_COLORS[assigneeIdForCard] ?? '#94a3b8',
+          data: {
+            taskId: task.id,
+            taskTitle: task.title,
+            reviewer: task.reviewer,
+            prUrl: prUrlForCard || undefined,
+            qaSummary: qaSummary || undefined,
+            priority: task.priority,
+          },
+          ttl: 120000,
+          t: approvalNow,
+        }
         eventBus.emit({
           id: `approval-${approvalNow}-${Math.random().toString(36).slice(2, 6)}`,
           type: 'canvas_push',
           timestamp: approvalNow,
-          data: {
-            type: 'approval_requested',
-            agentId: assigneeIdForCard,
-            agentColor: CANVAS_AGENT_COLORS[assigneeIdForCard] ?? '#94a3b8',
-            data: {
-              taskId: task.id,
-              taskTitle: task.title,
-              reviewer: task.reviewer,
-              prUrl: prUrlForCard || undefined,
-              qaSummary: qaSummary || undefined,
-              priority: task.priority,
-            },
-            ttl: 120000,
-            t: approvalNow,
-          },
+          data: approvalPushData,
         })
+        queueCanvasPushEvent(approvalPushData)
       }
 
       // ── Canvas push: self-emit utterance on task state transitions ──
@@ -9350,68 +9300,76 @@ export async function createServer(): Promise<FastifyInstance> {
 
         if (parsed.status === 'doing' && existing.status !== 'doing') {
           // Agent picks up work → utterance on canvas + orb flips to working
+          const doingPushData = {
+            type: 'utterance',
+            agentId: canvasAgent,
+            agentColor,
+            text: `picking up: ${taskSnippet}`,
+            t: canvasNow,
+          }
           eventBus.emit({
             id: `canvas-doing-${canvasNow}-${task.id.slice(-6)}`,
             type: 'canvas_push',
             timestamp: canvasNow,
-            data: {
-              type: 'utterance',
-              agentId: canvasAgent,
-              agentColor,
-              text: `picking up: ${taskSnippet}`,
-              t: canvasNow,
-            },
+            data: doingPushData,
           })
+          queueCanvasPushEvent(doingPushData)
           emitOrbState('working', { id: task.id, title: task.title ?? '' })
         } else if (parsed.status === 'validating' && existing.status !== 'validating') {
           // Agent submits for review → work_released on canvas + orb flips to handoff
           const prUrl = (mergedMeta as any)?.review_handoff?.pr_url || (mergedMeta as any)?.pr_url || undefined
+          const validatingPushData = {
+            type: 'work_released',
+            agentId: canvasAgent,
+            agentColor,
+            summary: `ready for review: ${taskSnippet}`,
+            prUrl,
+            t: canvasNow,
+          }
           eventBus.emit({
             id: `canvas-validating-${canvasNow}-${task.id.slice(-6)}`,
             type: 'canvas_push',
             timestamp: canvasNow,
-            data: {
-              type: 'work_released',
-              agentId: canvasAgent,
-              agentColor,
-              summary: `ready for review: ${taskSnippet}`,
-              prUrl,
-              t: canvasNow,
-            },
+            data: validatingPushData,
           })
+          queueCanvasPushEvent(validatingPushData)
           emitOrbState('handoff', { id: task.id, title: task.title ?? '' })
         } else if (parsed.status === 'done' && existing.status !== 'done') {
           // Agent closes task — burst from their orb + orb returns to idle
+          const donePushData = {
+            type: 'work_released',
+            agentId: canvasAgent,
+            agentColor,
+            text: 'shipped',
+            taskTitle: taskSnippet,
+            intensity: 0.8,
+            t: canvasNow,
+          }
           eventBus.emit({
             id: `canvas-done-${canvasNow}-${task.id.slice(-6)}`,
             type: 'canvas_push',
             timestamp: canvasNow,
-            data: {
-              type: 'work_released',
-              agentId: canvasAgent,
-              agentColor,
-              text: 'shipped',
-              taskTitle: taskSnippet,
-              intensity: 0.8,
-              t: canvasNow,
-            },
+            data: donePushData,
           })
+          queueCanvasPushEvent(donePushData)
           emitOrbState('idle')
         } else if (parsed.status === 'blocked' && existing.status !== 'blocked') {
           // Agent is blocked — utterance from their orb + orb flips to needs-attention
+          const blockedPushData = {
+            type: 'utterance',
+            agentId: canvasAgent,
+            agentColor,
+            text: `blocked on: ${taskSnippet}`,
+            ttl: 4000,
+            t: canvasNow,
+          }
           eventBus.emit({
             id: `canvas-blocked-${canvasNow}-${task.id.slice(-6)}`,
             type: 'canvas_push',
             timestamp: canvasNow,
-            data: {
-              type: 'utterance',
-              agentId: canvasAgent,
-              agentColor,
-              text: `blocked on: ${taskSnippet}`,
-              ttl: 4000,
-              t: canvasNow,
-            },
+            data: blockedPushData,
           })
+          queueCanvasPushEvent(blockedPushData)
           emitOrbState('needs-attention', { id: task.id, title: task.title ?? '' })
         }
       }
