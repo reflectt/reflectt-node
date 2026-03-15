@@ -11375,8 +11375,39 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // POST /canvas/query — human asks the canvas a question; agent responds with a typed card
   // The response is emitted as a canvas_message event on the pulse SSE stream (no reload needed).
+  // ── Canvas session history — per-session conversation memory ───────────────
+  // Keyed by sessionId (client-generated UUID). Stores last 5 human+assistant turns.
+  // Used to inject conversation context into LLM calls so follow-up questions work.
+  // task: link/canvas-session-continuity
+  const CANVAS_SESSION_MAX_TURNS = 5
+  const CANVAS_SESSION_TTL_MS = 30 * 60 * 1000 // 30 minutes idle eviction
+  type CanvasSessionTurn = { role: 'user' | 'assistant'; content: string; ts: number }
+  const canvasSessionHistory = new Map<string, { turns: CanvasSessionTurn[]; lastAt: number }>()
+
+  function getCanvasSession(sessionId: string): CanvasSessionTurn[] {
+    const s = canvasSessionHistory.get(sessionId)
+    if (!s) return []
+    // Evict stale sessions
+    if (Date.now() - s.lastAt > CANVAS_SESSION_TTL_MS) {
+      canvasSessionHistory.delete(sessionId)
+      return []
+    }
+    return s.turns
+  }
+
+  function pushCanvasSession(sessionId: string, role: 'user' | 'assistant', content: string): void {
+    const now = Date.now()
+    const existing = canvasSessionHistory.get(sessionId) ?? { turns: [], lastAt: now }
+    existing.turns.push({ role, content, ts: now })
+    if (existing.turns.length > CANVAS_SESSION_MAX_TURNS * 2) {
+      existing.turns.splice(0, existing.turns.length - CANVAS_SESSION_MAX_TURNS * 2)
+    }
+    existing.lastAt = now
+    canvasSessionHistory.set(sessionId, existing)
+  }
+
   //
-  // Body: { query: string, agentId?: string }
+  // Body: { query: string, agentId?: string, sessionId?: string }
   // Response: { success, card: { type, data, agentId, agentColor } }
   // Card types: "tasks" | "info" | "revenue" | "onboarding"
   // SSE event: canvas_message { type, data, agentId, agentColor, query }
@@ -11387,6 +11418,12 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.status(400)
       return { success: false, message: 'query is required (max 500 chars)' }
     }
+
+    // Session continuity: client passes sessionId (UUID) so follow-up questions have context
+    const sessionId = typeof body.sessionId === 'string' && body.sessionId.length > 0
+      ? body.sessionId.trim().slice(0, 64)
+      : null
+    const sessionTurns = sessionId ? getCanvasSession(sessionId) : []
 
     // Default answering agent is link (builder — knows the codebase + task board)
     const responderId = typeof body.agentId === 'string' ? body.agentId.trim() : 'link'
@@ -11489,19 +11526,25 @@ export async function createServer(): Promise<FastifyInstance> {
       }))
       card = { type: 'hosts', data: { hosts } }
     } else {
-      // General info card — LLM answers with team context injected
+      // General info card — LLM answers with team context + session history injected
       const anthropicKey = process.env.ANTHROPIC_API_KEY
       let text = `"${query}" — I don't have enough context to answer that right now.`
       if (anthropicKey) {
         try {
-          const context = [
+          const systemPrompt = [
             `You are ${responderId}, an AI agent on Team Reflectt. Answer the user's canvas question concisely.`,
             `Current team state: ${activeAgentSummary.length > 0 ? activeAgentSummary.join('; ') : 'no agents active'}`,
             `Task board: ${doingCount} doing, ${validatingCount} validating, ${todoCount} todo`,
             `Active tasks: ${activeTasks.slice(0, 3).map(t => `${t.assignee}: ${t.title.slice(0, 40)}`).join('; ') || 'none'}`,
-            `User asked: "${query}"`,
             `Reply in 1-2 sentences max. Be specific and honest. No fluff.`,
           ].join('\n')
+
+          // Build messages array with session history for follow-up context
+          const messages: Array<{ role: 'user' | 'assistant'; content: string }> = []
+          for (const turn of sessionTurns) {
+            messages.push({ role: turn.role, content: turn.content })
+          }
+          messages.push({ role: 'user', content: query })
 
           const resp = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
@@ -11509,7 +11552,8 @@ export async function createServer(): Promise<FastifyInstance> {
             body: JSON.stringify({
               model: 'claude-haiku-4-5',
               max_tokens: 120,
-              messages: [{ role: 'user', content: context }],
+              system: systemPrompt,
+              messages,
             }),
             signal: AbortSignal.timeout(10000),
           })
@@ -11518,6 +11562,11 @@ export async function createServer(): Promise<FastifyInstance> {
             text = d.content?.[0]?.text?.trim() ?? text
           }
         } catch { /* use default */ }
+      }
+      // Store exchange in session history
+      if (sessionId) {
+        pushCanvasSession(sessionId, 'user', query)
+        pushCanvasSession(sessionId, 'assistant', text)
       }
       card = { type: 'info', data: { text } }
     }
