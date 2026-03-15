@@ -1056,6 +1056,9 @@ const NON_CODE_LANE_KEYWORDS = [
 ]
 
 function isNonCodeLane(metadata: Record<string, unknown>): boolean {
+  // Explicit top-level flag: metadata.non_code=true
+  if (metadata.non_code === true) return true
+
   const lane = normalizeLaneValue(metadata.lane)
   if (NON_CODE_LANE_KEYWORDS.some(k => lane.includes(k))) return true
 

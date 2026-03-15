@@ -128,9 +128,25 @@ export function runPrecheck(taskId: string, targetStatus: string): PrecheckResul
   // ── validating ──────────────────────────────────────────────────────
 
   if (targetStatus === 'validating') {
-    // Detect non-code task (explicit flag or lane-based)
+    // Detect non-code task — mirrors server.ts isNonCodeLane logic.
+    // Checks (in priority order):
+    //   1. metadata.non_code === true (top-level explicit flag)
+    //   2. review_handoff.non_code / doc_only / config_only
+    //   3. metadata.lane in non-code keyword list (ops/strategy/research/etc.)
+    const NON_CODE_LANE_KEYWORDS = [
+      'design', 'docs', 'documentation', 'content',
+      'ops', 'operations', 'finance', 'legal', 'admin',
+      'strategy', 'assessment', 'support', 'marketing',
+      'back-office', 'backoffice', 'research', 'planning',
+    ]
     const handoff = meta.review_handoff as Record<string, unknown> | undefined
-    const isNonCode = handoff?.non_code === true || handoff?.doc_only === true || handoff?.config_only === true
+    const lane = String(meta.lane ?? '').toLowerCase().trim()
+    const isNonCode =
+      meta.non_code === true ||
+      handoff?.non_code === true ||
+      handoff?.doc_only === true ||
+      handoff?.config_only === true ||
+      NON_CODE_LANE_KEYWORDS.some(k => lane.includes(k))
 
     // Artifact path
     const artifactPath = meta.artifact_path as string | undefined
@@ -370,6 +386,39 @@ function buildTemplate(
   }
 
   if (targetStatus === 'validating') {
+    const NON_CODE_LANE_KEYWORDS = [
+      'design', 'docs', 'documentation', 'content',
+      'ops', 'operations', 'finance', 'legal', 'admin',
+      'strategy', 'assessment', 'support', 'marketing',
+      'back-office', 'backoffice', 'research', 'planning',
+    ]
+    const meta = (task.metadata as Record<string, unknown>) || {}
+    const handoff = meta.review_handoff as Record<string, unknown> | undefined
+    const lane = String(meta.lane ?? '').toLowerCase().trim()
+    const isNonCode =
+      meta.non_code === true ||
+      handoff?.non_code === true ||
+      handoff?.doc_only === true ||
+      handoff?.config_only === true ||
+      NON_CODE_LANE_KEYWORDS.some(k => lane.includes(k))
+
+    if (isNonCode) {
+      // Non-code template: analysis, ops, strategy, docs tasks
+      // No PR/commit/qa_bundle required — review_handoff with non_code=true is sufficient
+      return {
+        status: 'validating',
+        metadata: {
+          artifact_path: autoDefaults['metadata.artifact_path'] || `process/TASK-${shortId}.md`,
+          review_handoff: {
+            task_id: task.id,
+            artifact_path: `process/TASK-${shortId}.md`,
+            known_caveats: '<required: "none" or description>',
+            non_code: true,
+          },
+        },
+      }
+    }
+
     return {
       status: 'validating',
       metadata: {
