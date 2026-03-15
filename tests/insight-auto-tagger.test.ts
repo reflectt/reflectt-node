@@ -243,4 +243,52 @@ describe('insight-auto-tagger', () => {
       expect(correctCount).toBeGreaterThanOrEqual(10)
     })
   })
+
+  // ── Regression: batch-2 deployment misclassifications (PR #1044) ─────────
+  // These titles were incorrectly tagged as 'deployment' before the fix.
+  // Generic "build" / "release" language without infra/CI context → process.
+  describe('regression: deployment family does not over-classify', () => {
+    it('does not tag "product decisions deferred to founder" as deployment', () => {
+      const result = inferFamilyFromTitle('uncategorized: product decisions deferred to founder instead of the team moving forward')
+      expect(result).not.toBe('deployment')
+    })
+
+    it('does not tag "team velocity stalls" as deployment', () => {
+      const result = inferFamilyFromTitle('uncategorized: team velocity stalls when no human is present to push')
+      expect(result).not.toBe('deployment')
+      expect(result).toBe('process')
+    })
+
+    it('does not tag "qa_bundle gate insight" as deployment', () => {
+      // This was tagged as 'ui' before — should be 'process' (QA workflow friction)
+      const result = inferFamilyFromTitle('uncategorized: qa_bundle gate rejects tasks that are clearly shipped — process overhead')
+      expect(result).not.toBe('deployment')
+    })
+
+    it('still tags real CI/infra build failures as deployment', () => {
+      // Note: 'fails' hits runtime-error first; use deploy* or pipeline-specific phrases
+      expect(inferFamilyFromTitle('uncategorized: Fly deployment blocked after infra change')).toBe('deployment')
+      expect(inferFamilyFromTitle('uncategorized: Build pipeline blocked in CI — deploy cannot proceed')).toBe('deployment')
+      expect(inferFamilyFromTitle('uncategorized: Docker build pipeline broken, CI refuses deploy')).toBe('deployment')
+    })
+
+    it('still tags PR stall insights as deployment', () => {
+      expect(inferFamilyFromTitle('uncategorized: Distribution PRs stalling — filed 3 PRs from audit but only 1 merged')).toBe('deployment')
+    })
+  })
+
+  // ── Regression: process family captures velocity/decision patterns ────────
+  describe('regression: process family gains velocity/decision patterns', () => {
+    it('tags "team velocity stalls" as process', () => {
+      expect(inferFamilyFromTitle('uncategorized: team velocity stalls when no human is present to push')).toBe('process')
+    })
+
+    it('tags "decision deferred to human" as process', () => {
+      expect(inferFamilyFromTitle('uncategorized: key decision deferred to human — team blocked for 2 days')).toBe('process')
+    })
+
+    it('tags "human sign-off required" as process', () => {
+      expect(inferFamilyFromTitle('uncategorized: every API key change requires human sign-off, slows shipping')).toBe('process')
+    })
+  })
 })
