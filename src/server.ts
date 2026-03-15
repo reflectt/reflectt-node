@@ -6338,7 +6338,7 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, error: 'reason is required — describe the external dependency (e.g. "Apple Developer credentials — Ryan required")' }
     }
 
-    const task = taskManager.getTask(resolved.id)
+    const task = resolved.task
     if (!task) {
       reply.code(404)
       return { success: false, error: 'Task not found' }
@@ -6351,7 +6351,7 @@ export async function createServer(): Promise<FastifyInstance> {
       blocked_external_at: Date.now(),
     }
 
-    const updated = taskManager.updateTask(resolved.id, { metadata: updatedMetadata })
+    const updated = await taskManager.updateTask(resolved.resolvedId, { metadata: updatedMetadata })
     if (!updated) {
       reply.code(500)
       return { success: false, error: 'Failed to update task' }
@@ -6370,7 +6370,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const resolved = resolveTaskFromParam(request.params.id, reply)
     if (!resolved) return
 
-    const task = taskManager.getTask(resolved.id)
+    const task = resolved.task
     if (!task) {
       reply.code(404)
       return { success: false, error: 'Task not found' }
@@ -6384,7 +6384,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const { blocked_external, blocked_external_reason, blocked_external_at, ...restMetadata } = (task.metadata || {}) as Record<string, unknown>
     void blocked_external; void blocked_external_reason; void blocked_external_at
 
-    const updated = taskManager.updateTask(resolved.id, { metadata: restMetadata })
+    const updated = await taskManager.updateTask(resolved.resolvedId, { metadata: restMetadata })
     if (!updated) {
       reply.code(500)
       return { success: false, error: 'Failed to update task' }
