@@ -120,12 +120,18 @@ export const DEFAULT_AUTO_TAG_RULES: AutoTagRule[] = [
     ],
   },
   {
+    // deployment requires infra/CI context — generic "build" or "release" alone is too broad
+    // (e.g. "product decisions defer to Ryan" has "release" but is a process insight)
     family: 'deployment',
     patterns: [
       '\\bdeploy(ment|ed)?\\b',
-      '\\brelease\\b',
-      '\\bbuild\\b',
-      '\\bci\\b',
+      // release/build only match when paired with infra/CI context words
+      'release.+(?:pipeline|ci|cd|fly|vercel|docker|infra)',
+      '(?:pipeline|ci|cd|fly|vercel|docker|infra).+release',
+      'build.+(?:fail|ci|cd|pipeline|infra|docker)',
+      '(?:ci|cd|pipeline|docker).+build',
+      '\\bci\\b.+(?:fail|block|broken|pass)',
+      '(?:fail|block|broken).+\\bci\\b',
       'pr.+stall',
       'stall.+pr',
       'distribution.+pr',
@@ -182,6 +188,18 @@ export const DEFAULT_AUTO_TAG_RULES: AutoTagRule[] = [
       'no.+revenue',
       'token.+patience',
       'agents.+don.?t.+read',
+      // Velocity / decision patterns — previously misclassified as deployment
+      '\\bvelocity\\b',
+      'team.+stall',
+      'stall.+team',
+      'defers?.+to.+ryan',
+      'defer.+decision',
+      'decision.+defer',
+      'product.+decision',
+      'decisions?.+defer',
+      '\\bblocked.+decision',
+      'wait.+human',
+      'human.+sign.?off',
     ],
   },
 ]
