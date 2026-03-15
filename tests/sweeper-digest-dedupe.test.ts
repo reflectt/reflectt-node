@@ -26,7 +26,12 @@ vi.mock('../src/tasks.js', () => ({
     getTask: () => undefined,
     getTaskComments: () => [],
     listTasks: () => [],
-    resolveTaskId: () => ({ task: undefined, canonicalId: undefined }),
+    // Return a live-looking task so the race-guard in escalateViolations()
+    // does not filter out test violations (race-guard was added in PR #1034).
+    resolveTaskId: (id: string) => ({
+      task: { id, status: 'validating', metadata: {} },
+      canonicalId: id,
+    }),
     patchTaskMetadata: () => {},
     updateTask: async () => {},
   },
