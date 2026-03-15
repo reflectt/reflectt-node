@@ -9336,12 +9336,21 @@ export async function createServer(): Promise<FastifyInstance> {
           emitOrbState('handoff', { id: task.id, title: task.title ?? '' })
         } else if (parsed.status === 'done' && existing.status !== 'done') {
           // Agent closes task — burst from their orb + orb returns to idle
+          // Enrich with PR metadata for proof artifact card on canvas
+          const donePrUrl = (mergedMeta as any)?.review_handoff?.pr_url
+            || (mergedMeta as any)?.pr_url
+            || undefined
+          const doneChangedFiles: string[] = Array.isArray((mergedMeta as any)?.qa_bundle?.changed_files)
+            ? ((mergedMeta as any).qa_bundle.changed_files as string[]).slice(0, 5)
+            : []
           const donePushData = {
             type: 'work_released',
             agentId: canvasAgent,
             agentColor,
             text: 'shipped',
             taskTitle: taskSnippet,
+            prUrl: donePrUrl,
+            changedFiles: doneChangedFiles.length > 0 ? doneChangedFiles : undefined,
             intensity: 0.8,
             t: canvasNow,
           }
