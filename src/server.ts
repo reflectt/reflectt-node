@@ -14362,13 +14362,19 @@ If your heartbeat shows **no active task** and **no next task**:
     }
     const shortId = lookup.resolvedId.replace(/^task-\d+-/, '')
     const branch = `${body.agent}/task-${shortId}`
+    // Inject default eta when absent — prevents 500 on the doing-status gate
+    const existingMeta = (task.metadata || {}) as Record<string, unknown>
+    const etaDefault = !existingMeta.eta
+      ? ({ P0: '~2h', P1: '~2h', P2: '~4h', P3: '~4h' }[task.priority || 'P2'] ?? '~4h')
+      : undefined
     const updated = await taskManager.updateTask(lookup.resolvedId, {
       assignee: body.agent,
       status: 'doing',
       metadata: {
-        ...(task.metadata || {}),
+        ...existingMeta,
         actor: body.agent,
         branch,
+        ...(etaDefault ? { eta: etaDefault } : {}),
       },
     })
     return { success: true, task: updated ? enrichTaskWithComments(updated) : null, resolvedId: lookup.resolvedId }
