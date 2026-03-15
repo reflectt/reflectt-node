@@ -5,6 +5,7 @@
 import { getDb, safeJsonStringify, safeJsonParse } from './db.js'
 import { eventBus } from './events.js'
 import type { Reflection } from './reflections.js'
+import { autoTagInsightIfUncategorized } from './insight-auto-tagger.js'
 
 
 // ── Constants ──
@@ -640,6 +641,11 @@ function createInsight(key: InsightClusterKey, clusterKeyStr: string, reflection
     safeJsonStringify(metadata),
     now, now,
   )
+
+  // Auto-tag: if family defaulted to 'uncategorized', attempt keyword-rule reclassification.
+  if (key.failure_family === 'uncategorized') {
+    autoTagInsightIfUncategorized(id, title, clusterKeyStr)
+  }
 
   if (shouldPromote) {
     eventBus.emit({

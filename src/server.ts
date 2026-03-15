@@ -184,6 +184,7 @@ import { startSelfKeepalive, stopSelfKeepalive, getSelfKeepaliveStatus, detectWa
 // polls.ts imported dynamically where needed
 import { pauseTarget, unpauseTarget, checkPauseStatus, listPauseEntries } from './pause-controls.js'
 import { isLocalWhisperAvailable, transcribeLocally } from './local-whisper.js'
+import { inferFamilyFromTitle, backfillUncategorizedInsights, getAutoTagRules, setAutoTagRules, resetAutoTagRules, autoTagInsightIfUncategorized, DEFAULT_AUTO_TAG_RULES, type AutoTagRule } from './insight-auto-tagger.js'
 
 // Schemas
 const ChatAttachmentSchema = z.object({
@@ -12930,6 +12931,55 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     return { success: true, dry_run: false, scanned: orphans.length, created, skipped, errors, details }
+  })
+
+  // ── Insight auto-tagger ────────────────────────────────────────────────────
+
+  // GET /insights/auto-tag/rules — return current keyword rule set
+  app.get('/insights/auto-tag/rules', async () => {
+    return { rules: getAutoTagRules(), default_count: DEFAULT_AUTO_TAG_RULES.length }
+  })
+
+  // PUT /insights/auto-tag/rules — replace rule set at runtime
+  app.put('/insights/auto-tag/rules', async (request, reply) => {
+    const body = request.body as { rules?: AutoTagRule[] }
+    if (!Array.isArray(body?.rules)) {
+      reply.code(400)
+      return { success: false, error: 'Body must be { rules: AutoTagRule[] }' }
+    }
+    setAutoTagRules(body.rules)
+    return { success: true, count: body.rules.length }
+  })
+
+  // DELETE /insights/auto-tag/rules — reset to defaults
+  app.delete('/insights/auto-tag/rules', async () => {
+    resetAutoTagRules()
+    return { success: true, message: 'Rules reset to defaults', count: DEFAULT_AUTO_TAG_RULES.length }
+  })
+
+  // POST /insights/auto-tag/backfill — reclassify all uncategorized insights
+  // Query: dry_run=true to preview without writing
+  app.post('/insights/auto-tag/backfill', async (request) => {
+    const q = request.query as Record<string, string>
+    const dryRun = q.dry_run === 'true' || q.dry_run === '1'
+    const summary = backfillUncategorizedInsights(dryRun)
+    return { success: true, dry_run: dryRun, ...summary }
+  })
+
+  // POST /insights/:id/auto-tag — re-run auto-tag on a single insight
+  app.post<{ Params: { id: string } }>('/insights/:id/auto-tag', async (request, reply) => {
+    const { id } = request.params
+    const insight = getInsight(id)
+    if (!insight) {
+      reply.code(404)
+      return { success: false, error: 'Insight not found' }
+    }
+    const newFamily = inferFamilyFromTitle(insight.title)
+    if (!newFamily || newFamily === insight.failure_family) {
+      return { success: true, changed: false, family: insight.failure_family }
+    }
+    autoTagInsightIfUncategorized(id, insight.title, insight.cluster_key)
+    return { success: true, changed: true, old_family: insight.failure_family, new_family: newFamily }
   })
 
   // Insight→Task bridge stats
