@@ -200,6 +200,20 @@ export async function tickContinuityLoop(): Promise<{
 
     if (unblockedTodo.length >= config.minReady) continue
 
+    // Auto-fill gate: only fill when agent is truly idle (todo=0 AND doing=0).
+    // If the agent is actively working on something, let them finish first.
+    // blocked_external doing tasks also skip — external dependency, not idleness.
+    const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
+    if (doingTasks.length > 0) continue
+
+    // Skip agents whose current task is blocked on an external dependency
+    const hasBlockedExternal = taskManager.listTasks({ assignee: agent })
+      .some(t => (t.metadata as any)?.blocked_external === true)
+    if (hasBlockedExternal) continue
+
+    // [continuity-loop] auto-fill triggered
+    console.log(`[continuity-loop] auto-fill: @${agent} queue empty (todo=0, doing=0) — generating tasks`)
+
     // Queue is below floor — attempt replenishment
     const deficit = config.minReady - unblockedTodo.length
 
