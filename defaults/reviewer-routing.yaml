@@ -31,4 +31,4 @@ domains:
     primary: link
     fallback: kai
 
-catch_all: kai
+catch_all: sage
