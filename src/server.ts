@@ -6757,7 +6757,7 @@ export async function createServer(): Promise<FastifyInstance> {
     example: Record<string, unknown>
   }> = {
     bug: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description', 'metadata.source', 'metadata.steps_to_reproduce'],
       min_done_criteria: 1,
       title_hint: 'Describe what is broken: "Bug: [component] — [symptom] when [action]"',
@@ -6774,7 +6774,7 @@ export async function createServer(): Promise<FastifyInstance> {
       },
     },
     feature: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description', 'metadata.spec_link'],
       min_done_criteria: 2,
       title_hint: 'Describe the user-facing outcome: "Feature: [what] — [user benefit]"',
@@ -6790,7 +6790,7 @@ export async function createServer(): Promise<FastifyInstance> {
       },
     },
     process: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description'],
       min_done_criteria: 1,
       title_hint: 'Describe the process change: "Process: [what changes] — [why]"',
@@ -6806,7 +6806,7 @@ export async function createServer(): Promise<FastifyInstance> {
       },
     },
     docs: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description', 'metadata.doc_path'],
       min_done_criteria: 1,
       title_hint: 'Describe what docs need: "Docs: [topic] — [what is missing/wrong]"',
@@ -6822,7 +6822,7 @@ export async function createServer(): Promise<FastifyInstance> {
       },
     },
     chore: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority'],
       recommended_fields: ['description'],
       min_done_criteria: 1,
       title_hint: 'Describe the maintenance task: "Chore: [what] — [why now]"',
@@ -6842,9 +6842,12 @@ export async function createServer(): Promise<FastifyInstance> {
   // Task intake schema (discovery endpoint)
   app.get('/tasks/intake-schema', async () => {
     return {
-      required: ['title', 'assignee', 'done_criteria', 'eta', 'createdBy', 'priority'],
-      optional: ['type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'teamId', 'metadata', 'reviewer'],
-      notes: { reviewer: 'Defaults to "auto" — load-balanced assignment based on role, affinity, and SLA risk. Set explicitly to override.' },
+      required: ['title', 'assignee', 'done_criteria', 'createdBy', 'priority'],
+      optional: ['eta', 'type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'teamId', 'metadata', 'reviewer'],
+      notes: {
+        reviewer: 'Defaults to "auto" — load-balanced assignment based on role, affinity, and SLA risk. Set explicitly to override.',
+        eta: 'Optional. If absent, defaults to ~2h (P0/P1) or ~4h (P2/P3) when status transitions to doing. Provide explicit ETA for better SLA tracking.',
+      },
       types: TASK_TYPES,
       templates: TASK_TEMPLATES,
       type_requirements: {
