@@ -343,6 +343,15 @@ async function _doTick(): Promise<{
     }
 
     if (shouldNudge) {
+      // Lane-aware suppression: skip nudge if agent has no unblocked todo tasks.
+      // Agents whose in-lane queue is genuinely empty cannot take new work —
+      // nudging them is a false positive (they're compliant, not idle).
+      const unblockedTodo = taskManager.listTasks({
+        status: 'todo',
+        assigneeIn: [agent],
+      }).filter(t => t.status === 'todo')
+      if (unblockedTodo.length === 0) continue
+
       // 4-tier dispatch per SIGNAL-ROUTING Change 2
       const tier = getReflectionTier(agent, lastReflection, false, now)
       if (tier !== 'none') {
