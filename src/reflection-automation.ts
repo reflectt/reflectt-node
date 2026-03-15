@@ -152,7 +152,7 @@ export async function dispatchReflectionTier(
 
     case 'immediate': {
       const msg = `🪞 @${agent} task complete — good moment to reflect. POST /reflections.`
-      batchNag(config.channel || 'general', msg)
+      batchNag('ops', msg)
       return
     }
   }

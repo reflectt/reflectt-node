@@ -886,6 +886,25 @@ export function hasRequiredArtifacts(meta: Record<string, unknown>): boolean {
 async function escalateViolations(violations: SweepViolation[]): Promise<void> {
   if (violations.length === 0) return
 
+  // ── Race-guard: drop violations for tasks that have since closed or been approved ──
+  // Between sweep snapshot and dispatch, a task may have transitioned to done/cancelled
+  // or received reviewer approval. Sending pings for closed/approved tasks wastes agent
+  // cycles and erodes trust in review notifications.
+  const liveViolations = violations.filter(v => {
+    const lookup = taskManager.resolveTaskId(v.taskId)
+    if (!lookup.task) return false // task deleted — suppress
+    const { status, metadata } = lookup.task
+    if (status === 'done' || status === 'cancelled') return false // already closed
+    const meta = (metadata || {}) as Record<string, unknown>
+    if (meta.reviewer_approved === true || meta.review_state === 'approved') return false // already approved
+    return true
+  })
+  if (liveViolations.length === 0) {
+    logDryRun('sweeper_digest_suppressed_race', `all ${violations.length} violation(s) stale at dispatch time`)
+    return
+  }
+  violations = liveViolations
+
   // Digest-level dedupe: don't re-emit the same digest repeatedly while unchanged.
   // Scope: process-local/in-memory only. The suppression window survives repeated
   // sweeps in the same runtime, but resets on process restart.

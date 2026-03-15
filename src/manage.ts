@@ -6,7 +6,7 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME, DATA_DIR } from './config.js'
-import { readFileSync, existsSync, statSync } from 'fs'
+import { readFileSync, existsSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 // ── Auth helper ──────────────────────────────────────────────────────
@@ -215,6 +215,34 @@ export function registerManageRoutes(app: FastifyInstance, deps: {
       }
     }
 
+    // Write context snapshot so agents can resume without full state reconstruction
+    try {
+      const { taskManager } = await import('./tasks.js')
+      const { presenceManager } = await import('./presence.js')
+      const snapshot = {
+        restart_at: new Date().toISOString(),
+        restart_method: method,
+        doing_tasks: taskManager.listTasks({ status: 'doing' }).map(t => ({
+          id: t.id,
+          title: t.title,
+          assignee: t.assignee,
+          reviewer: t.reviewer,
+        })),
+        validating_tasks: taskManager.listTasks({ status: 'validating' }).map(t => ({
+          id: t.id,
+          title: t.title,
+          assignee: t.assignee,
+          reviewer: t.reviewer,
+        })),
+        presence: presenceManager.getAllPresence(),
+      }
+      const snapshotPath = join(DATA_DIR, 'restart-context.json')
+      writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2), 'utf-8')
+      console.log(`[manage] restart context snapshot written → ${snapshotPath}`)
+    } catch (err) {
+      console.warn('[manage] failed to write restart context snapshot:', (err as Error)?.message || err)
+    }
+
     // Respond first, then restart
     reply.send({
       status: 'restarting',
@@ -232,6 +260,23 @@ export function registerManageRoutes(app: FastifyInstance, deps: {
         process.kill(process.pid, 'SIGTERM')
       }
     }, 500)
+  })
+
+  // GET /manage/restart-context — read last restart snapshot (agents use on boot to resume)
+  app.get('/manage/restart-context', async (request, reply) => {
+    if (!checkManageAuth(request, reply)) return
+    const snapshotPath = join(DATA_DIR, 'restart-context.json')
+    if (!existsSync(snapshotPath)) {
+      reply.code(404)
+      return { error: 'No restart context snapshot found', hint: 'Snapshot is written on graceful restart via POST /manage/restart' }
+    }
+    try {
+      const raw = readFileSync(snapshotPath, 'utf-8')
+      return JSON.parse(raw)
+    } catch (err) {
+      reply.code(500)
+      return { error: 'Failed to read restart context', details: String((err as Error)?.message || err) }
+    }
   })
 
   // GET /manage/disk — data directory sizes (for capacity monitoring)
