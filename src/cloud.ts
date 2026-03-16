@@ -1427,12 +1427,13 @@ async function syncCanvas(): Promise<void> {
       try {
         const s = JSON.parse(row.settings)
         if (s.avatar?.content) {
-          if (!agents[row.agent_id]) {
-            // Agent has an avatar but no active canvas state — add a floor stub so
-            // the custom orb reaches the cloud even without a canvas/state post.
-            agents[row.agent_id] = { state: 'floor', sensors: null, payload: {}, updatedAt: Date.now() } as Record<string, unknown>
+          if (agents[row.agent_id]) {
+            // Agent already has a canvas state — just inject the avatar string
+            (agents[row.agent_id] as Record<string, unknown>).avatar = s.avatar.content
           }
-          (agents[row.agent_id] as Record<string, unknown>).avatar = s.avatar.content
+          // No floor stub for agents without canvas state — this was causing extra
+          // agents to appear in the canvas constellation and fighting SSE presence updates.
+          // Avatars only render when the agent has an active canvas state.
         }
       } catch { /* skip */ }
     }
