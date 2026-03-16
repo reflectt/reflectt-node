@@ -11806,12 +11806,23 @@ export async function createServer(): Promise<FastifyInstance> {
       //
       // This replaces the old standalone LLM call that had no real agent context.
       // The agents ARE the product — queries go to them, not to a disconnected API key.
+      //
+      // Route: DM to the responder agent on #general (agents subscribe to #general
+      // by default — 'canvas' channel is NOT in DEFAULT_INBOX_SUBSCRIPTIONS, so
+      // messages posted there are never seen by agents).
       try {
         await chatManager.sendMessage({
           from: 'human',
-          content: `[canvas] ${query}`,
-          channel: 'canvas',
-          metadata: { source: 'canvas_query', sessionId, responderId, timestamp: Date.now() },
+          to: responderId,
+          content: `[canvas] @${responderId} ${query}`,
+          channel: 'general',
+          metadata: {
+            source: 'canvas_query',
+            sessionId,
+            responderId,
+            timestamp: Date.now(),
+            reply_via: 'canvas_push', // tells the agent to respond via POST /canvas/push
+          },
         })
       } catch {
         // Chat delivery failure is non-fatal — still show the thinking card
@@ -11842,6 +11853,56 @@ export async function createServer(): Promise<FastifyInstance> {
     })
 
     return { success: true, card: { ...card, agentId: responderId, agentColor } }
+  })
+
+  // ── Canvas query response bridge ───────────────────────────────────────────
+  // When an agent responds to a [canvas] query (via chat), convert their response
+  // into a canvas_message event so the browser canvas can display it.
+  // This bridges: agent chat response → canvas card.
+  eventBus.on('canvas-query-response-bridge', (event) => {
+    if (event.type !== 'message_posted') return
+    const data = event.data as Record<string, unknown>
+    const content = String(data.content ?? '')
+    const from = String(data.from ?? '')
+    const channel = String(data.channel ?? '')
+
+    // Only bridge messages from agents (not from 'human' or 'system')
+    if (from === 'human' || from === 'system' || from === 'github') return
+
+    // Detect canvas responses: messages that start with [canvas-response] or
+    // are on the canvas channel from an agent, or mention [canvas] in reply
+    const isCanvasResponse = content.startsWith('[canvas-response]')
+      || content.startsWith('[canvas]')
+      || (channel === 'canvas' && from !== 'human')
+    if (!isCanvasResponse) return
+
+    // Strip the [canvas-response] / [canvas] prefix
+    const cleanContent = content
+      .replace(/^\[canvas-response\]\s*/i, '')
+      .replace(/^\[canvas\]\s*/i, '')
+      .trim()
+    if (!cleanContent) return
+
+    const IDENTITY_COLORS_BRIDGE: Record<string, string> = {
+      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      rhythm: '#a3e635', swift: '#38bdf8',
+    }
+    const agentColor = IDENTITY_COLORS_BRIDGE[from] ?? '#94a3b8'
+
+    // Emit as canvas_message — browser pulse stream picks it up
+    eventBus.emit({
+      id: `cmsg-response-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type: 'canvas_message' as const,
+      timestamp: Date.now(),
+      data: {
+        type: 'info',
+        data: { text: cleanContent },
+        agentId: from,
+        agentColor,
+        isResponse: true,
+      },
+    })
   })
 
   // POST /canvas/push — agent self-initiates a canvas event without a human query.
