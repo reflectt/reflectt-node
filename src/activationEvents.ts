@@ -37,6 +37,8 @@ export type ActivationEventType =
   | 'first_task_completed'
   | 'first_team_message_sent'
   | 'day2_return_action'
+  | 'canvas_opened'
+  | 'canvas_first_action'
 
 /**
  * Reason codes for workspace_not_ready events.
@@ -245,6 +247,8 @@ export function getUserFunnelState(userId: string): UserFunnelState {
     first_task_completed: null,
     first_team_message_sent: null,
     day2_return_action: null,
+    canvas_opened: null,        // tracked but not a forward funnel step
+    canvas_first_action: null,  // tracked but not a forward funnel step
   }
 
   let currentStep = 0
@@ -303,6 +307,8 @@ export function getFunnelSummary(opts?: { raw?: boolean }): {
     first_task_completed: 0,
     first_team_message_sent: 0,
     day2_return_action: 0,
+    canvas_opened: 0,
+    canvas_first_action: 0,
   }
 
   const funnelByUser: UserFunnelState[] = []
@@ -623,6 +629,8 @@ export function getWeeklyTrends(weekCount = 12): WeeklyTrend[] {
       first_task_completed: 0,
       first_team_message_sent: 0,
       day2_return_action: 0,
+      canvas_opened: 0,
+      canvas_first_action: 0,
     }
 
     let newUsers = 0
