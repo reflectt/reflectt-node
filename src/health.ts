@@ -20,6 +20,7 @@ import { taskManager } from './tasks.js'
 import { routeMessage } from './messageRouter.js'
 import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
+import { getAgentLane } from './lane-config.js'
 import { getDb } from './db.js'
 import { policyManager } from './policy.js'
 import { recordSystemLoopTick } from './system-loop-state.js'
@@ -2043,8 +2044,25 @@ class TeamHealthMonitor {
         // ready queue returns nothing. Uses same logic as GET /tasks/next?agent=<id> —
         // respects WIP limits, lane matching, assignment, and blocked-by rules.
         // An agent with nothing pullable is compliant, not idle.
+        //
+        // Lane-scoped check: getNextTask already applies lane-aware filtering, so for
+        // artdirector (design lane) it will only return design-lane tasks. If the design
+        // queue is empty, suppress — even if other lanes have work available.
+        // This prevents false idle escalations for lane-specific agents (e.g. artdirector,
+        // support) who cannot pull cross-lane tasks.
+        const agentLane = getAgentLane(agent)
         const nextAvailable = taskManager.getNextTask(agent)
-        if (!nextAvailable) {
+        // Lane-scoped queue-empty check: if the agent has a lane, verify the next
+        // available task is actually in their lane. getNextTask can return directly-assigned
+        // tasks from any lane; we should only escalate if artdirector has design work available.
+        const isLaneEmpty = !nextAvailable || (
+          agentLane !== null && nextAvailable.metadata !== undefined && (() => {
+            const taskLane = (nextAvailable.metadata as Record<string, unknown> | null)?.lane
+            // If task has an explicit lane and it's different from agent's lane, treat as empty
+            return typeof taskLane === 'string' && taskLane !== agentLane.name
+          })()
+        )
+        if (isLaneEmpty) {
           decisions.push({ ...baseDecision, decision: 'none', reason: 'queue-empty-suppressed', renderedMessage: null })
           continue
         }
