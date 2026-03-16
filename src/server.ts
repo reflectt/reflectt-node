@@ -11783,6 +11783,11 @@ export async function createServer(): Promise<FastifyInstance> {
     // Also queue for cloud relay — reaches browsers via syncCanvas push_events[]
     queueCanvasPushEvent({ type: 'canvas_takeover', ...takeoverEventData, t: now })
 
+    // Track canvas_first_action activation event (idempotent — fires once per agentId)
+    // task-1773692063045-f3ggtwnbr
+    const { emitActivationEvent: emitAct } = await import('./activationEvents.js')
+    emitAct('canvas_first_action', agentId, { action: 'canvas_takeover' }).catch(() => {})
+
     return { success: true, id, expiresAt: now + duration }
   })
 
@@ -12598,6 +12603,11 @@ export async function createServer(): Promise<FastifyInstance> {
     // Queue for cloud relay — reaches browsers on app.reflectt.ai via syncCanvas push_events[]
     // task-1773690756100
     queueCanvasPushEvent({ ...payload, _event: 'canvas_push' })
+
+    // Track canvas_first_action activation event (idempotent — fires once per agentId)
+    // task-1773692063045-f3ggtwnbr
+    const { emitActivationEvent: emitActPush } = await import('./activationEvents.js')
+    emitActPush('canvas_first_action', agentId, { action: 'canvas_push', pushType: type }).catch(() => {})
 
     return { success: true, type, agentId }
   })

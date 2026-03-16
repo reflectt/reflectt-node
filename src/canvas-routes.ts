@@ -15,6 +15,7 @@
  */
 
 import type { FastifyInstance } from 'fastify'
+import { emitActivationEvent } from './activationEvents.js'
 
 // ── Types ──
 
@@ -54,7 +55,13 @@ export const SENSOR_VALUES = [
 export async function canvasReadRoutes(app: FastifyInstance, deps: CanvasRouteDeps) {
 
   // GET /canvas/states — valid state + sensor values (discovery)
-  app.get('/canvas/states', async () => ({
+  app.get('/canvas/states', async (request) => {
+    const query = request.query as Record<string, unknown>
+    const userId = typeof query.userId === 'string' && query.userId.trim()
+      ? query.userId.trim()
+      : 'anonymous'
+    emitActivationEvent('canvas_opened', userId).catch(() => {})
+    return ({
     states: CANVAS_STATES,
     sensors: SENSOR_VALUES,
     schema: {
@@ -63,7 +70,8 @@ export async function canvasReadRoutes(app: FastifyInstance, deps: CanvasRouteDe
       agentId: 'required — which agent is driving the canvas',
       payload: 'optional — text, media, decision, agents, summary',
     },
-  }))
+  })
+  })
 
   // GET /canvas/slots — current active slots
   app.get('/canvas/slots', async () => {
