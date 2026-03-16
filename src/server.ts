@@ -158,7 +158,7 @@ import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats }
 import { startOpenClawUsageSync, stopOpenClawUsageSync, syncOpenClawUsage } from './openclaw-usage-sync.js'
 import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
-import { canvasReadRoutes } from './canvas-routes.js'
+import { canvasReadRoutes, formatRecency } from './canvas-routes.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
@@ -11051,80 +11051,31 @@ export async function createServer(): Promise<FastifyInstance> {
       attention: (entry.payload as any)?.attention,
     }
   })
-
-  // GET /canvas/presence — all agents as AgentPresence[] (for presence surface)
-  app.get('/canvas/presence', async () => {
-    const agents: Array<{
-      name: string
-      identityColor: string
-      state: PresenceState
-      activeTask?: { title: string; id: string }
-      recency: string
-      attention?: { type: string; taskId: string; label?: string }
-    }> = []
-
-    for (const [agentId, entry] of canvasStateMap) {
-      const presenceState: PresenceState =
-        (entry.payload as any)?.presenceState ||
-        (entry.state === 'decision' || entry.state === 'urgent' ? 'needs-attention' :
-         entry.state === 'thinking' || entry.state === 'rendering' ? 'working' : 'idle')
-
-      agents.push({
-        name: agentId,
-        identityColor: AGENT_IDENTITY_COLORS[agentId] || '#9ca3af',
-        state: presenceState,
-        activeTask: (entry.payload as any)?.activeTask,
-        recency: formatRecency(entry.updatedAt),
-        attention: (entry.payload as any)?.attention,
-      })
-    }
-
-    return { agents, count: agents.length }
-  })
-
-  function formatRecency(updatedAt: number): string {
-    const diff = Date.now() - updatedAt
-    if (diff < 60_000) return 'just now'
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-    return `${Math.floor(diff / 86_400_000)}d ago`
-  }
-
-  // GET /canvas/state — current state for all agents (or one)
-  app.get('/canvas/state', async (request) => {
-    const query = request.query as { agentId?: string }
-
-    // Helper: get most recent chat message for an agent
-    function getLastMessage(agentId: string): { content: string; timestamp: number } | null {
-      try {
-        const _db = getDb()
-        const row = _db.prepare(
-          `SELECT content, timestamp FROM chat_messages WHERE "from" = ? AND "to" IS NULL ORDER BY timestamp DESC LIMIT 1`
-        ).get(agentId) as { content: string; timestamp: number } | undefined
-        return row ?? null
-      } catch {
-        return null
+  // Flow expression log — shared state for flow-score calculation (in canvas-routes.ts)
+  const flowExpressionLog: Array<{ t: number }> = []
+  ;(function trackExpressionVelocity() {
+    const listenerId = 'flow-score-tracker'
+    eventBus.on(listenerId, (event) => {
+      if (event.type === 'canvas_expression') {
+        flowExpressionLog.push({ t: Date.now() })
+        const cutoff = Date.now() - 10 * 60 * 1000
+        while (flowExpressionLog.length > 0 && flowExpressionLog[0]!.t < cutoff) {
+          flowExpressionLog.shift()
+        }
       }
-    }
+    })
+  })()
 
-    if (query.agentId) {
-      const entry = canvasStateMap.get(query.agentId)
-      const base = entry ?? { state: 'floor', sensors: null, payload: {}, updatedAt: null }
-      return { ...base, lastMessage: getLastMessage(query.agentId) }
-    }
-    const all: Record<string, unknown> = {}
-    for (const [id, entry] of canvasStateMap) {
-      all[id] = { ...entry, lastMessage: getLastMessage(id) }
-    }
-    return { agents: all, count: canvasStateMap.size }
-  })
-
-  // ── Canvas read routes (Phase 1 extraction) ──────────────────────────
-  // GET /canvas/states, /canvas/slots, /canvas/slots/all, /canvas/rejections
-  // Extracted to src/canvas-routes.ts
+  // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
+  // Phase 1: states, slots, slots/all, rejections
+  // Phase 2: presence, state, flow-score, team/mood
   await app.register(canvasReadRoutes, {
+    canvasStateMap,
     canvasSlots: { getActive: () => canvasSlots.getActive(), getAll: () => canvasSlots.getAll(), getStats: () => canvasSlots.getStats() },
+    agentIdentityColors: AGENT_IDENTITY_COLORS,
+    getDb,
     getRecentRejections,
+    flowExpressionLog,
   } as any)
   // POST /canvas/gaze — client fires when user holds cursor/gaze on an agent orb for ≥3 seconds.
   // The agent "notices" and responds: generates a one-line thought about what they're doing,
@@ -11412,168 +11363,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // GET /canvas/flow-score — real-time team flow metric (0–1).
-  // Drives sub-bass amplitude, particle density, breathing rate on the canvas.
-  // Factors: active agents, state distribution, expression velocity, time of day.
-  // <50ms response. Safe to poll at 30s intervals.
-  // Returns: { score, factors: { agents, velocity, expressions, timeOfDay }, label }
-  const flowExpressionLog: Array<{ t: number }> = []
-
-  // Hook into eventBus to track expression velocity
-  ;(function trackExpressionVelocity() {
-    const listenerId = 'flow-score-tracker'
-    eventBus.on(listenerId, (event) => {
-      if (event.type === 'canvas_expression') {
-        flowExpressionLog.push({ t: Date.now() })
-        // Keep only last 10 minutes
-        const cutoff = Date.now() - 10 * 60 * 1000
-        while (flowExpressionLog.length > 0 && flowExpressionLog[0]!.t < cutoff) {
-          flowExpressionLog.shift()
-        }
-      }
-    })
-  })()
-
-  app.get('/canvas/flow-score', async () => {
-    const now = Date.now()
-    const STALE_MS = 10 * 60 * 1000
-    const WINDOW_5M = 5 * 60 * 1000
-
-    // Factor 1: active agents (normalized — 4 agents = 1.0)
-    const activeEntries = [...canvasStateMap.entries()].filter(([, e]) => now - e.updatedAt < STALE_MS)
-    const agentScore = Math.min(1.0, activeEntries.length / 4)
-
-    // Factor 2: state distribution — working/rendering/thinking = high flow, idle = low
-    const HIGH_FLOW_STATES = new Set(['working', 'rendering', 'thinking', 'decision'])
-    const flowingCount = activeEntries.filter(([, e]) => HIGH_FLOW_STATES.has(e.state)).length
-    const velocityFromStates = activeEntries.length > 0 ? flowingCount / activeEntries.length : 0
-
-    // Factor 3: expression velocity — how many canvas_expressions in last 5 min
-    const recent = flowExpressionLog.filter(e => e.t > now - WINDOW_5M).length
-    const expressionScore = Math.min(1.0, recent / 20) // 20 expressions in 5min = max
-
-    // Factor 4: time of day — peak hours 9am-10pm, low late night
-    const hour = new Date(now).getHours()
-    const timeScore = hour >= 9 && hour <= 22 ? 1.0 : hour >= 6 && hour <= 8 ? 0.5 : 0.2
-
-    // Weighted composite
-    const score = Math.round((
-      agentScore        * 0.30 +
-      velocityFromStates * 0.35 +
-      expressionScore   * 0.25 +
-      timeScore         * 0.10
-    ) * 100) / 100
-
-    const label =
-      score >= 0.8 ? 'surge' :
-      score >= 0.6 ? 'flow' :
-      score >= 0.4 ? 'grinding' :
-      score >= 0.2 ? 'quiet' : 'idle'
-
-    return {
-      score,
-      label,
-      factors: {
-        agents: Math.round(agentScore * 100) / 100,
-        velocity: Math.round(velocityFromStates * 100) / 100,
-        expressions: Math.round(expressionScore * 100) / 100,
-        timeOfDay: timeScore,
-      },
-      activeAgents: activeEntries.length,
-      expressionsLast5m: recent,
-    }
-  })
-
   // /canvas/slots + /canvas/slots/all → canvas-routes.ts plugin
-
-  // GET /canvas/team/mood — derived collective mood of all active agents
-  // Returns teamRhythm, tension, ambientPulse, dominantColor. Used by living canvas for atmosphere shifts.
-  app.get('/canvas/team/mood', async () => {
-    const now = Date.now()
-    const STALE_MS = 10 * 60 * 1000 // ignore agents silent >10m
-
-    const states: string[] = []
-    const agentNames: string[] = []
-
-    for (const [agentId, entry] of canvasStateMap) {
-      if (now - entry.updatedAt > STALE_MS) continue
-      states.push(entry.state)
-      agentNames.push(agentId)
-    }
-
-    const activeCount = states.length
-    const urgentCount = states.filter(s => s === 'urgent').length
-    const decisionCount = states.filter(s => s === 'decision').length
-    const renderingCount = states.filter(s => s === 'rendering').length
-    const thinkingCount = states.filter(s => s === 'thinking').length
-    const idleCount = states.filter(s => s === 'floor' || s === 'ambient').length
-    const workingCount = activeCount - idleCount
-
-    // Blocked task count from DB
-    let blockedTasks = 0
-    let pendingDecisions = 0
-    try {
-      const db = getDb()
-      const row = db.prepare(`SELECT COUNT(*) as n FROM tasks WHERE status = 'blocked'`).get() as { n: number }
-      blockedTasks = row?.n ?? 0
-      const drow = db.prepare(`SELECT COUNT(*) as n FROM tasks WHERE status = 'doing' AND priority IN ('P0','P1')`).get() as { n: number }
-      pendingDecisions = decisionCount + (drow?.n ?? 0)
-    } catch { /* non-fatal */ }
-
-    // tension: 0.0–1.0
-    // Driven by: blocked tasks, urgent agents, unresolved decisions, idle ratio
-    const tensionRaw =
-      (urgentCount * 0.35) +
-      (decisionCount * 0.25) +
-      (Math.min(blockedTasks, 5) * 0.08) +
-      (activeCount > 0 ? (1 - idleCount / activeCount) * 0.10 : 0)
-    const tension = Math.min(1.0, tensionRaw)
-
-    // teamRhythm: the collective feel
-    const teamRhythm: string =
-      urgentCount > 0 ? 'surge' :
-      activeCount === 0 || idleCount === activeCount ? 'quiet' :
-      decisionCount > 0 && workingCount > 0 ? 'tense' :
-      renderingCount + thinkingCount >= Math.max(1, activeCount * 0.6) ? 'flow' :
-      'grinding'
-
-    // dominantState: most "energetic" state present
-    const dominantState: string =
-      urgentCount > 0 ? 'urgent' :
-      decisionCount > 0 ? 'decision' :
-      renderingCount > 0 ? 'rendering' :
-      thinkingCount > 0 ? 'thinking' :
-      workingCount > 0 ? 'working' :
-      'idle'
-
-    // ambientPulse: background breathing rate
-    const ambientPulse: string =
-      teamRhythm === 'surge' ? 'fast' :
-      teamRhythm === 'flow' ? 'normal' :
-      teamRhythm === 'tense' ? 'slow' :
-      'slow'
-
-    // Dominant agent identity color (most active non-floor agent)
-    let dominantColor = '#60a5fa' // default link blue
-    for (const [agentId, entry] of canvasStateMap) {
-      if (entry.state !== 'floor' && entry.state !== 'ambient') {
-        dominantColor = AGENT_IDENTITY_COLORS[agentId] ?? dominantColor
-        break
-      }
-    }
-
-    return {
-      mood: {
-        teamRhythm,        // 'quiet' | 'flow' | 'grinding' | 'tense' | 'surge'
-        dominantState,     // most energetic state in the room
-        tension,           // 0.0–1.0
-        ambientPulse,      // 'slow' | 'normal' | 'fast'
-        dominantColor,     // hex — background tint driven by most active agent
-        activeAgents: agentNames,
-        counts: { active: activeCount, urgent: urgentCount, rendering: renderingCount, thinking: thinkingCount, decision: decisionCount, idle: idleCount, blocked: blockedTasks },
-      },
-      generated_at: new Date(now).toISOString(),
-    }
-  })
 
   // POST /canvas/spark — explicit agent-to-agent arc (thought hand-off, handshake, collab signal)
   // Body: { from: agentId, to: agentId, kind: 'thought'|'handoff'|'collab'|'decision', intensity?: 0–1, label?: string }
