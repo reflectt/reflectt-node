@@ -1417,6 +1417,8 @@ async function syncCanvas(): Promise<void> {
   // Inject agent avatars into sync payload — browsers on app.reflectt.ai read avatar
   // from agent state (canvasStore), not from a separate API call. We merge avatar
   // into each agent entry here so cloud browsers render custom orbs instead of circles.
+  // Agents with avatars who haven't posted a canvas state get a floor stub so their
+  // custom orb always reaches the cloud (not just when canvas/state is called).
   // task-1773690756100
   try {
     const db = getDb()
@@ -1424,7 +1426,12 @@ async function syncCanvas(): Promise<void> {
     for (const row of avatarRows) {
       try {
         const s = JSON.parse(row.settings)
-        if (s.avatar?.content && agents[row.agent_id]) {
+        if (s.avatar?.content) {
+          if (!agents[row.agent_id]) {
+            // Agent has an avatar but no active canvas state — add a floor stub so
+            // the custom orb reaches the cloud even without a canvas/state post.
+            agents[row.agent_id] = { state: 'floor', sensors: null, payload: {}, updatedAt: Date.now() } as Record<string, unknown>
+          }
           (agents[row.agent_id] as Record<string, unknown>).avatar = s.avatar.content
         }
       } catch { /* skip */ }
