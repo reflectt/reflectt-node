@@ -103,6 +103,7 @@ import { getProvisioningManager } from './provisioning.js'
 import { getWebhookDeliveryManager } from './webhooks.js'
 import { enrichWebhookPayload } from './github-webhook-attribution.js'
 import { formatGitHubEvent } from './github-webhook-chat.js'
+import { formatSentryAlert, verifySentrySignature } from './sentry-webhook.js'
 import { exportBundle, importBundle } from './portability.js'
 import { getNotificationManager } from './notifications.js'
 import { getConnectivityManager } from './connectivity.js'
@@ -16602,6 +16603,27 @@ If your heartbeat shows **no active task** and **no next task**:
             },
           })
         }
+      }
+    }
+
+    // Post Sentry error alerts to #ops channel
+    if (provider === 'sentry') {
+      // Optional signature verification (HMAC-SHA256)
+      const sentrySecret = process.env.SENTRY_CLIENT_SECRET
+      const sentrySignature = request.headers['sentry-hook-signature'] as string | undefined
+      if (sentrySecret && !verifySentrySignature(JSON.stringify(body), sentrySignature, sentrySecret)) {
+        reply.code(401)
+        return { success: false, message: 'Invalid Sentry webhook signature' }
+      }
+
+      const opsMessage = formatSentryAlert(body as any)
+      if (opsMessage) {
+        chatManager.sendMessage({
+          from: 'sentry',
+          content: opsMessage,
+          channel: 'ops',
+          metadata: { source: 'sentry-webhook', action: (body as any)?.action, resource: request.headers['sentry-hook-resource'] as string | undefined },
+        }).catch(() => {}) // non-blocking
       }
     }
 
