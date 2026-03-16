@@ -158,6 +158,7 @@ import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats }
 import { startOpenClawUsageSync, stopOpenClawUsageSync, syncOpenClawUsage } from './openclaw-usage-sync.js'
 import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
+import { canvasReadRoutes } from './canvas-routes.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
@@ -11002,19 +11003,13 @@ export async function createServer(): Promise<FastifyInstance> {
     return { agents: all, count: canvasStateMap.size }
   })
 
-  // GET /canvas/states — valid state + sensor values (discovery)
-  app.get('/canvas/states', async () => ({
-    states: CANVAS_STATES,
-    sensors: SENSOR_VALUES,
-    schema: {
-      state: 'floor | listening | thinking | rendering | ambient | decision | urgent | handoff',
-      sensors: 'null | mic | camera | mic+camera (non-dismissable trust indicator)',
-      agentId: 'required — which agent is driving the canvas',
-      payload: 'optional — text, media, decision, agents, summary',
-    },
-  }))
-
-  // GET /canvas/slots — current active slots
+  // ── Canvas read routes (Phase 1 extraction) ──────────────────────────
+  // GET /canvas/states, /canvas/slots, /canvas/slots/all, /canvas/rejections
+  // Extracted to src/canvas-routes.ts
+  await app.register(canvasReadRoutes, {
+    canvasSlots: { getActive: () => canvasSlots.getActive(), getAll: () => canvasSlots.getAll(), getStats: () => canvasSlots.getStats() },
+    getRecentRejections,
+  } as any)
   // POST /canvas/gaze — client fires when user holds cursor/gaze on an agent orb for ≥3 seconds.
   // The agent "notices" and responds: generates a one-line thought about what they're doing,
   // fires canvas_expression so the room responds (dim others, speak, show task).
@@ -11372,17 +11367,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  app.get('/canvas/slots', async () => {
-    return {
-      slots: canvasSlots.getActive(),
-      stats: canvasSlots.getStats(),
-    }
-  })
-
-  // GET /canvas/slots/all — all slots including stale (debug)
-  app.get('/canvas/slots/all', async () => {
-    return { slots: canvasSlots.getAll() }
-  })
+  // /canvas/slots + /canvas/slots/all → canvas-routes.ts plugin
 
   // GET /canvas/team/mood — derived collective mood of all active agents
   // Returns teamRhythm, tension, ambientPulse, dominantColor. Used by living canvas for atmosphere shifts.
@@ -12828,10 +12813,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { history: canvasSlots.getHistory(slot, limit) }
   })
 
-  // GET /canvas/rejections — recent contract rejections (for tuning)
-  app.get('/canvas/rejections', async () => {
-    return { rejections: getRecentRejections() }
-  })
+  // /canvas/rejections → canvas-routes.ts plugin
 
   // GET /canvas/stream — SSE stream of canvas render events
   app.get('/canvas/stream', async (request, reply) => {
