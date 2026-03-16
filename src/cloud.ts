@@ -1572,15 +1572,25 @@ async function pollCanvasQueryRelay(): Promise<void> {
     for (const q of queries) {
       try {
         // POST to local node — canvas/query processes it and emits canvas_message via eventBus.
-        // The canvas_message flows through canvas_push relay to cloud → browser subscribers.
+        // Process query locally and capture card for relay back to the browser.
+        // The card is included in the ACK payload → cloud broadcasts canvas_message to pulse SSE.
         const res = await fetch('http://127.0.0.1:4445/canvas/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: q.query, sessionId: q.sessionId ?? undefined }),
           signal: AbortSignal.timeout(12000), // LLM calls can take ~10s
         })
-        if (res.ok || res.status === 400) {
-          // 400 means query was invalid — still ACK to remove from queue
+        if (res.ok) {
+          try {
+            const data = await res.json() as { success?: boolean; card?: Record<string, unknown> }
+            if (data.card) {
+              // Include card in acked payload so cloud can broadcast it to browser subscribers
+              ;(q as Record<string, unknown>)._card = data.card
+            }
+          } catch { /* card extraction optional — still ACK */ }
+          acked.push(q.queryId)
+        } else if (res.status === 400) {
+          // Invalid query — still ACK to remove from queue
           acked.push(q.queryId)
         }
       } catch {
@@ -1589,8 +1599,12 @@ async function pollCanvasQueryRelay(): Promise<void> {
     }
 
     if (acked.length > 0) {
-      await cloudPost(`/api/hosts/${state.hostId}/canvas/query/ack`, { queryIds: acked })
-      console.log(`☁️  [CanvasQueryRelay] Processed ${acked.length}/${queries.length} relay queries`)
+      // Collect response cards for broadcast: cloud will emit canvas_message to pulse SSE
+      const cards = queries
+        .filter(q => acked.includes(q.queryId) && (q as Record<string, unknown>)._card)
+        .map(q => (q as Record<string, unknown>)._card as Record<string, unknown>)
+      await cloudPost(`/api/hosts/${state.hostId}/canvas/query/ack`, { queryIds: acked, cards })
+      console.log(`☁️  [CanvasQueryRelay] Processed ${acked.length}/${queries.length} relay queries, ${cards.length} cards broadcast`)
     }
   } catch {
     // Non-critical — queries will be retried next cycle
