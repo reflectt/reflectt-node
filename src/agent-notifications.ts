@@ -14,7 +14,7 @@ import type Database from 'better-sqlite3'
 
 export type NotificationType = 'info' | 'task' | 'review' | 'mention' | 'alert' | 'system'
 export type NotificationPriorityLevel = 'low' | 'medium' | 'high' | 'critical'
-export type NotificationStatus = 'pending' | 'acked' | 'expired'
+export type NotificationStatus = 'pending' | 'delivered' | 'acked' | 'expired' | 'failed'
 export type AckDecision = 'seen' | 'accept' | 'defer' | 'dismiss'
 
 export interface AgentNotification {
