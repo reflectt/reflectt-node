@@ -12247,7 +12247,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const type = typeof body.type === 'string' ? body.type : 'utterance'
     const agentId = typeof body.agentId === 'string' ? body.agentId.toLowerCase() : 'agent'
 
-    const VALID_PUSH_TYPES = new Set(['utterance', 'work_released', 'handoff', 'canvas_response'])
+    const VALID_PUSH_TYPES = new Set(['utterance', 'work_released', 'handoff', 'canvas_response', 'rich'])
     if (!VALID_PUSH_TYPES.has(type)) {
       reply.status(400)
       return { success: false, message: `type must be one of: ${[...VALID_PUSH_TYPES].join(', ')}` }
@@ -12277,6 +12277,56 @@ export async function createServer(): Promise<FastifyInstance> {
       const taskTitle = typeof body.taskTitle === 'string' ? body.taskTitle : undefined
       const text = typeof body.text === 'string' ? body.text.slice(0, 80) : undefined
       payload = { ...payload, toAgentId, taskTitle, text }
+    } else if (type === 'rich') {
+      // Rich content — agents push arbitrary visual content to the canvas.
+      // This is the "agents control every pixel" path. Content can be markdown,
+      // code blocks, images, SVG, or raw HTML. The canvas renderer interprets it.
+      // task-1773672750043
+      const content = body.content as Record<string, unknown> | undefined
+      if (!content || typeof content !== 'object') {
+        reply.status(400)
+        return { success: false, message: 'rich push requires content object' }
+      }
+      // Sanitize content fields
+      const richContent: Record<string, unknown> = {}
+      if (typeof content.markdown === 'string') richContent.markdown = content.markdown.slice(0, 10_000)
+      if (typeof content.code === 'string') richContent.code = content.code.slice(0, 10_000)
+      if (typeof content.language === 'string') richContent.language = content.language.slice(0, 30)
+      if (typeof content.image === 'string') richContent.image = content.image.slice(0, 2000) // URL only
+      if (typeof content.svg === 'string') richContent.svg = content.svg.slice(0, 50_000)
+      if (typeof content.html === 'string') richContent.html = content.html.slice(0, 20_000)
+      if (typeof content.title === 'string') richContent.title = content.title.slice(0, 200)
+
+      // Position and display hints
+      const position = typeof body.position === 'object' && body.position
+        ? { x: Number((body.position as any).x) || 0, y: Number((body.position as any).y) || 0 }
+        : undefined
+      const layer = typeof body.layer === 'string' && ['background', 'stage', 'overlay'].includes(body.layer)
+        ? body.layer : 'stage'
+      const ttl = typeof body.ttl === 'number' && body.ttl > 0 ? Math.min(body.ttl, 120_000) : 30_000
+      const size = typeof body.size === 'object' && body.size
+        ? { w: Number((body.size as any).w) || 400, h: Number((body.size as any).h) || 300 }
+        : undefined
+
+      payload = { ...payload, content: richContent, position, layer, ttl, size }
+
+      // Also emit as canvas_message for activity feed visibility
+      const RICH_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
+        scout: '#fbbf24', echo: '#f472b6', rhythm: '#6ee7b7', spark: '#f97316',
+      }
+      eventBus.emit({
+        id: `cmsg-rich-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_message' as const,
+        timestamp: now,
+        data: {
+          type: 'rich',
+          agentId,
+          agentColor: RICH_COLORS[agentId] ?? '#60a5fa',
+          content: richContent,
+          layer,
+        },
+      })
     } else if (type === 'canvas_response') {
       // Agent responds to a canvas query with a structured card.
       // This is how agents answer questions typed on the canvas —
