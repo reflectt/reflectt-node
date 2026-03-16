@@ -11764,22 +11764,62 @@ export async function createServer(): Promise<FastifyInstance> {
   // task-1773672750043
 
   const ACTIVITY_STREAM_TYPES = new Set(['canvas_message', 'canvas_render', 'canvas_expression', 'canvas_burst'])
-  const activityRingBuffer: Array<{ id: string; type: string; timestamp: number; data: unknown }> = []
+
+  // Normalize raw eventBus events into the flat shape the cloud consumer expects:
+  // { id, type, agent, title, detail?, taskId?, prUrl?, timestamp }
+  // task-1773681277736
+  function toActivityEntry(event: { id: string; type: string; timestamp: number; data: unknown }): {
+    id: string; type: string; agent: string; title: string; detail?: string;
+    taskId?: string; prUrl?: string; timestamp: number
+  } {
+    const d = (event.data ?? {}) as Record<string, unknown>
+    const agent = String(d.agentId ?? d.agent ?? d.from ?? 'system')
+    let title = ''
+    let detail: string | undefined
+    let taskId: string | undefined
+    let prUrl: string | undefined
+
+    if (event.type === 'canvas_message') {
+      const innerType = String(d.type ?? 'message')
+      if (innerType === 'voice_transcript') {
+        title = `${agent} spoke`
+        detail = String(d.transcript ?? '').slice(0, 120)
+      } else {
+        title = String((d.data as Record<string, unknown>)?.text ?? d.query ?? 'Canvas message').slice(0, 120)
+      }
+    } else if (event.type === 'canvas_expression') {
+      const channels = d.channels as Record<string, unknown> | undefined
+      title = String(channels?.narrative ?? `${agent} expression`).slice(0, 120)
+      if (channels?.voice) detail = String(channels.voice).slice(0, 120)
+    } else if (event.type === 'canvas_burst') {
+      title = String(d.label ?? `${agent} burst`).slice(0, 120)
+    } else if (event.type === 'canvas_render') {
+      const cmd = d.cmd as Record<string, unknown> | undefined
+      title = String(cmd?.type ?? d.state ?? 'Render update').slice(0, 120)
+    }
+
+    if (typeof d.taskId === 'string') taskId = d.taskId
+    if (typeof d.prUrl === 'string') prUrl = d.prUrl
+
+    return { id: event.id, type: event.type, agent, title: title || event.type, detail, taskId, prUrl, timestamp: event.timestamp }
+  }
+
+  const activityRingBuffer: Array<ReturnType<typeof toActivityEntry>> = []
   const ACTIVITY_RING_SIZE = 30 // Keep slightly more than 20 for filtering headroom
 
-  // Subscribe to eventBus to populate ring buffer
+  // Subscribe to eventBus to populate ring buffer (normalized)
   eventBus.on('activity-ring-collector', (event) => {
     if (!ACTIVITY_STREAM_TYPES.has(event.type)) return
-    activityRingBuffer.push({ id: event.id, type: event.type, timestamp: event.timestamp, data: event.data })
+    activityRingBuffer.push(toActivityEntry(event))
     if (activityRingBuffer.length > ACTIVITY_RING_SIZE) activityRingBuffer.shift()
   })
 
   const activityStreamSubscribers = new Map<string, { closed: boolean; send: (data: string) => void }>()
 
-  // Forward matching events to activity stream subscribers
+  // Forward matching events to activity stream subscribers (normalized)
   eventBus.on('activity-stream-relay', (event) => {
     if (!ACTIVITY_STREAM_TYPES.has(event.type)) return
-    const payload = JSON.stringify({ id: event.id, type: event.type, timestamp: event.timestamp, data: event.data })
+    const payload = JSON.stringify(toActivityEntry(event))
     for (const [subId, sub] of activityStreamSubscribers) {
       if (sub.closed) { activityStreamSubscribers.delete(subId); continue }
       try { sub.send(payload) } catch { activityStreamSubscribers.delete(subId) }
