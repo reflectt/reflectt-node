@@ -2443,10 +2443,19 @@ export async function createServer(): Promise<FastifyInstance> {
   try {
     const validatingTasks = taskManager.listTasks({ status: 'validating' })
     const cutoff = Date.now() - APPROVAL_CARD_TTL_MS
+    // Known agent names — agent-to-agent reviews should not produce canvas approval cards
+    const KNOWN_AGENTS_RESTORE = new Set([
+      'link', 'kai', 'pixel', 'sage', 'scout', 'echo', 'rhythm', 'swift', 'kotlin',
+      'harmony', 'cos', 'artdirector', 'shield', 'spark', 'coo', 'pm', 'qa', 'kindling',
+      'uipolish', 'evi-scout',
+    ])
     for (const task of validatingTasks) {
       const meta = (task.metadata ?? {}) as Record<string, unknown>
       // Skip if already decided
       if (meta.review_decided === true || meta.reviewer_approved === true || meta.review_state === 'approved' || meta.review_state === 'rejected') continue
+      // Skip agent-to-agent reviews — only human-required approvals show on canvas
+      const reviewerId = (task.reviewer ?? '').toLowerCase().trim()
+      if (reviewerId && KNOWN_AGENTS_RESTORE.has(reviewerId)) continue
       // Skip if card is older than TTL (sweep handled it)
       const enteredValidatingAt = typeof meta.entered_validating_at === 'number' ? meta.entered_validating_at : task.updatedAt
       if (enteredValidatingAt < cutoff) continue
