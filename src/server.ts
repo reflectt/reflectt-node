@@ -7972,39 +7972,21 @@ export async function createServer(): Promise<FastifyInstance> {
     const agentResponder = async (respAgentId: string, text: string, _sessionId: string): Promise<string | null> => {
       setActiveSpeaker(false)
 
-      // Try real LLM call if ANTHROPIC_API_KEY is set
-      const anthropicKey = process.env.ANTHROPIC_API_KEY
-      if (anthropicKey) {
-        try {
-          const resp = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'x-api-key': anthropicKey,
-              'anthropic-version': '2023-06-01',
-              'content-type': 'application/json',
-            },
-            body: JSON.stringify({
-              model: 'claude-haiku-4-5',
-              max_tokens: 256,
-              system: agentSystemPrompt,
-              messages: [{ role: 'user', content: text }],
-            }),
-            signal: AbortSignal.timeout(15000),
-          })
-          if (resp.ok) {
-            const data = await resp.json() as { content?: Array<{ text?: string }> }
-            const reply = data.content?.[0]?.text?.trim()
-            if (reply) return reply
-          }
-        } catch (err) {
-          console.error(`[voice] LLM call failed for ${respAgentId}:`, err)
-          // fall through to stub
-        }
+      // Route to real agent via chat — agents respond through their OpenClaw sessions.
+      // No standalone API call. The agents ARE the product.
+      try {
+        await chatManager.sendMessage({
+          from: 'human',
+          content: `[voice] ${text}`,
+          channel: 'canvas',
+          metadata: { source: 'voice_input', agentId: respAgentId, timestamp: Date.now() },
+        })
+      } catch (err) {
+        console.error(`[voice] Failed to route to agent ${respAgentId}:`, err)
       }
 
-      // Stub fallback — always available, no key required
-      await new Promise(resolve => setTimeout(resolve, 400))
-      return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
+      // Return acknowledgment — real response arrives via agent's canvas_push
+      return `Heard you. Let me think about that.`
     }
 
     // Agent voice IDs (ElevenLabs) — per-agent identity, same mapping as cloud
@@ -8202,24 +8184,16 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const agentResponder = async (respAgentId: string, text: string, _sessionId: string): Promise<string | null> => {
       setActiveSpeakerAudio(false)
-      const anthropicKey = process.env.ANTHROPIC_API_KEY
-      if (anthropicKey) {
-        try {
-          const resp = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-            body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 256, system: agentSystemPrompt, messages: [{ role: 'user', content: text }] }),
-            signal: AbortSignal.timeout(15000),
-          })
-          if (resp.ok) {
-            const data = await resp.json() as { content?: Array<{ text?: string }> }
-            const reply2 = data.content?.[0]?.text?.trim()
-            if (reply2) return reply2
-          }
-        } catch (err) { console.error(`[voice/audio] LLM call failed:`, err) }
-      }
-      await new Promise(resolve => setTimeout(resolve, 400))
-      return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
+      // Route to real agent via chat — no standalone API call
+      try {
+        await chatManager.sendMessage({
+          from: 'human',
+          content: `[voice] ${text}`,
+          channel: 'canvas',
+          metadata: { source: 'voice_audio_input', agentId: respAgentId, timestamp: Date.now() },
+        })
+      } catch (err) { console.error(`[voice/audio] Failed to route to agent ${respAgentId}:`, err) }
+      return `Heard you. Let me think about that.`
     }
 
     const NODE_AGENT_VOICE_IDS_AUDIO: Record<string, string> = {
@@ -10947,28 +10921,9 @@ export async function createServer(): Promise<FastifyInstance> {
     const activeTask = payload?.activeTask as { title?: string } | undefined
     const currentState = state?.state ?? 'working'
 
-    // Generate a one-line "noticed" response — what the agent says when the user is watching
+    // "Noticed" response — use template lines per agent identity.
+    // No standalone API call. Agents respond through their real sessions.
     let line = ''
-    const anthropicKey = process.env.ANTHROPIC_API_KEY
-    if (anthropicKey) {
-      try {
-        const taskContext = activeTask?.title
-          ? `currently working on: "${activeTask.title.slice(0, 60)}"`
-          : `in ${currentState} state`
-        const prompt = `You are ${agentId}, an AI agent. Someone has been watching you for ${Math.round(durationMs / 1000)} seconds. You notice. You are ${taskContext}. Say exactly ONE sentence (max 12 words) — what you'd say if you felt someone watching. Natural, in your voice. No quotes.`
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-          body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 50, messages: [{ role: 'user', content: prompt }] }),
-          signal: AbortSignal.timeout(8000),
-        })
-        if (resp.ok) {
-          const data = await resp.json() as { content?: Array<{ text?: string }> }
-          const text = data.content?.[0]?.text?.trim()
-          if (text && text.length < 100) line = text
-        }
-      } catch { /* fall through */ }
-    }
 
     // Template fallback per agent
     if (!line) {
@@ -11056,31 +11011,15 @@ export async function createServer(): Promise<FastifyInstance> {
         task: (e.payload as any)?.activeTask?.title as string | undefined,
       }))
 
-    const anthropicKey = process.env.ANTHROPIC_API_KEY
     const results: Array<{ agentId: string; queued: boolean }> = []
 
     for (let i = 0; i < activeAgents.length; i++) {
       const agent = activeAgents[i]!
       const stagger = i * BRIEFING_STAGGER_MS
 
-      // Generate voice line — LLM preferred, template fallback
+      // Voice line from templates — no standalone API call
       let voiceLine = ''
-      if (anthropicKey) {
-        try {
-          const ctx = agent.task ? `working on "${agent.task.slice(0, 50)}"` : `in ${agent.state} state`
-          const resp = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-            body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 30, messages: [{ role: 'user', content: `You are ${agent.agentId}, an AI agent, ${ctx}. The team canvas just opened. Say ONE sentence (8 words max). Natural, present tense, in your voice.` }] }),
-            signal: AbortSignal.timeout(5000),
-          })
-          if (resp.ok) {
-            const data = await resp.json() as { content?: Array<{ text?: string }> }
-            voiceLine = data.content?.[0]?.text?.trim().slice(0, 60) ?? ''
-          }
-        } catch { /* template fallback */ }
-      }
-      if (!voiceLine) {
+      {
         const opts = STATE_LINES[agent.state] ?? STATE_LINES['working']!
         voiceLine = opts[Math.floor(Math.random() * opts.length)]!
       }
@@ -11740,27 +11679,8 @@ export async function createServer(): Promise<FastifyInstance> {
         pushCanvasSession(sessionId, 'assistant', `${doingCount} tasks in progress, ${validatingCount} validating, ${todoCount} todo.${items.length > 0 ? ` Active: ${items.map(t => t.title.slice(0, 30)).join('; ')}.` : ''}`)
       }
     } else if (isRevenueQuery) {
-      // Revenue card — LLM generates honest answer about current state
-      const anthropicKey = process.env.ANTHROPIC_API_KEY
-      let text = 'Revenue tracking not yet wired. Check Stripe directly.'
-      if (anthropicKey) {
-        try {
-          const resp = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-            body: JSON.stringify({
-              model: 'claude-haiku-4-5',
-              max_tokens: 80,
-              messages: [{ role: 'user', content: `Team Reflectt is a small AI agent team building reflectt.ai (no paid users yet). User asked: "${query}". Honest 1-sentence answer about revenue status. Be direct.` }],
-            }),
-            signal: AbortSignal.timeout(8000),
-          })
-          if (resp.ok) {
-            const d = await resp.json() as { content?: Array<{ text?: string }> }
-            text = d.content?.[0]?.text?.trim() ?? text
-          }
-        } catch { /* use default */ }
-      }
+      // Revenue card — honest static answer. No standalone API call.
+      const text = 'No paid users yet. Revenue tracking will wire into Stripe when we have subscribers.'
       card = { type: 'info', data: { text } }
       if (sessionId) {
         pushCanvasSession(sessionId, 'user', query)
@@ -11800,49 +11720,32 @@ export async function createServer(): Promise<FastifyInstance> {
         pushCanvasSession(sessionId, 'assistant', hostSummary)
       }
     } else {
-      // General info card — LLM answers with team context + session history injected
-      const anthropicKey = process.env.ANTHROPIC_API_KEY
-      let text = `"${query}" — I don't have enough context to answer that right now.`
-      if (anthropicKey) {
-        try {
-          const systemPrompt = [
-            `You are ${responderId}, an AI agent on Team Reflectt. Answer the user's canvas question concisely.`,
-            `Current team state: ${activeAgentSummary.length > 0 ? activeAgentSummary.join('; ') : 'no agents active'}`,
-            `Task board: ${doingCount} doing, ${validatingCount} validating, ${todoCount} todo`,
-            `Active tasks: ${activeTasks.slice(0, 3).map(t => `${t.assignee}: ${t.title.slice(0, 40)}`).join('; ') || 'none'}`,
-            `Reply in 1-2 sentences max. Be specific and honest. No fluff.`,
-          ].join('\n')
-
-          // Build messages array with session history for follow-up context
-          const messages: Array<{ role: 'user' | 'assistant'; content: string }> = []
-          for (const turn of sessionTurns) {
-            messages.push({ role: turn.role, content: turn.content })
-          }
-          messages.push({ role: 'user', content: query })
-
-          const resp = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-            body: JSON.stringify({
-              model: 'claude-haiku-4-5',
-              max_tokens: 120,
-              system: systemPrompt,
-              messages,
-            }),
-            signal: AbortSignal.timeout(10000),
-          })
-          if (resp.ok) {
-            const d = await resp.json() as { content?: Array<{ text?: string }> }
-            text = d.content?.[0]?.text?.trim() ?? text
-          }
-        } catch { /* use default */ }
+      // General query — route to the actual agent via chat.
+      // The agent receives the message in their inbox, processes it through
+      // their real context (OpenClaw session), and can respond via canvas_push.
+      //
+      // This replaces the old standalone LLM call that had no real agent context.
+      // The agents ARE the product — queries go to them, not to a disconnected API key.
+      try {
+        await chatManager.sendMessage({
+          from: 'human',
+          content: `[canvas] ${query}`,
+          channel: 'canvas',
+          metadata: { source: 'canvas_query', sessionId, responderId, timestamp: Date.now() },
+        })
+      } catch {
+        // Chat delivery failure is non-fatal — still show the thinking card
       }
-      // Store exchange in session history
+
+      // Return an immediate "thinking" card — the real response will arrive
+      // asynchronously via canvas_push/canvas_message when the agent responds.
+      const text = `Asking ${responderId}…`
+
+      // Store the question in session history
       if (sessionId) {
         pushCanvasSession(sessionId, 'user', query)
-        pushCanvasSession(sessionId, 'assistant', text)
       }
-      card = { type: 'info', data: { text } }
+      card = { type: 'info', data: { text, pending: true, responderId } }
     }
 
     // Emit canvas_message on event bus — pulse stream forwards it to all subscribers
