@@ -2610,6 +2610,13 @@ describe('Idle Nudge lane-state transitions', () => {
   it('nudges queue-clear agents to pull /tasks/next after warn threshold', async () => {
     const agent = 'lane-queue-clear-nudge'
     await cleanupAgentTasks(agent)
+    // Seed a pullable todo task so the queue-empty gate doesn't suppress the nudge
+    await req('POST', '/tasks', {
+      title: 'TEST: pullable task for queue-clear nudge',
+      assignee: agent, reviewer: 'test-reviewer', priority: 'P2',
+      createdBy: 'test-runner', eta: '1h', done_criteria: ['nudge fires correctly'],
+      status: 'todo',
+    })
     await req('POST', `/presence/${agent}`, { status: 'working' })
 
     const tickNowMs = Date.now() + (50 * 60_000) // > warnMin (45m)
