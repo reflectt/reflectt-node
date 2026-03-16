@@ -11656,12 +11656,16 @@ export async function createServer(): Promise<FastifyInstance> {
     }, duration)
 
     // Emit takeover event — frontend fades orbs to ambient, renders agent content full-screen
+    const takeoverEventData = { action: 'claim', agentId, content: safeContent, title, duration, transition }
     eventBus.emit({
       id,
       type: 'canvas_takeover' as const,
       timestamp: now,
-      data: { action: 'claim', agentId, content: safeContent, title, duration, transition },
+      data: takeoverEventData,
     })
+
+    // Also queue for cloud relay — reaches browsers via syncCanvas push_events[]
+    queueCanvasPushEvent({ type: 'canvas_takeover', ...takeoverEventData, t: now })
 
     return { success: true, id, expiresAt: now + duration }
   })
@@ -11682,12 +11686,15 @@ export async function createServer(): Promise<FastifyInstance> {
     const transition = typeof body.transition === 'string' && ['fade', 'slide', 'instant'].includes(body.transition)
       ? body.transition : 'fade'
 
+    const releaseNow = Date.now()
+    const releaseData = { action: 'release', agentId, transition, reason: 'agent_released' }
     eventBus.emit({
-      id: `takeover-release-${Date.now()}`,
+      id: `takeover-release-${releaseNow}`,
       type: 'canvas_takeover' as const,
-      timestamp: Date.now(),
-      data: { action: 'release', agentId, transition, reason: 'agent_released' },
+      timestamp: releaseNow,
+      data: releaseData,
     })
+    queueCanvasPushEvent({ type: 'canvas_takeover', ...releaseData, t: releaseNow })
 
     currentTakeover = null
     return { success: true }
@@ -11701,6 +11708,7 @@ export async function createServer(): Promise<FastifyInstance> {
       agentId: currentTakeover.agentId,
       id: currentTakeover.id,
       title: currentTakeover.title,
+      content: currentTakeover.content,
       startedAt: currentTakeover.startedAt,
       expiresAt: currentTakeover.startedAt + currentTakeover.duration,
       remainingMs: Math.max(0, (currentTakeover.startedAt + currentTakeover.duration) - Date.now()),
