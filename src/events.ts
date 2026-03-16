@@ -32,6 +32,7 @@ export type EventType =
   | 'canvas_message'   // typed visual card — response to human query (tasks/info/revenue/onboarding)
   | 'canvas_push'      // agent self-initiates canvas event without human query (utterance/work_released/handoff)
   | 'canvas_artifact'  // proof artifact drifts through canvas on task/PR completion (commit/pr/test/run/approval)
+  | 'canvas_takeover'  // agent claims/releases full-screen takeover — orbs fade, agent content is the canvas
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -51,6 +52,7 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'canvas_message',
   'canvas_push',
   'canvas_artifact',
+  'canvas_takeover',
 ])
 
 export interface Event {
