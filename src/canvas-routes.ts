@@ -2,19 +2,17 @@
 // Copyright (c) Reflectt AI
 
 /**
- * Canvas Routes (Phase 1) — extracted from server.ts
+ * Canvas Routes — extracted from server.ts
  *
- * Fastify plugin that registers a first batch of /canvas/* endpoints.
- * Each extracted route is replaced with this plugin in server.ts.
- * Remaining routes stay in server.ts for Phase 2+ extraction.
- *
- * Extraction strategy: start with simple, self-contained routes.
- * Complex routes with deep state coupling remain in server.ts.
+ * Fastify plugin that registers /canvas/* read endpoints.
+ * Dependencies injected via plugin options.
  *
  * task-1773681272865
  */
 
 import type { FastifyInstance } from 'fastify'
+import type { PresenceStatus } from './presence.js'
+import type Database from 'better-sqlite3'
 
 // ── Types ──
 
@@ -32,15 +30,18 @@ export interface CanvasStateEntry {
  * Each dep is a narrow interface — no coupling to the full module.
  */
 export interface CanvasRouteDeps {
+  canvasStateMap: Map<string, CanvasStateEntry>
   canvasSlots: {
     getActive: () => unknown[]
     getAll: () => unknown[]
     getStats: () => unknown
   }
+  agentIdentityColors: Record<string, string>
+  getDb: () => Database.Database
   getRecentRejections: () => unknown[]
 }
 
-// ── Constants (moved from server.ts) ──
+// ── Constants ──
 
 export const CANVAS_STATES = [
   'floor', 'listening', 'thinking', 'rendering', 'ambient', 'decision', 'urgent', 'handoff', 'presenting',
@@ -49,9 +50,77 @@ export const SENSOR_VALUES = [
   'voice_active', 'screen_share', 'camera', 'typing', 'idle', 'scroll', 'hover', 'focus',
 ]
 
+// ── Helpers ──
+
+export function formatRecency(updatedAt: number): string {
+  const diff = Date.now() - updatedAt
+  if (diff < 60_000) return 'just now'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+  return `${Math.floor(diff / 86_400_000)}d ago`
+}
+
 // ── Plugin ──
 
 export async function canvasReadRoutes(app: FastifyInstance, deps: CanvasRouteDeps) {
+
+  // GET /canvas/presence — all agents as AgentPresence[] (for presence surface)
+  app.get('/canvas/presence', async () => {
+    const agents: Array<{
+      name: string
+      identityColor: string
+      state: PresenceStatus
+      activeTask?: { title: string; id: string }
+      recency: string
+      attention?: { type: string; taskId: string; label?: string }
+    }> = []
+
+    for (const [agentId, entry] of deps.canvasStateMap) {
+      const presenceState: PresenceStatus =
+        (entry.payload as any)?.presenceState ||
+        (entry.state === 'decision' || entry.state === 'urgent' ? 'blocked' :
+         entry.state === 'thinking' || entry.state === 'rendering' ? 'working' : 'idle')
+
+      agents.push({
+        name: agentId,
+        identityColor: deps.agentIdentityColors[agentId] || '#9ca3af',
+        state: presenceState,
+        activeTask: (entry.payload as any)?.activeTask,
+        recency: formatRecency(entry.updatedAt),
+        attention: (entry.payload as any)?.attention,
+      })
+    }
+
+    return { agents, count: agents.length }
+  })
+
+  // GET /canvas/state — current state for all agents (or one)
+  app.get('/canvas/state', async (request) => {
+    const query = request.query as { agentId?: string }
+
+    function getLastMessage(agentId: string): { content: string; timestamp: number } | null {
+      try {
+        const db = deps.getDb()
+        const row = db.prepare(
+          `SELECT content, timestamp FROM chat_messages WHERE "from" = ? AND "to" IS NULL ORDER BY timestamp DESC LIMIT 1`
+        ).get(agentId) as { content: string; timestamp: number } | undefined
+        return row ?? null
+      } catch {
+        return null
+      }
+    }
+
+    if (query.agentId) {
+      const entry = deps.canvasStateMap.get(query.agentId)
+      const base = entry ?? { state: 'floor', sensors: null, payload: {}, updatedAt: null }
+      return { ...base, lastMessage: getLastMessage(query.agentId) }
+    }
+    const all: Record<string, unknown> = {}
+    for (const [id, entry] of deps.canvasStateMap) {
+      all[id] = { ...entry, lastMessage: getLastMessage(id) }
+    }
+    return { agents: all, count: deps.canvasStateMap.size }
+  })
 
   // GET /canvas/states — valid state + sensor values (discovery)
   app.get('/canvas/states', async () => ({

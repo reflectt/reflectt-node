@@ -158,7 +158,7 @@ import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats }
 import { startOpenClawUsageSync, stopOpenClawUsageSync, syncOpenClawUsage } from './openclaw-usage-sync.js'
 import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
-import { canvasReadRoutes } from './canvas-routes.js'
+import { canvasReadRoutes, formatRecency } from './canvas-routes.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
@@ -10936,78 +10936,15 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // GET /canvas/presence — all agents as AgentPresence[] (for presence surface)
-  app.get('/canvas/presence', async () => {
-    const agents: Array<{
-      name: string
-      identityColor: string
-      state: PresenceState
-      activeTask?: { title: string; id: string }
-      recency: string
-      attention?: { type: string; taskId: string; label?: string }
-    }> = []
 
-    for (const [agentId, entry] of canvasStateMap) {
-      const presenceState: PresenceState =
-        (entry.payload as any)?.presenceState ||
-        (entry.state === 'decision' || entry.state === 'urgent' ? 'needs-attention' :
-         entry.state === 'thinking' || entry.state === 'rendering' ? 'working' : 'idle')
-
-      agents.push({
-        name: agentId,
-        identityColor: AGENT_IDENTITY_COLORS[agentId] || '#9ca3af',
-        state: presenceState,
-        activeTask: (entry.payload as any)?.activeTask,
-        recency: formatRecency(entry.updatedAt),
-        attention: (entry.payload as any)?.attention,
-      })
-    }
-
-    return { agents, count: agents.length }
-  })
-
-  function formatRecency(updatedAt: number): string {
-    const diff = Date.now() - updatedAt
-    if (diff < 60_000) return 'just now'
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-    return `${Math.floor(diff / 86_400_000)}d ago`
-  }
-
-  // GET /canvas/state — current state for all agents (or one)
-  app.get('/canvas/state', async (request) => {
-    const query = request.query as { agentId?: string }
-
-    // Helper: get most recent chat message for an agent
-    function getLastMessage(agentId: string): { content: string; timestamp: number } | null {
-      try {
-        const _db = getDb()
-        const row = _db.prepare(
-          `SELECT content, timestamp FROM chat_messages WHERE "from" = ? AND "to" IS NULL ORDER BY timestamp DESC LIMIT 1`
-        ).get(agentId) as { content: string; timestamp: number } | undefined
-        return row ?? null
-      } catch {
-        return null
-      }
-    }
-
-    if (query.agentId) {
-      const entry = canvasStateMap.get(query.agentId)
-      const base = entry ?? { state: 'floor', sensors: null, payload: {}, updatedAt: null }
-      return { ...base, lastMessage: getLastMessage(query.agentId) }
-    }
-    const all: Record<string, unknown> = {}
-    for (const [id, entry] of canvasStateMap) {
-      all[id] = { ...entry, lastMessage: getLastMessage(id) }
-    }
-    return { agents: all, count: canvasStateMap.size }
-  })
-
-  // ── Canvas read routes (Phase 1 extraction) ──────────────────────────
-  // GET /canvas/states, /canvas/slots, /canvas/slots/all, /canvas/rejections
-  // Extracted to src/canvas-routes.ts
+  // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
+  // GET /canvas/presence, /canvas/state, /canvas/states
+  // GET /canvas/slots, /canvas/slots/all, /canvas/rejections
   await app.register(canvasReadRoutes, {
+    canvasStateMap,
     canvasSlots: { getActive: () => canvasSlots.getActive(), getAll: () => canvasSlots.getAll(), getStats: () => canvasSlots.getStats() },
+    agentIdentityColors: AGENT_IDENTITY_COLORS,
+    getDb,
     getRecentRejections,
   } as any)
   // POST /canvas/gaze — client fires when user holds cursor/gaze on an agent orb for ≥3 seconds.
