@@ -11925,7 +11925,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const type = typeof body.type === 'string' ? body.type : 'utterance'
     const agentId = typeof body.agentId === 'string' ? body.agentId.toLowerCase() : 'agent'
 
-    const VALID_PUSH_TYPES = new Set(['utterance', 'work_released', 'handoff'])
+    const VALID_PUSH_TYPES = new Set(['utterance', 'work_released', 'handoff', 'canvas_response'])
     if (!VALID_PUSH_TYPES.has(type)) {
       reply.status(400)
       return { success: false, message: `type must be one of: ${[...VALID_PUSH_TYPES].join(', ')}` }
@@ -11955,6 +11955,31 @@ export async function createServer(): Promise<FastifyInstance> {
       const taskTitle = typeof body.taskTitle === 'string' ? body.taskTitle : undefined
       const text = typeof body.text === 'string' ? body.text.slice(0, 80) : undefined
       payload = { ...payload, toAgentId, taskTitle, text }
+    } else if (type === 'canvas_response') {
+      // Agent responds to a canvas query with a structured card.
+      // This is how agents answer questions typed on the canvas —
+      // the query arrives via chat, agent processes it, responds here.
+      const card = body.card as Record<string, unknown> | undefined
+      if (!card || typeof card.type !== 'string') {
+        reply.status(400)
+        return { success: false, message: 'canvas_response requires card with type field' }
+      }
+      const query = typeof body.query === 'string' ? body.query.slice(0, 200) : undefined
+      payload = { ...payload, card, query }
+
+      // Also emit as canvas_message so living-canvas renders it as a response card
+      // (same event type as the old synchronous canvas/query response)
+      const RESP_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
+        scout: '#f472b6', echo: '#fbbf24', rhythm: '#6ee7b7', spark: '#f97316',
+      }
+      const agentColor = RESP_COLORS[agentId] ?? '#60a5fa'
+      eventBus.emit({
+        id: `cmsg-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_message' as const,
+        timestamp: now,
+        data: { ...card, agentId, agentColor, query },
+      })
     }
 
     // Emit on eventBus — forwarded immediately on pulse SSE stream
