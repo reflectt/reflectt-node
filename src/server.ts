@@ -11800,49 +11800,32 @@ export async function createServer(): Promise<FastifyInstance> {
         pushCanvasSession(sessionId, 'assistant', hostSummary)
       }
     } else {
-      // General info card — LLM answers with team context + session history injected
-      const anthropicKey = process.env.ANTHROPIC_API_KEY
-      let text = `"${query}" — I don't have enough context to answer that right now.`
-      if (anthropicKey) {
-        try {
-          const systemPrompt = [
-            `You are ${responderId}, an AI agent on Team Reflectt. Answer the user's canvas question concisely.`,
-            `Current team state: ${activeAgentSummary.length > 0 ? activeAgentSummary.join('; ') : 'no agents active'}`,
-            `Task board: ${doingCount} doing, ${validatingCount} validating, ${todoCount} todo`,
-            `Active tasks: ${activeTasks.slice(0, 3).map(t => `${t.assignee}: ${t.title.slice(0, 40)}`).join('; ') || 'none'}`,
-            `Reply in 1-2 sentences max. Be specific and honest. No fluff.`,
-          ].join('\n')
-
-          // Build messages array with session history for follow-up context
-          const messages: Array<{ role: 'user' | 'assistant'; content: string }> = []
-          for (const turn of sessionTurns) {
-            messages.push({ role: turn.role, content: turn.content })
-          }
-          messages.push({ role: 'user', content: query })
-
-          const resp = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-            body: JSON.stringify({
-              model: 'claude-haiku-4-5',
-              max_tokens: 120,
-              system: systemPrompt,
-              messages,
-            }),
-            signal: AbortSignal.timeout(10000),
-          })
-          if (resp.ok) {
-            const d = await resp.json() as { content?: Array<{ text?: string }> }
-            text = d.content?.[0]?.text?.trim() ?? text
-          }
-        } catch { /* use default */ }
+      // General query — route to the actual agent via chat.
+      // The agent receives the message in their inbox, processes it through
+      // their real context (OpenClaw session), and can respond via canvas_push.
+      //
+      // This replaces the old standalone LLM call that had no real agent context.
+      // The agents ARE the product — queries go to them, not to a disconnected API key.
+      try {
+        await chatManager.sendMessage({
+          from: 'human',
+          content: `[canvas] ${query}`,
+          channel: 'canvas',
+          metadata: { source: 'canvas_query', sessionId, responderId, timestamp: Date.now() },
+        })
+      } catch {
+        // Chat delivery failure is non-fatal — still show the thinking card
       }
-      // Store exchange in session history
+
+      // Return an immediate "thinking" card — the real response will arrive
+      // asynchronously via canvas_push/canvas_message when the agent responds.
+      const text = `Asking ${responderId}…`
+
+      // Store the question in session history
       if (sessionId) {
         pushCanvasSession(sessionId, 'user', query)
-        pushCanvasSession(sessionId, 'assistant', text)
       }
-      card = { type: 'info', data: { text } }
+      card = { type: 'info', data: { text, pending: true, responderId } }
     }
 
     // Emit canvas_message on event bus — pulse stream forwards it to all subscribers
