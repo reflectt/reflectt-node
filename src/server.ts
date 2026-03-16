@@ -18594,7 +18594,33 @@ If your heartbeat shows **no active task** and **no next task**:
       event: { id: run.id, event_type: 'approval_requested', payload: run.input },
     }))
 
-    const allItems = [...items, ...agentInterfaceItems]
+    // Filter out agent-to-agent reviews — humans don't need to see these on the canvas.
+    // Only show items where the reviewer is a human (not a known agent).
+    const KNOWN_AGENTS_APPROVAL = new Set([
+      'link', 'kai', 'pixel', 'sage', 'scout', 'echo',
+      'rhythm', 'spark', 'swift', 'kotlin', 'harmony',
+      'artdirector', 'uipolish', 'coo', 'cos', 'pm', 'qa',
+      'shield', 'kindling', 'quill', 'funnel', 'attribution',
+      'bookkeeper', 'legal-counsel', 'evi-scout',
+    ])
+
+    // Check if ?humanOnly=true (default true for canvas, false for dashboard)
+    const humanOnly = (request.query as Record<string, string>).humanOnly !== 'false'
+
+    const filteredItems = humanOnly
+      ? items.filter(item => {
+          // agentId on the event IS the reviewer for review_requested events
+          const reviewerAgent = (item.agentId ?? '').toLowerCase().trim()
+          if (reviewerAgent && KNOWN_AGENTS_APPROVAL.has(reviewerAgent)) return false
+          // Also check payload.reviewer if present
+          const payload = item.event?.payload as Record<string, unknown> | undefined
+          const payloadReviewer = (payload?.reviewer as string ?? '').toLowerCase().trim()
+          if (payloadReviewer && KNOWN_AGENTS_APPROVAL.has(payloadReviewer)) return false
+          return true
+        })
+      : items
+
+    const allItems = [...filteredItems, ...agentInterfaceItems]
     return {
       items: allItems,
       count: allItems.length,
