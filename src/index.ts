@@ -6,6 +6,7 @@
  * 
  * Entry point
  */
+import { initSentry, flushSentry, captureException } from './sentry.js'
 import { createServer } from './server.js'
 import { serverConfig, isDev, openclawConfig, DATA_DIR, REFLECTT_HOME } from './config.js'
 import { execSync } from 'node:child_process'
@@ -180,6 +181,9 @@ function checkDockerBootstrap(): void {
 async function main() {
   console.log('🚀 Starting reflectt-node...')
 
+  // Initialize Sentry error tracking (no-op if SENTRY_DSN not set)
+  initSentry()
+
   // Build-freshness check (non-blocking)
   checkBuildFreshness()
 
@@ -252,12 +256,13 @@ async function main() {
   const fatal = (label: string, err: any) => {
     try {
       console.error(`\n🚨 [FATAL] ${label}:`, err)
+      captureException(err instanceof Error ? err : new Error(String(err)), { fatal: true, label })
     } catch {}
     try {
       releasePidLock(pidPath)
     } catch {}
-    // Exit non-zero so launchd restarts
-    process.exit(1)
+    // Flush Sentry before exit so the error is captured
+    flushSentry(1000).catch(() => {}).finally(() => process.exit(1))
   }
   process.on('uncaughtException', err => fatal('uncaughtException', err))
   process.on('unhandledRejection', err => fatal('unhandledRejection', err))
@@ -664,6 +669,7 @@ async function main() {
         await closeAllSessions()
       } catch { /* non-blocking */ }
       closeDb()
+      await flushSentry(2000)
       releasePidLock(pidPath)
       await app.close()
       process.exit(0)
