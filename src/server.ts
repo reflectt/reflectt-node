@@ -9409,7 +9409,23 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       // ── Approval card: proactively surface approval card on canvas when task enters validating ──
+      // Only emit for human reviewers — agent-to-agent reviews should NOT appear on canvas.
+      // If the reviewer is a known agent name, skip the card entirely.
       if (parsed.status === 'validating' && existing.status !== 'validating') {
+        const KNOWN_AGENT_IDS = new Set([
+          'link', 'kai', 'pixel', 'sage', 'scout', 'echo',
+          'rhythm', 'spark', 'swift', 'kotlin', 'harmony',
+        ])
+        const reviewerId = (task.reviewer ?? '').toLowerCase().trim()
+        const isAgentReviewer = KNOWN_AGENT_IDS.has(reviewerId)
+
+        // Skip canvas card for agent-to-agent reviews — humans don't need to see these
+        if (isAgentReviewer) {
+          // Still log for debugging, but no canvas card
+          console.log(`[ApprovalCard] Skipped canvas card for agent-to-agent review: ${task.id} (reviewer: ${reviewerId})`)
+        }
+
+        if (!isAgentReviewer) {
         const taskMetaForCard = task.metadata as Record<string, unknown> | undefined
         const prUrlForCard = (taskMetaForCard?.pr_url as string | undefined)
           ?? (taskMetaForCard?.review_handoff as Record<string, unknown> | undefined)?.pr_url as string | undefined
@@ -9444,6 +9460,7 @@ export async function createServer(): Promise<FastifyInstance> {
           data: approvalPushData,
         })
         queueCanvasPushEvent(approvalPushData)
+        } // end if (!isAgentReviewer)
       }
 
       // ── Canvas push: self-emit utterance on task state transitions ──
