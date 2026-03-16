@@ -37,6 +37,9 @@ export const VALID_EVENT_TYPES = [
   'review_requested',
   'review_approved',
   'review_rejected',
+  'approval_requested',
+  'approval_approved',
+  'approval_rejected',
   'blocked',
   'handed_off',
   'completed',
@@ -792,16 +795,19 @@ export function submitApprovalDecision(opts: {
 }): { event: AgentEvent; runUnblocked: boolean } {
   const db = getDb()
 
-  // Find the original review_requested event
+  // Find the original review_requested OR approval_requested event
   const originalRow = db.prepare('SELECT * FROM agent_events WHERE id = ?').get(opts.eventId) as EventRow | undefined
   if (!originalRow) throw new Error(`Event ${opts.eventId} not found`)
   const original = rowToEvent(originalRow)
-  if (original.eventType !== 'review_requested') {
-    throw new Error(`Event ${opts.eventId} is not a review_requested event`)
+  if (original.eventType !== 'review_requested' && original.eventType !== 'approval_requested') {
+    throw new Error(`Event ${opts.eventId} is type ${original.eventType}, expected review_requested or approval_requested`)
   }
 
-  // Record the decision
-  const eventType = opts.decision === 'approve' ? 'review_approved' : 'review_rejected'
+  // Record the decision — use the matching *_approved/*_rejected event type
+  const isReview = original.eventType === 'review_requested'
+  const eventType = isReview
+    ? (opts.decision === 'approve' ? 'review_approved' : 'review_rejected')
+    : (opts.decision === 'approve' ? 'approval_approved' : 'approval_rejected')
   const decisionEvent = appendAgentEvent({
     agentId: original.agentId,
     runId: original.runId,
@@ -825,4 +831,61 @@ export function submitApprovalDecision(opts: {
   }
 
   return { event: decisionEvent, runUnblocked }
+}
+
+/**
+ * Sweep expired approval/review cards on node startup.
+ *
+ * Approval and review cards older than TTL (default 24h) that have no decision event
+ * are pruned by inserting a synthetic `approval_rejected`/`review_rejected` event with
+ * actor="system" and reason="expired". This prevents stale cards from reappearing after
+ * node restarts and ensures the canvas approval queue stays clean.
+ *
+ * AC: task-1773603042171-oqcsfar7m
+ */
+export function sweepExpiredApprovalCards(ttlMs: number = 24 * 60 * 60 * 1000): number {
+  const db = getDb()
+  const cutoff = Date.now() - ttlMs
+
+  // Find undecided approval_requested and review_requested events older than TTL
+  const staleRows = db.prepare(`
+    SELECT e.* FROM agent_events e
+    WHERE e.event_type IN ('approval_requested', 'review_requested')
+    AND e.created_at < ?
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_events r
+      WHERE r.run_id = e.run_id
+      AND r.event_type IN ('review_approved', 'review_rejected', 'approval_approved', 'approval_rejected')
+      AND r.created_at > e.created_at
+    )
+    ORDER BY e.created_at ASC
+  `).all(cutoff) as EventRow[]
+
+  let pruned = 0
+  for (const row of staleRows) {
+    try {
+      const original = rowToEvent(row)
+      const expiredEventType = original.eventType === 'review_requested' ? 'review_rejected' : 'approval_rejected'
+      appendAgentEvent({
+        agentId: original.agentId,
+        runId: original.runId,
+        eventType: expiredEventType,
+        payload: {
+          original_event_id: original.id,
+          reviewer: 'system',
+          reason: 'expired',
+          expired_at: Date.now(),
+          ttl_ms: ttlMs,
+        },
+      })
+      pruned++
+    } catch {
+      // Non-fatal — skip individual failures
+    }
+  }
+
+  if (pruned > 0) {
+    console.log(`[ApprovalSweep] Pruned ${pruned} expired approval/review card${pruned > 1 ? 's' : ''} (TTL: ${ttlMs / 3600000}h)`)
+  }
+  return pruned
 }
