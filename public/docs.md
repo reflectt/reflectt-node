@@ -1193,6 +1193,9 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/agents/:agentId/cost-check` | Runtime cost enforcement check. Params: `dailySpend?`, `monthlySpend?`. Returns: allowed, action (allow\|warn\|downgrade\|deny), remaining budgets, model/fallback. |
 | POST | `/events/routing/validate` | Validate routing semantics for an event payload. Body: `{ eventType, payload }`. Returns: valid, errors[], warnings[]. Actionable events (review_requested, approval_requested, escalation, handoff) require: action_required, urgency (low\|normal\|high\|critical), owner. |
 | GET | `/agents/:name/identity` | Host-native agent identity resolution. Resolves by name, alias, or display name without requiring OpenClaw gateway. Returns: agentId, displayName, role, aliases, capabilities, model, costCap. Merges YAML roles + agent_config table. |
+| POST | `/agents/:name/identity/avatar` | Agent sets their own visual identity. Body: `{ type: 'svg'\|'image'\|'emoji', content: string, animated?: boolean, displayName?: string, bio?: string }`. Stored in agent_config settings. Emits canvas_expression with identity channel. |
+| GET | `/agents/:name/identity/avatar` | Read a single agent's visual identity (avatar SVG/image/emoji, bio, displayName). |
+| GET | `/agents/avatars` | All agent avatars — for canvas to render custom agent visuals instead of default circles. Returns: `{ avatars: { [agentId]: { type, content, animated, displayName?, bio? } } }`. |
 | POST | `/agents/:agentId/messages/send` | Send message to another agent. Body: `{ to (required), content (required), channel?, metadata? }`. Emits message_posted SSE event. |
 | GET | `/agents/:agentId/messages` | Inbox — list messages for an agent. Params: `channel?`, `unread?` (true), `since?`, `limit?`. Returns messages + unreadCount. |
 | GET | `/agents/:agentId/messages/sent` | Sent messages. Params: `limit?`. |
