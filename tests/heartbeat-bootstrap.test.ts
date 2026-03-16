@@ -27,8 +27,8 @@ describe('GET /heartbeat/:agent', () => {
   it('shows active task when agent has doing task', async () => {
     const cr = await app.inject({
       method: 'POST', url: '/tasks',
-      payload: { title: 'HB test', description: 'x', assignee: AGENT, reviewer: 'ryan',
-        priority: 'P2', createdBy: AGENT, eta: '~1h', done_criteria: ['t'],
+      payload: { title: 'TEST: HB active task for heartbeat', description: 'x', assignee: AGENT, reviewer: 'ryan',
+        priority: 'P2', createdBy: AGENT, eta: '~1h', done_criteria: ['heartbeat shows active task'],
         metadata: { wip_override: true, lane: 'test' } },
     })
     const taskId = JSON.parse(cr.body).task.id

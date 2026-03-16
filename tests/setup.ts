@@ -13,6 +13,10 @@ import { rmSync } from 'fs'
 const testHome = mkdtempSync(join(tmpdir(), 'reflectt-test-'))
 process.env.REFLECTT_HOME = testHome
 
+// Set NODE_ENV=test so DoR gate, noise budget, and other production guards
+// are bypassed in test mode (matches the skipDoR check in POST /tasks).
+process.env.NODE_ENV = 'test'
+
 // Ensure cleanup after all tests
 process.on('exit', () => {
   try {
