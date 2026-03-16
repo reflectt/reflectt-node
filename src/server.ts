@@ -9179,6 +9179,39 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      // ── Lane validation on claim ──
+      // Reject out-of-lane claims at the API level.
+      // If the task has metadata.lane, the claiming agent must belong to a lane
+      // that matches the task's lane. Agents with no lane config cannot claim lane-specific tasks.
+      // Tasks without lane metadata pass through (no breaking change).
+      if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
+        const claimingAgent = (parsed.assignee || existing.assignee || '').toLowerCase()
+        const taskLane = String((mergedMeta.lane ?? '') as string).trim().toLowerCase()
+        if (claimingAgent && taskLane) {
+          // Check if this is a lane override (metadata.lane_override = true)
+          const laneOverride = mergedMeta.lane_override === true
+          if (!laneOverride) {
+            const { getAgentLane } = await import('./lane-config.js')
+            const agentLaneConfig = getAgentLane(claimingAgent)
+            const agentLaneName = agentLaneConfig?.name?.toLowerCase() ?? null
+
+            if (!agentLaneName || agentLaneName !== taskLane) {
+              reply.code(400)
+              return {
+                success: false,
+                error: agentLaneName
+                  ? `Lane mismatch: ${claimingAgent} belongs to "${agentLaneConfig!.name}" lane but task is in "${taskLane}" lane.`
+                  : `Lane mismatch: ${claimingAgent} has no lane assignment but task is in "${taskLane}" lane.`,
+                gate: 'lane_validation',
+                agentLane: agentLaneName ?? null,
+                taskLane,
+                hint: 'Set metadata.lane_override=true to bypass this check.',
+              }
+            }
+          }
+        }
+      }
+
       // ── Working contract: reflection gate on claim ──
       // Only fires for fresh claims (todo→doing, blocked→doing), not re-claims
       // (validating→doing = reviewer rejection/rework on the agent's own task).
