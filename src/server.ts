@@ -11598,6 +11598,130 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, id }
   })
 
+  // ── Canvas takeover — agent owns the full screen ──────────────────────
+  // When an agent has something to show, they take over. Orbs fade to ambient.
+  // The agent's content IS the canvas. Release returns to constellation view.
+  // task-1773672750043
+  //
+  // POST /canvas/takeover — claim the screen
+  //   { agentId, content: { html?, markdown?, code?, image?, svg?, video?, threejs? },
+  //     title?, duration?: number (ms, max 120s, default 30s),
+  //     transition?: 'fade'|'slide'|'instant' (default 'fade') }
+  //
+  // POST /canvas/takeover/release — give back the screen
+  //   { agentId }
+
+  let currentTakeover: {
+    agentId: string; id: string; content: Record<string, unknown>;
+    title?: string; startedAt: number; duration: number; transition: string;
+    releaseTimer?: ReturnType<typeof setTimeout>
+  } | null = null
+
+  app.post('/canvas/takeover', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim().toLowerCase() : ''
+    if (!agentId) {
+      reply.status(400)
+      return { success: false, message: 'agentId is required' }
+    }
+
+    const content = body.content as Record<string, unknown> | undefined
+    if (!content || typeof content !== 'object') {
+      reply.status(400)
+      return { success: false, message: 'content object is required' }
+    }
+
+    // Sanitize content fields
+    const safeContent: Record<string, unknown> = {}
+    if (typeof content.html === 'string') safeContent.html = content.html.slice(0, 50_000)
+    if (typeof content.markdown === 'string') safeContent.markdown = content.markdown.slice(0, 20_000)
+    if (typeof content.code === 'string') safeContent.code = content.code.slice(0, 20_000)
+    if (typeof content.language === 'string') safeContent.language = content.language.slice(0, 30)
+    if (typeof content.image === 'string') safeContent.image = content.image.slice(0, 2000)
+    if (typeof content.svg === 'string') safeContent.svg = content.svg.slice(0, 100_000)
+    if (typeof content.video === 'string') safeContent.video = content.video.slice(0, 2000)
+    if (typeof content.threejs === 'string') safeContent.threejs = content.threejs.slice(0, 100_000)
+    if (typeof content.title === 'string') safeContent.title = content.title.slice(0, 200)
+
+    const duration = typeof body.duration === 'number' && body.duration > 0
+      ? Math.min(body.duration, 120_000) : 30_000
+    const transition = typeof body.transition === 'string' && ['fade', 'slide', 'instant'].includes(body.transition)
+      ? body.transition : 'fade'
+    const title = typeof body.title === 'string' ? body.title.slice(0, 200) : undefined
+
+    // Release previous takeover if any
+    if (currentTakeover?.releaseTimer) clearTimeout(currentTakeover.releaseTimer)
+
+    const id = `takeover-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const now = Date.now()
+
+    currentTakeover = { agentId, id, content: safeContent, title, startedAt: now, duration, transition }
+
+    // Auto-release after duration
+    currentTakeover.releaseTimer = setTimeout(() => {
+      if (currentTakeover?.id === id) {
+        eventBus.emit({
+          id: `takeover-release-${Date.now()}`,
+          type: 'canvas_takeover' as const,
+          timestamp: Date.now(),
+          data: { action: 'release', agentId, agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa', transition: 'fade', reason: 'timeout' },
+        })
+        currentTakeover = null
+      }
+    }, duration)
+
+    // Emit takeover event — frontend fades orbs to ambient, renders agent content full-screen
+    eventBus.emit({
+      id,
+      type: 'canvas_takeover' as const,
+      timestamp: now,
+      data: { action: 'claim', agentId, agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa', content: safeContent, title, duration, transition },
+    })
+
+    return { success: true, id, expiresAt: now + duration }
+  })
+
+  app.post('/canvas/takeover/release', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim().toLowerCase() : ''
+    if (!agentId) {
+      reply.status(400)
+      return { success: false, message: 'agentId is required' }
+    }
+
+    if (!currentTakeover || currentTakeover.agentId !== agentId) {
+      return { success: true, message: 'no active takeover by this agent' }
+    }
+
+    if (currentTakeover.releaseTimer) clearTimeout(currentTakeover.releaseTimer)
+    const transition = typeof body.transition === 'string' && ['fade', 'slide', 'instant'].includes(body.transition)
+      ? body.transition : 'fade'
+
+    eventBus.emit({
+      id: `takeover-release-${Date.now()}`,
+      type: 'canvas_takeover' as const,
+      timestamp: Date.now(),
+      data: { action: 'release', agentId, agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa', transition, reason: 'agent_released' },
+    })
+
+    currentTakeover = null
+    return { success: true }
+  })
+
+  // GET /canvas/takeover — check current takeover state
+  app.get('/canvas/takeover', async () => {
+    if (!currentTakeover) return { active: false }
+    return {
+      active: true,
+      agentId: currentTakeover.agentId,
+      id: currentTakeover.id,
+      title: currentTakeover.title,
+      startedAt: currentTakeover.startedAt,
+      expiresAt: currentTakeover.startedAt + currentTakeover.duration,
+      remainingMs: Math.max(0, (currentTakeover.startedAt + currentTakeover.duration) - Date.now()),
+    }
+  })
+
   // GET /canvas/render/stream — SSE stream for the Reality Mixer
   // Agents push commands via POST /canvas/express; surfaces subscribe here and execute.
   // New subscribers receive last 20 commands for catch-up.
