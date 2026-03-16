@@ -9996,6 +9996,94 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Agent visual identity — agents choose their own appearance ──────
+  // POST /agents/:name/identity/avatar — agent sets their visual form
+  // task-1773690756100
+  app.post<{ Params: { name: string } }>('/agents/:name/identity/avatar', async (request) => {
+    const { name } = request.params
+    const body = request.body as Record<string, unknown> ?? {}
+
+    // Validate agent exists
+    const resolved = resolveAgentMention(name)
+    const agentId = resolved ?? name
+    const role = getAgentRole(agentId)
+    if (!role) return { success: false, error: 'Agent not found' }
+
+    // Validate avatar payload
+    const avatarType = String(body.type ?? 'svg')
+    if (!['svg', 'image', 'emoji'].includes(avatarType)) {
+      return { success: false, error: 'Invalid avatar type. Must be: svg, image, emoji' }
+    }
+    const content = String(body.content ?? '')
+    if (!content) return { success: false, error: 'content is required' }
+    if (avatarType === 'svg' && content.length > 50000) {
+      return { success: false, error: 'SVG content too large (max 50KB)' }
+    }
+
+    const avatar = {
+      type: avatarType,
+      content,
+      animated: body.animated === true,
+      displayName: typeof body.displayName === 'string' ? body.displayName : undefined,
+      bio: typeof body.bio === 'string' ? body.bio.slice(0, 200) : undefined,
+      updatedAt: Date.now(),
+    }
+
+    // Store in agent_config settings
+    const db = getDb()
+    const existing = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(agentId) as { settings: string } | undefined
+    const settings = existing ? JSON.parse(existing.settings) : {}
+    settings.avatar = avatar
+
+    if (existing) {
+      db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
+        .run(JSON.stringify(settings), Date.now(), agentId)
+    } else {
+      db.prepare('INSERT INTO agent_config (agent_id, team_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run(agentId, 'default', JSON.stringify(settings), Date.now(), Date.now())
+    }
+
+    // Emit on eventBus so canvas updates immediately
+    eventBus.emit({
+      id: `avatar-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type: 'canvas_expression' as const,
+      timestamp: Date.now(),
+      data: { agentId, channels: { identity: avatar } },
+    })
+
+    return { success: true, agentId, avatar }
+  })
+
+  // GET /agents/:name/identity/avatar — read agent's visual identity
+  app.get<{ Params: { name: string } }>('/agents/:name/identity/avatar', async (request) => {
+    const { name } = request.params
+    const resolved = resolveAgentMention(name)
+    const agentId = resolved ?? name
+
+    const db = getDb()
+    const row = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(agentId) as { settings: string } | undefined
+    if (!row) return { found: false, agentId }
+
+    const settings = JSON.parse(row.settings)
+    if (!settings.avatar) return { found: false, agentId }
+
+    return { found: true, agentId, avatar: settings.avatar }
+  })
+
+  // GET /agents/avatars — all agent avatars (for canvas to render)
+  app.get('/agents/avatars', async () => {
+    const db = getDb()
+    const rows = db.prepare('SELECT agent_id, settings FROM agent_config WHERE settings LIKE \'%avatar%\'').all() as Array<{ agent_id: string; settings: string }>
+    const avatars: Record<string, unknown> = {}
+    for (const row of rows) {
+      try {
+        const settings = JSON.parse(row.settings)
+        if (settings.avatar) avatars[row.agent_id] = settings.avatar
+      } catch { /* skip malformed */ }
+    }
+    return { avatars }
+  })
+
   // Team-scoped alias for assignment-engine consumers
   app.get('/team/roles', async () => {
     const payload = buildRoleRegistryPayload()
