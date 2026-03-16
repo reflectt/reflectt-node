@@ -158,7 +158,7 @@ import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats }
 import { startOpenClawUsageSync, stopOpenClawUsageSync, syncOpenClawUsage } from './openclaw-usage-sync.js'
 import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
-import { canvasReadRoutes } from './canvas-routes.js'
+import { canvasReadRoutes, canvasPhase2Routes } from './canvas-routes.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
@@ -6913,6 +6913,35 @@ export async function createServer(): Promise<FastifyInstance> {
             taskId: task.id,
             timestamp: completedAt,
           },
+        })
+
+        // Auto-paint canvas on task completion — the room reflects real work
+        // Brief visual moment showing what was shipped (task-1773689755389-ux4bbn1lo)
+        const shortTitle = (updated.title ?? 'task').slice(0, 60)
+        const pushSvg = `<svg viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg"><rect width="800" height="200" fill="transparent"/><text x="400" y="80" text-anchor="middle" fill="${milestoneColor}" font-size="24" font-family="monospace" font-weight="bold" opacity="0.8">✓ shipped</text><text x="400" y="120" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="16" font-family="monospace">${shortTitle.replace(/[<>&"']/g, '')}</text><text x="400" y="155" text-anchor="middle" fill="${milestoneColor}" font-size="12" font-family="monospace" opacity="0.4">${assigneeId}</text></svg>`
+        eventBus.emit({
+          id: `ship-visual-${completedAt}-${task.id.slice(-6)}`,
+          type: 'canvas_push' as const,
+          timestamp: completedAt,
+          data: {
+            agentId: assigneeId,
+            type: 'rich',
+            content: { svg: pushSvg, title: `${assigneeId} shipped: ${shortTitle}` },
+            layer: 'stage',
+            position: { x: 0.5, y: 0.3 },
+            size: { w: 0.5, h: 0.2 },
+            ttl: 15_000,
+          },
+        })
+        queueCanvasPushEvent({
+          type: 'canvas_push',
+          agentId: assigneeId,
+          content: { svg: pushSvg, title: `${assigneeId} shipped: ${shortTitle}` },
+          layer: 'stage',
+          position: { x: 0.5, y: 0.3 },
+          size: { w: 0.5, h: 0.2 },
+          ttl: 15_000,
+          t: completedAt,
         })
       })
     }
