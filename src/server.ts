@@ -8050,8 +8050,36 @@ export async function createServer(): Promise<FastifyInstance> {
       echo: 'MF3mGyEYCl7XYWbV9V6O',    // Elli
     }
 
+    // ── Voice mutex — only one agent speaks at a time ──────────────────
+    // P0 fix: multiple agents were triggering TTS simultaneously, causing
+    // overlapping audio on the canvas. Queue ensures serial playback.
+    // task-1773686058943-v17yrucjr
+    const voiceQueue: Array<{ text: string; agentId: string; resolve: (v: string | null) => void }> = []
+    let voiceSpeaking = false
+
+    const processVoiceQueue = async () => {
+      if (voiceSpeaking || voiceQueue.length === 0) return
+      voiceSpeaking = true
+      const item = voiceQueue.shift()!
+      try {
+        const result = await synthesizeTtsInternal(item.text, item.agentId)
+        item.resolve(result)
+      } catch {
+        item.resolve(null)
+      }
+      voiceSpeaking = false
+      if (voiceQueue.length > 0) setTimeout(processVoiceQueue, 500)
+    }
+
     // Synthesize TTS via ElevenLabs if key is set
     const synthesizeTts = async (text: string, forAgentId: string): Promise<string | null> => {
+      return new Promise<string | null>((resolve) => {
+        voiceQueue.push({ text, agentId: forAgentId, resolve })
+        processVoiceQueue()
+      })
+    }
+
+    const synthesizeTtsInternal = async (text: string, forAgentId: string): Promise<string | null> => {
       const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
 
       // Fire canvas_expression alongside TTS — the room responds when an agent speaks.
