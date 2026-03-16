@@ -11701,6 +11701,7 @@ export async function createServer(): Promise<FastifyInstance> {
       agentId: currentTakeover.agentId,
       id: currentTakeover.id,
       title: currentTakeover.title,
+      content: currentTakeover.content,
       startedAt: currentTakeover.startedAt,
       expiresAt: currentTakeover.startedAt + currentTakeover.duration,
       remainingMs: Math.max(0, (currentTakeover.startedAt + currentTakeover.duration) - Date.now()),
