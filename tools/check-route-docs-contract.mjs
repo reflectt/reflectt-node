@@ -9,6 +9,7 @@ const DOCS_PATH = path.join(ROOT, 'public', 'docs.md')
 // Additional source files that register routes via helper functions
 const EXTRA_ROUTE_SOURCES = [
   path.join(ROOT, 'src', 'manage.ts'),
+  path.join(ROOT, 'src', 'canvas-routes.ts'),
 ]
 
 const IGNORE_ROUTES = new Set([
