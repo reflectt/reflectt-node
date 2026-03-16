@@ -427,6 +427,21 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | POST | `/presence/:agent/focus` | Toggle focus mode. Body: `{ "active": true, "level": "soft|deep", "durationMin": 60, "reason": "shipping PR" }`. Soft: suppresses system nudges, allows direct mentions. Deep: suppresses everything except blocker/review pings. |
 | GET | `/presence-loop` | Presence loop demo page — serves an HTML page that polls `/presence` to show live agent status changes. |
 
+## Agent Notifications
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agent-notifications` | Create a notification. Body: `{ "target_agent": "link", "title": "Review PR", "source_agent": "kai", "type": "review|task|mention|alert|info|system", "body": "...", "priority": "low|medium|high|critical", "task_id": "...", "metadata": {}, "expires_at": 0 }`. Returns 201 + notification object. |
+| POST | `/agent-notifications/:id/ack` | Acknowledge a notification. Body: `{ "decision": "seen|accept|defer|dismiss" }`. Returns updated notification. |
+| GET | `/agent-notifications` | List notifications for an agent. Query: `agent` (required), `status` (default `pending`), `limit` (default 50). Returns `{ notifications, total }`. |
+
+## Agent Presence (structured)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agent-presence` | Upsert agent presence + log to history. Body: `{ "agent": "link", "status": "working|idle|blocked|reviewing|offline", "task": "...", "focus_level": "soft|deep", "metadata": {} }`. Returns current presence. |
+| GET | `/agent-presence` | Read current agent presence. Query: `agent` (required). Returns `{ presence }`. |
+
 ## Memory
 
 | Method | Path | Description |

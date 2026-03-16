@@ -55,6 +55,7 @@ import { buildContextInjection, getContextBudgets, getContextMemo, upsertContext
 import { deriveScopeId } from './scope-routing.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
+import type { NotificationType, NotificationPriorityLevel, AckDecision, NotificationStatus } from './agent-notifications.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
 import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog } from './prAutoMerge.js'
 import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
@@ -15237,6 +15238,119 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get<{ Params: { agent: string } }>('/presence/:agent/focus', async (request) => {
     const focus = presenceManager.isInFocus(request.params.agent)
     return { agent: request.params.agent, focus }
+  })
+
+  // ── Agent Notifications ─────────────────────────────────────────────
+  // Structured notification delivery with ack workflow.
+  // Storage: agent_notifications table (migration v27).
+
+  const agentNotifModule = await import('./agent-notifications.js')
+
+  // POST /agent-notifications — create a notification
+  app.post('/agent-notifications', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const target_agent = String(body.target_agent || '').trim()
+    if (!target_agent) {
+      reply.code(400)
+      return { error: 'target_agent is required' }
+    }
+    const title = String(body.title || '').trim()
+    if (!title) {
+      reply.code(400)
+      return { error: 'title is required' }
+    }
+
+    const notification = agentNotifModule.createNotification(getDb(), {
+      target_agent,
+      source_agent: body.source_agent ? String(body.source_agent) : undefined,
+      type: body.type ? String(body.type) as NotificationType : undefined,
+      title,
+      body: body.body ? String(body.body) : undefined,
+      priority: body.priority ? String(body.priority) as NotificationPriorityLevel : undefined,
+      task_id: body.task_id ? String(body.task_id) : undefined,
+      metadata: body.metadata as Record<string, unknown> | undefined,
+      expires_at: body.expires_at ? Number(body.expires_at) : undefined,
+    })
+
+    reply.code(201)
+    return { success: true, notification }
+  })
+
+  // POST /agent-notifications/:id/ack — acknowledge a notification
+  app.post<{ Params: { id: string } }>('/agent-notifications/:id/ack', async (request, reply) => {
+    const { id } = request.params
+    const body = request.body as Record<string, unknown>
+    const decision = String(body.decision || '').trim() as AckDecision
+
+    if (!['seen', 'accept', 'defer', 'dismiss'].includes(decision)) {
+      reply.code(400)
+      return { error: 'decision must be one of: seen, accept, defer, dismiss' }
+    }
+
+    const notification = agentNotifModule.ackNotification(getDb(), id, decision)
+    if (!notification) {
+      reply.code(404)
+      return { error: 'Notification not found or already acked' }
+    }
+
+    return { success: true, notification }
+  })
+
+  // GET /agent-notifications?agent=:id — list notifications for an agent
+  app.get('/agent-notifications', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const agent = String(query.agent || '').trim()
+    if (!agent) {
+      reply.code(400)
+      return { error: 'agent query parameter is required' }
+    }
+
+    const status = query.status as NotificationStatus | undefined
+    const limit = query.limit ? parseInt(query.limit, 10) : undefined
+
+    const result = agentNotifModule.getNotifications(getDb(), agent, { status, limit })
+    return { notifications: result.notifications, total: result.total }
+  })
+
+  // POST /agent-presence — upsert agent presence (delegates to PresenceManager + logs)
+  app.post('/agent-presence', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const agent = String(body.agent || '').trim()
+    if (!agent) {
+      return { error: 'agent is required' }
+    }
+
+    const status = String(body.status || 'idle') as import('./presence.js').PresenceStatus
+    const task = body.task ? String(body.task) : undefined
+
+    presenceManager.updatePresence(agent, status, task)
+
+    // Log to agent_presence_log for historical tracking
+    const focusLevel = body.focus_level ? String(body.focus_level) : null
+    const metadata = body.metadata ? JSON.stringify(body.metadata) : null
+    getDb().prepare(`
+      INSERT INTO agent_presence_log (agent, status, task, focus_level, metadata, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(agent, status, task ?? null, focusLevel, metadata, Date.now())
+
+    const presence = presenceManager.getPresence(agent)
+    return { success: true, presence }
+  })
+
+  // GET /agent-presence?agent=:id — read current agent presence
+  app.get('/agent-presence', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const agent = String(query.agent || '').trim()
+    if (!agent) {
+      reply.code(400)
+      return { error: 'agent query parameter is required' }
+    }
+
+    const presence = presenceManager.getPresence(agent)
+    if (!presence) {
+      return { presence: null, message: 'No presence data for this agent' }
+    }
+    return { presence }
   })
 
   // Get all agent activity metrics

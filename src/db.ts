@@ -660,6 +660,42 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_canvas_sessions_id_ts ON canvas_sessions(session_id, ts);
       `,
     },
+    {
+      version: 27,
+      sql: `
+        -- Agent notifications: structured notification delivery with ack workflow
+        CREATE TABLE IF NOT EXISTS agent_notifications (
+          id            TEXT PRIMARY KEY,
+          target_agent  TEXT NOT NULL,
+          source_agent  TEXT,
+          type          TEXT NOT NULL DEFAULT 'info',
+          title         TEXT NOT NULL,
+          body          TEXT,
+          priority      TEXT NOT NULL DEFAULT 'medium',
+          status        TEXT NOT NULL DEFAULT 'pending',
+          ack_decision  TEXT,
+          ack_at        INTEGER,
+          task_id       TEXT,
+          metadata      TEXT,
+          created_at    INTEGER NOT NULL,
+          expires_at    INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_notif_target ON agent_notifications(target_agent, status);
+        CREATE INDEX IF NOT EXISTS idx_agent_notif_created ON agent_notifications(created_at);
+
+        -- Agent presence log: historical presence state for analytics
+        CREATE TABLE IF NOT EXISTS agent_presence_log (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          agent       TEXT NOT NULL,
+          status      TEXT NOT NULL,
+          task        TEXT,
+          focus_level TEXT,
+          metadata    TEXT,
+          recorded_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_presence_log_agent ON agent_presence_log(agent, recorded_at);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
@@ -700,6 +736,7 @@ export function runMigrations(db: Database.Database): void {
     { version: 24, tables: ['agent_messages', 'artifacts'] },
     { version: 25, tables: ['webhook_payloads'] },
     { version: 26, tables: ['canvas_sessions'] },
+    { version: 27, tables: ['agent_notifications', 'agent_presence_log'] },
   ]
   const existingTables = new Set(
     (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>)
