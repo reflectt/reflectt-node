@@ -2577,6 +2577,12 @@ export async function createServer(): Promise<FastifyInstance> {
     wsHeartbeat.stop()
   })
 
+  // Canvas state map — forward reference for route handlers that emit before the canvas block.
+  // Populated in the canvas state section below. Route handlers (e.g. PATCH /tasks) access
+  // this via closure to synchronously update orb state when task status transitions occur.
+  // eslint-disable-next-line prefer-const
+  let _canvasStateMap: Map<string, { state: string; sensors: string | null; payload: unknown; updatedAt: number }> | null = null
+
   // Health check
   // Ultra-lightweight ping — no DB, no stats, instant response.
   // Use for keepalive cron triggers (Cloudflare, load balancers, uptime monitors).
@@ -9552,22 +9558,35 @@ export async function createServer(): Promise<FastifyInstance> {
         // Helper: emit canvas_render to update agent orb state (presence layer).
         // canvas_push carries the utterance/work_released visual; canvas_render updates
         // the orb's state ring so browsers show the right idle/working/handoff/etc ring.
-        // Note: canvasStateMap is in a nested scope below; we emit without updating the map
-        // here — the auto-state sweep keeps the map eventually consistent.
-        // task: task-1773525394065-f13ucg8ir
+        // Emit canvas state AND synchronously update canvasStateMap so the next pulse
+        // tick reads fresh state immediately (no stale window).
+        // task-1773672429681
         const emitOrbState = (presState: string, activeTaskPayload?: { id: string; title: string }) => {
+          const canvasState = presState === 'working' ? 'thinking'
+                   : presState === 'handoff' ? 'handoff'
+                   : presState === 'needs-attention' ? 'decision'
+                   : 'ambient'
+          const payload = { presenceState: presState, activeTask: activeTaskPayload }
+
+          // Synchronously update canvasStateMap before SSE broadcast
+          if (_canvasStateMap) {
+            _canvasStateMap.set(canvasAgent, {
+              state: canvasState as any,
+              sensors: null,
+              payload,
+              updatedAt: canvasNow,
+            })
+          }
+
           eventBus.emit({
             id: `canvas-orb-${canvasNow}-${task.id.slice(-6)}`,
             type: 'canvas_render' as const,
             timestamp: canvasNow,
             data: {
-              state: presState === 'working' ? 'thinking'
-                   : presState === 'handoff' ? 'handoff'
-                   : presState === 'needs-attention' ? 'decision'
-                   : 'ambient',
+              state: canvasState,
               sensors: null,
               agentId: canvasAgent,
-              payload: { presenceState: presState, activeTask: activeTaskPayload },
+              payload,
               presence: {
                 name: canvasAgent,
                 identityColor: agentColor,
@@ -10584,6 +10603,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Current state per agent — in-memory, not persisted
   const canvasStateMap = new Map<string, { state: CanvasState; sensors: string | null; payload: unknown; updatedAt: number }>()
+  _canvasStateMap = canvasStateMap // populate forward reference for earlier route handlers
 
   // ── Canvas auto-state sweep ──
   // Derives canvas state from task board for agents who haven't pushed recently.
