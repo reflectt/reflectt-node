@@ -9409,7 +9409,23 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       // ── Approval card: proactively surface approval card on canvas when task enters validating ──
+      // Only emit for human reviewers — agent-to-agent reviews should NOT appear on canvas.
+      // If the reviewer is a known agent name, skip the card entirely.
       if (parsed.status === 'validating' && existing.status !== 'validating') {
+        const KNOWN_AGENT_IDS = new Set([
+          'link', 'kai', 'pixel', 'sage', 'scout', 'echo',
+          'rhythm', 'spark', 'swift', 'kotlin', 'harmony',
+        ])
+        const reviewerId = (task.reviewer ?? '').toLowerCase().trim()
+        const isAgentReviewer = KNOWN_AGENT_IDS.has(reviewerId)
+
+        // Skip canvas card for agent-to-agent reviews — humans don't need to see these
+        if (isAgentReviewer) {
+          // Still log for debugging, but no canvas card
+          console.log(`[ApprovalCard] Skipped canvas card for agent-to-agent review: ${task.id} (reviewer: ${reviewerId})`)
+        }
+
+        if (!isAgentReviewer) {
         const taskMetaForCard = task.metadata as Record<string, unknown> | undefined
         const prUrlForCard = (taskMetaForCard?.pr_url as string | undefined)
           ?? (taskMetaForCard?.review_handoff as Record<string, unknown> | undefined)?.pr_url as string | undefined
@@ -9444,6 +9460,7 @@ export async function createServer(): Promise<FastifyInstance> {
           data: approvalPushData,
         })
         queueCanvasPushEvent(approvalPushData)
+        } // end if (!isAgentReviewer)
       }
 
       // ── Canvas push: self-emit utterance on task state transitions ──
@@ -18661,17 +18678,25 @@ If your heartbeat shows **no active task** and **no next task**:
   // Human → agent control seam for the Presence Layer.
   // Payload is intentionally small per COO spec: action + target + actor.
 
-  const CANVAS_INPUT_ACTIONS = ['decision', 'interrupt', 'pause', 'resume', 'mute', 'unmute'] as const
+  const CANVAS_INPUT_ACTIONS = ['decision', 'interrupt', 'pause', 'resume', 'mute', 'unmute', 'surface_tap', 'presence_dot_tap'] as const
   type CanvasInputAction = typeof CANVAS_INPUT_ACTIONS[number]
 
+  const SURFACE_TAP_ZONES = ['floor_trigger', 'presence_dot', 'decision_card'] as const
+
+  // canvas_input.v1 schema per design/interface-os-v0-multimodal-input.html
+  // Also accepts legacy field `type` as alias for `action` (render-protocol uses `type`)
   const CanvasInputSchema = z.object({
-    action: z.enum(CANVAS_INPUT_ACTIONS),
-    targetRunId: z.string().optional(),        // which run to act on
-    decisionId: z.string().optional(),         // for decision actions
+    // `action` is canonical; `type` accepted as alias for canvas_input.v1 compatibility
+    action: z.enum(CANVAS_INPUT_ACTIONS).optional(),
+    type: z.enum(CANVAS_INPUT_ACTIONS).optional(),
+    schema: z.literal('canvas_input.v1').optional(),
+    zone: z.enum(SURFACE_TAP_ZONES).optional(),  // surface_tap zone
+    targetRunId: z.string().optional(),            // which run to act on
+    decisionId: z.string().optional(),             // for decision actions
     choice: z.enum(['approve', 'deny', 'defer']).optional(),  // for decision actions
-    actor: z.string().min(1),                  // who made this input
-    comment: z.string().optional(),            // optional rationale
-  })
+    actor: z.string().optional(),                  // who made this input (optional for surface events)
+    comment: z.string().optional(),               // optional rationale
+  }).refine(d => d.action || d.type, { message: 'action or type is required' })
 
   app.post('/canvas/input', async (request, reply) => {
     const body = request.body as Record<string, unknown>
@@ -18680,15 +18705,35 @@ If your heartbeat shows **no active task** and **no next task**:
       reply.code(422)
       return {
         error: `Invalid canvas input: ${result.error.issues.map(i => i.message).join(', ')}`,
-        hint: 'Required: action (decision|interrupt|pause|resume|mute|unmute), actor. Optional: targetRunId, decisionId, choice, comment.',
+        hint: 'Required: action or type (decision|interrupt|pause|resume|mute|unmute|surface_tap|presence_dot_tap). Optional: actor, zone, targetRunId, decisionId, choice, comment.',
       }
     }
 
     const input = result.data
     const now = Date.now()
 
+    // Normalize: accept `type` as alias for `action` (canvas_input.v1 compat)
+    const action: CanvasInputAction = (input.action ?? input.type) as CanvasInputAction
+
+    // Route surface signals — surface_tap and presence_dot_tap
+    // These are UI receptivity signals from the canvas surface, not agent-control actions.
+    if (action === 'surface_tap' || action === 'presence_dot_tap') {
+      eventBus.emit({
+        id: `cinput-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_input' as const,
+        timestamp: now,
+        data: {
+          action,
+          zone: input.zone ?? null,
+          actor: input.actor ?? 'human',
+          timestamp: now,
+        },
+      })
+      return { success: true, action, zone: input.zone ?? null, timestamp: now }
+    }
+
     // Route by action type
-    if (input.action === 'decision') {
+    if (action === 'decision') {
       if (!input.decisionId || !input.choice) {
         reply.code(422)
         return { error: 'Decision action requires decisionId and choice (approve|deny|defer)' }
@@ -18696,7 +18741,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
       // Emit canvas_input event for SSE subscribers
       eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
-        action: input.action,
+        action,
         decisionId: input.decisionId,
         choice: input.choice,
         actor: input.actor,
@@ -18714,19 +18759,19 @@ If your heartbeat shows **no active task** and **no next task**:
       }
     }
 
-    if (input.action === 'interrupt' || input.action === 'pause') {
+    if (action === 'interrupt' || action === 'pause') {
       // Update active run if specified
       const runId = input.targetRunId
       if (runId) {
         try {
           updateAgentRun(runId, {
-            status: input.action === 'interrupt' ? 'cancelled' : 'blocked',
+            status: action === 'interrupt' ? 'cancelled' : 'blocked',
           })
         } catch { /* run may not exist — still emit event */ }
       }
 
       eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
-        action: input.action,
+        action,
         targetRunId: runId || null,
         actor: input.actor,
         timestamp: now,
@@ -18734,14 +18779,14 @@ If your heartbeat shows **no active task** and **no next task**:
 
       return {
         success: true,
-        action: input.action,
+        action,
         targetRunId: runId || null,
         actor: input.actor,
         timestamp: now,
       }
     }
 
-    if (input.action === 'resume') {
+    if (action === 'resume') {
       const runId = input.targetRunId
       if (runId) {
         try {
@@ -18761,12 +18806,12 @@ If your heartbeat shows **no active task** and **no next task**:
 
     // Mute/unmute — emit event only, no state change needed
     eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
-      action: input.action,
+      action,
       actor: input.actor,
       timestamp: now,
     } })
 
-    return { success: true, action: input.action, actor: input.actor, timestamp: now }
+    return { success: true, action, actor: input.actor, timestamp: now }
   })
 
   // GET /canvas/input/schema — discovery endpoint
