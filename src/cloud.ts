@@ -1414,6 +1414,23 @@ async function syncCanvas(): Promise<void> {
     checkNeedsAttentionTransitions(agents, state.hostId, config.cloudUrl, state.credential)
   }
 
+  // Inject agent avatars into sync payload — browsers on app.reflectt.ai read avatar
+  // from agent state (canvasStore), not from a separate API call. We merge avatar
+  // into each agent entry here so cloud browsers render custom orbs instead of circles.
+  // task-1773690756100
+  try {
+    const db = getDb()
+    const avatarRows = db.prepare("SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%'").all() as Array<{ agent_id: string; settings: string }>
+    for (const row of avatarRows) {
+      try {
+        const s = JSON.parse(row.settings)
+        if (s.avatar?.content && agents[row.agent_id]) {
+          (agents[row.agent_id] as Record<string, unknown>).avatar = s.avatar.content
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* non-blocking */ }
+
   // Push to cloud — include slots, agent states, and any buffered canvas_push events
   const pushEventsToSend = pendingPushEvents.splice(0, pendingPushEvents.length)
   const result = await cloudPost<{ ok: boolean; slotCount: number }>(
