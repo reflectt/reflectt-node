@@ -12592,8 +12592,12 @@ export async function createServer(): Promise<FastifyInstance> {
       })
     }
 
-    // Emit on eventBus — forwarded immediately on pulse SSE stream
+    // Emit on eventBus — forwarded immediately on pulse SSE stream (local SSE subscribers)
     eventBus.emit({ id: `push-${now}-${Math.random().toString(36).slice(2, 6)}`, type: 'canvas_push', timestamp: now, data: payload })
+
+    // Queue for cloud relay — reaches browsers on app.reflectt.ai via syncCanvas push_events[]
+    // task-1773690756100
+    queueCanvasPushEvent({ ...payload, _event: 'canvas_push' })
 
     return { success: true, type, agentId }
   })
