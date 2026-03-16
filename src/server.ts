@@ -2499,6 +2499,15 @@ export async function createServer(): Promise<FastifyInstance> {
   boardHealthWorker.updateConfig(policy.boardHealth)
   boardHealthWorker.start()
 
+  // Notification delivery worker — pushes pending agent-notifications to active agents
+  const { NotificationDeliveryWorker } = await import('./notification-worker.js')
+  const notificationWorker = new NotificationDeliveryWorker(
+    getDb,
+    presenceManager,
+    async (opts) => { await chatManager.sendMessage(opts) },
+  )
+  notificationWorker.start()
+
   // Activate noise budget enforcement — the 24h canary period is complete.
   // Canary mode (log-only) is still the default in case of fresh installs,
   // but on a running server we want real duplicate suppression.
@@ -15324,6 +15333,17 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const result = agentNotifModule.getNotifications(getDb(), agent, { status, limit })
     return { notifications: result.notifications, total: result.total }
+  })
+
+  // GET /agent-notifications/worker/stats — delivery worker status
+  app.get('/agent-notifications/worker/stats', async () => {
+    return { success: true, stats: notificationWorker.getStats() }
+  })
+
+  // POST /agent-notifications/worker/tick — manually trigger delivery tick (for testing)
+  app.post('/agent-notifications/worker/tick', async () => {
+    const results = await notificationWorker.tick()
+    return { success: true, results }
   })
 
   // POST /agent-presence — upsert agent presence (delegates to PresenceManager + logs)

@@ -434,6 +434,8 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | POST | `/agent-notifications` | Create a notification. Body: `{ "target_agent": "link", "title": "Review PR", "source_agent": "kai", "type": "review|task|mention|alert|info|system", "body": "...", "priority": "low|medium|high|critical", "task_id": "...", "metadata": {}, "expires_at": 0 }`. Returns 201 + notification object. |
 | POST | `/agent-notifications/:id/ack` | Acknowledge a notification. Body: `{ "decision": "seen|accept|defer|dismiss" }`. Returns updated notification. |
 | GET | `/agent-notifications` | List notifications for an agent. Query: `agent` (required), `status` (default `pending`), `limit` (default 50). Returns `{ notifications, total }`. |
+| GET | `/agent-notifications/worker/stats` | Notification delivery worker stats: delivered/skipped/failed/expired counts, tick count, running status. |
+| POST | `/agent-notifications/worker/tick` | Manually trigger a delivery tick (useful for testing). Returns delivery results for the batch. |
 
 ## Agent Presence (structured)
 
