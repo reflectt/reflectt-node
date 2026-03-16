@@ -8193,6 +8193,20 @@ export async function createServer(): Promise<FastifyInstance> {
 
     if (transcript.length > 4000) transcript = transcript.slice(0, 4000)
 
+    // Emit canvas_message so pulse SSE subscribers (browser, Android) get the transcript immediately
+    eventBus.emit({
+      id: `cmsg-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_message' as const,
+      timestamp: Date.now(),
+      data: {
+        type: 'voice_transcript',
+        agentId,
+        agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af',
+        transcript,
+        sttProvider,
+      },
+    })
+
     // Delegate to the same voice pipeline as POST /voice/input
     // Inline the pipeline logic (mirrors /voice/input handler)
     const session = createVoiceSession(agentId)
