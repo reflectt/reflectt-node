@@ -1567,12 +1567,13 @@ async function pollCanvasQueryRelay(): Promise<void> {
     const queries = Array.isArray(result.data?.queries) ? result.data.queries : []
     if (queries.length === 0) return
 
-    const acked: string[] = []
+    const acked: Array<{ queryId: string; card: Record<string, unknown> | null }> = []
 
     for (const q of queries) {
       try {
-        // POST to local node — canvas/query processes it and emits canvas_message via eventBus.
-        // The canvas_message flows through canvas_push relay to cloud → browser subscribers.
+        // POST to local node — canvas/query processes it and returns card in response body.
+        // We capture the card here and include it in the ACK so the cloud can immediately
+        // broadcast canvas_message to pulse subscribers without waiting for next syncCanvas.
         const res = await fetch('http://127.0.0.1:4445/canvas/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1580,8 +1581,15 @@ async function pollCanvasQueryRelay(): Promise<void> {
           signal: AbortSignal.timeout(12000), // LLM calls can take ~10s
         })
         if (res.ok || res.status === 400) {
-          // 400 means query was invalid — still ACK to remove from queue
-          acked.push(q.queryId)
+          // Capture card from response — included in ACK for immediate cloud broadcast
+          let card: Record<string, unknown> | null = null
+          if (res.ok) {
+            try {
+              const body = await res.json() as { card?: Record<string, unknown> }
+              card = body.card ?? null
+            } catch { /* ignore parse errors */ }
+          }
+          acked.push({ queryId: q.queryId, card })
         }
       } catch {
         // Individual failure — leave in queue, retry next cycle
@@ -1589,7 +1597,12 @@ async function pollCanvasQueryRelay(): Promise<void> {
     }
 
     if (acked.length > 0) {
-      await cloudPost(`/api/hosts/${state.hostId}/canvas/query/ack`, { queryIds: acked })
+      // Include cards in ACK so cloud can immediately broadcast canvas_message to browsers.
+      // This is faster than waiting for the next syncCanvas push_events cycle.
+      await cloudPost(`/api/hosts/${state.hostId}/canvas/query/ack`, {
+        queryIds: acked.map(a => a.queryId),
+        cards: acked.filter(a => a.card !== null).map(a => a.card),
+      })
       console.log(`☁️  [CanvasQueryRelay] Processed ${acked.length}/${queries.length} relay queries`)
     }
   } catch {
