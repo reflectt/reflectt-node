@@ -11767,19 +11767,24 @@ export async function createServer(): Promise<FastifyInstance> {
   const activityRingBuffer: Array<{ id: string; type: string; timestamp: number; data: unknown }> = []
   const ACTIVITY_RING_SIZE = 30 // Keep slightly more than 20 for filtering headroom
 
+  // Normalize activity events into consistent shape
+  const { normalizeActivityEventSlim } = await import('./activity-stream-normalizer.js')
+
   // Subscribe to eventBus to populate ring buffer
   eventBus.on('activity-ring-collector', (event) => {
     if (!ACTIVITY_STREAM_TYPES.has(event.type)) return
-    activityRingBuffer.push({ id: event.id, type: event.type, timestamp: event.timestamp, data: event.data })
+    const normalized = normalizeActivityEventSlim({ id: event.id, type: event.type, timestamp: event.timestamp, data: event.data as Record<string, unknown> })
+    activityRingBuffer.push(normalized as any)
     if (activityRingBuffer.length > ACTIVITY_RING_SIZE) activityRingBuffer.shift()
   })
 
   const activityStreamSubscribers = new Map<string, { closed: boolean; send: (data: string) => void }>()
 
-  // Forward matching events to activity stream subscribers
+  // Forward matching events to activity stream subscribers (normalized shape)
   eventBus.on('activity-stream-relay', (event) => {
     if (!ACTIVITY_STREAM_TYPES.has(event.type)) return
-    const payload = JSON.stringify({ id: event.id, type: event.type, timestamp: event.timestamp, data: event.data })
+    const normalized = normalizeActivityEventSlim({ id: event.id, type: event.type, timestamp: event.timestamp, data: event.data as Record<string, unknown> })
+    const payload = JSON.stringify(normalized)
     for (const [subId, sub] of activityStreamSubscribers) {
       if (sub.closed) { activityStreamSubscribers.delete(subId); continue }
       try { sub.send(payload) } catch { activityStreamSubscribers.delete(subId) }
