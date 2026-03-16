@@ -11704,6 +11704,106 @@ export async function createServer(): Promise<FastifyInstance> {
     return new Promise<void>(() => {})
   })
 
+  // ── Canvas attention — single highest-priority actionable item ──────────
+  // Returns the one thing that most needs the viewer's attention right now.
+  // Priority: critical notification > high notification > validating task needing review >
+  //           blocked task > medium notification > oldest pending notification
+  // task-1773672750043
+  app.get('/canvas/attention', async (request) => {
+    const query = request.query as Record<string, string>
+    const viewer = typeof query.viewer === 'string' ? query.viewer.trim() : 'human'
+
+    // 1. Check pending notifications (already priority-sorted)
+    const notifModule = await import('./agent-notifications.js')
+    const notifResult = notifModule.getNotifications(getDb(), viewer, { status: 'pending', limit: 1 })
+    const topNotif = notifResult.notifications[0]
+    const notifTotal = notifResult.total
+
+    // 2. Check tasks in validating that viewer could review
+    const validatingTasks = taskManager.listTasks({ status: 'validating' })
+    const reviewable = validatingTasks.find((t: any) =>
+      t.assignee !== viewer && t.reviewers?.includes(viewer)
+    ) ?? validatingTasks[0] // fall back to any validating task
+
+    // 3. Check blocked tasks assigned to viewer
+    const blockedTasks = taskManager.listTasks({ status: 'blocked' })
+    const viewerBlocked = blockedTasks.find((t: any) => t.assignee === viewer)
+
+    // Build attention item — pick highest priority source
+    type AttentionItem = {
+      source: 'notification' | 'review' | 'blocked'
+      priority: 'critical' | 'high' | 'medium' | 'low'
+      title: string
+      detail?: string
+      taskId?: string
+      prUrl?: string
+      agentId?: string
+      actionLabel: string
+      actionType: 'ack' | 'review' | 'unblock'
+      notificationId?: string
+    }
+
+    let item: AttentionItem | null = null
+
+    // Critical/high notifications always win
+    if (topNotif && (topNotif.priority === 'critical' || topNotif.priority === 'high')) {
+      item = {
+        source: 'notification',
+        priority: topNotif.priority,
+        title: topNotif.title,
+        detail: topNotif.body ?? undefined,
+        taskId: topNotif.task_id ?? undefined,
+        agentId: topNotif.source_agent ?? undefined,
+        actionLabel: topNotif.type === 'review' ? 'Review' : 'Acknowledge',
+        actionType: 'ack',
+        notificationId: topNotif.id,
+      }
+    }
+    // Then validating tasks needing review
+    else if (reviewable) {
+      const t = reviewable as any
+      item = {
+        source: 'review',
+        priority: 'high',
+        title: t.title ?? 'Task needs review',
+        detail: `Assigned to ${t.assignee ?? 'unassigned'}`,
+        taskId: t.id,
+        agentId: t.assignee ?? undefined,
+        actionLabel: 'Review',
+        actionType: 'review',
+      }
+    }
+    // Then blocked tasks
+    else if (viewerBlocked) {
+      const t = viewerBlocked as any
+      item = {
+        source: 'blocked',
+        priority: 'medium',
+        title: t.title ?? 'Task is blocked',
+        detail: t.blocked_reason ?? 'Needs attention',
+        taskId: t.id,
+        actionLabel: 'Unblock',
+        actionType: 'unblock',
+      }
+    }
+    // Then any remaining notification
+    else if (topNotif) {
+      item = {
+        source: 'notification',
+        priority: topNotif.priority as 'critical' | 'high' | 'medium' | 'low',
+        title: topNotif.title,
+        detail: topNotif.body ?? undefined,
+        taskId: topNotif.task_id ?? undefined,
+        agentId: topNotif.source_agent ?? undefined,
+        actionLabel: 'Acknowledge',
+        actionType: 'ack',
+        notificationId: topNotif.id,
+      }
+    }
+
+    return { item, pendingCount: notifTotal + validatingTasks.length + blockedTasks.filter((t: any) => t.assignee === viewer).length }
+  })
+
   // POST /canvas/pulse — agent pushes urgency + optional burst without a full canvas/state update
   // Lighter-weight than POST /canvas/state; fires canvas_burst if burst=true.
   // Body: { agentId: string, urgency?: 0–1, burst?: boolean, label?: string }
