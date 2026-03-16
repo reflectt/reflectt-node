@@ -12662,15 +12662,37 @@ export async function createServer(): Promise<FastifyInstance> {
     let closed = false
     request.raw.on('close', () => { closed = true })
 
+    // Cache avatars — refresh every 30s to avoid DB reads on every tick
+    let avatarCache: Record<string, { type: string; content: string; animated: boolean }> = {}
+    let avatarCacheAge = 0
+    const refreshAvatarCache = () => {
+      const now = Date.now()
+      if (now - avatarCacheAge < 30_000 && Object.keys(avatarCache).length > 0) return
+      try {
+        const rows = getDb().prepare("SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%'").all() as Array<{ agent_id: string; settings: string }>
+        const fresh: typeof avatarCache = {}
+        for (const row of rows) {
+          try {
+            const s = JSON.parse(row.settings)
+            if (s.avatar) fresh[row.agent_id] = { type: s.avatar.type, content: s.avatar.content, animated: s.avatar.animated ?? false }
+          } catch { /* skip */ }
+        }
+        avatarCache = fresh
+        avatarCacheAge = now
+      } catch { /* non-blocking */ }
+    }
+
     const emitTick = () => {
       if (closed) return
+      refreshAvatarCache()
       const now = Date.now()
 
       // Per-agent orb data
       const agents: Array<{
         id: string; state: string; urgency: number;
         activeSpeaker: boolean; color: string; age: number;
-        task: string | null
+        task: string | null;
+        avatar: { type: string; content: string; animated: boolean } | null
       }> = []
 
       for (const [agentId, entry] of canvasStateMap) {
@@ -12698,6 +12720,7 @@ export async function createServer(): Promise<FastifyInstance> {
           color: IDENTITY_COLORS[agentId] ?? '#94a3b8',
           age: now - entry.updatedAt,
           task: taskLabel,
+          avatar: avatarCache[agentId] ?? null,
         })
       }
 
