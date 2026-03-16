@@ -630,8 +630,14 @@ async function main() {
           }
 
           // Read node identity for the broadcast
-          const pkg = await import('../package.json', { assert: { type: 'json' } }).catch(() => ({ default: { version: 'unknown' } }))
-          const version = pkg.default.version
+          // Use readFileSync (same approach as BUILD_VERSION in server.ts) — dynamic import
+          // fails when running from dist/ because the relative path doesn't resolve.
+          let version = 'unknown'
+          try {
+            const pkgPath = join(process.cwd(), 'package.json')
+            const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+            version = pkg.version || 'unknown'
+          } catch { /* non-blocking */ }
           let nodeName = process.env.REFLECTT_HOST_NAME || 'unknown'
           try {
             const cfgPath = join(REFLECTT_HOME, 'config.json')
