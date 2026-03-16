@@ -11837,6 +11837,24 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, message: 'query is required (max 500 chars)' }
     }
 
+    // Extract file attachments (base64-encoded from cloud multimodal composer)
+    // Shape: [{ name: string, type: string, data: string (base64) }]
+    // task-1773673290429
+    const rawAttachments = Array.isArray(body.attachments) ? body.attachments : []
+    const attachments: Array<{ name: string; type: string; data: string; sizeBytes: number }> = []
+    for (const att of rawAttachments.slice(0, 5)) { // Max 5 files
+      if (typeof att === 'object' && att && typeof att.name === 'string' && typeof att.data === 'string') {
+        const sizeBytes = Math.ceil((att.data.length * 3) / 4) // base64 → byte estimate
+        if (sizeBytes > 10 * 1024 * 1024) continue // Skip files > 10MB
+        attachments.push({
+          name: String(att.name).slice(0, 255),
+          type: String(att.type || 'application/octet-stream'),
+          data: att.data,
+          sizeBytes,
+        })
+      }
+    }
+
     // Session continuity: client passes sessionId (UUID) so follow-up questions have context
     const sessionId = typeof body.sessionId === 'string' && body.sessionId.length > 0
       ? body.sessionId.trim().slice(0, 64)
@@ -11975,10 +11993,13 @@ export async function createServer(): Promise<FastifyInstance> {
       // by default — 'canvas' channel is NOT in DEFAULT_INBOX_SUBSCRIPTIONS, so
       // messages posted there are never seen by agents).
       try {
+        const attachmentSummary = attachments.length > 0
+          ? `\n[${attachments.length} file(s) attached: ${attachments.map(a => `${a.name} (${a.type}, ${Math.round(a.sizeBytes / 1024)}KB)`).join(', ')}]`
+          : ''
         await chatManager.sendMessage({
           from: 'human',
           to: responderId,
-          content: `[canvas] @${responderId} ${query}`,
+          content: `[canvas] @${responderId} ${query}${attachmentSummary}`,
           channel: 'general',
           metadata: {
             source: 'canvas_query',
@@ -11986,6 +12007,7 @@ export async function createServer(): Promise<FastifyInstance> {
             responderId,
             timestamp: Date.now(),
             reply_via: 'canvas_push', // tells the agent to respond via POST /canvas/push
+            ...(attachments.length > 0 ? { attachments: attachments.map(a => ({ name: a.name, type: a.type, sizeBytes: a.sizeBytes })) } : {}),
           },
         })
       } catch {
@@ -12048,10 +12070,11 @@ export async function createServer(): Promise<FastifyInstance> {
         agentId: responderId,
         agentColor,
         query,
+        ...(attachments.length > 0 ? { attachments: attachments.map(a => ({ name: a.name, type: a.type, sizeBytes: a.sizeBytes })) } : {}),
       },
     })
 
-    return { success: true, card: { ...card, agentId: responderId, agentColor } }
+    return { success: true, card: { ...card, agentId: responderId, agentColor, ...(attachments.length > 0 ? { attachmentCount: attachments.length } : {}) } }
   })
 
   // ── Canvas query response bridge ───────────────────────────────────────────
