@@ -2189,6 +2189,12 @@ export async function createServer(): Promise<FastifyInstance> {
       url: request.url,
     }).catch(() => {})
 
+    // Report to Sentry
+    try {
+      const { captureException } = await import('./sentry.js')
+      captureException(error, { method: request.method, url: request.url, status })
+    } catch { /* non-blocking */ }
+
     if (wantsJson) {
       reply.code(status).header('content-type', 'application/json; charset=utf-8')
       return {
