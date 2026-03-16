@@ -39,6 +39,9 @@ export interface CanvasRouteDeps {
   agentIdentityColors: Record<string, string>
   getDb: () => Database.Database
   getRecentRejections: () => unknown[]
+  eventBus: {
+    on: (id: string, handler: (event: { type: string; [k: string]: unknown }) => void) => void
+  }
 }
 
 // ── Constants ──
@@ -150,5 +153,150 @@ export async function canvasReadRoutes(app: FastifyInstance, deps: CanvasRouteDe
   // GET /canvas/rejections — recent render rejections (debug)
   app.get('/canvas/rejections', async () => {
     return { rejections: deps.getRecentRejections() }
+  })
+
+  // ── Flow score ──────────────────────────────────────────────────────
+
+  const flowExpressionLog: Array<{ t: number }> = []
+
+  // Track expression velocity via eventBus
+  deps.eventBus.on('flow-score-tracker', (event) => {
+    if (event.type === 'canvas_expression') {
+      flowExpressionLog.push({ t: Date.now() })
+      const cutoff = Date.now() - 10 * 60 * 1000
+      while (flowExpressionLog.length > 0 && flowExpressionLog[0]!.t < cutoff) {
+        flowExpressionLog.shift()
+      }
+    }
+  })
+
+  // GET /canvas/flow-score — real-time team flow metric (0–1)
+  app.get('/canvas/flow-score', async () => {
+    const now = Date.now()
+    const STALE_MS = 10 * 60 * 1000
+    const WINDOW_5M = 5 * 60 * 1000
+
+    const activeEntries = [...deps.canvasStateMap.entries()].filter(([, e]) => now - e.updatedAt < STALE_MS)
+    const agentScore = Math.min(1.0, activeEntries.length / 4)
+
+    const HIGH_FLOW_STATES = new Set(['working', 'rendering', 'thinking', 'decision'])
+    const flowingCount = activeEntries.filter(([, e]) => HIGH_FLOW_STATES.has(e.state)).length
+    const velocityFromStates = activeEntries.length > 0 ? flowingCount / activeEntries.length : 0
+
+    const recent = flowExpressionLog.filter(e => e.t > now - WINDOW_5M).length
+    const expressionScore = Math.min(1.0, recent / 20)
+
+    const hour = new Date(now).getHours()
+    const timeScore = hour >= 9 && hour <= 22 ? 1.0 : hour >= 6 && hour <= 8 ? 0.5 : 0.2
+
+    const score = Math.round((
+      agentScore * 0.30 +
+      velocityFromStates * 0.35 +
+      expressionScore * 0.25 +
+      timeScore * 0.10
+    ) * 100) / 100
+
+    const label =
+      score >= 0.8 ? 'surge' :
+      score >= 0.6 ? 'flow' :
+      score >= 0.4 ? 'grinding' :
+      score >= 0.2 ? 'quiet' : 'idle'
+
+    return {
+      score,
+      label,
+      factors: {
+        agents: Math.round(agentScore * 100) / 100,
+        velocity: Math.round(velocityFromStates * 100) / 100,
+        expressions: Math.round(expressionScore * 100) / 100,
+        timeOfDay: timeScore,
+      },
+      activeAgents: activeEntries.length,
+      expressionsLast5m: recent,
+    }
+  })
+
+  // ── Team mood ───────────────────────────────────────────────────────
+
+  // GET /canvas/team/mood — derived collective mood of all active agents
+  app.get('/canvas/team/mood', async () => {
+    const now = Date.now()
+    const STALE_MS = 10 * 60 * 1000
+
+    const states: string[] = []
+    const agentNames: string[] = []
+
+    for (const [agentId, entry] of deps.canvasStateMap) {
+      if (now - entry.updatedAt > STALE_MS) continue
+      states.push(entry.state)
+      agentNames.push(agentId)
+    }
+
+    const activeCount = states.length
+    const urgentCount = states.filter(s => s === 'urgent').length
+    const decisionCount = states.filter(s => s === 'decision').length
+    const renderingCount = states.filter(s => s === 'rendering').length
+    const thinkingCount = states.filter(s => s === 'thinking').length
+    const idleCount = states.filter(s => s === 'floor' || s === 'ambient').length
+    const workingCount = activeCount - idleCount
+
+    let blockedTasks = 0
+    let pendingDecisions = 0
+    try {
+      const db = deps.getDb()
+      const row = db.prepare(`SELECT COUNT(*) as n FROM tasks WHERE status = 'blocked'`).get() as { n: number }
+      blockedTasks = row?.n ?? 0
+      const drow = db.prepare(`SELECT COUNT(*) as n FROM tasks WHERE status = 'doing' AND priority IN ('P0','P1')`).get() as { n: number }
+      pendingDecisions = decisionCount + (drow?.n ?? 0)
+    } catch { /* non-fatal */ }
+
+    const tensionRaw =
+      (urgentCount * 0.35) +
+      (decisionCount * 0.25) +
+      (Math.min(blockedTasks, 5) * 0.08) +
+      (activeCount > 0 ? (1 - idleCount / activeCount) * 0.10 : 0)
+    const tension = Math.min(1.0, tensionRaw)
+
+    const teamRhythm: string =
+      urgentCount > 0 ? 'surge' :
+      activeCount === 0 || idleCount === activeCount ? 'quiet' :
+      decisionCount > 0 && workingCount > 0 ? 'tense' :
+      renderingCount + thinkingCount >= Math.max(1, activeCount * 0.6) ? 'flow' :
+      'grinding'
+
+    const dominantState: string =
+      urgentCount > 0 ? 'urgent' :
+      decisionCount > 0 ? 'decision' :
+      renderingCount > 0 ? 'rendering' :
+      thinkingCount > 0 ? 'thinking' :
+      workingCount > 0 ? 'working' :
+      'idle'
+
+    const ambientPulse: string =
+      teamRhythm === 'surge' ? 'fast' :
+      teamRhythm === 'flow' ? 'normal' :
+      teamRhythm === 'tense' ? 'slow' :
+      'slow'
+
+    let dominantColor = '#60a5fa'
+    for (const [agentId, entry] of deps.canvasStateMap) {
+      if (entry.state !== 'floor' && entry.state !== 'ambient') {
+        dominantColor = deps.agentIdentityColors[agentId] ?? dominantColor
+        break
+      }
+    }
+
+    return {
+      mood: {
+        teamRhythm,
+        dominantState,
+        tension,
+        ambientPulse,
+        dominantColor,
+        activeAgents: agentNames,
+        counts: { active: activeCount, urgent: urgentCount, rendering: renderingCount, thinking: thinkingCount, decision: decisionCount, idle: idleCount, blocked: blockedTasks },
+      },
+      generated_at: new Date(now).toISOString(),
+    }
   })
 }
