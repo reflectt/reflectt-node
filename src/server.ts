@@ -11633,6 +11633,117 @@ export async function createServer(): Promise<FastifyInstance> {
     return new Promise<void>(() => {})
   })
 
+  // ── Canvas activity stream — SSE with backfill ────────────────────────
+  // New viewers get the last 20 canvas events immediately on connect (backfill),
+  // then receive live events going forward. Canvas feels alive from frame 1.
+  // Event types: canvas_message, canvas_render, canvas_expression, canvas_burst
+  // task-1773672750043
+
+  const ACTIVITY_STREAM_TYPES = new Set(['canvas_message', 'canvas_render', 'canvas_expression', 'canvas_burst'])
+
+  // Transform raw eventBus events into the flat shape the cloud consumer expects:
+  // { id, type, agent, title, detail?, taskId?, prUrl?, timestamp }
+  function toActivityEntry(event: { id: string; type: string; timestamp: number; data: unknown }): {
+    id: string; type: string; agent: string; title: string; detail?: string;
+    taskId?: string; prUrl?: string; timestamp: number
+  } {
+    const d = (event.data ?? {}) as Record<string, unknown>
+    const agent = String(d.agentId ?? d.agent ?? d.from ?? 'system')
+    let title = ''
+    let detail: string | undefined
+    let taskId: string | undefined
+    let prUrl: string | undefined
+
+    if (event.type === 'canvas_message') {
+      const innerType = String(d.type ?? 'message')
+      if (innerType === 'voice_transcript') {
+        title = `${agent} spoke`
+        detail = String(d.transcript ?? '').slice(0, 120)
+      } else {
+        title = String((d.data as Record<string, unknown>)?.text ?? d.query ?? 'Canvas message').slice(0, 120)
+      }
+    } else if (event.type === 'canvas_expression') {
+      const channels = d.channels as Record<string, unknown> | undefined
+      title = String(channels?.narrative ?? `${agent} expression`).slice(0, 120)
+      if (channels?.voice) detail = String(channels.voice).slice(0, 120)
+    } else if (event.type === 'canvas_burst') {
+      title = String(d.label ?? `${agent} burst`).slice(0, 120)
+    } else if (event.type === 'canvas_render') {
+      const cmd = d.cmd as Record<string, unknown> | undefined
+      title = String(cmd?.type ?? d.state ?? 'Render update').slice(0, 120)
+    }
+
+    // Extract task/PR context if present
+    if (typeof d.taskId === 'string') taskId = d.taskId
+    if (typeof d.prUrl === 'string') prUrl = d.prUrl
+
+    return { id: event.id, type: event.type, agent, title: title || event.type, detail, taskId, prUrl, timestamp: event.timestamp }
+  }
+
+  const activityRingBuffer: Array<ReturnType<typeof toActivityEntry>> = []
+  const ACTIVITY_RING_SIZE = 30 // Keep slightly more than 20 for filtering headroom
+
+  // Subscribe to eventBus to populate ring buffer
+  eventBus.on('activity-ring-collector', (event) => {
+    if (!ACTIVITY_STREAM_TYPES.has(event.type)) return
+    activityRingBuffer.push(toActivityEntry(event))
+    if (activityRingBuffer.length > ACTIVITY_RING_SIZE) activityRingBuffer.shift()
+  })
+
+  const activityStreamSubscribers = new Map<string, { closed: boolean; send: (data: string) => void }>()
+
+  // Forward matching events to activity stream subscribers
+  eventBus.on('activity-stream-relay', (event) => {
+    if (!ACTIVITY_STREAM_TYPES.has(event.type)) return
+    const payload = JSON.stringify(toActivityEntry(event))
+    for (const [subId, sub] of activityStreamSubscribers) {
+      if (sub.closed) { activityStreamSubscribers.delete(subId); continue }
+      try { sub.send(payload) } catch { activityStreamSubscribers.delete(subId) }
+    }
+  })
+
+  app.get('/canvas/activity-stream', async (request, reply) => {
+    reply.raw.setHeader('Content-Type', 'text/event-stream')
+    reply.raw.setHeader('Cache-Control', 'no-cache')
+    reply.raw.setHeader('Connection', 'keep-alive')
+    reply.raw.setHeader('X-Accel-Buffering', 'no')
+    reply.raw.flushHeaders?.()
+
+    let closed = false
+    const subId = `asub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+    // Replay backfill — last 20 events with stagger hint for animated replay
+    const backfill = activityRingBuffer.slice(-20)
+    for (let i = 0; i < backfill.length; i++) {
+      if (closed) break
+      try {
+        const entry = { ...backfill[i], _backfill: true, _staggerMs: i * 50 }
+        reply.raw.write(`event: backfill\ndata: ${JSON.stringify(entry)}\n\n`)
+      } catch { break }
+    }
+
+    // Signal backfill complete
+    if (!closed) {
+      try { reply.raw.write(`event: backfill_done\ndata: {}\n\n`) } catch { /* */ }
+    }
+
+    // Register for live events
+    activityStreamSubscribers.set(subId, {
+      closed: false,
+      send: (data: string) => {
+        if (closed) return
+        try { reply.raw.write(`event: activity\ndata: ${data}\n\n`) } catch { closed = true }
+      },
+    })
+
+    request.raw.on('close', () => {
+      closed = true
+      activityStreamSubscribers.delete(subId)
+    })
+
+    return new Promise<void>(() => {})
+  })
+
   // POST /canvas/pulse — agent pushes urgency + optional burst without a full canvas/state update
   // Lighter-weight than POST /canvas/state; fires canvas_burst if burst=true.
   // Body: { agentId: string, urgency?: 0–1, burst?: boolean, label?: string }
