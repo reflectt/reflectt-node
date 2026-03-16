@@ -158,7 +158,7 @@ import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats }
 import { startOpenClawUsageSync, stopOpenClawUsageSync, syncOpenClawUsage } from './openclaw-usage-sync.js'
 import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
-import { canvasReadRoutes, canvasPhase2Routes } from './canvas-routes.js'
+import { canvasReadRoutes } from './canvas-routes.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
