@@ -12136,7 +12136,8 @@ export async function createServer(): Promise<FastifyInstance> {
       // Per-agent orb data
       const agents: Array<{
         id: string; state: string; urgency: number;
-        activeSpeaker: boolean; color: string; age: number
+        activeSpeaker: boolean; color: string; age: number;
+        task: string | null
       }> = []
 
       for (const [agentId, entry] of canvasStateMap) {
@@ -12145,6 +12146,17 @@ export async function createServer(): Promise<FastifyInstance> {
         const presState = String((payload as any).presenceState ?? entry.state)
         const explicitUrgency = typeof (payload as any).urgency === 'number' ? (payload as any).urgency : null
         const urgency = explicitUrgency ?? (STATE_URGENCY[presState] ?? STATE_URGENCY[entry.state] ?? 0)
+
+        // Extract current task label from payload — supports multiple sources:
+        // 1. Explicit payload.task (agent-pushed)
+        // 2. payload.activeTask.title (canvas state)
+        // 3. payload.sourceTasks[0].title (auto-state sweep)
+        const taskLabel: string | null =
+          (typeof (payload as any).task === 'string' ? (payload as any).task : null) ??
+          ((payload as any).activeTask?.title as string | undefined) ??
+          ((payload as any).sourceTasks?.[0]?.title as string | undefined) ??
+          null
+
         agents.push({
           id: agentId,
           state: presState,
@@ -12152,6 +12164,7 @@ export async function createServer(): Promise<FastifyInstance> {
           activeSpeaker: !!(payload as any).activeSpeaker,
           color: IDENTITY_COLORS[agentId] ?? '#94a3b8',
           age: now - entry.updatedAt,
+          task: taskLabel,
         })
       }
 
