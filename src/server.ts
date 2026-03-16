@@ -11879,6 +11879,41 @@ export async function createServer(): Promise<FastifyInstance> {
         pushCanvasSession(sessionId, 'user', query)
       }
       card = { type: 'info', data: { text, pending: true, responderId } }
+
+      // ── Timeout fallback: if agent doesn't respond within 15s, send a
+      // "no response" card so the UI doesn't hang on "Asking …" forever.
+      let responseReceived = false
+      const listenerId = `canvas-query-timeout-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      eventBus.on(listenerId, (event) => {
+        if (event.type !== 'canvas_message') return
+        const d = event.data as Record<string, unknown> | undefined
+        if (d?.agentId === responderId && d?.isResponse === true) {
+          responseReceived = true
+          eventBus.off(listenerId)
+        }
+      })
+
+      setTimeout(() => {
+        eventBus.off(listenerId)
+        if (responseReceived) return
+        // Emit a timeout fallback card
+        eventBus.emit({
+          id: `cmsg-timeout-${Date.now()}`,
+          type: 'canvas_message' as const,
+          timestamp: Date.now(),
+          data: {
+            type: 'info',
+            data: { text: `${responderId} is busy right now. Try again in a moment, or ask a different agent.`, pending: false },
+            agentId: responderId,
+            agentColor,
+            isResponse: true,
+            isTimeout: true,
+          },
+        })
+        if (sessionId) {
+          pushCanvasSession(sessionId, 'assistant', `(${responderId} did not respond within 15s)`)
+        }
+      }, 15_000)
     }
 
     // Emit canvas_message on event bus — pulse stream forwards it to all subscribers
