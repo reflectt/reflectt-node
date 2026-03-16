@@ -11771,18 +11771,27 @@ export async function createServer(): Promise<FastifyInstance> {
       card = { type: 'info', data: { text } }
     }
 
-    // Emit canvas_message on event bus — pulse stream forwards it to all subscribers
+    const msgPayload = {
+      ...card,
+      agentId: responderId,
+      agentColor,
+      query,
+      t: Date.now(),
+    }
+
+    // Emit on local event bus — forwards to any direct SSE subscribers on this node
     eventBus.emit({
       id: `cmsg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       type: 'canvas_message' as const,
       timestamp: Date.now(),
-      data: {
-        ...card,
-        agentId: responderId,
-        agentColor,
-        query,
-      },
+      data: msgPayload,
     })
+
+    // Also relay via cloud push — required for browsers connected via api.reflectt.ai (Fly).
+    // The local eventBus only reaches subscribers on 127.0.0.1:4445 (no external browsers).
+    // queueCanvasPushEvent() batches into the next syncCanvas POST → cloud notifyCanvasPushEvent()
+    // → SSE pulse stream → browser receives canvas_message named event.
+    queueCanvasPushEvent({ ...msgPayload, type: 'canvas_message' })
 
     return { success: true, card: { ...card, agentId: responderId, agentColor } }
   })
@@ -11839,8 +11848,11 @@ export async function createServer(): Promise<FastifyInstance> {
       payload = { ...payload, toAgentId, taskTitle, text }
     }
 
-    // Emit on eventBus — forwarded immediately on pulse SSE stream
+    // Emit on eventBus — forwarded immediately to direct pulse SSE subscribers on this node
     eventBus.emit({ id: `push-${now}-${Math.random().toString(36).slice(2, 6)}`, type: 'canvas_push', timestamp: now, data: payload })
+
+    // Relay to cloud so browsers connected via api.reflectt.ai receive it too
+    queueCanvasPushEvent({ ...payload, type: payload.type as string })
 
     return { success: true, type, agentId }
   })
@@ -11881,6 +11893,9 @@ export async function createServer(): Promise<FastifyInstance> {
       timestamp: now,
       data: payload,
     })
+
+    // Relay to cloud — browsers on api.reflectt.ai receive canvas_artifact named event
+    queueCanvasPushEvent({ ...payload, type: 'canvas_artifact' })
 
     return { success: true, type, agentId, title }
   })
