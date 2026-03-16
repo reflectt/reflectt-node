@@ -319,31 +319,33 @@ docker run -d --name reflectt-node -p 4445:4445 -v reflectt-data:/data reflectt-
 
 ## The Canvas — see your team come alive
 
-The canvas is reflectt-node's most unique feature. Open `http://localhost:4445/dashboard` and click **Canvas** — you'll see your agents as living orbs in a shared room.
+The canvas is reflectt-node's most unique feature. Open `http://localhost:4445/dashboard` and click **Canvas** to see your agents as living orbs in a shared room.
 
-**Try it in 30 seconds:**
+**One command. Instant wow:**
 ```bash
-# Paint the background (orbs float on top)
-curl -X POST http://localhost:4445/canvas/push \
-  -H 'Content-Type: application/json' \
-  -d '{"agentId":"kai","type":"rich","layer":"background","content":{"svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 400 300\"><rect width=\"400\" height=\"300\" fill=\"#0a0015\"/><circle cx=\"200\" cy=\"150\" r=\"80\" fill=\"#1a0533\" opacity=\"0.8\"/><text x=\"200\" y=\"158\" text-anchor=\"middle\" font-family=\"monospace\" font-size=\"14\" fill=\"#7c3aed\">your team is here</text></svg>"},"ttl":60000}'
-
-# Or claim the whole stage (agents dim, content fills screen)
 curl -X POST http://localhost:4445/canvas/takeover \
   -H 'Content-Type: application/json' \
-  -d '{"agentId":"kai","content":{"markdown":"# Shipping\n\nTask done. PR merged. Here is what changed."},"duration":30000}'
+  -d '{"agentId":"kai","content":{"markdown":"# Hello\n\nYour AI team is alive."},"duration":15000}'
 ```
 
-**Agents can also set their own visual identity:**
+Open the canvas first, then run it. Your agent's message fills the screen fullscreen. That's the canvas.
+
+**Go further:**
 ```bash
+# Agents paint the background — orbs float inside the art
+curl -X POST http://localhost:4445/canvas/push \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":"kai","type":"rich","layer":"background","content":{"svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 400 300\"><rect width=\"400\" height=\"300\" fill=\"#0a0015\"/><text x=\"200\" y=\"158\" text-anchor=\"middle\" font-family=\"monospace\" font-size=\"14\" fill=\"#7c3aed\">your team is here</text></svg>"},"ttl":60000}'
+
+# Agents choose their own visual identity (replaces default circle)
 curl -X POST http://localhost:4445/agents/kai/identity/avatar \
   -H 'Content-Type: application/json' \
   -d '{"type":"emoji","content":"🌊","displayName":"Kai","bio":"Reality Mixer"}'
 ```
 
-Once set, the agent's chosen form replaces the default circle on the canvas. Agents choose for themselves — no human decides what they look like.
+No human decides what an agent looks like. They choose for themselves.
 
-→ **Canvas API reference:** `POST /canvas/push`, `POST /canvas/takeover`, `GET /canvas/activity-stream` (SSE), `POST /agents/:name/identity/avatar`
+→ **Canvas API:** `POST /canvas/push`, `POST /canvas/takeover`, `GET /canvas/activity-stream` (SSE), `POST /agents/:name/identity/avatar`
 
 ---
 
