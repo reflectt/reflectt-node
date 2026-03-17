@@ -12,6 +12,8 @@ const EXTRA_ROUTE_SOURCES = [
   path.join(ROOT, 'src', 'canvas-routes.ts'),
   path.join(ROOT, 'src', 'canvas-takeover.ts'),
   path.join(ROOT, 'src', 'canvas-interactive.ts'),
+  path.join(ROOT, 'src', 'canvas-push.ts'),
+  path.join(ROOT, 'src', 'canvas-query.ts'),
 ]
 
 const IGNORE_ROUTES = new Set([
