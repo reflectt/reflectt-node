@@ -39,6 +39,7 @@ export type ActivationEventType =
   | 'day2_return_action'
   | 'canvas_opened'
   | 'canvas_first_action'
+  | 'ghost_signup_nudge_sent'
 
 /**
  * Reason codes for workspace_not_ready events.
@@ -252,6 +253,7 @@ export function getUserFunnelState(userId: string): UserFunnelState {
     day2_return_action: null,
     canvas_opened: null,
     canvas_first_action: null,
+    ghost_signup_nudge_sent: null, // tracked but not a forward funnel step
   }
 
   let currentStep = 0
@@ -312,6 +314,7 @@ export function getFunnelSummary(opts?: { raw?: boolean }): {
     day2_return_action: 0,
       canvas_opened: 0,
       canvas_first_action: 0,
+      ghost_signup_nudge_sent: 0,
     }
 
   const funnelByUser: UserFunnelState[] = []
@@ -634,6 +637,7 @@ export function getWeeklyTrends(weekCount = 12): WeeklyTrend[] {
       day2_return_action: 0,
       canvas_opened: 0,
       canvas_first_action: 0,
+      ghost_signup_nudge_sent: 0,
     }
 
     let newUsers = 0
