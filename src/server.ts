@@ -16115,6 +16115,67 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, trends: getWeeklyTrends(weeks) }
   })
 
+  /**
+   * GET /activation/ghost-signups — Users who signed up but never ran preflight.
+   * Cloud polls this to find candidates for the ghost signup nudge email.
+   * Query: ?minAgeHours=2 (default 2h; use 24 for 24h tier candidates)
+   *
+   * task-1773709288800-lam5hd11b
+   */
+  app.get('/activation/ghost-signups', async (request) => {
+    const query = request.query as Record<string, string>
+    const minAgeHours = query.minAgeHours ? parseFloat(query.minAgeHours) : 2
+    const minAgeMs = minAgeHours * 60 * 60 * 1000
+    const { getGhostSignupCandidates } = await import('./ghost-signup-nudge.js')
+    const candidates = getGhostSignupCandidates(minAgeMs)
+    return { success: true, candidates, count: candidates.length, minAgeHours }
+  })
+
+  /**
+   * POST /activation/ghost-signup-nudge — Send re-engagement email to a ghost signup.
+   * Cloud calls this with { userId, email, nudgeTier? } after finding candidates.
+   * Node sends the email via cloud relay, tags the user, and returns result.
+   *
+   * Body: { userId: string, email: string, nudgeTier?: '2h' | '24h' }
+   *
+   * task-1773709288800-lam5hd11b
+   */
+  app.post('/activation/ghost-signup-nudge', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const userId = typeof body.userId === 'string' ? body.userId.trim() : ''
+    const email = typeof body.email === 'string' ? body.email.trim() : ''
+    const nudgeTier = (body.nudgeTier === '24h' ? '24h' : '2h') as '2h' | '24h'
+
+    if (!userId) return reply.code(400).send({ success: false, error: 'userId is required' })
+    if (!email || !email.includes('@')) return reply.code(400).send({ success: false, error: 'valid email is required' })
+
+    const { sendGhostSignupNudge } = await import('./ghost-signup-nudge.js')
+
+    // Email relay function — delegates to existing /email/send infrastructure
+    const emailRelayFn = async (opts: {
+      from: string; to: string; subject: string; html: string; text: string;
+      tags?: Array<{ name: string; value: string }>;
+    }) => {
+      const hostId = process.env.REFLECTT_HOST_ID
+      const relayPath = hostId ? `/api/hosts/${encodeURIComponent(hostId)}/relay/email` : '/api/hosts/relay/email'
+      try {
+        const relayResult = await cloudRelay(relayPath, {
+          from: opts.from, to: opts.to, subject: opts.subject,
+          html: opts.html, text: opts.text, tags: opts.tags,
+          agent: 'funnel',
+          idempotencyKey: `ghost-signup-nudge/${userId}/${nudgeTier}`,
+        }, reply) as Record<string, unknown>
+        const relayError = typeof relayResult?.error === 'string' ? relayResult.error : undefined
+        return { success: !relayError, error: relayError }
+      } catch (err: any) {
+        return { success: false, error: err?.message ?? 'relay error' }
+      }
+    }
+
+    const result = await sendGhostSignupNudge(userId, email, nudgeTier, emailRelayFn)
+    return { success: true, result }
+  })
+
   // Get task analytics
   app.get('/tasks/analytics', async (request) => {
     const query = request.query as Record<string, string>
