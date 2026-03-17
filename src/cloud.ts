@@ -68,6 +68,7 @@ interface AgentInfo {
   lastSeen?: number
   waitingFor?: string   // populated when status === 'waiting'
   waitingTaskId?: string
+  thought?: string      // agent's current thought/expression — shown on canvas as AI-native content
 }
 
 interface TaskStateEntry {
@@ -721,6 +722,7 @@ function getAgents(): AgentInfo[] {
         waitingFor: p.waiting.waitingFor,
         waitingTaskId: p.waiting.taskId,
       } : {}),
+      ...(p?.thought ? { thought: p.thought } : {}),
     })
   }
 
