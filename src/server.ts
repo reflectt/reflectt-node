@@ -14604,6 +14604,35 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, agent, status: 'idle' }
   })
 
+  // ── Agent thought — brief expression that flows to canvas via presence → pulse ──
+  // POST /agents/:name/thought { text: "..." }
+  // Thought is attached to agent's presence entry and synced to cloud heartbeat.
+  // Canvas renders it as ephemeral expression (8s TTL managed client-side).
+  app.post<{ Params: { name: string } }>('/agents/:name/thought', async (request, reply) => {
+    const name = String(request.params.name || '').trim().toLowerCase()
+    if (!name) return reply.code(400).send({ error: 'agent name is required' })
+    const body = request.body as { text?: string } ?? {}
+    const text = typeof body.text === 'string' ? body.text.trim().slice(0, 200) : ''
+    if (!text) return reply.code(400).send({ error: 'text is required (max 200 chars)' })
+
+    // Attach thought to presence
+    const presence = presenceManager.getPresence(name)
+    if (presence) {
+      presence.thought = text
+      presence.lastUpdate = Date.now()
+    }
+
+    // Also emit as canvas_expression so it appears immediately on pulse
+    eventBus.emit({
+      id: `thought-${Date.now()}-${name}`,
+      type: 'canvas_expression' as const,
+      data: { agent: name, text, kind: 'thought' },
+      timestamp: Date.now(),
+    })
+
+    return { success: true, agent: name, thought: text }
+  })
+
   // ── Bootstrap: dynamic agent config generation ──────────────────────
   app.get<{ Params: { agent: string } }>('/bootstrap/heartbeat/:agent', async (request) => {
     const agent = String(request.params.agent || '').trim().toLowerCase()

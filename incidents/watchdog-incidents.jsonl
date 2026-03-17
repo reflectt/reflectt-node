@@ -106,3 +106,4 @@
 {"type":"stale_working","at":1772412027791,"agent":"link","taskId":"task-1771849175579-apuqqi0fd","thresholdMs":2700000,"lastUpdateAt":1772409304819,"workingSinceAt":1772409304817}
 {"type":"stale_working","at":1772943984404,"agent":"pixel","taskId":"task-1772899959780-o1gjus1es","thresholdMs":2700000,"lastUpdateAt":1772941235087,"workingSinceAt":1772941090159}
 {"type":"stale_working","at":1772945366960,"agent":"pixel","taskId":"task-1772899959780-o1gjus1es","thresholdMs":2700000,"lastUpdateAt":1772941235087,"workingSinceAt":1772943984415}
+{"type":"trio_general_silence","at":1773620730890,"thresholdMs":3300000,"lastUpdateAt":1773617372590}

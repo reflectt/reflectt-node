@@ -43,6 +43,7 @@ export interface AgentPresence {
   last_active?: number // Last real activity (message, task action, etc.)
   focus?: FocusState
   waiting?: WaitingState  // populated when status === 'waiting'
+  thought?: string        // agent's current thought — expires after 8s TTL on canvas
 }
 
 export interface AgentActivity {
