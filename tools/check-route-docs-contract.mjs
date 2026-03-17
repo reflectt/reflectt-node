@@ -10,6 +10,7 @@ const DOCS_PATH = path.join(ROOT, 'public', 'docs.md')
 const EXTRA_ROUTE_SOURCES = [
   path.join(ROOT, 'src', 'manage.ts'),
   path.join(ROOT, 'src', 'canvas-routes.ts'),
+  path.join(ROOT, 'src', 'canvas-takeover.ts'),
 ]
 
 const IGNORE_ROUTES = new Set([
