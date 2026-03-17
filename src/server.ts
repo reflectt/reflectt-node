@@ -11864,39 +11864,81 @@ export async function createServer(): Promise<FastifyInstance> {
   // Card types: "tasks" | "info" | "revenue" | "onboarding"
   // SSE event: canvas_message { type, data, agentId, agentColor, query }
   app.post('/canvas/query', async (request, reply) => {
-    const body = request.body as Record<string, unknown>
-    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    // Support both JSON and multipart/form-data (task-1773673285236)
+    // JSON: { query, attachments: [{ name, type, data (base64) }], sessionId?, agentId? }
+    // Multipart: fields query, sessionId?, agentId? + file parts
+    const contentType = String(request.headers['content-type'] ?? '')
+    const isMultipart = contentType.includes('multipart/form-data')
+
+    let query = ''
+    let sessionIdRaw: string | undefined
+    let agentIdRaw: string | undefined
+    const attachments: Array<{ name: string; type: string; data: string; sizeBytes: number }> = []
+
+    if (isMultipart) {
+      try {
+        const parts = request.parts({ limits: { fileSize: 10 * 1024 * 1024, files: 5 } })
+        for await (const part of parts) {
+          if (part.type === 'field') {
+            const val = typeof part.value === 'string' ? part.value : ''
+            if (part.fieldname === 'query' || part.fieldname === 'text') query = val.trim()
+            else if (part.fieldname === 'sessionId') sessionIdRaw = val
+            else if (part.fieldname === 'agentId') agentIdRaw = val
+          } else if (part.type === 'file') {
+            const chunks: Buffer[] = []
+            for await (const chunk of part.file) chunks.push(chunk)
+            const buf = Buffer.concat(chunks)
+            if (buf.length > 0 && buf.length <= 10 * 1024 * 1024) {
+              attachments.push({
+                name: String(part.filename ?? 'file').slice(0, 255),
+                type: String(part.mimetype ?? 'application/octet-stream'),
+                data: buf.toString('base64'),
+                sizeBytes: buf.length,
+              })
+            }
+          }
+        }
+      } catch (mpErr) {
+        reply.status(400)
+        return { success: false, message: 'Invalid multipart body' }
+      }
+    } else {
+      // JSON path (backward compatible)
+      const body = request.body as Record<string, unknown>
+      query = typeof body.query === 'string' ? body.query.trim() : ''
+      sessionIdRaw = typeof body.sessionId === 'string' ? body.sessionId : undefined
+      agentIdRaw = typeof body.agentId === 'string' ? body.agentId : undefined
+
+      // Extract base64 file attachments from JSON body
+      // Shape: [{ name: string, type: string, data: string (base64) }]
+      const rawAttachments = Array.isArray(body.attachments) ? body.attachments : []
+      for (const att of rawAttachments.slice(0, 5)) { // Max 5 files
+        if (typeof att === 'object' && att && typeof att.name === 'string' && typeof att.data === 'string') {
+          const sizeBytes = Math.ceil((att.data.length * 3) / 4) // base64 → byte estimate
+          if (sizeBytes > 10 * 1024 * 1024) continue // Skip files > 10MB
+          attachments.push({
+            name: String(att.name).slice(0, 255),
+            type: String(att.type || 'application/octet-stream'),
+            data: att.data,
+            sizeBytes,
+          })
+        }
+      }
+    }
+
     if (!query || query.length > 500) {
       reply.status(400)
       return { success: false, message: 'query is required (max 500 chars)' }
     }
 
-    // Extract file attachments (base64-encoded from cloud multimodal composer)
-    // Shape: [{ name: string, type: string, data: string (base64) }]
-    // task-1773673290429
-    const rawAttachments = Array.isArray(body.attachments) ? body.attachments : []
-    const attachments: Array<{ name: string; type: string; data: string; sizeBytes: number }> = []
-    for (const att of rawAttachments.slice(0, 5)) { // Max 5 files
-      if (typeof att === 'object' && att && typeof att.name === 'string' && typeof att.data === 'string') {
-        const sizeBytes = Math.ceil((att.data.length * 3) / 4) // base64 → byte estimate
-        if (sizeBytes > 10 * 1024 * 1024) continue // Skip files > 10MB
-        attachments.push({
-          name: String(att.name).slice(0, 255),
-          type: String(att.type || 'application/octet-stream'),
-          data: att.data,
-          sizeBytes,
-        })
-      }
-    }
-
     // Session continuity: client passes sessionId (UUID) so follow-up questions have context
-    const sessionId = typeof body.sessionId === 'string' && body.sessionId.length > 0
-      ? body.sessionId.trim().slice(0, 64)
+    const sessionId = sessionIdRaw && sessionIdRaw.length > 0
+      ? sessionIdRaw.trim().slice(0, 64)
       : null
     const sessionTurns = sessionId ? getCanvasSession(sessionId) : []
 
     // Default answering agent is link (builder — knows the codebase + task board)
-    const responderId = typeof body.agentId === 'string' ? body.agentId.trim() : 'link'
+    const responderId = agentIdRaw ? agentIdRaw.trim() : 'link'
     const IDENTITY_COLORS_Q: Record<string, string> = {
       link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
       sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
