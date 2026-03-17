@@ -16,6 +16,7 @@
  *   HOST_ID — Fly host ID for canvas check
  *   FLY_API — Fly API base (default: https://api.reflectt.ai)
  *   APP_URL — Frontend URL (default: https://app.reflectt.ai)
+ *   ALERT_MENTIONS — mention prefix in #ops alerts (default: "@kai @link")
  *   DRY_RUN — if "1", print alerts instead of posting
  */
 
@@ -24,6 +25,7 @@ const HOST_ID = process.env.HOST_ID || 'b8465d7e-e641-4301-8537-cb3b9f5d7d0d'
 const FLY_API = process.env.FLY_API || 'https://api.reflectt.ai'
 const APP_URL = process.env.APP_URL || 'https://app.reflectt.ai'
 const DRY_RUN = process.env.DRY_RUN === '1'
+const ALERT_MENTIONS = (process.env.ALERT_MENTIONS || '@kai @link').trim()
 const TIMEOUT_MS = 15_000
 
 async function fetchWithTimeout(url, opts = {}) {
@@ -40,7 +42,8 @@ async function fetchWithTimeout(url, opts = {}) {
 }
 
 async function alertOps(message) {
-  const line = `🚨 **UPTIME ALERT** — ${message}`
+  const mentionPrefix = ALERT_MENTIONS ? `${ALERT_MENTIONS} ` : ''
+  const line = `${mentionPrefix}🚨 **UPTIME ALERT** — ${message}`
   if (DRY_RUN) {
     console.error(`[DRY_RUN] ${line}`)
     return
