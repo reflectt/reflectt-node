@@ -13,10 +13,26 @@
  * task-1773681272865, task-1773689755389
  */
 
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { PresenceStatus } from './presence.js'
 import type Database from 'better-sqlite3'
 import { emitActivationEvent } from './activationEvents.js'
+
+/**
+ * Resolve userId for activation event attribution.
+ * Priority: ?userId= query param → x-user-id header → 'anonymous'
+ *
+ * Cloud dashboard should always pass ?userId= or X-User-Id on authenticated
+ * canvas requests so events are cohoratable per user.
+ * task-1773692468958-k9zkr0hz9
+ */
+function resolveUserId(request: FastifyRequest): string {
+  const query = request.query as Record<string, unknown>
+  if (typeof query.userId === 'string' && query.userId.trim()) return query.userId.trim()
+  const header = request.headers['x-user-id']
+  if (typeof header === 'string' && header.trim()) return header.trim()
+  return 'anonymous'
+}
 
 // ── Takeover state (module-level, shared between claim/release/get) ──
 
@@ -89,7 +105,10 @@ export function formatRecency(updatedAt: number): string {
 export async function canvasReadRoutes(app: FastifyInstance, deps: CanvasRouteDeps) {
 
   // GET /canvas/presence — all agents as AgentPresence[]
-  app.get('/canvas/presence', async () => {
+  // Also fires canvas_opened for the visiting user — this is the primary dashboard canvas entry.
+  app.get('/canvas/presence', async (request) => {
+    const userId = resolveUserId(request)
+    emitActivationEvent('canvas_opened', userId).catch(() => {})
     const agents: Array<{
       name: string
       identityColor: string
@@ -147,11 +166,9 @@ export async function canvasReadRoutes(app: FastifyInstance, deps: CanvasRouteDe
   })
 
   // GET /canvas/states — valid state + sensor values (discovery)
+  // Secondary canvas entry path — also fires canvas_opened.
   app.get('/canvas/states', async (request) => {
-    const query = request.query as Record<string, unknown>
-    const userId = typeof query.userId === 'string' && query.userId.trim()
-      ? query.userId.trim()
-      : 'anonymous'
+    const userId = resolveUserId(request)
     emitActivationEvent('canvas_opened', userId).catch(() => {})
     return {
       states: CANVAS_STATES,

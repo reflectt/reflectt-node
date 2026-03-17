@@ -53,3 +53,33 @@ Hot-reloads cloud configuration from `~/.reflectt/config.json` without restartin
 4. Restarts cloud integration with new config
 
 This avoids a full server restart after `reflectt host connect`, solving the dogfood issue where `/cloud/status` showed `registered: false` on the running process after CLI enrollment.
+
+---
+
+## Activation Cohort — Canvas userId Propagation
+
+For accurate per-user activation cohorts, the dashboard must pass `?userId=<userId>` (or `X-User-Id` header) on all authenticated canvas requests:
+
+### Canvas entry endpoints that fire `canvas_opened`
+
+| Endpoint | Notes |
+|----------|-------|
+| `GET /canvas/presence` | Primary dashboard entry. Fires `canvas_opened` with resolved userId. |
+| `GET /canvas/states` | Discovery entry. Fires `canvas_opened` with resolved userId. |
+
+### userId resolution priority
+
+1. `?userId=` query param
+2. `X-User-Id` request header
+3. Falls back to `anonymous` (loses cohort attribution)
+
+### Example (authenticated dashboard route)
+
+```javascript
+// When opening the Canvas tab, pass userId:
+const res = await fetch(`http://node:4445/canvas/presence?userId=${encodeURIComponent(currentUserId)}`)
+```
+
+Without userId propagation, `canvas_opened` events record as `anonymous` and cannot be cohorted in `GET /activation/funnel?userId=<id>`.
+
+task-1773692468958-k9zkr0hz9
