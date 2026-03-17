@@ -73,6 +73,7 @@ import {
   getFailureDistribution,
   getWeeklyTrends,
   getOnboardingDashboard,
+  getActivationEventLog,
   type ActivationEventType,
 } from './activationEvents.js'
 import { alertUnauthorizedApproval, alertFlipAttempt, getMutationAlertStatus, pruneOldAttempts } from './mutationAlert.js'
@@ -16039,6 +16040,47 @@ If your heartbeat shows **no active task** and **no next task**:
     }
 
     return { funnel: getFunnelSummary({ raw }) }
+  })
+
+  /**
+   * GET /activation/doctor-gate — polling-optimized endpoint for cloud onboarding UI.
+   * Cloud BYOH onboarding polls this every 5s to check if the user ran reflectt doctor.
+   * Returns a simple passed/failed state without the full funnel payload.
+   *
+   * Query: ?userId=<userId>
+   *
+   * Used by the cloud "Verify your setup" step (step 4 of BYOH onboarding).
+   * task-1773703300024-73ydeyx9n
+   */
+  app.get('/activation/doctor-gate', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const userId = query.userId?.trim()
+    if (!userId) return reply.code(400).send({ success: false, error: 'userId is required' })
+
+    const state = getUserFunnelState(userId)
+    const passedAt = state.events.host_preflight_passed ?? null
+    const passed = passedAt !== null
+
+    // Extract failure reasons from preflight_failed event metadata in the event log
+    let failureReasons: string[] = []
+    if (!passed && state.events.host_preflight_failed) {
+      const log = getActivationEventLog()
+      const failEvent = log.find(e => e.userId === userId && e.type === 'host_preflight_failed')
+      if (failEvent?.metadata) {
+        const fc = failEvent.metadata['failed_checks']
+        if (Array.isArray(fc)) failureReasons = fc.map(String)
+        else if (typeof failEvent.metadata['first_blocker'] === 'string') failureReasons = [failEvent.metadata['first_blocker']]
+      }
+    }
+
+    return {
+      userId,
+      passed,
+      passedAt,
+      workspaceReady: state.events.workspace_ready !== null,
+      preflightAttempted: state.events.host_preflight_failed !== null || passed,
+      failureReasons,
+    }
   })
 
   /**

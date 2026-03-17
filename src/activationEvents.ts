@@ -77,6 +77,9 @@ const userFunnels = new Map<string, Map<ActivationEventType, number>>()
 
 /** Ordered event log (also persisted) */
 const eventLog: ActivationEvent[] = []
+
+/** Read-only access to the activation event log (for server routes + tests). */
+export function getActivationEventLog(): readonly ActivationEvent[] { return eventLog }
 const MAX_LOG_SIZE = 10_000
 
 const FUNNEL_ORDER: ActivationEventType[] = [
