@@ -2234,6 +2234,85 @@ describe('Review State Tracking Metadata', () => {
   })
 })
 
+describe('Cancelled task review-metadata cleanup', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: cancelled task clears stale review metadata',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Cancelled task should not look like waiting-on-author'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+    await advanceTo(taskId, 'doing')
+
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/test-cancelled-review-cleanup.md',
+        qa_bundle: validQaBundle({
+          summary: 'test cancelled review cleanup bundle',
+          artifact_links: ['test://artifact'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/99998',
+            commit: 'cafebabe',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/test-cancelled-review-cleanup.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/99998',
+          commit_sha: 'cafebabe',
+          artifact_path: 'process/test-cancelled-review-cleanup.md',
+          known_caveats: 'none',
+        },
+      },
+    })
+
+    await req('POST', `/tasks/${taskId}/review`, {
+      reviewer: 'test-reviewer',
+      decision: 'reject',
+      comment: 'Needs changes',
+    })
+
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: { transition: { type: 'claim', reason: 'addressing review feedback' }, eta: '~1h' },
+    })
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('clears stale review metadata when task is cancelled and unassigned', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'cancelled',
+      assignee: 'unassigned',
+      metadata: {
+        cancel_reason: 'superseded',
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('cancelled')
+    expect(body.task.assignee).toBe('unassigned')
+    expect(body.task.metadata.review_state).toBeUndefined()
+    expect(body.task.metadata.reviewer_decision).toBeUndefined()
+    expect(body.task.metadata.reviewer_approved).toBeUndefined()
+    expect(body.task.metadata.review_last_activity_at).toBeUndefined()
+  })
+})
+
 describe('Chat Messages', () => {
   let authorMessageId: string
 
