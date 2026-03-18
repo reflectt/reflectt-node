@@ -102,13 +102,74 @@ export async function canvasQueryRoutes(
       : null
     const sessionTurns = sessionId ? getCanvasSession(sessionId) : []
 
-    // Default answering agent is link (builder — knows the codebase + task board)
-    const responderId = agentIdRaw ? agentIdRaw.trim() : 'link'
+    // Default answering agent: fetch canvas state instead of hard-coding 'link'
+    // This enables the "show team status" flow without routing to a specific person
+    const responderId = agentIdRaw ? agentIdRaw.trim() : null
     const IDENTITY_COLORS_Q: Record<string, string> = {
       link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
       sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
     }
-    const agentColor = IDENTITY_COLORS_Q[responderId] ?? '#60a5fa'
+    const agentColor = responderId ? (IDENTITY_COLORS_Q[responderId] ?? '#60a5fa') : '#60a5fa'
+
+    // If no specific agent requested, return task board summary directly
+    if (!responderId) {
+      const allTasks = taskManager.listTasks({})
+      const doingTasks = allTasks.filter((t: any) => t.status === 'doing').slice(0, 5)
+      const validatingTasks = allTasks.filter((t: any) => t.status === 'validating').slice(0, 3)
+      const todoCount = allTasks.filter((t: any) => t.status === 'todo').length
+      
+      // Try to get agent states from canvasStateMap, fallback to task info
+      const now = Date.now()
+      const STALE_AGENT_MS = 10 * 60 * 1000
+      const agents: Array<{ id: string; name: string; state: string; task?: string }> = []
+      try {
+        for (const [agentId, entry] of canvasStateMap) {
+          if (now - entry.updatedAt > STALE_AGENT_MS) continue
+          const payload = entry.payload ?? {}
+          const state = String((payload as any).presenceState ?? entry.state)
+          const task = (payload as any).activeTask?.title ?? null
+          agents.push({ id: agentId, name: agentId, state, task: task ?? undefined })
+        }
+      } catch (e) {
+        // canvasStateMap may not be available
+      }
+      
+      // If we have agent states, return them; otherwise return task summary
+      if (agents.length > 0) {
+        return {
+          success: true,
+          card: {
+            type: 'info',
+            data: {
+              text: agents.map(a => `• **${a.name}**: ${a.state}${a.task ? ` — ${a.task.slice(0,40)}` : ''}`).join('\n'),
+              pending: false,
+            },
+            agentId: 'assistant',
+            agentColor: '#60a5fa',
+          },
+        }
+      }
+      
+      // Fallback: return task summary
+      return {
+        success: true,
+        card: {
+          type: 'tasks',
+          data: {
+            items: doingTasks.map((t: any) => ({
+              agentId: t.assignee || 'unassigned',
+              title: t.title,
+              state: t.status,
+            })),
+            todoCount,
+            doingCount: doingTasks.length,
+            validatingCount: validatingTasks.length,
+          },
+          agentId: 'assistant',
+          agentColor: '#60a5fa',
+        },
+      }
+    }
 
     // Gather live context to inject into LLM
     const allTasksForQuery = taskManager.listTasks({})
