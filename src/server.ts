@@ -57,6 +57,7 @@ import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
 import type { NotificationType, NotificationPriorityLevel, AckDecision, NotificationStatus } from './agent-notifications.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
+import { runRestartDriftGuard } from './restart-drift-guard.js'
 import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog } from './prAutoMerge.js'
 import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
@@ -16649,6 +16650,11 @@ If your heartbeat shows **no active task** and **no next task**:
     if (count > 0) console.log(`[ActivationFunnel] Loaded ${count} funnel events`)
   }).catch(err => {
     console.error('[ActivationFunnel] Failed to load funnel data:', err)
+  })
+
+  // ── Restart Drift Guard: reassert critical task ownership post-restart ──
+  runRestartDriftGuard().catch(err => {
+    console.error('[RestartDrift] Failed to run drift guard:', err)
   })
 
   // GET /execution-health — sweeper status + current violations
