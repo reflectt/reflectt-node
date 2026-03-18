@@ -1020,6 +1020,17 @@ function applyReviewStateMetadata(
     metadata.review_last_activity_at = now
   }
 
+  // Cancelled tasks should not keep reviewer-decision metadata alive.
+  // Otherwise downstream notifiers/dashboard rails can misclassify a
+  // cancelled+unassigned task as still waiting on the former assignee/author.
+  if (nextStatus === 'cancelled') {
+    metadata.review_state = undefined
+    metadata.reviewer_decision = undefined
+    metadata.reviewer_notes = undefined
+    metadata.reviewer_approved = undefined
+    metadata.review_last_activity_at = undefined
+  }
+
   const actor = parsed.actor?.trim()
   if (
     nextStatus === 'validating'
