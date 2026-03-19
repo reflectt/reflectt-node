@@ -28,8 +28,8 @@
 
 import type { Task } from './types.js'
 
-export const SYNC_INTERVAL_MS = 5_000 // 5s — matches ACTIVE_CANVAS_SYNC_MS
-export const PUSH_PRIORITY_WINDOW_MS = 5_000 // agent push within 5s wins
+export const SYNC_INTERVAL_MS = 2_000 // 2s — faster updates for more responsive /live
+export const PUSH_PRIORITY_WINDOW_MS = 2_000 // agent push within 2s wins
 
 export type CanvasState =
   | 'floor'
@@ -69,6 +69,8 @@ export interface SweepDeps {
   emitSyntheticState(agentId: string, state: CanvasState, sourceTasks: Task[]): void
   /** Emit a canvas_push event for task progress (for /live visitors) */
   emitTaskProgress?(agentId: string, task: Task): void
+  /** Emit a canvas_push ambient thought for active agents (more frequent) */
+  emitAmbientThought?(agentId: string, task: Task): void
 }
 
 export interface SweepResult {
@@ -107,6 +109,9 @@ export function runCanvasAutoStateSweep(deps: SweepDeps): SweepResult {
 
   // Track current task per agent for change detection
   const currentTasksByAgent = new Map<string, string>()
+  // Track last ambient thought emit time per agent
+  const lastAmbientByAgent = new Map<string, number>()
+  const AMBIENT_THOT_INTERVAL_MS = 8_000 // Emit ambient thought every 8s per active agent
 
   for (const [agentId, tasks] of byAgent) {
     const current = deps.getCanvasState(agentId)
@@ -122,11 +127,10 @@ export function runCanvasAutoStateSweep(deps: SweepDeps): SweepResult {
     // Skip if state unchanged (avoid redundant events)
     if (current && current.state === derived) {
       unchanged++
-      continue
+    } else {
+      deps.emitSyntheticState(agentId, derived, tasks)
+      emitted++
     }
-
-    deps.emitSyntheticState(agentId, derived, tasks)
-    emitted++
 
     // Emit task progress via canvas_push for /live visitors
     // Track current task and emit when it changes
@@ -139,6 +143,17 @@ export function runCanvasAutoStateSweep(deps: SweepDeps): SweepResult {
       if (prevTaskId !== currentTaskId) {
         currentTasksByAgent.set(agentId, currentTaskId)
         deps.emitTaskProgress(agentId, primaryTask)
+      }
+    }
+
+    // Emit ambient thought periodically for active agents - makes /live feel more alive
+    // Visitors see agents "thinking" throughout their work, not just at task boundaries
+    if (deps.emitAmbientThought && tasks.length > 0) {
+      const lastAmbient = lastAmbientByAgent.get(agentId) ?? 0
+      if (now - lastAmbient >= AMBIENT_THOT_INTERVAL_MS) {
+        const primaryTask = tasks[0]
+        lastAmbientByAgent.set(agentId, now)
+        deps.emitAmbientThought(agentId, primaryTask)
       }
     }
   }

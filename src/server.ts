@@ -10832,6 +10832,39 @@ export async function createServer(): Promise<FastifyInstance> {
               },
             })
           },
+          emitAmbientThought: (agentId, task) => {
+            const now = Date.now()
+            // Emit ambient thought - makes /live feel alive with constant activity
+            // Varied messages to show agents are actively working
+            const messages = [
+              `Working on: ${task.title.slice(0, 50)}`,
+              `Analyzing: ${task.title.slice(0, 40)}`,
+              `Processing: ${task.title.slice(0, 40)}`,
+              `Building: ${task.title.slice(0, 40)}`,
+              `Reviewing: ${task.title.slice(0, 40)}`,
+              `Testing: ${task.title.slice(0, 40)}`,
+              `Debugging: ${task.title.slice(0, 40)}`,
+              `Ship it`,
+              `Almost done`,
+              `Making progress`,
+            ]
+            const msg = messages[Math.floor(Math.random() * messages.length)]
+            eventBus.emit({
+              id: `ambient-${agentId}-${now}`,
+              type: 'canvas_message' as const,
+              timestamp: now,
+              data: {
+                type: 'expression',
+                expression: 'thought',
+                agentId,
+                agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
+                text: msg,
+                state: 'working',
+                task: task.title,
+                ttl: 8000,
+              },
+            })
+          },
         })
       } catch (err) {
         // Non-fatal — canvas auto-state is best-effort
