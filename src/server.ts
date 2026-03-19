@@ -10818,7 +10818,7 @@ export async function createServer(): Promise<FastifyInstance> {
             // Emit canvas_push thought for /live visitors - shows real task progress
             eventBus.emit({
               id: `task-progress-${agentId}-${now}`,
-              type: 'canvas_message' as const,
+              type: 'canvas_push' as const,
               timestamp: now,
               data: {
                 type: 'expression',
@@ -10851,7 +10851,7 @@ export async function createServer(): Promise<FastifyInstance> {
             const msg = messages[Math.floor(Math.random() * messages.length)]
             eventBus.emit({
               id: `ambient-${agentId}-${now}`,
-              type: 'canvas_message' as const,
+              type: 'canvas_push' as const,
               timestamp: now,
               data: {
                 type: 'expression',
