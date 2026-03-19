@@ -355,6 +355,7 @@ class TaskManager {
   }
 
   private startThinkingPulse() {
+    console.log('[Tasks] Starting thinking pulse...')
     const THOUGHT_TEMPLATES = [
       'Considering next step...',
       'Analyzing options...',
@@ -364,6 +365,7 @@ class TaskManager {
     ]
 
     const pulse = () => {
+      console.log('[Tasks] Thinking pulse firing...')
       const db = getDb()
       const doingTasks = db.prepare(`
         SELECT DISTINCT assignee FROM tasks 
@@ -373,6 +375,7 @@ class TaskManager {
       for (const { assignee } of doingTasks) {
         if (!assignee) continue
         // Emit a "thinking" visual for active agents
+        console.log(`[Tasks] Emitting thinking pulse for ${assignee}`)
         eventBus.emit({
           id: `think-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
           type: 'canvas_spark' as const,
