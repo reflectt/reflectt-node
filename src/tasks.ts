@@ -1700,9 +1700,44 @@ class TaskManager {
     // Emit events to event bus
     eventBus.emitTaskUpdated(updated, updates)
     
-    // If assignee changed, emit task_assigned
+    // If assignee changed: emit task_assigned + canvas handoff event
     if (updates.assignee && updates.assignee !== task.assignee) {
       eventBus.emitTaskAssigned(updated)
+      
+      // Emit canvas handoff - shows work transferring between agents on /live
+      const fromAgent = task.assignee ?? 'unassigned'
+      const toAgent = updates.assignee
+      const taskTitle = task.title?.slice(0, 60) ?? 'task'
+      eventBus.emit({
+        id: `handoff-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        type: 'canvas_spark' as const,
+        timestamp: Date.now(),
+        data: {
+          kind: 'handoff',
+          fromAgent,
+          toAgent,
+          taskId: id,
+          taskTitle,
+          line: `${toAgent} picked up: ${taskTitle}`,
+        },
+      })
+    }
+    
+    // If task status changed to 'doing' (task pickup): emit canvas utterance
+    if (updates.status === 'doing' && task.status !== 'doing') {
+      const agentId = updates.assignee ?? task.assignee ?? 'agent'
+      const taskTitle = task.title?.slice(0, 60) ?? 'task'
+      eventBus.emit({
+        id: `pickup-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        type: 'canvas_spark' as const,
+        timestamp: Date.now(),
+        data: {
+          kind: 'utterance',
+          agentId,
+          text: `Working on: ${taskTitle}`,
+          ttl: 5000,
+        },
+      })
     }
     
     // If task completed, check for unblocked tasks

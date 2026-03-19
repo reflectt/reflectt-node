@@ -67,17 +67,35 @@ export async function canvasInteractiveRoutes(
 ): Promise<void> {
   const { eventBus, canvasStateMap } = deps
 
-  // Auto-expression listener: route canvas_spark auto_expression events into Reality Mixer
+  // Auto-expression listener: route canvas_spark events into Reality Mixer
   eventBus.on('auto-expression-router', (event) => {
     if (event.type !== 'canvas_spark') return
     const data = event.data as Record<string, unknown>
-    if (data?.kind !== 'auto_expression') return
-    const agentId = String(data.agentId ?? 'unknown')
-    const line = String(data.line ?? '')
-    const voiceId = data.voiceId ? String(data.voiceId) : undefined
-    if (!line) return
-    broadcastRenderCommand(agentId, { type: 'speak', content: line, voiceId, agentId })
-    broadcastRenderCommand(agentId, { type: 'visual', preset: 'exhale' })
+    const kind = String(data?.kind ?? '')
+
+    if (kind === 'auto_expression') {
+      const agentId = String(data.agentId ?? 'unknown')
+      const line = String(data.line ?? '')
+      const voiceId = data.voiceId ? String(data.voiceId) : undefined
+      if (!line) return
+      broadcastRenderCommand(agentId, { type: 'speak', content: line, voiceId, agentId })
+      broadcastRenderCommand(agentId, { type: 'visual', preset: 'exhale' })
+    } else if (kind === 'utterance') {
+      // Agent utterance - shows what agent is doing/saying on /live
+      const agentId = String(data.agentId ?? 'unknown')
+      const text = String(data.text ?? '')
+      const ttl = typeof data.ttl === 'number' ? data.ttl : 5000
+      if (!text) return
+      broadcastRenderCommand(agentId, { type: 'text', content: text, durationMs: ttl, style: { fontSize: '14px', color: '#a1a1aa' } })
+    } else if (kind === 'handoff') {
+      // Agent handoff - shows work transferring between agents
+      const toAgent = String(data.toAgent ?? '')
+      const taskTitle = String(data.taskTitle ?? '')
+      const line = String(data.line ?? `${toAgent} picked up: ${taskTitle}`)
+      if (!toAgent) return
+      broadcastRenderCommand(toAgent, { type: 'text', content: line, durationMs: 6000, style: { fontSize: '14px', color: '#a78bfa' } })
+      broadcastRenderCommand(toAgent, { type: 'visual', preset: 'celebration' })
+    }
   })
 
   // ── POST /canvas/gaze ──
