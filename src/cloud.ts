@@ -1316,6 +1316,19 @@ async function syncCanvas(): Promise<void> {
     }
   } catch { /* local API not ready */ }
 
+  // ── Pre-build avatar map so ALL agents (including task-derived) get avatars ──
+  const avatarMap: Record<string, string> = {}
+  try {
+    const db = getDb()
+    const avatarRows = db.prepare("SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%'").all() as Array<{ agent_id: string; settings: string }>
+    for (const row of avatarRows) {
+      try {
+        const s = JSON.parse(row.settings)
+        if (s.avatar?.content) avatarMap[row.agent_id] = s.avatar.content
+      } catch { /* skip */ }
+    }
+  } catch { /* non-blocking */ }
+
   // ── Task-derived agent presence ─────────────────────────────────────────
   // Agents that have open tasks are present even if they haven't pushed native
   // canvas state. Any agent with a doing/validating task → "working".
@@ -1356,6 +1369,7 @@ async function syncCanvas(): Promise<void> {
         currentTask: info.taskTitle,
         updatedAt: now,
         source: 'task-derived',
+        avatar: avatarMap[agentId] ?? null,
       }
     }
 
@@ -1373,6 +1387,7 @@ async function syncCanvas(): Promise<void> {
         source: 'waiting-derived',
         waitingFor: agent.waitingFor ?? null,
         waitingTaskId: agent.waitingTaskId ?? null,
+        avatar: avatarMap[agent.name] ?? null,
       }
     }
   } catch { /* task API not ready — not fatal */ }
@@ -1403,6 +1418,7 @@ async function syncCanvas(): Promise<void> {
           state: 'thinking',
           updatedAt: now2,
           source: 'thinking-inferred',
+          avatar: avatarMap[agent.name] ?? null,
         }
       }
     }
