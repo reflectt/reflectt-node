@@ -23,7 +23,7 @@ export async function canvasPushRoutes(
     const type = typeof body.type === 'string' ? body.type : 'utterance'
     const agentId = typeof body.agentId === 'string' ? body.agentId.toLowerCase() : 'agent'
 
-    const VALID_PUSH_TYPES = new Set(['utterance', 'work_released', 'handoff', 'canvas_response', 'rich'])
+    const VALID_PUSH_TYPES = new Set(['utterance', 'thought', 'work_released', 'handoff', 'canvas_response', 'rich'])
     if (!VALID_PUSH_TYPES.has(type)) {
       reply.status(400)
       return { success: false, message: `type must be one of: ${[...VALID_PUSH_TYPES].join(', ')}` }
@@ -37,6 +37,31 @@ export async function canvasPushRoutes(
       const text = raw.slice(0, 60)
       const ttl = typeof body.ttl === 'number' && body.ttl > 0 ? Math.min(body.ttl, 15_000) : 4_000
       payload = { ...payload, text, ttl }
+    } else if (type === 'thought') {
+      // Agent thought bubble - shows what agent is thinking in real-time
+      // Emit as expression type for frontend compatibility
+      const raw = typeof body.text === 'string' ? body.text.trim() : ''
+      const text = raw.slice(0, 200)
+      const ttl = typeof body.ttl === 'number' && body.ttl > 0 ? Math.min(body.ttl, 30_000) : 8_000
+      const THOUGHT_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
+        scout: '#fbbf24', echo: '#f472b6', rhythm: '#6ee7b7', spark: '#f97316',
+      }
+      eventBus.emit({
+        id: `cmsg-thought-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_message' as const,
+        timestamp: now,
+        data: {
+          type: 'expression',
+          expression: 'thought',
+          agentId,
+          agentColor: THOUGHT_COLORS[agentId] ?? '#60a5fa',
+          text,
+          ttl,
+        },
+      })
+      // Also emit legacy canvas_push for backwards compatibility
+      payload = { ...payload, type: 'expression', expression: 'thought', text, ttl }
     } else if (type === 'work_released') {
       const text = typeof body.text === 'string' ? body.text.slice(0, 80) : 'work shipped'
       const intensity = typeof body.intensity === 'number'
