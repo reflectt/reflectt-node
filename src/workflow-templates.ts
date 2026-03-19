@@ -24,6 +24,37 @@ async function emitCanvasState(agentId: string, state: CanvasEmitState, text: st
   }
 }
 
+// Emit canvas_push event for /live SSE stream - makes agents visible on live.reflectt.ai
+async function emitCanvasPush(
+  agentId: string,
+  type: 'utterance' | 'thought' | 'work_released' | 'handoff',
+  data: Record<string, unknown>
+): Promise<void> {
+  try {
+    await fetch(`${LOCAL_NODE_BASE}/canvas/push`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId, type, ...data }),
+    })
+  } catch {
+    // Canvas push is best-effort; workflow execution must continue.
+  }
+}
+
+// Convenience wrappers for common /live events
+async function emitThought(agentId: string, text: string, ttl = 8000): Promise<void> {
+  await emitCanvasPush(agentId, 'thought', { text, ttl })
+}
+async function emitUtterance(agentId: string, text: string, ttl = 4000): Promise<void> {
+  await emitCanvasPush(agentId, 'utterance', { text, ttl })
+}
+async function emitWorkReleased(agentId: string, text: string, intensity = 0.6): Promise<void> {
+  await emitCanvasPush(agentId, 'work_released', { text, intensity })
+}
+async function emitHandoff(agentId: string, toAgentId: string, taskTitle?: string): Promise<void> {
+  await emitCanvasPush(agentId, 'handoff', { toAgentId, taskTitle })
+}
+
 export interface WorkflowStep {
   name: string
   description: string
@@ -86,6 +117,8 @@ export const prReviewWorkflow: WorkflowTemplate = {
           eventType: 'work_started',
           payload: { message: 'Agent began working on objective' },
         })
+        // Emit thought for /live - visitors see agent thinking
+        emitThought(ctx.agentId, `Starting work on: ${(ctx.params.objective as string ?? 'task').slice(0, 80)}`).catch(() => {})
         return { success: true }
       },
     },
@@ -140,6 +173,7 @@ export const prReviewWorkflow: WorkflowTemplate = {
       name: 'handoff',
       description: 'Hand off to next owner or complete',
       action: (ctx) => {
+        const nextOwner = ctx.params.nextOwner as string ?? ctx.agentId
         appendAgentEvent({
           agentId: ctx.agentId,
           runId: ctx.runId,
@@ -147,7 +181,7 @@ export const prReviewWorkflow: WorkflowTemplate = {
           payload: {
             action_required: 'approve',
             urgency: 'normal',
-            owner: ctx.params.nextOwner as string ?? ctx.agentId,
+            owner: nextOwner,
             summary: ctx.params.summary as string ?? 'Work reviewed and approved',
             rationale: {
               choice: (ctx.params.handoffRationale as string) ?? 'Handing off to next owner for final approval and merge.',
@@ -156,6 +190,8 @@ export const prReviewWorkflow: WorkflowTemplate = {
             },
           },
         })
+        // Emit handoff for /live - visitors see work transfer
+        emitHandoff(ctx.agentId, nextOwner, (ctx.params.objective as string)?.slice(0, 60)).catch(() => {})
         return { success: true }
       },
     },
@@ -170,6 +206,8 @@ export const prReviewWorkflow: WorkflowTemplate = {
           eventType: 'run_completed',
           payload: { message: 'Workflow completed successfully' },
         })
+        // Emit work_released for /live - visitors see work completed
+        emitWorkReleased(ctx.agentId, 'Work complete!').catch(() => {})
         return { success: true }
       },
     },
