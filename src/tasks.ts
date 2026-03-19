@@ -356,27 +356,22 @@ class TaskManager {
 
   private startThinkingPulse() {
     console.log('[Tasks] Starting thinking pulse...')
-    const THOUGHT_TEMPLATES = [
-      'Considering next step...',
-      'Analyzing options...',
-      'Working through the details...',
-      'Checking constraints...',
-      'Evaluating approach...',
-    ]
 
     const pulse = () => {
       console.log('[Tasks] Thinking pulse firing...')
       const db = getDb()
       const doingTasks = db.prepare(`
-        SELECT DISTINCT assignee FROM tasks 
+        SELECT assignee, title FROM tasks 
         WHERE status = 'doing' AND assignee IS NOT NULL
-      `).all() as { assignee: string }[]
+      `).all() as { assignee: string; title: string }[]
 
-      for (const { assignee } of doingTasks) {
+      for (const { assignee, title } of doingTasks) {
         if (!assignee) continue
         // Emit a "thinking" visual for active agents
-        console.log(`[Tasks] Emitting thinking pulse for ${assignee}`)
-        const line = THOUGHT_TEMPLATES[Math.floor(Math.random() * THOUGHT_TEMPLATES.length)]!
+        console.log(`[Tasks] Emitting thinking pulse for ${assignee}: ${title}`)
+        // Show actual work - truncate task title to fit
+        const work = title?.slice(0, 50) ?? 'Working...'
+        const line = work
         const voiceId = VOICE_IDS[assignee]
         // Auto-expression: triggers TTS audio
         eventBus.emit({
@@ -391,20 +386,15 @@ class TaskManager {
             intensity: 0.3,
           },
         })
-        // Also emit a thought card so visitors SEE the agent thinking on /live
-        const THOUGHT_COLORS: Record<string, string> = {
-          link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
-          scout: '#fbbf24', echo: '#f472b6', rhythm: '#6ee7b7', spark: '#f97316',
-        }
+        // Emit canvas_spark with kind='utterance' → auto-expression-router generates
+        // a 'text' render command → appears as visible thought card on /live
         eventBus.emit({
           id: `thought-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-          type: 'canvas_message' as const,
+          type: 'canvas_spark' as const,
           timestamp: Date.now(),
           data: {
-            type: 'expression',
-            expression: 'thought',
+            kind: 'utterance' as const,
             agentId: assignee,
-            agentColor: THOUGHT_COLORS[assignee] ?? '#60a5fa',
             text: line,
             ttl: 12000,
           },
@@ -1801,8 +1791,6 @@ class TaskManager {
       // Uses LLM if ANTHROPIC_API_KEY available; falls back to concise templates.
       void (async () => {
         try {
-          let line: string
-          const openaiKey = process.env.ANTHROPIC_API_KEY
           if (openaiKey) {
             // LLM-generated expression — one authentic sentence, no boilerplate
             const ageHours = Math.round(ageMs / (1000 * 60 * 60))

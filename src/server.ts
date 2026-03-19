@@ -10781,15 +10781,18 @@ export async function createServer(): Promise<FastifyInstance> {
             const entry = canvasStateMap.get(agentId)
             return entry ? { state: entry.state, updatedAt: entry.updatedAt } : null
           },
-          emitSyntheticState: (agentId, state, sourceTasks) => {
+          emitSyntheticState: (agentId, state, sourceTasks, thought) => {
             const now = Date.now()
             // Write into canvasStateMap so pulse tick picks it up
             const prev = canvasStateMap.get(agentId)
+            const existing = canvasStateMap.get(agentId) ?? {}
             canvasStateMap.set(agentId, {
+              ...existing,
               state,
               sensors: null,
               payload: { _auto: true, sourceTasks: sourceTasks.slice(0, 2).map(t => ({ id: t.id, title: t.title, status: t.status })) },
               updatedAt: now,
+              lastMessage: thought ? { content: thought, timestamp: now } : existing?.lastMessage,
             })
             // Emit canvas_render so SSE consumers get immediate update
             eventBus.emit({
