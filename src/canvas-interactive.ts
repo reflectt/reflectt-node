@@ -409,7 +409,11 @@ export async function canvasInteractiveRoutes(
       data: { agentId, channels },
     })
 
-    broadcastRenderCommand(agentId, { type: 'text', content: JSON.stringify(channels) } as RealityMixerCommand)
+    // Extract typography text for the render stream - onText expects plain text, not JSON
+    const typography = (channels.typography ?? {}) as Record<string, unknown>
+    const text = typeof typography.text === 'string' ? typography.text : JSON.stringify(channels)
+    const durationMs = typeof typography.durationMs === 'number' ? typography.durationMs : 5000
+    broadcastRenderCommand(agentId, { type: 'text', content: text, durationMs } as RealityMixerCommand)
 
     return { success: true, id }
   })
