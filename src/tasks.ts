@@ -358,22 +358,17 @@ class TaskManager {
     console.log('[Tasks] Starting thinking pulse...')
 
     const pulse = () => {
-      console.log('[Tasks] Thinking pulse firing...')
       const db = getDb()
       const doingTasks = db.prepare(`
-        SELECT assignee, title FROM tasks 
+        SELECT assignee, title FROM tasks
         WHERE status = 'doing' AND assignee IS NOT NULL
       `).all() as { assignee: string; title: string }[]
 
       for (const { assignee, title } of doingTasks) {
         if (!assignee) continue
-        // Emit a "thinking" visual for active agents
-        console.log(`[Tasks] Emitting thinking pulse for ${assignee}: ${title}`)
-        // Show actual work - truncate task title to fit
         const work = title?.slice(0, 50) ?? 'Working...'
-        const line = work
         const voiceId = VOICE_IDS[assignee]
-        // Auto-expression: triggers TTS audio
+        // Auto-expression: triggers TTS audio (local SSE)
         eventBus.emit({
           id: `think-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
           type: 'canvas_spark' as const,
@@ -381,24 +376,17 @@ class TaskManager {
           data: {
             kind: 'auto_expression' as const,
             agentId: assignee,
-            line,
+            line: work,
             voiceId,
             intensity: 0.3,
           },
         })
-        // Emit canvas_spark with kind='utterance' → auto-expression-router generates
-        // a 'text' render command → appears as visible thought card on /live
-        eventBus.emit({
-          id: `thought-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-          type: 'canvas_spark' as const,
-          timestamp: Date.now(),
-          data: {
-            kind: 'utterance' as const,
-            agentId: assignee,
-            text: line,
-            ttl: 12000,
-          },
-        })
+        // POST to /canvas/push → queues for cloud relay → broadcast as canvas_push SSE → visible on /live
+        fetch(`${process.env.NODE_URL ?? 'http://127.0.0.1:4445'}/canvas/push`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'thought', agentId: assignee, content: work, ttl: 12000 }),
+        }).catch(() => { /* non-fatal */ })
       }
     }
 
@@ -1791,6 +1779,8 @@ class TaskManager {
       // Uses LLM if ANTHROPIC_API_KEY available; falls back to concise templates.
       void (async () => {
         try {
+          let line: string
+          const openaiKey = process.env.ANTHROPIC_API_KEY
           if (openaiKey) {
             // LLM-generated expression — one authentic sentence, no boilerplate
             const ageHours = Math.round(ageMs / (1000 * 60 * 60))

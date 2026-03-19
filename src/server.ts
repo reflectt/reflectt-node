@@ -2595,7 +2595,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // Populated in the canvas state section below. Route handlers (e.g. PATCH /tasks) access
   // this via closure to synchronously update orb state when task status transitions occur.
   // eslint-disable-next-line prefer-const
-  let _canvasStateMap: Map<string, { state: string; sensors: string | null; payload: unknown; updatedAt: number }> | null = null
+  let _canvasStateMap: Map<string, { state: string; sensors: string | null; payload: unknown; updatedAt: number; lastMessage?: { content: string; timestamp: number } }> | null = null
 
   // Health check
   // Ultra-lightweight ping — no DB, no stats, instant response.
@@ -10761,7 +10761,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // Current state per agent — in-memory, not persisted
-  const canvasStateMap = new Map<string, { state: CanvasState; sensors: string | null; payload: unknown; updatedAt: number }>()
+  const canvasStateMap = new Map<string, { state: CanvasState; sensors: string | null; payload: unknown; updatedAt: number; lastMessage?: { content: string; timestamp: number } }>()
   _canvasStateMap = canvasStateMap // populate forward reference for earlier route handlers
 
   // ── Canvas auto-state sweep ──
@@ -10784,13 +10784,11 @@ export async function createServer(): Promise<FastifyInstance> {
           emitSyntheticState: (agentId, state, sourceTasks, thought) => {
             const now = Date.now()
             // Write into canvasStateMap so pulse tick picks it up
-            const prev = canvasStateMap.get(agentId)
-            const existing = canvasStateMap.get(agentId) ?? {}
+            const existing: { lastMessage?: { content: string; timestamp: number }; state?: CanvasState } = canvasStateMap.get(agentId) ?? {}
             canvasStateMap.set(agentId, {
-              ...existing,
               state,
               sensors: null,
-              payload: { _auto: true, sourceTasks: sourceTasks.slice(0, 2).map(t => ({ id: t.id, title: t.title, status: t.status })) },
+              payload: { _auto: true, sourceTasks: sourceTasks.slice(0, 2).map((t: { id: string; title: string; status: string }) => ({ id: t.id, title: t.title, status: t.status })) },
               updatedAt: now,
               lastMessage: thought ? { content: thought, timestamp: now } : existing?.lastMessage,
             })
@@ -10812,7 +10810,7 @@ export async function createServer(): Promise<FastifyInstance> {
                   task: sourceTasks[0]?.title ?? null,
                   _auto: true,
                 },
-                previousState: prev?.state ?? 'floor',
+                previousState: existing?.state ?? 'floor',
               },
             })
           },

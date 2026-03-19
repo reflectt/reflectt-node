@@ -66,7 +66,7 @@ export interface SweepDeps {
   /** Get current canvas state entry for an agent (null if never set) */
   getCanvasState(agentId: string): CanvasStateEntry | null
   /** Emit a synthetic canvas state event */
-  emitSyntheticState(agentId: string, state: CanvasState, sourceTasks: Task[]): void
+  emitSyntheticState(agentId: string, state: CanvasState, sourceTasks: Task[], thought?: string): void
   /** Emit a canvas_push event for task progress (for /live visitors) */
   emitTaskProgress?(agentId: string, task: Task): void
   /** Emit a canvas_push ambient thought for active agents (more frequent) */
