@@ -1842,18 +1842,18 @@ class TaskManager {
             line = opts[Math.floor(Math.random() * opts.length)]!
           }
 
-          // Fire Reality Mixer speak command
-          // We use eventBus internal listener to avoid circular import on server.ts broadcastRenderCommand
+          // Fire canvas_expression for auto-thought — broadcasts directly to canvas/stream
+          // This shows text + speaks TTS on the living canvas
           eventBus.emit({
-            id: `expr-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
-            type: 'canvas_spark' as const,  // repurpose spark channel for auto-expression trigger
+            id: `thought-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+            type: 'canvas_expression' as const,
             timestamp: Date.now(),
             data: {
-              kind: 'auto_expression',
               agentId: completedAgentId,
-              line,
-              voiceId: VOICE_IDS[completedAgentId],
-              intensity,
+              channels: {
+                typography: { text: line, size: 'md', durationMs: 5000 },
+                voice: line,
+              },
             },
           })
         } catch { /* never fail a task close */ }
