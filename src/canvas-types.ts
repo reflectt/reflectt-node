@@ -39,6 +39,7 @@ export const ALLOWED_CONTENT_TYPES = [
   'cta.button',
   'evidence.link',
   'timeline.event',
+  'rich', // For agent expressions (thoughts, reactions) - ephemeral, not slot-based
 ] as const
 
 export type ContentType = (typeof ALLOWED_CONTENT_TYPES)[number]
