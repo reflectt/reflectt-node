@@ -79,7 +79,7 @@ export async function canvasInteractiveRoutes(
       const voiceId = data.voiceId ? String(data.voiceId) : undefined
       if (!line) return
       broadcastRenderCommand(agentId, { type: 'speak', content: line, voiceId, agentId })
-      broadcastRenderCommand(agentId, { type: 'visual', preset: 'exhale', durationMs: 15000 })
+      broadcastRenderCommand(agentId, { type: 'visual', preset: 'exhale' })
     } else if (kind === 'utterance') {
       // Agent utterance - shows what agent is doing/saying on /live
       const agentId = String(data.agentId ?? 'unknown')
