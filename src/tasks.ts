@@ -376,6 +376,9 @@ class TaskManager {
         if (!assignee) continue
         // Emit a "thinking" visual for active agents
         console.log(`[Tasks] Emitting thinking pulse for ${assignee}`)
+        const line = THOUGHT_TEMPLATES[Math.floor(Math.random() * THOUGHT_TEMPLATES.length)]!
+        const voiceId = VOICE_IDS[assignee]
+        // Auto-expression: triggers TTS audio
         eventBus.emit({
           id: `think-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
           type: 'canvas_spark' as const,
@@ -383,9 +386,27 @@ class TaskManager {
           data: {
             kind: 'auto_expression' as const,
             agentId: assignee,
-            line: THOUGHT_TEMPLATES[Math.floor(Math.random() * THOUGHT_TEMPLATES.length)]!,
-            voiceId: VOICE_IDS[assignee],
+            line,
+            voiceId,
             intensity: 0.3,
+          },
+        })
+        // Also emit a thought card so visitors SEE the agent thinking on /live
+        const THOUGHT_COLORS: Record<string, string> = {
+          link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
+          scout: '#fbbf24', echo: '#f472b6', rhythm: '#6ee7b7', spark: '#f97316',
+        }
+        eventBus.emit({
+          id: `thought-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          type: 'canvas_message' as const,
+          timestamp: Date.now(),
+          data: {
+            type: 'expression',
+            expression: 'thought',
+            agentId: assignee,
+            agentColor: THOUGHT_COLORS[assignee] ?? '#60a5fa',
+            text: line,
+            ttl: 12000,
           },
         })
       }
