@@ -19,6 +19,18 @@ import { getAgentAliases } from './assignment.js'
 import { getAgentLane } from './lane-config.js'
 import type Database from 'better-sqlite3'
 
+// Voice IDs for agents (used for TTS)
+const VOICE_IDS: Record<string, string> = {
+  link:  'pNInz6obpgDQGcFmaJgB',
+  kai:   'onwK4e9ZLuTAKqWW03F9',
+  pixel: 'EXAVITQu4vr4xnSDxMaL',
+  sage:  'yoZ06aMxZJJ28mfd3POQ',
+  scout: '3XbDmaS0mwj3WIVTUxWa',
+  echo:  'MF3mGyEYCl7XYWbV9V6O',
+  rhythm: 'morgan',
+  spark: 'corey',
+}
+
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
 const LEGACY_TASKS_FILE = join(LEGACY_DATA_DIR, 'tasks.jsonl')
 const RECURRING_TASKS_FILE = join(DATA_DIR, 'tasks.recurring.jsonl')
@@ -336,6 +348,49 @@ class TaskManager {
       })
     }, 60_000)
     this.recurringTicker.unref()
+
+    // Periodic "thinking pulse" — makes agents show as actively thinking on /live canvas
+    // Fires every 15 seconds for agents with active tasks
+    this.startThinkingPulse()
+  }
+
+  private startThinkingPulse() {
+    const THOUGHT_TEMPLATES = [
+      'Considering next step...',
+      'Analyzing options...',
+      'Working through the details...',
+      'Checking constraints...',
+      'Evaluating approach...',
+    ]
+
+    const pulse = () => {
+      const db = getDb()
+      const doingTasks = db.prepare(`
+        SELECT DISTINCT assignee FROM tasks 
+        WHERE status = 'doing' AND assignee IS NOT NULL
+      `).all() as { assignee: string }[]
+
+      for (const { assignee } of doingTasks) {
+        if (!assignee) continue
+        // Emit a "thinking" visual for active agents
+        eventBus.emit({
+          id: `think-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          type: 'canvas_spark' as const,
+          timestamp: Date.now(),
+          data: {
+            kind: 'auto_expression' as const,
+            agentId: assignee,
+            line: THOUGHT_TEMPLATES[Math.floor(Math.random() * THOUGHT_TEMPLATES.length)]!,
+            voiceId: VOICE_IDS[assignee],
+            intensity: 0.3,
+          },
+        })
+      }
+    }
+
+    // Fire immediately, then every 15 seconds
+    setTimeout(pulse, 5000)
+    setInterval(pulse, 15_000)
   }
 
   private async loadTasks(): Promise<void> {
@@ -1655,7 +1710,7 @@ class TaskManager {
       this.checkUnblockedTasks(id)
 
       // Cinematic completion moment — emit canvas_milestone for the living canvas
-      // Intensity scales with how long the task was in-flight and how high the priority
+      // Also emit an utterance (thought) showing what was accomplished
       const ageMs = Date.now() - (task.createdAt ?? Date.now())
       const ageDays = ageMs / (1000 * 60 * 60 * 24)
       const priorityBoost: Record<string, number> = { P0: 1.0, P1: 0.9, P2: 0.7, P3: 0.5 }
@@ -1687,15 +1742,6 @@ class TaskManager {
       // Uses LLM if ANTHROPIC_API_KEY available; falls back to concise templates.
       void (async () => {
         try {
-          const VOICE_IDS: Record<string, string> = {
-            link:  'pNInz6obpgDQGcFmaJgB',
-            kai:   'onwK4e9ZLuTAKqWW03F9',
-            pixel: 'EXAVITQu4vr4xnSDxMaL',
-            sage:  'yoZ06aMxZJJ28mfd3POQ',
-            scout: '3XbDmaS0mwj3WIVTUxWa',
-            echo:  'MF3mGyEYCl7XYWbV9V6O',
-          }
-
           let line: string
           const openaiKey = process.env.ANTHROPIC_API_KEY
           if (openaiKey) {
