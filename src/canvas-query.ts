@@ -102,13 +102,40 @@ export async function canvasQueryRoutes(
       : null
     const sessionTurns = sessionId ? getCanvasSession(sessionId) : []
 
-    // Default answering agent is link (builder — knows the codebase + task board)
-    const responderId = agentIdRaw ? agentIdRaw.trim() : 'link'
+    // Default: if no agent specified, return team status directly (don't route to specific agent)
+    const responderId = agentIdRaw ? agentIdRaw.trim() : null
     const IDENTITY_COLORS_Q: Record<string, string> = {
       link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
       sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
     }
-    const agentColor = IDENTITY_COLORS_Q[responderId] ?? '#60a5fa'
+    const agentColor = responderId ? (IDENTITY_COLORS_Q[responderId] ?? '#60a5fa') : '#60a5fa'
+
+    // If no specific agent requested, return team status directly without agent routing
+    if (!responderId) {
+      const allTasks = taskManager.listTasks({})
+      const doingTasks = allTasks.filter((t: any) => t.status === 'doing').slice(0, 5)
+      const todoCount = allTasks.filter((t: any) => t.status === 'todo').length
+      const validatingCount = allTasks.filter((t: any) => t.status === 'validating').length
+      
+      return {
+        success: true,
+        card: {
+          type: 'tasks',
+          data: {
+            items: doingTasks.map((t: any) => ({
+              agentId: t.assignee || 'unassigned',
+              title: t.title,
+              state: t.status,
+            })),
+            todoCount,
+            doingCount: doingTasks.length,
+            validatingCount,
+          },
+          agentId: 'assistant',
+          agentColor: '#60a5fa',
+        },
+      }
+    }
 
     // Gather live context to inject into LLM
     const allTasksForQuery = taskManager.listTasks({})
