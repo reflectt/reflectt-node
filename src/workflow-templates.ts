@@ -42,8 +42,8 @@ async function emitCanvasPush(
 }
 
 // Convenience wrappers for common /live events
-async function emitThought(agentId: string, text: string, ttl = 8000): Promise<void> {
-  await emitCanvasPush(agentId, 'thought', { text, ttl })
+async function emitThought(agentId: string, text: string, ttl = 8000, state?: string, task?: string): Promise<void> {
+  await emitCanvasPush(agentId, 'thought', { text, ttl, state, task })
 }
 async function emitUtterance(agentId: string, text: string, ttl = 4000): Promise<void> {
   await emitCanvasPush(agentId, 'utterance', { text, ttl })
@@ -117,8 +117,9 @@ export const prReviewWorkflow: WorkflowTemplate = {
           eventType: 'work_started',
           payload: { message: 'Agent began working on objective' },
         })
-        // Emit thought for /live - visitors see agent thinking
-        emitThought(ctx.agentId, `Starting work on: ${(ctx.params.objective as string ?? 'task').slice(0, 80)}`).catch(() => {})
+        // Emit thought for /live - visitors see agent thinking with context
+        const taskName = (ctx.params.objective as string ?? 'task').slice(0, 60)
+        emitThought(ctx.agentId, `Starting: ${taskName}`, 10000, 'working', taskName).catch(() => {})
         return { success: true }
       },
     },
@@ -190,8 +191,11 @@ export const prReviewWorkflow: WorkflowTemplate = {
             },
           },
         })
+        // Emit thought for /live - visitors see agent deciding to handoff
+        const taskName = (ctx.params.objective as string)?.slice(0, 60) ?? 'task'
+        emitThought(ctx.agentId, `Handing off to @${nextOwner}`, 6000, 'handoff', taskName).catch(() => {})
         // Emit handoff for /live - visitors see work transfer
-        emitHandoff(ctx.agentId, nextOwner, (ctx.params.objective as string)?.slice(0, 60)).catch(() => {})
+        emitHandoff(ctx.agentId, nextOwner, taskName).catch(() => {})
         return { success: true }
       },
     },
@@ -206,8 +210,11 @@ export const prReviewWorkflow: WorkflowTemplate = {
           eventType: 'run_completed',
           payload: { message: 'Workflow completed successfully' },
         })
+        // Emit thought for /live - visitors see agent celebrating/shipping
+        const taskName = (ctx.params.objective as string)?.slice(0, 50) ?? 'task'
+        emitThought(ctx.agentId, `Shipped: ${taskName}`, 12000, 'complete', taskName).catch(() => {})
         // Emit work_released for /live - visitors see work completed
-        emitWorkReleased(ctx.agentId, 'Work complete!').catch(() => {})
+        emitWorkReleased(ctx.agentId, `Shipped: ${taskName}`).catch(() => {})
         return { success: true }
       },
     },

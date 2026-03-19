@@ -10813,6 +10813,25 @@ export async function createServer(): Promise<FastifyInstance> {
               },
             })
           },
+          emitTaskProgress: (agentId, task) => {
+            const now = Date.now()
+            // Emit canvas_push thought for /live visitors - shows real task progress
+            eventBus.emit({
+              id: `task-progress-${agentId}-${now}`,
+              type: 'canvas_message' as const,
+              timestamp: now,
+              data: {
+                type: 'expression',
+                expression: 'thought',
+                agentId,
+                agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
+                text: `${task.title}`,
+                state: 'working',
+                task: task.title,
+                ttl: 12000,
+              },
+            })
+          },
         })
       } catch (err) {
         // Non-fatal — canvas auto-state is best-effort

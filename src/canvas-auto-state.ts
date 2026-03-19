@@ -67,6 +67,8 @@ export interface SweepDeps {
   getCanvasState(agentId: string): CanvasStateEntry | null
   /** Emit a synthetic canvas state event */
   emitSyntheticState(agentId: string, state: CanvasState, sourceTasks: Task[]): void
+  /** Emit a canvas_push event for task progress (for /live visitors) */
+  emitTaskProgress?(agentId: string, task: Task): void
 }
 
 export interface SweepResult {
@@ -103,6 +105,9 @@ export function runCanvasAutoStateSweep(deps: SweepDeps): SweepResult {
   let skipped = 0
   let unchanged = 0
 
+  // Track current task per agent for change detection
+  const currentTasksByAgent = new Map<string, string>()
+
   for (const [agentId, tasks] of byAgent) {
     const current = deps.getCanvasState(agentId)
 
@@ -122,6 +127,20 @@ export function runCanvasAutoStateSweep(deps: SweepDeps): SweepResult {
 
     deps.emitSyntheticState(agentId, derived, tasks)
     emitted++
+
+    // Emit task progress via canvas_push for /live visitors
+    // Track current task and emit when it changes
+    if (deps.emitTaskProgress && tasks.length > 0) {
+      const primaryTask = tasks[0] // First task is most recent/important
+      const prevTaskId = currentTasksByAgent.get(agentId)
+      const currentTaskId = primaryTask.id
+      
+      // Emit if task changed or this is first time we see this agent
+      if (prevTaskId !== currentTaskId) {
+        currentTasksByAgent.set(agentId, currentTaskId)
+        deps.emitTaskProgress(agentId, primaryTask)
+      }
+    }
   }
 
   return {
