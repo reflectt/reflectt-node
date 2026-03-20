@@ -490,3 +490,44 @@ export async function canvasInteractiveRoutes(
     })
   })
 }
+
+// ── ApprovalCard command ────────────────────────────────────────────────────────
+export interface ApprovalCardCommand {
+  type: 'render_approval'
+  id: string
+  agentName: string
+  agentColor?: string
+  title: string
+  description: string
+  risk: 'low' | 'medium' | 'high' | 'critical'
+  acceptLabel?: string
+  modifyLabel?: string
+  escalateLabel?: string
+  timeoutSeconds?: number
+  trustDelta?: number
+}
+
+export interface ApprovalDecisionEvent {
+  type: 'approval_decision'
+  id: string
+  decision: 'accept' | 'modify' | 'escalate'
+  modifiedValue?: string
+}
+
+// ── DecisionCard command ────────────────────────────────────────────────────────
+export interface DecisionCardCommand {
+  type: 'render_decision'
+  id: string
+  agentName: string
+  agentColor?: string
+  title: string
+  description?: string
+  options: Array<{ id: string; label: string; description?: string }>
+}
+
+export interface DecisionSelectEvent {
+  type: 'decision_select'
+  id: string
+  optionId: string
+}
+
