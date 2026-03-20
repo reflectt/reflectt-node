@@ -11406,6 +11406,7 @@ export async function createServer(): Promise<FastifyInstance> {
   await app.register(canvasPushRoutes, {
     eventBus,
     queueCanvasPushEvent,
+    canvasStateMap,
   } as any)
 
   // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
