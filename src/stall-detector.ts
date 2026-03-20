@@ -149,10 +149,10 @@ export function recordAgentResponse(
 /**
  * Check all sessions for stalls and emit events
  */
-export function checkForStalls(config: StallDetectorConfig = DEFAULT_CONFIG): StallEvent[] {
+export function checkForStalls(config: StallDetectorConfig = DEFAULT_CONFIG, now = Date.now()): StallEvent[] {
   if (!config.enabled) return []
   
-  const now = Date.now()
+  // now injected for testability (defaults to Date.now())
   const emitted: StallEvent[] = []
   
   for (const [key, state] of sessionStates) {

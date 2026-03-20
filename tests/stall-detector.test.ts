@@ -52,7 +52,7 @@ describe('StallDetector', () => {
     if (emitted1.length !== 0) throw new Error('Should not emit with higher threshold')
     
     // With 3 min threshold, 5 min should trigger
-    const emitted2 = checkForStalls({ thresholds: { newUserStallMinutes: 3, inSessionStallMinutes: 3, setupStallMinutes: 3 }, enabled: true }, now + 5 * 60 * 1000)
+    const emitted2 = checkForStalls({ thresholds: { newUserStallMinutes: 3, inSessionStallMinutes: 3, setupStallMinutes: 3 }, enabled: true }, now + 5 * 60 * 1000 + 31_000)
     if (emitted2.length !== 1) throw new Error('Should emit with lower threshold')
   })
 
