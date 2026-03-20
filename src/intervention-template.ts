@@ -364,3 +364,12 @@ export function cleanupStaleEntries(): void {
     }
   }
 }
+
+/**
+ * Reset all intervention engine state — for testing only
+ */
+export function _resetInterventionEngineState(): void {
+  cooldownStore.clear()
+  sentTemplates.clear()
+  deduplicationStore.clear()
+}
