@@ -836,6 +836,7 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/canvas/history` | Recent render history (?slot=&limit=) |
 | GET | `/canvas/rejections` | Recent contract validation rejections |
 | GET | `/canvas/stream` | SSE stream of canvas render events |
+| GET | `/canvas/viewers` | Returns `{ viewers: number }` — count of open SSE connections to `/canvas/stream`. Used by reflectt-cloud /live page to show real-time viewer count. |
 | GET | `/execution-health` | Execution sweeper status: validating queue violations, SLA breaches, escalation tracking. |
 | POST | `/pr-event` | PR state webhook. Body: `{ taskId, prState: "merged"|"closed", prUrl? }`. Auto-updates task artifacts on merge, auto-blocks on close. |
 | GET | `/pr-automerge/status` | PR auto-merge attempt log: recent merge/close attempts with summary counts (attempted, success, failed, skipped, auto-close, close-gate-fail). |
