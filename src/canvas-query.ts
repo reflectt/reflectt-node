@@ -110,22 +110,41 @@ export async function canvasQueryRoutes(
     }
     const agentColor = responderId ? (IDENTITY_COLORS_Q[responderId] ?? '#60a5fa') : '#60a5fa'
 
-    // If no specific agent requested, return team status directly without agent routing
+    // If no specific agent requested, classify intent and return appropriate card
     if (!responderId) {
+      const lower = query.toLowerCase()
+      const isHostsQuery = /show me hosts|host status|server status|machine|node/.test(lower)
+      const isRevenueQuery = /revenue|mrr|arr|money|sales|customers|paid|billing/.test(lower)
+      const isOnboardingQuery = /onboard|get started|how do i|where do i start|first step/.test(lower)
+
+      if (isHostsQuery) {
+        const rawHosts = listHosts({})
+        const hosts = rawHosts.map((h: any) => ({
+          id: h.id, name: h.hostname ?? h.id, status: h.status,
+          version: h.version ?? null,
+          agentCount: Array.isArray(h.agents) ? h.agents.length : 0,
+          lastSeen: h.last_seen_at,
+        }))
+        return { success: true, card: { type: 'hosts', data: { hosts } } }
+      }
+      if (isRevenueQuery) {
+        return { success: true, card: { type: 'info', data: { text: 'Revenue tracking not yet wired.' } } }
+      }
+      if (isOnboardingQuery) {
+        return { success: true, card: { type: 'info', data: { text: 'Getting started: install reflectt-node on any machine.' } } }
+      }
+      // Default: team task status
       const allTasks = taskManager.listTasks({})
       const doingTasks = allTasks.filter((t: any) => t.status === 'doing').slice(0, 5)
       const todoCount = allTasks.filter((t: any) => t.status === 'todo').length
       const validatingCount = allTasks.filter((t: any) => t.status === 'validating').length
-      
       return {
         success: true,
         card: {
           type: 'tasks',
           data: {
             items: doingTasks.map((t: any) => ({
-              agentId: t.assignee || 'unassigned',
-              title: t.title,
-              state: t.status,
+              agentId: t.assignee || 'unassigned', title: t.title, state: t.status,
             })),
             todoCount,
             doingCount: doingTasks.length,
