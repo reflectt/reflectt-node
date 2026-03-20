@@ -540,7 +540,7 @@ export async function canvasInteractiveRoutes(
     if (KOKORO_BASE) {
       try {
         const ac = new AbortController()
-        setTimeout(() => ac.abort(), 12000)
+        setTimeout(() => ac.abort(), 60000)
         const r = await fetch(KOKORO_BASE + '/v1/audio/speech', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
