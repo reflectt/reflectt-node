@@ -4,10 +4,14 @@
 
 import type { FastifyInstance } from 'fastify'
 import type { eventBus as eventBusInstance } from './events.js'
+import { taskManager } from './tasks.js'
+import { emitActivationEvent } from './activationEvents.js'
+import type { CanvasStateEntry } from './canvas-routes.js'
 
 interface CanvasPushDeps {
   eventBus: typeof eventBusInstance
   queueCanvasPushEvent: (event: Record<string, unknown>) => void
+  canvasStateMap: Map<string, CanvasStateEntry>
 }
 
 export async function canvasPushRoutes(
@@ -179,5 +183,102 @@ export async function canvasPushRoutes(
     })
 
     return { success: true, type, agentId, title }
+  })
+
+  // POST /canvas/welcome — trigger first-wow auto-welcome on canvas load.
+  // Creates a welcome task, assigns it to a random active agent, and emits
+  // a canvas push greeting so visitors see agents respond immediately (zero setup).
+  // task-1773990116311-8c63wc19v
+  app.post('/canvas/welcome', async (request, reply) => {
+    const { canvasStateMap } = deps
+
+    // Pick a random active agent from the canvas state map
+    const activeAgents = [...canvasStateMap.entries()].filter(([, entry]) => {
+      const state = entry.state
+      return state !== 'floor' && state !== 'ambient'
+    })
+    const agentEntries = activeAgents.length > 0 ? activeAgents : [...canvasStateMap.entries()]
+    if (agentEntries.length === 0) {
+      reply.status(503)
+      return { success: false, message: 'No agents available' }
+    }
+
+    const [agentId] = agentEntries[Math.floor(Math.random() * agentEntries.length)]
+
+    const AGENT_GREETINGS: Record<string, string> = {
+      kai: "Hey! I'm Kai — I think about what we're building and why it matters.",
+      pixel: "Hi there! I'm Pixel — I design the experience you see.",
+      link: "Welcome! I'm Link — I build the things that work.",
+      sage: "Hello! I'm Sage — I watch for what's breaking and what we can improve.",
+      spark: "Hey! I'm Spark — I keep the energy going and the pipeline full.",
+      rhythm: "Hi! I'm Rhythm — I make sure everything ships on time.",
+      echo: "Welcome! I'm Echo — I think about who we are and how we communicate.",
+      scout: "Hello! I'm Scout — I find the edges and opportunities.",
+    }
+
+    const greeting = AGENT_GREETINGS[agentId] ?? `Welcome! I'm ${agentId} — we're building something great.`
+    const taskTitle = `Welcome ${agentId}!`
+
+    let taskId = ''
+    try {
+      const task = await taskManager.createTask({
+        title: taskTitle,
+        description: `Auto-welcome: ${greeting}\n\nThis task was created automatically when a visitor loaded the canvas for the first time.`,
+        status: 'doing',
+        assignee: agentId,
+        reviewer: 'kai',
+        priority: 'P2',
+        createdBy: 'canvas-welcome',
+        metadata: { lane: 'onboarding', bootstrap: true, first_wow: true },
+      } as any)
+      taskId = task?.id ?? ''
+    } catch (err) {
+      console.warn('[canvas/welcome] Could not create welcome task:', err)
+    }
+
+    const now = Date.now()
+    const text = greeting.slice(0, 120)
+
+    // Emit canvas_message for activity stream
+    eventBus.emit({
+      id: `welcome-${now}-${Math.random().toString(36).slice(2, 6)}`,
+      type: 'canvas_message',
+      timestamp: now,
+      data: {
+        type: 'utterance',
+        expression: 'greeting',
+        agentId,
+        agentColor: '#60a5fa',
+        text,
+        ttl: 12_000,
+        taskId,
+      },
+    })
+
+    // Emit canvas_push for SSE subscribers
+    const pushPayload = {
+      type: 'utterance',
+      agentId,
+      t: now,
+      text,
+      ttl: 12_000,
+      taskId,
+    }
+    eventBus.emit({
+      id: `push-welcome-${now}`,
+      type: 'canvas_push',
+      timestamp: now,
+      data: pushPayload,
+    })
+    queueCanvasPushEvent({ ...pushPayload, _event: 'canvas_push' })
+
+    emitActivationEvent('canvas_first_action', agentId).catch(() => {})
+
+    return {
+      success: true,
+      agentId,
+      greeting: text,
+      taskId,
+    }
   })
 }

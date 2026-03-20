@@ -81,7 +81,8 @@ interface UserSessionState {
   lastActionAt: number
   lastAgentResponseAt?: number
   firstActionAt?: number
-  stallFired: boolean
+  stallFired: Set<string>
+  context?: StallContext
 }
 
 const sessionStates = new Map<string, UserSessionState>() // Key: `${userId}:${sessionId}`
@@ -107,7 +108,7 @@ export function recordUserAction(
       sessionId,
       phase: 'new_user',
       lastActionAt: timestamp,
-      stallFired: false,
+      stallFired: new Set(),
     }
     sessionStates.set(key, state)
   }
@@ -137,7 +138,7 @@ export function recordAgentResponse(
       sessionId,
       phase: 'setup',
       lastActionAt: timestamp,
-      stallFired: false,
+      stallFired: new Set(),
     }
     sessionStates.set(key, state)
   }
@@ -156,7 +157,7 @@ export function checkForStalls(config: StallDetectorConfig = DEFAULT_CONFIG): St
   
   for (const [key, state] of sessionStates) {
     // Skip if stall already fired for this session
-    if (state.stallFired) continue
+    if (state.stallFired.size > 0) continue
     
     // Skip if checked recently (within 30 seconds)
     const lastCheck = lastCheckTimes.get(key) ?? 0
@@ -190,7 +191,7 @@ export function checkForStalls(config: StallDetectorConfig = DEFAULT_CONFIG): St
     
     if (inactivityMs >= thresholdMs) {
       // Stall detected!
-      state.stallFired = true
+      state.stallFired.add(stallType)
       
       const event: StallEvent = {
         stallId: `stall-${key}-${now}`,
@@ -230,7 +231,7 @@ export function transitionSessionPhase(
   if (state) {
     state.phase = newPhase
     // Reset stall fired when transitioning phases
-    state.stallFired = false
+    state.stallFired.clear()
   }
 }
 
@@ -280,4 +281,74 @@ export function cleanupStaleSessions(maxAgeMs: number = 30 * 60 * 1000): number 
 export function _resetStallDetectorState(): void {
   sessionStates.clear()
   lastCheckTimes.clear()
+}
+
+// ── StallDetector class (for test compatibility) ─────────────────────────────────
+
+let _stallDetectorInstance: StallDetector | null = null
+
+export class StallDetector {
+  private config: StallDetectorConfig
+
+  constructor(config: Partial<StallDetectorConfig> = {}) {
+    this.config = { ...DEFAULT_CONFIG, ...config }
+  }
+
+  getAllStates(): UserSessionState[] {
+    return [...sessionStates.values()]
+  }
+
+  getState(userId: string): UserSessionState | undefined {
+    for (const state of sessionStates.values()) {
+      if (state.userId === userId) return state
+    }
+    return undefined
+  }
+
+  recordActivity(userId: string, options?: { phase?: SessionPhase; sessionId?: string }): void {
+    const now = Date.now()
+    let state = this.getState(userId)
+    const sessionId = options?.sessionId ?? `session-${userId}`
+    const key = `${userId}:${sessionId}`
+
+    if (!state) {
+      state = { userId, sessionId, phase: options?.phase ?? 'new_user', lastActionAt: now, stallFired: new Set() }
+      sessionStates.set(key, state)
+    } else {
+      if (options?.phase) state.phase = options.phase
+      state.lastActionAt = now
+    }
+  }
+
+  recordAgentResponse(userId: string, agentId: string): void {
+    const now = Date.now()
+    for (const state of sessionStates.values()) {
+      if (state.userId === userId) {
+        state.lastAgentResponseAt = now
+        break
+      }
+    }
+  }
+
+  start(): void {
+    // Periodic stall check — run every 60s when enabled
+    if (this.config.enabled) return // already running
+    this.config.enabled = true
+    setInterval(() => {
+      if (!this.config.enabled) return
+      try {
+        checkForStalls(this.config)
+      } catch (err) {
+        console.error('[StallDetector] Check error:', err)
+      }
+    }, 60_000)
+  }
+}
+
+// Singleton accessor
+export function getStallDetector(): StallDetector {
+  if (!_stallDetectorInstance) {
+    _stallDetectorInstance = new StallDetector()
+  }
+  return _stallDetectorInstance
 }
