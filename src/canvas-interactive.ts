@@ -593,20 +593,39 @@ export async function canvasInteractiveRoutes(
     return reply.send(e.audio)
   })
 
-  // ── Voice output: generate audio + emit SSE event ─────────────────────────
+  // ── Voice output: async TTS generation + SSE events ─────────────────────────
+  // POST /canvas/speak returns immediately, generates in background.
+  // Emits voice_queued immediately, voice_output when audio is ready.
+  // Clients listen to the render stream SSE for voice events.
   app.post('/canvas/speak', async (req: any, reply: any) => {
     const body = req.body as any
     const text = typeof body?.text === 'string' ? body.text.trim() : ''
     const agentId = typeof body?.agentId === 'string' ? body.agentId : 'unknown'
     const agentName = typeof body?.agentName === 'string' ? body.agentName : agentId
     if (!text || text.length > 1000) return { error: 'text required, max 1000' }
-    const result = await makeTts(text, agentId)
-    const event = { type: 'voice_output', text: text, url: result ? result.url : '', agentId, agentName, durationMs: result?.ms ?? 3000 }
-    const payload = JSON.stringify(event)
+
+    // Deterministic ID so clients can match queued → ready events
+    const voiceId = await hashTts(text, agentId)
+    const estimatedMs = Math.round(text.length * 50)
+
+    // Emit voice_queued immediately so UI can show "speaking" state
+    const queuedPayload = JSON.stringify({ type: 'voice_queued', voiceId, text, agentId, agentName, estimatedMs })
     for (const [, client] of renderStreamSubscribers) {
-      try { client.send('event: voice_output\r\ndata: ' + payload + '\r\n\r\n') } catch {}
+      try { client.send('event: voice_queued\r\ndata: ' + queuedPayload + '\r\n\r\n') } catch {}
     }
-    return { ok: true, audioUrl: result?.url ?? null, durationMs: event.durationMs }
+
+    // Generate audio in background — do not await
+    makeTts(text, agentId).then(async (result) => {
+      if (!result) return // Kokoro + ElevenLabs both failed
+      // Re-emit with audio URL so clients can play
+      const event = { type: 'voice_output', voiceId, text, url: result.url, agentId, agentName, durationMs: result.ms }
+      const payload = JSON.stringify(event)
+      for (const [, client] of renderStreamSubscribers) {
+        try { client.send('event: voice_output\r\ndata: ' + payload + '\r\n\r\n') } catch {}
+      }
+    }).catch(() => {})
+
+    return { ok: true, voiceId, estimatedMs }
   })
 }
 
