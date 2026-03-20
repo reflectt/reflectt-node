@@ -503,6 +503,130 @@ export async function canvasInteractiveRoutes(
       renderStreamSubscribers.delete(subId)
     })
   })
+
+  // ── TTS: Kokoro audio generation + cache ─────────────────────────────────
+  const KOKORO_BASE = process.env.KOKORO_BASE_URL || process.env.KOKORO_BASE
+  const TTS_TTL = 30 * 60 * 1000
+  const ttsCache = new Map<string, { audio: Buffer; ts: number }>()
+
+  async function hashTts(text: string, voice: string): Promise<string> {
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text + voice))
+    return Array.from(new Uint8Array(h)).map((b: number) => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  const ELEVEN_BASE = 'https://api.elevenlabs.io/v1'
+  const ELEVEN_API_KEY = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
+  const ELEVEN_VOICE_MAP: Record<string, string> = {
+    link: 'pNInz6obpgDQGcFmaJgB', kai: 'ErXwobaYiN019PkySvjV',
+    pixel: 'MF3mGyEYCl7XYWbV9V6O', echo: 'jBpfuIE2acCO8z3wKNLl',
+    harmony: 'jBpfuIE2acCO8z3wKNLl', rhythm: 'onwK4e9ZLuTAKqWW03F9',
+    swift: 'yoZ06aMxZJJ28mfd3POQ', kotlin: 'SOYHLrjzK2X1ezoPC6cr',
+    sage: 'ThT5KcBeYPX3keUQqHPh', bookkeeper: 'GBv7mTt0atIp3Br8iCZE',
+  }
+  const KOKORO_VOICE_MAP: Record<string, string> = {
+    link: 'af_sarah', swift: 'af_sarah',
+    kai: 'af_nicole', kotlin: 'af_nicole', pixel: 'af_nicole', echo: 'af_nicole', harmony: 'af_nicole',
+    rhythm: 'af_james', bookkeeper: 'bf_emma', sage: 'bf_emma',
+  }
+
+  async function makeTts(text: string, agentId: string): Promise<{ url: string; ms: number } | null> {
+    const kokoroVoice = KOKORO_VOICE_MAP[agentId] || 'af_sarah'
+    const elevenVoice = ELEVEN_VOICE_MAP[agentId] || 'pNInz6obpgDQGcFmaJgB'
+    const key = await hashTts(text, kokoroVoice)
+    const cached = ttsCache.get(key)
+    if (cached && Date.now() - cached.ts < TTS_TTL) return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
+
+    // Try Kokoro first (12s timeout)
+    if (KOKORO_BASE) {
+      try {
+        const ac = new AbortController()
+        setTimeout(() => ac.abort(), 60000)
+        const r = await fetch(KOKORO_BASE + '/v1/audio/speech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'kokoro', input: text, voice: kokoroVoice }),
+          signal: ac.signal,
+        })
+        if (r.ok) {
+          const buf = Buffer.from(await r.arrayBuffer())
+          ttsCache.set(key, { audio: buf, ts: Date.now() })
+          return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
+        }
+      } catch { /* fall through to ElevenLabs */ }
+    }
+
+    // ElevenLabs fallback
+    if (ELEVEN_API_KEY) {
+      try {
+        const ac = new AbortController()
+        setTimeout(() => ac.abort(), 10000)
+        const r = await fetch(ELEVEN_BASE + '/text-to-speech/' + elevenVoice, {
+          method: 'POST',
+          headers: {
+            'Accept': 'audio/mpeg',
+            'Content-Type': 'application/json',
+            'xi-api-key': ELEVEN_API_KEY,
+          },
+          body: JSON.stringify({ text, model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.8 } }),
+          signal: ac.signal,
+        })
+        if (r.ok) {
+          const buf = Buffer.from(await r.arrayBuffer())
+          ttsCache.set(key, { audio: buf, ts: Date.now() })
+          return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
+        }
+      } catch { return null }
+    }
+
+    return null
+  }
+
+  // ── Audio cache retrieval ─────────────────────────────────────────────────
+  app.get('/audio/:id', (req: any, reply: any) => {
+    const e = ttsCache.get((req.params as any).id)
+    if (!e || Date.now() - e.ts > TTS_TTL) {
+      reply.status(404)
+      return { error: 'Not found or expired' }
+    }
+    reply.header('Content-Type', 'audio/mpeg')
+    reply.header('Cache-Control', 'public, max-age=1800')
+    return reply.send(e.audio)
+  })
+
+  // ── Voice output: async TTS generation + SSE events ─────────────────────────
+  // POST /canvas/speak returns immediately, generates in background.
+  // Emits voice_queued immediately, voice_output when audio is ready.
+  // Clients listen to the render stream SSE for voice events.
+  app.post('/canvas/speak', async (req: any, reply: any) => {
+    const body = req.body as any
+    const text = typeof body?.text === 'string' ? body.text.trim() : ''
+    const agentId = typeof body?.agentId === 'string' ? body.agentId : 'unknown'
+    const agentName = typeof body?.agentName === 'string' ? body.agentName : agentId
+    if (!text || text.length > 1000) return { error: 'text required, max 1000' }
+
+    // Deterministic ID so clients can match queued → ready events
+    const voiceId = await hashTts(text, agentId)
+    const estimatedMs = Math.round(text.length * 50)
+
+    // Emit voice_queued immediately so UI can show "speaking" state
+    const queuedPayload = JSON.stringify({ type: 'voice_queued', voiceId, text, agentId, agentName, estimatedMs })
+    for (const [, client] of renderStreamSubscribers) {
+      try { client.send('event: voice_queued\r\ndata: ' + queuedPayload + '\r\n\r\n') } catch {}
+    }
+
+    // Generate audio in background — do not await
+    makeTts(text, agentId).then(async (result) => {
+      if (!result) return // Kokoro + ElevenLabs both failed
+      // Re-emit with audio URL so clients can play
+      const event = { type: 'voice_output', voiceId, text, url: result.url, agentId, agentName, durationMs: result.ms }
+      const payload = JSON.stringify(event)
+      for (const [, client] of renderStreamSubscribers) {
+        try { client.send('event: voice_output\r\ndata: ' + payload + '\r\n\r\n') } catch {}
+      }
+    }).catch(() => {})
+
+    return { ok: true, voiceId, estimatedMs }
+  })
 }
 
 // ── ApprovalCard command ────────────────────────────────────────────────────────
