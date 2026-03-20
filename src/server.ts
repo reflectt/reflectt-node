@@ -11585,10 +11585,13 @@ export async function createServer(): Promise<FastifyInstance> {
         if (a.state !== 'floor' && a.state !== 'ambient') { dominantColor = a.color; break }
       }
 
+      // Include focus directive if set
+      const focus = getFocus()
+
       const tick = {
         t: now,
         agents,
-        team: { rhythm, tension, ambientPulse, dominantColor },
+        team: { rhythm, tension, ambientPulse, dominantColor, focus },
       }
 
       try {
