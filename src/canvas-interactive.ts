@@ -33,6 +33,20 @@ interface CanvasInteractiveDeps {
 const renderCommandLog: Array<{ id: string; ts: number; agentId: string; cmd: RealityMixerCommand }> = []
 const MAX_RENDER_LOG = 20
 
+// ── Capability map ──────────────────────────────────────────────────────────────
+export type CapabilityId = 'email' | 'sms' | 'voice' | 'phone' | 'browser' | 'memory' | 'tasks' | 'canvas'
+export type CapabilityStatus = 'active' | 'warning' | 'offline'
+export interface Capability { id: CapabilityId; status: CapabilityStatus; label?: string; detail?: string }
+export interface AgentCapabilities { agentId: string; agentName: string; capabilities: Capability[]; updatedAt: number }
+const agentCapabilitiesMap = new Map<string, AgentCapabilities>()
+function broadcastCapabilityEvent(agentId: string, caps: Capability[]) {
+  const payload = JSON.stringify({ type: 'capability_setup', agentId, capabilities: caps, updatedAt: Date.now() })
+  for (const [subId, sub] of renderStreamSubscribers) {
+    if (sub.closed) { renderStreamSubscribers.delete(subId); continue }
+    try { sub.send(payload) } catch { sub.closed = true; renderStreamSubscribers.delete(subId) }
+  }
+}
+
 // Subscriber set for GET /canvas/render/stream
 export const renderStreamSubscribers = new Map<string, { send: (data: string) => void; closed: boolean }>()
 
@@ -531,3 +545,21 @@ export interface DecisionSelectEvent {
   optionId: string
 }
 
+
+
+// ── Capability registration endpoints ──────────────────────────────────────────
+export function registerCapabilityRoutes(app: any) {
+  app.get('/canvas/capability', (_req: any, _reply: any) => {
+    const all = Array.from(agentCapabilitiesMap.values())
+    return { capabilities: all }
+  })
+  app.post('/canvas/capability', async (req: any, _reply: any) => {
+    const { agentId, agentName, capabilities } = req.body as any
+    if (!agentId || !Array.isArray(capabilities)) {
+      return { error: 'agentId and capabilities[] required' }
+    }
+    agentCapabilitiesMap.set(agentId, { agentId, agentName: agentName || agentId, capabilities, updatedAt: Date.now() })
+    broadcastCapabilityEvent(agentId, capabilities)
+    return { ok: true, agentId, count: capabilities.length }
+  })
+}
