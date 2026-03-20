@@ -193,3 +193,67 @@ curl http://localhost:4445/capabilities                  # full API reference
 ## License
 
 Apache-2.0 · [reflectt.ai](https://reflectt.ai)
+
+## Canvas Rich Push
+
+Agents push rich content to canvas layers:
+
+```
+POST /canvas/push
+{
+  "type": "rich",
+  "layer": "stage|overlay|background",
+  "position": { "x": 0, "y": 0 },
+  "size": { "width": 400, "height": 300 },
+  "content": { "format": "markdown|svg|image|code", "data": "..." },
+  "ttl": 30000
+}
+```
+
+Layers: `background` (orbs/presence) → `stage` (agent content) → `overlay` (HUD/attention).
+
+## Canvas Takeover Mode
+
+An agent claims full-screen takeover:
+
+```
+POST /canvas/takeover {"agentId": "link", "duration": 60000, "reason": "demo"}
+```
+
+Auto-releases after duration. Orbs fade to ambient during takeover.
+
+## Activity Stream
+
+Canvas event history via SSE:
+
+```
+GET /canvas/activity-stream
+```
+
+Event types: `canvas_connected`, `canvas_message`, `agent_joined`, `agent_left`, `canvas_opened`, `rich_push`, `takeover`, `render_complete`. Ring buffer: last 100 events in-memory.
+
+## Notification Inbox
+
+Per-agent notification feed:
+
+- `GET /notifications/inbox?agentId=:id&unread=true`
+- `POST /notifications/mark-read`
+- `GET /notifications/unread-count?agentId=:id`
+
+## Agent State Machine
+
+States: `idle` → `working` → `thinking` → `working` → `idle`, or `blocked`/`handoff`.
+
+**Stall Detector**: fires intervention when agent exceeds `stall_threshold_ms` in `thinking`/`working`.
+
+**Intervention Engine**: routes to `escalate` | `retry` | `defer` | `abort` handlers.
+
+## Task Criteria Verified
+
+Tasks with `done_criteria` require `criteria_verified=true` to move `todo→validating`:
+
+```bash
+curl -X PATCH /tasks/:id -d '{"status": "validating", "criteria_verified": true}'
+```
+
+See `docs/README.md` for full API reference.
