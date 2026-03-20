@@ -94,6 +94,14 @@ export async function canvasInteractiveRoutes(
       if (!line) return
       broadcastRenderCommand(agentId, { type: 'speak', content: line, voiceId, agentId })
       broadcastRenderCommand(agentId, { type: 'visual', preset: 'exhale' })
+      makeTts(line, agentId).then(r => {
+        if (!r) return
+        const ev = { type: 'voice_output' as const, text: line, url: r.url, agentId, agentName: agentId, durationMs: r.ms }
+        const payload = JSON.stringify(ev)
+        for (const [, client] of renderStreamSubscribers) {
+          try { client.send('event: voice_output\r\ndata: ' + payload + '\r\n\r\n') } catch {}
+        }
+      }).catch(() => {})
     } else if (kind === 'utterance') {
       // Agent utterance - shows what agent is doing/saying on /live
       const agentId = String(data.agentId ?? 'unknown')
@@ -547,7 +555,52 @@ export interface DecisionSelectEvent {
 
 
 
-// ── Capability registration endpoints ──────────────────────────────────────────
+// ── Capability registration endpoints
+
+// ── Voice output (Kokoro TTS) ────────────────────────────────────────────────
+const KOKORO_BASE = process.env.KOKORO_BASE_URL || process.env.KOKORO_BASE
+const TTS_TTL_MS = 30 * 60 * 1000
+const ttsCache = new Map<string, { audio: Buffer; ts: number }>()
+
+async function hashTts(text: string, voice: string): Promise<string> {
+  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text + voice))
+  return Array.from(new Uint8Array(h)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function makeTts(text: string, agentId: string): Promise<{ url: string; ms: number } | null> {
+  if (!KOKORO_BASE) return null
+  const voiceMap: Record<string, string> = {
+    link: 'af_sarah', swift: 'af_sarah',
+    kai: 'af_nicole', kotlin: 'af_nicole', pixel: 'af_nicole', echo: 'af_nicole', harmony: 'af_nicole',
+    rhythm: 'af_james',
+    bookkeeper: 'bf_emma', sage: 'bf_emma',
+  }
+  const voice = voiceMap[agentId] || 'af_sarah'
+  const key = await hashTts(text, voice)
+  const cached = ttsCache.get(key)
+  if (cached && Date.now() - cached.ts < TTS_TTL_MS) return { url: `/audio/${key}`, ms: Math.round(text.length * 50) }
+  try {
+    const ac = new AbortController()
+    const to = setTimeout(() => ac.abort(), 20000)
+    const r = await fetch(`${KOKORO_BASE}/v1/audio/speech`, {
+      method: 'POST', signal: ac.signal as any,
+      headers: { 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
+      body: JSON.stringify({ model: 'kokoro', voice, input: text }),
+    })
+    clearTimeout(to)
+    if (!r.ok) return null
+    const buf = await r.arrayBuffer()
+    ttsCache.set(key, { audio: Buffer.from(buf), ts: Date.now() })
+    return { url: `/audio/${key}`, ms: Math.round(text.length * 50) }
+  } catch { return null }
+}
+
+function getCachedAudio(id: string): Buffer | null {
+  const e = ttsCache.get(id)
+  if (!e || Date.now() - e.ts > TTS_TTL_MS) return null
+  return e.audio
+}
+ ──────────────────────────────────────────
 export function registerCapabilityRoutes(app: any) {
   app.get('/canvas/capability', (_req: any, _reply: any) => {
     const all = Array.from(agentCapabilitiesMap.values())
