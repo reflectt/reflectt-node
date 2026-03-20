@@ -11690,9 +11690,31 @@ export async function createServer(): Promise<FastifyInstance> {
       'X-Accel-Buffering': 'no',
     })
 
-    // Send current state as initial snapshot
+    // Derive agents from task board — show ALL agents, not just canvas-state emitters
+    const allTasks = taskManager.listTasks({})
+    const agentStates: Record<string, any> = {}
+    for (const task of allTasks) {
+      const assignee = task.assignee
+      if (!assignee || assignee === 'unassigned') continue
+      const agentId = assignee.toLowerCase()
+      if (!agentStates[agentId]) {
+        // Get canvas state if exists, otherwise default based on task status
+        const canvasEntry = canvasStateMap.get(agentId)
+        const isDone = task.status === 'done' || task.status === 'cancelled'
+        const isBlocked = task.status === 'blocked'
+        const isWorking = task.status === 'in_progress'
+        agentStates[agentId] = {
+          state: canvasEntry?.state || (isDone ? 'ambient' : isBlocked ? 'attention' : isWorking ? 'working' : 'floor'),
+          currentTask: task.title,
+          updatedAt: task.updatedAt || Date.now(),
+          sourceTasks: [{ id: task.id, title: task.title, status: task.status }],
+        }
+      }
+    }
+
+    // Send current state as initial snapshot — include all agents from task board
     const activeSlots = canvasSlots.getActive()
-    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ slots: activeSlots })}\n\n`)
+    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ slots: activeSlots, agents: agentStates })}\n\n`)
 
     // Subscribe to new render events
     const unsubscribe = subscribeCanvas((event, slot) => {
