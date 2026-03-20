@@ -514,32 +514,71 @@ export async function canvasInteractiveRoutes(
     return Array.from(new Uint8Array(h)).map((b: number) => b.toString(16).padStart(2, '0')).join('')
   }
 
+  const ELEVEN_BASE = 'https://api.elevenlabs.io/v1'
+  const ELEVEN_API_KEY = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
+  const ELEVEN_VOICE_MAP: Record<string, string> = {
+    link: 'pNInz6obpgDQGcFmaJgB', kai: 'ErXwobaYiN019PkySvjV',
+    pixel: 'MF3mGyEYCl7XYWbV9V6O', echo: 'jBpfuIE2acCO8z3wKNLl',
+    harmony: 'jBpfuIE2acCO8z3wKNLl', rhythm: 'onwK4e9ZLuTAKqWW03F9',
+    swift: 'yoZ06aMxZJJ28mfd3POQ', kotlin: 'SOYHLrjzK2X1ezoPC6cr',
+    sage: 'ThT5KcBeYPX3keUQqHPh', bookkeeper: 'GBv7mTt0atIp3Br8iCZE',
+  }
+  const KOKORO_VOICE_MAP: Record<string, string> = {
+    link: 'af_sarah', swift: 'af_sarah',
+    kai: 'af_nicole', kotlin: 'af_nicole', pixel: 'af_nicole', echo: 'af_nicole', harmony: 'af_nicole',
+    rhythm: 'af_james', bookkeeper: 'bf_emma', sage: 'bf_emma',
+  }
+
   async function makeTts(text: string, agentId: string): Promise<{ url: string; ms: number } | null> {
-    if (!KOKORO_BASE) return null
-    const voiceMap: Record<string, string> = {
-      link: 'af_sarah', swift: 'af_sarah',
-      kai: 'af_nicole', kotlin: 'af_nicole', pixel: 'af_nicole', echo: 'af_nicole', harmony: 'af_nicole',
-      rhythm: 'af_james',
-      bookkeeper: 'bf_emma', sage: 'bf_emma',
-    }
-    const voice = voiceMap[agentId] || 'af_sarah'
-    const key = await hashTts(text, voice)
+    const kokoroVoice = KOKORO_VOICE_MAP[agentId] || 'af_sarah'
+    const elevenVoice = ELEVEN_VOICE_MAP[agentId] || 'pNInz6obpgDQGcFmaJgB'
+    const key = await hashTts(text, kokoroVoice)
     const cached = ttsCache.get(key)
     if (cached && Date.now() - cached.ts < TTS_TTL) return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
-    try {
-      const ac = new AbortController()
-      setTimeout(() => ac.abort(), 12000)
-      const r = await fetch(KOKORO_BASE + '/v1/audio/speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'kokoro', input: text, voice }),
-        signal: ac.signal,
-      })
-      if (!r.ok) return null
-      const buf = Buffer.from(await r.arrayBuffer())
-      ttsCache.set(key, { audio: buf, ts: Date.now() })
-      return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
-    } catch { return null }
+
+    // Try Kokoro first (12s timeout)
+    if (KOKORO_BASE) {
+      try {
+        const ac = new AbortController()
+        setTimeout(() => ac.abort(), 12000)
+        const r = await fetch(KOKORO_BASE + '/v1/audio/speech', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'kokoro', input: text, voice: kokoroVoice }),
+          signal: ac.signal,
+        })
+        if (r.ok) {
+          const buf = Buffer.from(await r.arrayBuffer())
+          ttsCache.set(key, { audio: buf, ts: Date.now() })
+          return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
+        }
+      } catch { /* fall through to ElevenLabs */ }
+    }
+
+    // ElevenLabs fallback
+    if (ELEVEN_API_KEY) {
+      try {
+        const ac = new AbortController()
+        setTimeout(() => ac.abort(), 10000)
+        const r = await fetch(ELEVEN_BASE + '/text-to-speech/' + elevenVoice, {
+          method: 'POST',
+          headers: {
+            'Accept': 'audio/mpeg',
+            'Content-Type': 'application/json',
+            'xi-api-key': ELEVEN_API_KEY,
+          },
+          body: JSON.stringify({ text, model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.8 } }),
+          signal: ac.signal,
+        })
+        if (r.ok) {
+          const buf = Buffer.from(await r.arrayBuffer())
+          ttsCache.set(key, { audio: buf, ts: Date.now() })
+          return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
+        }
+      } catch { return null }
+    }
+
+    return null
   }
 
   // ── Audio cache retrieval ─────────────────────────────────────────────────
