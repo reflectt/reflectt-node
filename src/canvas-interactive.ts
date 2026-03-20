@@ -36,6 +36,12 @@ const MAX_RENDER_LOG = 20
 // Subscriber set for GET /canvas/render/stream
 export const renderStreamSubscribers = new Map<string, { send: (data: string) => void; closed: boolean }>()
 
+// ── Agent capabilities state ──────────────────────────────────────────────────
+export interface CapabilityStatus { id: string; status: 'active' | 'warning' | 'offline'; label?: string }
+export interface AgentCapability { id: string; status: 'active' | 'warning' | 'offline'; label?: string }
+const agentCapabilities = new Map<string, { agentName: string; capabilities: AgentCapability[]; updatedAt: number }>()
+export { agentCapabilities }
+
 export function broadcastRenderCommand(agentId: string, cmd: RealityMixerCommand): string {
   const id = `rc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const entry = { id, ts: Date.now(), agentId, cmd }
@@ -478,6 +484,17 @@ export async function canvasInteractiveRoutes(
       send(JSON.stringify(entry))
     }
 
+    // Backfill: emit current capabilities for all registered agents
+    for (const [aId, data2] of agentCapabilities) {
+      send(JSON.stringify({
+        type: 'capability_setup',
+        agentId: aId,
+        agentName: data2.agentName,
+        capabilities: data2.capabilities,
+        timestamp: data2.updatedAt,
+      }))
+    }
+
     // Keep alive
     const keepAlive = setInterval(() => {
       if (closed) { clearInterval(keepAlive); renderStreamSubscribers.delete(subId); return }
@@ -490,6 +507,36 @@ export async function canvasInteractiveRoutes(
     })
   })
 }
+
+
+// ── Capability registration ──────────────────────────────────────────────────
+  app.get('/canvas/capability', (_req: any, res: any) => {
+    const result: Record<string, any> = {}
+    for (const [id, data2] of agentCapabilities) result[id] = data2
+    return res.json(result)
+  })
+
+  app.post('/canvas/capability', async (req: any, res: any) => {
+    try {
+      const body = req.body as { agentId?: string; agentName?: string; capabilities?: AgentCapability[] }
+      const agentId: string = typeof body?.agentId === 'string' ? body.agentId : 'unknown'
+      const agentName: string = typeof body?.agentName === 'string' ? body.agentName : agentId
+      const capabilities: AgentCapability[] = Array.isArray(body?.capabilities) ? body.capabilities : []
+      if (!capabilities.length) return res.status(400).json({ error: 'capabilities required' })
+      agentCapabilities.set(agentId, { agentName, capabilities, updatedAt: Date.now() })
+      const cmd = {
+        type: 'capability_setup', agentId, agentName, capabilities, timestamp: Date.now(),
+      }
+      const data = JSON.stringify(cmd)
+      for (const [, client] of renderStreamSubscribers) {
+        try { client.send('event: capability_setup\r\ndata: ' + data + '\r\n\r\n') } catch {}
+      }
+      return res.json({ ok: true, agentId, count: capabilities.length })
+    } catch (err: any) {
+      console.error('[canvas/capability]', err?.message)
+      return res.status(500).json({ error: 'Internal error' })
+    }
+  })
 
 // ── ApprovalCard command ────────────────────────────────────────────────────────
 export interface ApprovalCardCommand {
