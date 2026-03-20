@@ -18,7 +18,7 @@ jobs:
 
       # Node 24+ required: ships npm v11 which supports OIDC trusted publishing.
       # Node 22 ships npm v10 which fails the OIDC handshake (misleading 404/expired token).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
