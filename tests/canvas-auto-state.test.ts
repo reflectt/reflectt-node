@@ -176,11 +176,11 @@ describe('runCanvasAutoStateSweep', () => {
 })
 
 describe('constants', () => {
-  it('SYNC_INTERVAL_MS is 5 seconds', () => {
-    expect(SYNC_INTERVAL_MS).toBe(5_000)
+  it('SYNC_INTERVAL_MS is 2 seconds', () => {
+    expect(SYNC_INTERVAL_MS).toBe(2_000)
   })
 
-  it('PUSH_PRIORITY_WINDOW_MS is 5 seconds', () => {
-    expect(PUSH_PRIORITY_WINDOW_MS).toBe(5_000)
+  it('PUSH_PRIORITY_WINDOW_MS is 2 seconds', () => {
+    expect(PUSH_PRIORITY_WINDOW_MS).toBe(2_000)
   })
 })
