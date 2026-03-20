@@ -11,6 +11,7 @@
  */
 
 export type StallType = 'new_user_stall' | 'in_session_stall' | 'setup_stall'
+  | 'task_stalled' | 'review_pending' | 'handoff_waiting' | 'approval_pending'
 export type SessionPhase = 'new_user' | 'in_session' | 'setup'
 
 export interface StallContext {
@@ -71,6 +72,28 @@ function emitStallEvent(event: StallEvent): void {
       console.error('[StallDetector] Handler error:', err)
     }
   }
+}
+
+/**
+ * Emit a workflow stall event (task_stalled, review_pending, etc.)
+ * Call this from task lifecycle events — no session tracking needed.
+ */
+export function emitWorkflowStall(
+  userId: string,
+  stallType: 'task_stalled' | 'review_pending' | 'handoff_waiting' | 'approval_pending',
+  context: { lastAction?: string; lastAgent?: string; lastActionAt?: number } = {}
+): void {
+  const event: StallEvent = {
+    stallId: `workflow-${userId}-${stallType}-${Date.now()}`,
+    userId,
+    sessionId: `workflow:${stallType}`,
+    stallType,
+    context: { userId, sessionId: `workflow:${stallType}`, ...context },
+    timestamp: Date.now(),
+    thresholdMinutes: 5, // default, overridden by caller
+    inactivityMinutes: 0,
+  }
+  emitStallEvent(event)
 }
 
 // In-memory state tracking

@@ -15,7 +15,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME, DATA_DIR } from './config.js'
-import { getStallDetector } from './stall-detector.js'
+import { getStallDetector, emitWorkflowStall, onStallEvent } from './stall-detector.js'
+import { processStallEvent } from './intervention-template.js'
 import { trackRequest, getRequestMetrics } from './request-tracker.js'
 import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots, startAutoSnapshot } from './alert-preflight.js'
 
@@ -2804,6 +2805,44 @@ export async function createServer(): Promise<FastifyInstance> {
   // ── Stall Detector ─────────────────────────────────────────────────────────
 
   const sd = getStallDetector()
+
+  // Register stall event handler: compile intervention and post to chat
+  onStallEvent((event) => {
+    // Adapt stall-detector event to intervention-template expected format
+    const adaptedEvent = {
+      stallId: event.stallId,
+      userId: event.userId,
+      stallType: event.stallType as import('./intervention-template.js').StallType,
+      personalizations: {
+        user_name: event.userId,
+        last_intent: event.context?.lastAction,
+        active_task_title: event.context?.lastAction,
+        last_agent_name: event.context?.lastAgent,
+      },
+      timestamp: event.timestamp,
+    }
+    const result = processStallEvent(adaptedEvent)
+    if (!result.sent) {
+      console.debug('[StallDetector] Intervention not sent:', result.reason)
+      return
+    }
+
+    // Select an agent to send the intervention (use lastAgent from context, or default)
+    const agentName = event.context?.lastAgent || 'rhythm'
+    const message = result.message || 'Hey! Just checking in — want to pick up where you left off?'
+
+    // Post to #general as the intervening agent
+    const baseUrl = `http://127.0.0.1:${serverPort}`
+    fetch(`${baseUrl}/chat/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-reflectt-internal': 'true' },
+      body: JSON.stringify({ from: agentName, channel: 'general', content: message }),
+    }).catch((err) => console.error('[StallDetector] Failed to post intervention:', err))
+  })
+
+  // Start stall detector if enabled in config
+  const stallConfig = (serverConfig as any).stallDetector
+  if (stallConfig?.enabled) sd.start()
 
   app.get('/stall-detector', async () => {
     return {
@@ -9499,6 +9538,22 @@ export async function createServer(): Promise<FastifyInstance> {
       if (!task) {
         reply.code(404)
         return { success: false, error: 'Task not found' }
+      }
+
+      // ── Emit workflow stall when task enters review ──
+      if (
+        effectiveTargetStatus === 'validating' &&
+        existing.status !== 'validating' &&
+        existing.status !== 'done'
+      ) {
+        const reviewer = task.reviewer
+        if (reviewer) {
+          emitWorkflowStall(reviewer, 'review_pending', {
+            lastAction: `task "${task.title}" submitted for review`,
+            lastAgent: task.assignee || 'unknown',
+            lastActionAt: Date.now(),
+          })
+        }
       }
 
       // ── Audit ledger: log review-field mutations ──

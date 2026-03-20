@@ -255,6 +255,7 @@ export interface EngineResult {
   sent: boolean
   reason?: string
   result?: InterventionResult
+  message?: string  // The interpolated intervention text (only when sent=true)
 }
 
 export function processStallEvent(event: StallEvent): EngineResult {
@@ -301,6 +302,7 @@ export function processStallEvent(event: StallEvent): EngineResult {
   
   return {
     sent: true,
+    message, // interpolated intervention text
     result,
   }
 }
