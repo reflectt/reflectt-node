@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -46,7 +46,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -85,7 +85,7 @@ jobs:
       DRYRUN_VALIDATOR_JSON: artifacts/task-linkify/ci/task-linkify-dryrun-validator-result.json
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -165,7 +165,7 @@ jobs:
       DRYRUN_NEGATIVE_JSON: artifacts/task-linkify/ci/task-linkify-dryrun-negative-harness-result.json
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
         uses: actions/setup-node@v5

@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Node 24+ required: ships npm v11 which supports OIDC trusted publishing.
       # Node 22 ships npm v10 which fails the OIDC handshake (misleading 404/expired token).
