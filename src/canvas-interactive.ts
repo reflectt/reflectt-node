@@ -98,6 +98,42 @@ export async function canvasInteractiveRoutes(
     }
   })
 
+  // ── Canvas query response bridge: canvas_message → render stream ─────────────────────
+  // Canvas query responses (agent "thought" cards) are emitted as canvas_message on the
+  // event bus. This listener bridges them to the render stream so the browser receives them.
+  // task-1773855900916-isvqru41x
+  eventBus.on('canvas-query-response-bridge', (event) => {
+    if (event.type !== 'canvas_message') return
+    const data = event.data as Record<string, unknown>
+    const expression = String(data?.expression ?? '')
+    const agentId = String(data?.agentId ?? 'unknown')
+    const text = String(data?.text ?? '')
+    const ttl = typeof data?.ttl === 'number' ? data.ttl : 8000
+
+    // Also handle canvas_expression shape (from voice messages)
+    const channels = data?.channels as Record<string, unknown> | undefined
+    if (channels) {
+      broadcastRenderCommand(agentId, {
+        type: 'visual',
+        agentId,
+        channels,
+      } as any)
+    }
+
+    // Emit as speak or text command on the render stream
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (expression === 'greeting') {
+      broadcastRenderCommand(agentId, { type: 'speak', content: text, durationMs: ttl, agentId } as any)
+    } else if (expression === 'response' || expression === 'utterance') {
+      broadcastRenderCommand(agentId, { type: 'speak', content: text, durationMs: ttl, agentId } as any)
+    } else if (expression === 'thinking') {
+      broadcastRenderCommand(agentId, { type: 'text', content: text, durationMs: ttl, agentId, style: { fontSize: '13px', color: '#a1a1aa' } } as any)
+    } else if (text) {
+      // Default: show as text card
+      broadcastRenderCommand(agentId, { type: 'text', content: text, durationMs: ttl, agentId } as any)
+    }
+  })
+
   // ── POST /canvas/gaze ──
 
   app.post('/canvas/gaze', async (request, reply) => {
