@@ -11295,11 +11295,14 @@ export async function createServer(): Promise<FastifyInstance> {
   // ── Canvas interactive routes (extracted to src/canvas-interactive.ts) ─────
   // POST /canvas/gaze, POST /canvas/briefing, POST /canvas/victory,
   // POST /canvas/spark, POST /canvas/express, GET /canvas/render/stream
-  const { canvasInteractiveRoutes } = await import("./canvas-interactive.js")
+  const { canvasInteractiveRoutes, registerCapabilityRoutes } = await import("./canvas-interactive.js")
   await app.register(canvasInteractiveRoutes, {
     eventBus,
     canvasStateMap,
   } as any)
+
+  // Register capability routes: GET/POST /canvas/capability
+  registerCapabilityRoutes(app)
 
   // ── Canvas activity stream — SSE with backfill ────────────────────────
   // New viewers get the last 20 canvas events immediately on connect (backfill),
