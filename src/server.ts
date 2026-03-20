@@ -15,6 +15,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME, DATA_DIR } from './config.js'
+import { getStallDetector } from './stall-detector.js'
 import { trackRequest, getRequestMetrics } from './request-tracker.js'
 import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots, startAutoSnapshot } from './alert-preflight.js'
 
@@ -2799,6 +2800,49 @@ export async function createServer(): Promise<FastifyInstance> {
   const serverPort = Number(process.env['PORT'] || process.env['REFLECTT_PORT'] || 4445)
   startSelfKeepalive(serverPort)
 
+  // ── Stall Detector ─────────────────────────────────────────────────────────
+
+  const sd = getStallDetector()
+
+  app.get('/stall-detector', async () => {
+    return {
+      enabled: sd.getAllStates().length > 0,
+      states: sd.getAllStates().map(s => ({
+        userId: s.userId,
+        phase: s.phase,
+        context: s.context,
+        stallFired: [...s.stallFired],
+      })),
+    }
+  })
+
+  app.post('/stall-detector/config', async (request) => {
+    const body = (request.body ?? {}) as Record<string, unknown>
+    // Accept: { enabled, thresholds: { newUserMinutes, inSessionMinutes, setupMinutes } }
+    const newCfg: any = {}
+    if (typeof body.enabled === 'boolean') {
+      newCfg.enabled = body.enabled
+    }
+    if (body.thresholds && typeof body.thresholds === 'object') {
+      newCfg.thresholds = body.thresholds as any
+    }
+    // Merge into serverConfig
+    ;(serverConfig as any).stallDetector = {
+      ...((serverConfig as any).stallDetector ?? {}),
+      ...newCfg,
+    }
+    if (newCfg.enabled) sd.start()
+    return { success: true, config: (serverConfig as any).stallDetector }
+  })
+
+  app.post('/stall-detector/test', async (request) => {
+    // Fire a test stall event for a given userId
+    const { userId } = (request.body ?? {}) as { userId?: string }
+    if (!userId) return { success: false, error: 'userId required' }
+    sd.recordActivity(userId, { phase: 'new_user' })
+    return { success: true, message: `Recorded activity for ${userId}` }
+  })
+
   // Self-keepalive status + warm boot info
   app.get('/health/keepalive', async () => {
     return getSelfKeepaliveStatus()
@@ -4034,6 +4078,9 @@ export async function createServer(): Promise<FastifyInstance> {
     if (data.from) {
       presenceManager.recordActivity(data.from, 'message')
       presenceManager.touchPresence(data.from)
+
+      // Stall detector: user sent a message — record activity
+      getStallDetector().recordActivity(data.from)
 
       // Activation funnel: first team message
       emitActivationEvent('first_team_message_sent', data.from, {
@@ -9499,6 +9546,10 @@ export async function createServer(): Promise<FastifyInstance> {
         if (parsed.status === 'done') {
           presenceManager.recordActivity(task.assignee, 'task_completed')
           presenceManager.updatePresence(task.assignee, 'working', null)
+          // Stall detector: agent completed a task — user should respond
+          // Determine who to notify: the task creator / assignee who might be waiting
+          const waitingUserId = (task.metadata as any)?.userId || task.assignee
+          getStallDetector().recordAgentResponse(waitingUserId, task.assignee)
           trackTaskEvent('completed')
         } else if (parsed.status === 'doing') {
           presenceManager.updatePresence(task.assignee, 'working', task.id)
