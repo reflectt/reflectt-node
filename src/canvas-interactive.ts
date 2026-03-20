@@ -503,6 +503,72 @@ export async function canvasInteractiveRoutes(
       renderStreamSubscribers.delete(subId)
     })
   })
+
+  // ── TTS: Kokoro audio generation + cache ─────────────────────────────────
+  const KOKORO_BASE = process.env.KOKORO_BASE_URL || process.env.KOKORO_BASE
+  const TTS_TTL = 30 * 60 * 1000
+  const ttsCache = new Map<string, { audio: Buffer; ts: number }>()
+
+  async function hashTts(text: string, voice: string): Promise<string> {
+    const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text + voice))
+    return Array.from(new Uint8Array(h)).map((b: number) => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  async function makeTts(text: string, agentId: string): Promise<{ url: string; ms: number } | null> {
+    if (!KOKORO_BASE) return null
+    const voiceMap: Record<string, string> = {
+      link: 'af_sarah', swift: 'af_sarah',
+      kai: 'af_nicole', kotlin: 'af_nicole', pixel: 'af_nicole', echo: 'af_nicole', harmony: 'af_nicole',
+      rhythm: 'af_james',
+      bookkeeper: 'bf_emma', sage: 'bf_emma',
+    }
+    const voice = voiceMap[agentId] || 'af_sarah'
+    const key = await hashTts(text, voice)
+    const cached = ttsCache.get(key)
+    if (cached && Date.now() - cached.ts < TTS_TTL) return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
+    try {
+      const ac = new AbortController()
+      setTimeout(() => ac.abort(), 12000)
+      const r = await fetch(KOKORO_BASE + '/v1/audio/speech', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'kokoro', input: text, voice }),
+        signal: ac.signal,
+      })
+      if (!r.ok) return null
+      const buf = Buffer.from(await r.arrayBuffer())
+      ttsCache.set(key, { audio: buf, ts: Date.now() })
+      return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
+    } catch { return null }
+  }
+
+  // ── Audio cache retrieval ─────────────────────────────────────────────────
+  app.get('/audio/:id', (req: any, reply: any) => {
+    const e = ttsCache.get((req.params as any).id)
+    if (!e || Date.now() - e.ts > TTS_TTL) {
+      reply.status(404)
+      return { error: 'Not found or expired' }
+    }
+    reply.header('Content-Type', 'audio/mpeg')
+    reply.header('Cache-Control', 'public, max-age=1800')
+    return reply.send(e.audio)
+  })
+
+  // ── Voice output: generate audio + emit SSE event ─────────────────────────
+  app.post('/canvas/speak', async (req: any, reply: any) => {
+    const body = req.body as any
+    const text = typeof body?.text === 'string' ? body.text.trim() : ''
+    const agentId = typeof body?.agentId === 'string' ? body.agentId : 'unknown'
+    const agentName = typeof body?.agentName === 'string' ? body.agentName : agentId
+    if (!text || text.length > 1000) return { error: 'text required, max 1000' }
+    const result = await makeTts(text, agentId)
+    const event = { type: 'voice_output', text: text, url: result ? result.url : '', agentId, agentName, durationMs: result?.ms ?? 3000 }
+    const payload = JSON.stringify(event)
+    for (const [, client] of renderStreamSubscribers) {
+      try { client.send('event: voice_output\r\ndata: ' + payload + '\r\n\r\n') } catch {}
+    }
+    return { ok: true, audioUrl: result?.url ?? null, durationMs: event.durationMs }
+  })
 }
 
 // ── ApprovalCard command ────────────────────────────────────────────────────────
