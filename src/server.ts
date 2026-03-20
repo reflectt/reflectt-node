@@ -11526,6 +11526,28 @@ export async function createServer(): Promise<FastifyInstance> {
       } catch { /* non-blocking */ }
     }
 
+    // Cache for focus, calendar, and activity (30s TTL — cheap to compute)
+    interface CanvasMetaCache { focus: ReturnType<typeof getFocus>; upcomingEvents: Array<{ id: string; summary: string; dtstart: number; organizer: string }>; recentActivity: Array<{ ts: number; type: string; subject: unknown }>; age: number }
+    let canvasMetaCache: CanvasMetaCache | null = null
+    const getCanvasMeta = (): CanvasMetaCache => {
+      const now = Date.now()
+      if (canvasMetaCache && (now - canvasMetaCache.age) < 30_000) return canvasMetaCache
+      const focus = getFocus()
+      let upcomingEvents: CanvasMetaCache['upcomingEvents'] = []
+      try {
+        const events = calendarEvents.listEvents({ from: now, to: now + 24 * 60 * 60 * 1000, limit: 5 })
+        upcomingEvents = events.map(e => ({ id: e.id, summary: e.summary, dtstart: e.dtstart, organizer: e.organizer }))
+      } catch { /* skip */ }
+      let recentActivity: CanvasMetaCache['recentActivity'] = []
+      try {
+        const twoHoursAgo = now - 2 * 60 * 60 * 1000
+        const activity = queryActivity({ range: '24h', type: ['task', 'chat'], limit: 10 })
+        recentActivity = activity.events.filter(e => e.ts_ms > twoHoursAgo).slice(0, 5).map(e => ({ ts: e.ts_ms, type: e.type, subject: e.subject }))
+      } catch { /* skip */ }
+      canvasMetaCache = { focus, upcomingEvents, recentActivity, age: now }
+      return canvasMetaCache
+    }
+
     const emitTick = () => {
       if (closed) return
       refreshAvatarCache()
@@ -11585,13 +11607,13 @@ export async function createServer(): Promise<FastifyInstance> {
         if (a.state !== 'floor' && a.state !== 'ambient') { dominantColor = a.color; break }
       }
 
-      // Include focus directive if set
-      const focus = getFocus()
+      // Include focus, calendar, and activity (cached, 30s TTL)
+      const meta = getCanvasMeta()
 
       const tick = {
         t: now,
         agents,
-        team: { rhythm, tension, ambientPulse, dominantColor, focus },
+        team: { rhythm, tension, ambientPulse, dominantColor, ...meta },
       }
 
       try {
