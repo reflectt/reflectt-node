@@ -714,3 +714,110 @@ docker run -p 4445:4445 reflectt-node
 
 See `docs/GETTING-STARTED.md` for full setup instructions.
 See `docs/CONTRIBUTING.md` for PR workflow.
+
+## Agent State Machine
+
+Agents cycle through states based on their work:
+
+```
+idle → working → thinking → working → idle
+              ↘ blocked
+              ↘ handoff (waiting for another agent)
+```
+
+States are exposed via `GET /agents` and the presence SSE stream.
+
+### Stall Detector
+
+If an agent stays in `thinking` or `working` for longer than `stall_threshold_ms`, the stall detector fires an intervention event. Intervention handlers can auto-retry, escalate, or notify the human.
+
+### Intervention Engine
+
+Routes intervention events to handlers based on `intervention_config`:
+- `escalate`: transfer to another agent
+- `retry`: re-run the last operation
+- `defer`: pause and resume later
+- `abort`: stop and report failure
+
+### Team Templates
+
+Templates define which agents run for a team. Stored in `templates/` directory.
+
+### Agent Persistence
+
+Agent state (memory, tools, active tasks) is persisted to disk after each significant action. On restart, agents restore from the snapshot store.
+
+### Agent Communication
+
+Agents communicate via:
+- **Direct messaging**: `POST /agents/:id/message`
+- **Broadcast**: `POST /agents/broadcast`
+- **Canvas events**: `canvas_message` through canvas query bridge
+- **Task handoff**: `POST /tasks/:id/handoff`
+- **Event bus**: Internal pub/sub for real-time coordination
+
+## Canvas Rich Push
+
+Agents push rich content to canvas layers:
+
+```
+POST /canvas/push
+{
+  "type": "rich",
+  "layer": "stage|overlay|background",
+  "position": { "x": 0, "y": 0 },
+  "size": { "width": 400, "height": 300 },
+  "content": { "format": "markdown|svg|image|code", "data": "..." },
+  "ttl": 30000
+}
+```
+
+Layers: `background` (orbs/presence) → `stage` (agent content) → `overlay` (HUD/attention).
+
+## Canvas Takeover Mode
+
+An agent claims full-screen takeover:
+
+```
+POST /canvas/takeover
+{
+  "agentId": "link",
+  "duration": 60000,
+  "reason": "demo"
+}
+```
+
+Auto-releases after `duration`. Orbs fade to ambient mode during takeover.
+
+## Activity Stream
+
+Canvas event history for real-time and replay:
+
+```
+GET /canvas/activity-stream  (SSE)
+```
+
+Event types: `canvas_connected`, `canvas_message`, `agent_joined`, `agent_left`, `canvas_opened`, `rich_push`, `takeover`, `render_complete`.
+
+Ring buffer: last 100 events in-memory, sent as backfill on connect.
+
+## Notification Inbox
+
+Per-agent notification feed:
+
+- `GET /notifications/inbox?agentId=:id&unread=true`
+- `POST /notifications/mark-read`
+- `GET /notifications/unread-count?agentId=:id`
+
+Delivered via presence SSE stream as `{type: "notification", ...}` events.
+
+## Task Criteria Verified
+
+Tasks with `done_criteria` cannot move `todo→validating` unless `criteria_verified=true` is set:
+
+```bash
+curl -X PATCH /tasks/:id \
+  -d '{"status": "validating", "criteria_verified": true}'
+```
+
+Returns error `DONE_CRITERIA_NOT_VERIFIED` if done criteria exist and not verified.
