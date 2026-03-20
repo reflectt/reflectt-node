@@ -398,6 +398,7 @@ const UpdateTaskSchema = z.object({
   assignee: z.string().optional(),
   reviewer: z.string().optional(),
   done_criteria: z.array(z.string().min(1)).optional(),
+  criteria_verified: z.boolean().optional(),  // bypass done_criteria gate for todo→validating
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
   blocked_by: z.array(z.string()).optional(),
   epic_id: z.string().optional(),
@@ -8926,7 +8927,8 @@ export async function createServer(): Promise<FastifyInstance> {
           'in-progress': ['blocked', 'validating', 'done', 'doing', 'todo', 'cancelled'], // legacy, permissive
         }
         const allowed = ALLOWED_TRANSITIONS[existing.status] ?? []
-        if (!allowed.includes(parsed.status)) {
+        // Allow todo→validating when criteria_verified=true
+        if (!allowed.includes(parsed.status) && !(parsed.status === 'validating' && existing.status === 'todo' && parsed.criteria_verified === true)) {
           const meta = (incomingMeta ?? {}) as Record<string, unknown>
           const isReopen = meta.reopen === true
           const reopenReason = typeof meta.reopen_reason === 'string' ? String(meta.reopen_reason).trim() : ''
@@ -8946,6 +8948,22 @@ export async function createServer(): Promise<FastifyInstance> {
           mergedMeta.reopen_reason = reopenReason
           mergedMeta.reopened_at = Date.now()
           mergedMeta.reopened_from = existing.status
+
+      // ── Done-criteria verification gate ──
+      // Block todo→validating unless criteria_verified=true is set.
+      if (parsed.status === 'validating' && existing.status === 'todo') {
+        const hasDoneCriteria = Boolean(existing.done_criteria && existing.done_criteria.length > 0)
+        if (hasDoneCriteria && parsed.criteria_verified !== true) {
+          const dc = Array.isArray(existing.done_criteria) ? existing.done_criteria.length : 0
+          reply.code(422)
+          return {
+            success: false,
+            error: `All ${dc} done criteria must be verified. Set criteria_verified=true in PATCH body to unblock.`,
+            code: 'DONE_CRITERIA_NOT_VERIFIED',
+            gate: 'done_criteria_verification',
+          }
+        }
+      }
 
           // Emit trust signal: forced state bypass
           const NORMAL_ESCALATION_PATHS = ['todo→doing', 'doing→validating', 'validating→done']
