@@ -11702,7 +11702,7 @@ export async function createServer(): Promise<FastifyInstance> {
         const canvasEntry = canvasStateMap.get(agentId)
         const isDone = task.status === 'done' || task.status === 'cancelled'
         const isBlocked = task.status === 'blocked'
-        const isWorking = task.status === 'in_progress'
+        const isWorking = task.status === 'doing'
         agentStates[agentId] = {
           state: canvasEntry?.state || (isDone ? 'ambient' : isBlocked ? 'attention' : isWorking ? 'working' : 'floor'),
           currentTask: task.title,
