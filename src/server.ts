@@ -11295,7 +11295,34 @@ export async function createServer(): Promise<FastifyInstance> {
   // ── Canvas interactive routes (extracted to src/canvas-interactive.ts) ─────
   // POST /canvas/gaze, POST /canvas/briefing, POST /canvas/victory,
   // POST /canvas/spark, POST /canvas/express, GET /canvas/render/stream
-  const { canvasInteractiveRoutes } = await import("./canvas-interactive.js")
+  const { canvasInteractiveRoutes, agentCapabilities } = await import("./canvas-interactive.js")
+  // Capability registration routes (GET/POST /canvas/capability)
+  app.get("/canvas/capability", (_req: any, res: any) => {
+    const result: Record<string, any> = {}
+    for (const [id, data2] of agentCapabilities) result[id] = data2
+    return res.json(result)
+  })
+  app.post("/canvas/capability", async (req: any, res: any) => {
+    try {
+      const body = req.body as { agentId?: string; agentName?: string; capabilities?: any[] }
+      const agentId: string = typeof body?.agentId === "string" ? body.agentId : "unknown"
+      const agentName: string = typeof body?.agentName === "string" ? body.agentName : agentId
+      const capabilities: any[] = Array.isArray(body?.capabilities) ? body.capabilities : []
+      if (!capabilities.length) return res.status(400).json({ error: "capabilities required" })
+      agentCapabilities.set(agentId, { agentName, capabilities, updatedAt: Date.now() })
+      const cmd = { type: "capability_setup", agentId, agentName, capabilities, timestamp: Date.now() }
+      const data = JSON.stringify(cmd)
+      const { renderStreamSubscribers } = await import("./canvas-interactive.js")
+      for (const [, client] of renderStreamSubscribers) {
+        try { client.send("event: capability_setup\r\ndata: " + data + "\r\n\r\n") } catch {}
+      }
+      return res.json({ ok: true, agentId, count: capabilities.length })
+    } catch (err: any) {
+      console.error("[canvas/capability]", err?.message)
+      return res.status(500).json({ error: "Internal error" })
+    }
+  })
+
   await app.register(canvasInteractiveRoutes, {
     eventBus,
     canvasStateMap,
