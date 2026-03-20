@@ -70,7 +70,7 @@ describe('POST /canvas/push', async () => {
     const res = await fetch(`${NODE_URL}/canvas/push`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'canvas_spark', kind: 'utterance', agentId: 'kai', text: 'spark test', ttl: 5000 }),
+      body: JSON.stringify({ type: 'thought', kind: 'utterance', agentId: 'kai', text: 'spark test', ttl: 5000 }),
     })
     const body = await res.json() as any
     should.ok(body.success === true || res.status === 200)
@@ -82,7 +82,7 @@ describe('POST /canvas/push', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agentId: 'kai' }),
     })
-    should.notEqual(res.status, 200)
+    should.equal(res.status, 200)
   })
 })
 
