@@ -11296,7 +11296,9 @@ export async function createServer(): Promise<FastifyInstance> {
   // POST /canvas/gaze, POST /canvas/briefing, POST /canvas/victory,
   // POST /canvas/spark, POST /canvas/express, GET /canvas/render/stream
   const { canvasInteractiveRoutes } = await import("./canvas-interactive.js")
-  await app.register(canvasInteractiveRoutes, {
+  const { registerCapabilityRoutes } = await import("./canvas-interactive.js")
+  registerCapabilityRoutes(app)
+await app.register(canvasInteractiveRoutes, {
     eventBus,
     canvasStateMap,
   } as any)
