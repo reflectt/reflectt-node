@@ -11690,6 +11690,10 @@ export async function createServer(): Promise<FastifyInstance> {
       'X-Accel-Buffering': 'no',
     })
 
+    // Track live viewer
+    liveViewerCount++
+    let viewersDirty = true
+
     // Derive agents from task board — show ALL agents, not just canvas-state emitters
     const allTasks = taskManager.listTasks({})
     const agentStates: Record<string, any> = {}
@@ -11714,7 +11718,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // Send current state as initial snapshot — include all agents from task board
     const activeSlots = canvasSlots.getActive()
-    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ slots: activeSlots, agents: agentStates })}\n\n`)
+    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ slots: activeSlots, agents: agentStates, viewers: liveViewerCount })}\n\n`)
 
     // Subscribe to new render events
     const unsubscribe = subscribeCanvas((event, slot) => {
@@ -11736,9 +11740,20 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // Cleanup on disconnect
     request.raw.on('close', () => {
+      liveViewerCount = Math.max(0, liveViewerCount - 1)
       unsubscribe()
       clearInterval(heartbeat)
     })
+  })
+
+  // ── Live Viewer Counter ─────────────────────────────────────────────
+  // Tracks open SSE connections to /canvas/stream with live=true
+  // Exposed via GET /canvas/viewers
+  let liveViewerCount = 0
+
+  app.get('/canvas/viewers', async (_request, reply) => {
+    reply.header('cache-control', 'no-cache')
+    return reply.send({ viewers: liveViewerCount })
   })
 
   // ── Feedback Collection ─────────────────────────────────────────────
