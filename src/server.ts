@@ -10777,6 +10777,15 @@ export async function createServer(): Promise<FastifyInstance> {
       try {
         runCanvasAutoStateSweep({
           listTasks: (opts) => taskManager.listTasks(opts as any),
+          listAllAgents: () => {
+            // Get ALL agent IDs from task board - every assignee, even those without tasks
+            const allTasks = taskManager.listTasks({})
+            const agents = new Set<string>()
+            for (const t of allTasks) {
+              if (t.assignee) agents.add(t.assignee)
+            }
+            return [...agents]
+          },
           getCanvasState: (agentId) => {
             const entry = canvasStateMap.get(agentId)
             return entry ? { state: entry.state, updatedAt: entry.updatedAt } : null
@@ -10835,21 +10844,8 @@ export async function createServer(): Promise<FastifyInstance> {
           },
           emitAmbientThought: (agentId, task) => {
             const now = Date.now()
-            // Emit ambient thought - makes /live feel alive with constant activity
-            // Varied messages to show agents are actively working
-            const messages = [
-              `Working on: ${task.title.slice(0, 50)}`,
-              `Analyzing: ${task.title.slice(0, 40)}`,
-              `Processing: ${task.title.slice(0, 40)}`,
-              `Building: ${task.title.slice(0, 40)}`,
-              `Reviewing: ${task.title.slice(0, 40)}`,
-              `Testing: ${task.title.slice(0, 40)}`,
-              `Debugging: ${task.title.slice(0, 40)}`,
-              `Ship it`,
-              `Almost done`,
-              `Making progress`,
-            ]
-            const msg = messages[Math.floor(Math.random() * messages.length)]
+            // Emit ambient thought with actual task title - makes /live feel alive with real work
+            // Shows visitors exactly what each agent is doing right now
             eventBus.emit({
               id: `ambient-${agentId}-${now}`,
               type: 'canvas_push' as const,
@@ -10859,10 +10855,10 @@ export async function createServer(): Promise<FastifyInstance> {
                 expression: 'thought',
                 agentId,
                 agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
-                text: msg,
+                text: task.title.slice(0, 80),
                 state: 'working',
                 task: task.title,
-                ttl: 8000,
+                ttl: 12000,
               },
             })
           },

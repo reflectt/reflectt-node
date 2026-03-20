@@ -63,6 +63,8 @@ export interface CanvasStateEntry {
 export interface SweepDeps {
   /** Get all tasks, optionally filtered by assignee */
   listTasks(opts: { assignee?: string; status?: Task['status'] | Task['status'][] }): Task[]
+  /** Get all known agent IDs (for seeding canvas with all agents) */
+  listAllAgents?(): string[]
   /** Get current canvas state entry for an agent (null if never set) */
   getCanvasState(agentId: string): CanvasStateEntry | null
   /** Emit a synthetic canvas state event */
@@ -99,9 +101,16 @@ export function runCanvasAutoStateSweep(deps: SweepDeps): SweepResult {
     byAgent.set(task.assignee, list)
   }
 
-  // Also include agents who have been seen on canvas (may now be idle)
-  // so we can flip them back to floor when they finish
-  // (This is handled by the caller passing a set of known canvas agents)
+  // Also include ALL known agents (even without tasks) so they're visible on canvas
+  // This ensures all team members show up, not just those with active tasks
+  const allAgents = deps.listAllAgents ? deps.listAllAgents() : null
+  if (allAgents) {
+    for (const agentId of allAgents) {
+      if (!byAgent.has(agentId)) {
+        byAgent.set(agentId, [])
+      }
+    }
+  }
 
   let emitted = 0
   let skipped = 0
