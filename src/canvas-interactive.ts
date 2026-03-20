@@ -9,7 +9,8 @@ import type { eventBus as eventBusInstance } from './events.js'
 
 type RealityMixerCommand =
   | { type: 'text';    content: string; style?: Record<string, unknown>; durationMs?: number }
-  | { type: 'speak';   content: string; voiceId?: string; agentId?: string }
+  | { type: 'speak';   content: string; voiceId?: string; agentId?: string; audioUrl?: string }
+  | { type: 'voice_output'; text: string; url: string; agentId: string; agentName?: string; durationMs?: number }
   | { type: 'visual';  preset: 'urgency' | 'celebration' | 'thinking' | 'flow' | 'tension' | 'exhale' | 'spark' }
   | { type: 'color';   agent: string; color: string }
   | { type: 'sound';   src: string; volume?: number }
@@ -35,6 +36,72 @@ const MAX_RENDER_LOG = 20
 
 // Subscriber set for GET /canvas/render/stream
 export const renderStreamSubscribers = new Map<string, { send: (data: string) => void; closed: boolean }>()
+
+// ── Voice output (Kokoro TTS) ──────────────────────────────────────────────────
+const KOKORO_BASE_URL = process.env.KOKORO_BASE_URL
+const KOKORO_API_KEY = process.env.KOKORO_API_KEY
+
+const KOKORO_VOICE_MAP: Record<string, string> = {
+  link: 'af_sarah', swift: 'af_sarah',
+  kai: 'af_nicole', kotlin: 'af_nicole', pixel: 'af_nicole', echo: 'af_nicole', harmony: 'af_nicole',
+  rhythm: 'af_james',
+  bookkeeper: 'bf_emma', sage: 'bf_emma',
+}
+
+const TTS_CACHE_TTL_MS = 30 * 60 * 1000
+const ttsCache = new Map<string, { audio: ArrayBuffer; createdAt: number }>()
+
+async function hashText(text: string, voiceId: string): Promise<string> {
+  const msgBuffer = new TextEncoder().encode(text + voiceId)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer)
+  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function generateVoiceAudio(text: string, agentId: string): Promise<{ url: string; durationMs: number } | null> {
+  if (!KOKORO_BASE_URL) return null
+  const voiceId = KOKORO_VOICE_MAP[agentId] || 'af_sarah'
+  const cacheKey = await hashText(text, voiceId)
+  const cached = ttsCache.get(cacheKey)
+  if (cached && Date.now() - cached.createdAt < TTS_CACHE_TTL_MS) {
+    return { url: `/audio/${cacheKey}`, durationMs: Math.round(text.length * 50) }
+  }
+  try {
+    const ctrl = new AbortController()
+    const to = setTimeout(() => ctrl.abort(), 15000)
+    const res = await fetch(`${KOKORO_BASE_URL}/v1/audio/speech`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(KOKORO_API_KEY ? { 'Authorization': `Bearer ${KOKORO_API_KEY}` } : {}),
+        'Accept': 'audio/mpeg',
+      },
+      body: JSON.stringify({ model: 'kokoro', voice: voiceId, input: text }),
+      signal: ctrl.signal as any,
+    })
+    clearTimeout(to)
+    if (!res.ok) { console.error('[canvas/voice] Kokoro', res.status); return null }
+    const audio = await res.arrayBuffer()
+    ttsCache.set(cacheKey, { audio, createdAt: Date.now() })
+    if (ttsCache.size > 100) {
+      const cutoff = Date.now() - TTS_CACHE_TTL_MS
+      for (const [k, v] of ttsCache) { if (v.createdAt < cutoff) ttsCache.delete(k) }
+    }
+    return { url: `/audio/${cacheKey}`, durationMs: Math.round(text.length * 50) }
+  } catch (err: any) {
+    console.error('[canvas/voice] TTS failed:', err?.message)
+    return null
+  }
+}
+
+export function getAudioFromCache(id: string): ArrayBuffer | null {
+  const cached = ttsCache.get(id)
+  if (!cached) return null
+  if (Date.now() - cached.createdAt > TTS_CACHE_TTL_MS) { ttsCache.delete(id); return null }
+  return cached.audio
+}
+
+// Agent capabilities state (used by SSE backfill)
+const agentCapabilities = new Map<string, { agentName: string; capabilities: any[]; updatedAt: number }>()
 
 export function broadcastRenderCommand(agentId: string, cmd: RealityMixerCommand): string {
   const id = `rc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -80,6 +147,15 @@ export async function canvasInteractiveRoutes(
       if (!line) return
       broadcastRenderCommand(agentId, { type: 'speak', content: line, voiceId, agentId })
       broadcastRenderCommand(agentId, { type: 'visual', preset: 'exhale' })
+      generateVoiceAudio(line, agentId).then(result => {
+        if (result) {
+          const cmd = { type: 'voice_output' as const, text: line, url: result.url, agentId, agentName: agentId, durationMs: result.durationMs }
+          const payload = JSON.stringify(cmd)
+          for (const [, client] of renderStreamSubscribers) {
+            try { client.send('event: voice_output\r\ndata: ' + payload + '\r\n\r\n') } catch {}
+          }
+        }
+      }).catch(() => {})
     } else if (kind === 'utterance') {
       // Agent utterance - shows what agent is doing/saying on /live
       const agentId = String(data.agentId ?? 'unknown')
@@ -531,3 +607,99 @@ export interface DecisionSelectEvent {
   optionId: string
 }
 
+
+
+// ── Capability types ──────────────────────────────────────────────────────────
+export type CapabilityId = 'email' | 'sms' | 'voice' | 'phone' | 'browser' | 'memory' | 'tasks' | 'canvas'
+export type CapabilityStatus = 'active' | 'warning' | 'offline'
+
+export interface AgentCapability {
+  id: CapabilityId
+  status: CapabilityStatus
+  label?: string
+  detail?: string
+}
+
+export interface CapabilitySetupCommand {
+  type: 'capability_setup'
+  agentId: string
+  agentName: string
+  capabilities: AgentCapability[]
+  timestamp: number
+}
+
+// ── Audio cache + voice output endpoints ──────────────────────────────────────
+  app.get<{ Params: { id: string } }>('/audio/:id', (request, reply) => {
+    const audio = getAudioFromCache(request.params.id)
+    if (!audio) { reply.status(404); return { error: 'Audio not found' } }
+    reply.header('Content-Type', 'audio/mpeg')
+    reply.header('Cache-Control', 'public, max-age=1800')
+    reply.header('Access-Control-Allow-Origin', '*')
+    return reply.send(Buffer.from(audio))
+  })
+
+  app.post<{ Body: { text?: string; agentId?: string; agentName?: string; voiceId?: string } }>(
+    '/canvas/speak', async (request, reply) => {
+      const { text, agentId = 'unknown', agentName = agentId, voiceId } = request.body ?? {}
+      const speakText = typeof text === 'string' ? text.trim() : ''
+      if (!speakText) return { error: 'text required' }
+      if (speakText.length > 1000) return { error: 'text too long (max 1000)' }
+      const result = await generateVoiceAudio(speakText, voiceId || agentId)
+      const vid = voiceId || agentId
+      const voice = KOKORO_VOICE_MAP[vid] || 'af_sarah'
+      const cacheKey = await hashText(speakText, voice)
+      const cmd = {
+        type: 'voice_output' as const,
+        text: speakText,
+        url: result ? `/audio/${cacheKey}` : '',
+        agentId,
+        agentName,
+        durationMs: result?.durationMs ?? 3000,
+      }
+      const payload = JSON.stringify(cmd)
+      for (const [, client] of renderStreamSubscribers) {
+        try { client.send('event: voice_output\r\ndata: ' + payload + '\r\n\r\n') } catch {}
+      }
+      broadcastRenderCommand(agentId, { type: 'speak', content: speakText, voiceId, agentId, audioUrl: result?.url })
+      return { ok: true, audioUrl: result?.url ?? null, durationMs: cmd.durationMs }
+    }
+  )
+
+// ── Agent capabilities registration ───────────────────────────────────────────
+  app.get('/canvas/capability', (_req: any, res: any) => {
+    const result: Record<string, any> = {}
+    for (const [id, data2] of agentCapabilities) result[id] = data2
+    return res.json(result)
+  })
+
+  app.post('/canvas/capability', async (req: any, res: any) => {
+    try {
+      const body = req.body as { agentId?: string; agentName?: string; capabilities?: any[] }
+      const agentId: string = typeof body?.agentId === 'string' ? body.agentId : 'unknown'
+      const agentName: string = typeof body?.agentName === 'string' ? body.agentName : agentId
+      const capabilities: any[] = Array.isArray(body?.capabilities) ? body.capabilities : []
+      if (!capabilities.length) return res.status(400).json({ error: 'capabilities required' })
+      agentCapabilities.set(agentId, { agentName, capabilities, updatedAt: Date.now() })
+      const cmd: CapabilitySetupCommand = {
+        type: 'capability_setup', agentId, agentName, capabilities, timestamp: Date.now(),
+      }
+      const data = JSON.stringify(cmd)
+      for (const [, client] of renderStreamSubscribers) {
+        try { client.send('event: capability_setup\r\ndata: ' + data + '\r\n\r\n') } catch {}
+      }
+      return res.json({ ok: true, agentId, count: capabilities.length })
+    } catch (err: any) {
+      console.error('[canvas/capability]', err?.message)
+      return res.status(500).json({ error: 'Internal error' })
+    }
+  })
+
+// ── Capability types ──────────────────────────────────────────────────────────
+export type CapabilityId = 'email' | 'sms' | 'voice' | 'phone' | 'browser' | 'memory' | 'tasks' | 'canvas'
+export type CapabilityStatus = 'active' | 'warning' | 'offline'
+export interface AgentCapability {
+  id: CapabilityId; status: CapabilityStatus; label?: string; detail?: string
+}
+export interface CapabilitySetupCommand {
+  type: 'capability_setup'; agentId: string; agentName: string; capabilities: AgentCapability[]; timestamp: number
+}
