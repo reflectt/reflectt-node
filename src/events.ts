@@ -498,6 +498,7 @@ class EventBus {
         // Include events where the agent is involved
         return (
           data.agent === filters.agent ||
+          data.agentId === filters.agent ||
           data.from === filters.agent ||
           data.to === filters.agent ||
           data.assignee === filters.agent ||
