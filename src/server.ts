@@ -14880,7 +14880,7 @@ If your heartbeat shows **no active task** and **no next task**:
     const since = rawQuery.since ? parseInt(rawQuery.since, 10) : undefined
 
     const events: Array<{
-      type: 'run_complete' | 'task_state_change' | 'trust_event'
+      type: 'run_complete' | 'task_state_change' | 'trust_event' | 'expression_changed'
       timestamp: number
       summary: string
       taskId?: string
@@ -14930,6 +14930,34 @@ If your heartbeat shows **no active task** and **no next task**:
             meta: { taskTitle: task.title, author: c.author },
           })
         }
+      }
+    }
+
+    // ── Source 4: Expression events from eventLog ─────────────────
+    {
+      const exprEvents = eventBus.getEvents({ agent, limit })
+        .filter(e => e.type === 'canvas_expression')
+      for (const e of exprEvents) {
+        const data = e.data as any
+        if (since && e.timestamp < since) continue
+        // Classify expression type based on dominant channel
+        const channels = data.channels ?? {}
+        const expressionType: string =
+          channels.voice ? 'thought' :
+          channels.narrative && !channels.voice ? 'reaction' :
+          channels.emoji ? 'emoji' :
+          'visual'
+        events.push({
+          type: 'expression_changed',
+          timestamp: e.timestamp,
+          summary: channels.voice ?? channels.narrative ?? 'Expression',
+          meta: {
+            agentId: data.agentId,
+            emoji: channels.emoji ?? null,
+            name: channels.voice ?? channels.narrative ?? null,
+            expressionType,
+          },
+        })
       }
     }
 
