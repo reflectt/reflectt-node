@@ -96,6 +96,7 @@ interface CloudState {
   credential: string | null
   heartbeatTimer: ReturnType<typeof setInterval> | null
   taskSyncTimer: ReturnType<typeof setInterval> | null
+  taskCloudPullTimer: ReturnType<typeof setInterval> | null
   chatSyncTimer: ReturnType<typeof setInterval> | null
   canvasSyncTimer: ReturnType<typeof setInterval> | null
   approvalSyncTimer: ReturnType<typeof setInterval> | null
@@ -228,6 +229,7 @@ let state: CloudState = {
   credential: null,
   heartbeatTimer: null,
   taskSyncTimer: null,
+  taskCloudPullTimer: null,
   chatSyncTimer: null,
   canvasSyncTimer: null,
   approvalSyncTimer: null,
@@ -424,6 +426,19 @@ export async function startCloudIntegration(): Promise<void> {
   state.taskSyncTimer = setInterval(() => {
     syncTasks().catch(() => {})
   }, config.taskSyncIntervalMs)
+
+  // Pull tasks FROM cloud (Supabase) into local SQLite on a fixed interval.
+  // This catches tasks created via the API while the node was offline or
+  // while local SQLite was non-empty (which skips the startup hydration).
+  const TASK_CLOUD_PULL_INTERVAL_MS = Number(process.env.REFLECTT_TASK_CLOUD_PULL_MS) || 30_000
+  state.taskCloudPullTimer = setInterval(async () => {
+    try {
+      const r = await taskManager.syncFromCloud()
+      if (r.added > 0 || r.updated > 0) {
+        console.log(`[cloud] taskCloudPull: +${r.added} added, ~${r.updated} updated`)
+      }
+    } catch {}
+  }, TASK_CLOUD_PULL_INTERVAL_MS)
 
   // Chat sync — event-driven with adaptive polling fallback
   // When active: 5s poll. When idle: 60s poll. Events always trigger immediate sync.
@@ -649,6 +664,10 @@ export function stopCloudIntegration(): void {
   if (state.taskSyncTimer) {
     clearInterval(state.taskSyncTimer)
     state.taskSyncTimer = null
+  }
+  if (state.taskCloudPullTimer) {
+    clearInterval(state.taskCloudPullTimer)
+    state.taskCloudPullTimer = null
   }
   if (state.chatSyncTimer) {
     clearInterval(state.chatSyncTimer)
