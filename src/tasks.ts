@@ -446,6 +446,42 @@ class TaskManager {
     }
   }
 
+  /**
+   * Periodically pull tasks from cloud (Supabase) and merge into local SQLite.
+   * This ensures the node sees tasks created via the API, not just via local mutations.
+   * Called on a timer from cloud.ts alongside the existing syncTasks() push.
+   */
+  async syncFromCloud(): Promise<{ added: number; updated: number; errors: number }> {
+    if (!this.taskStateAdapter) return { added: 0, updated: 0, errors: 0 }
+
+    const result = { added: 0, updated: 0, errors: 0 }
+    try {
+      const remoteTasks = await this.taskStateAdapter.pullTasks()
+      for (const remoteTask of remoteTasks) {
+        try {
+          const localTask = queryTask(remoteTask.id)
+          if (!localTask) {
+            // New task from cloud — insert
+            this.writeTaskToDb(remoteTask)
+            result.added++
+          } else if ((remoteTask.updatedAt ?? 0) > (localTask.updatedAt ?? 0)) {
+            // Cloud version is newer — update local
+            this.writeTaskToDb(remoteTask)
+            result.updated++
+          }
+          // else: local is current or newer — skip
+        } catch (err) {
+          console.error(`[Tasks] syncFromCloud: error processing task ${remoteTask.id}:`, err)
+          result.errors++
+        }
+      }
+    } catch (err) {
+      console.error('[Tasks] syncFromCloud: pullTasks failed:', err)
+      result.errors++
+    }
+    return result
+  }
+
   private normalizeRecurringTask(recurring: RecurringTask): RecurringTask {
     return {
       ...recurring,
