@@ -16250,6 +16250,17 @@ If your heartbeat shows **no active task** and **no next task**:
    * task-1774294960543-v778wwmio
    */
   app.post('/tracking/live-cta', async (request) => {
+
+  /**
+   * POST /tracking/live-visit — Track /live page visits
+   * Simple hit counter - logs each visit to console
+   */
+  app.post('/tracking/live-visit', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const referrer = body.referrer as string || 'direct'
+    console.log(`[live-visit] ${new Date().toISOString()} referrer=${referrer}`)
+    return { success: true, visited: true }
+  })
     const body = request.body as Record<string, unknown>
     const sourcePage = body.sourcePage as string || '/live'
     const ctaType = body.ctaType as string || 'unknown'
