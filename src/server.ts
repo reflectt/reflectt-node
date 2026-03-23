@@ -15457,6 +15457,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
+<<<<<<< HEAD
    * GET /activation/ghost-signups — Users who signed up but never ran preflight.
    * Cloud polls this to find candidates for the ghost signup nudge email.
    * Query: ?minAgeHours=2 (default 2h; use 24 for 24h tier candidates)
@@ -15515,6 +15516,31 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const result = await sendGhostSignupNudge(userId, email, nudgeTier, emailRelayFn)
     return { success: true, result }
+  })
+
+  /**
+   * POST /tracking/live-cta — Track /live page CTA clicks
+   * Called by cloud app when user clicks "Start Free" on /live
+   * task-1774294960543-v778wwmio
+   */
+  app.post('/tracking/live-cta', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const sourcePage = body.sourcePage as string || '/live'
+    const ctaType = body.ctaType as string || 'unknown'
+    const userId = body.userId as string || 'anonymous'
+    console.log(`[live-cta] ${new Date().toISOString()} page=${sourcePage} cta=${ctaType} userId=${userId}`)
+    return { success: true, tracked: true }
+  })
+
+  /**
+   * POST /tracking/live-visit — Track /live page visits
+   * Simple hit counter - logs each visit to console
+   */
+  app.post('/tracking/live-visit', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const referrer = body.referrer as string || 'direct'
+    console.log(`[live-visit] ${new Date().toISOString()} referrer=${referrer}`)
+    return { success: true, visited: true }
   })
 
   // Get task analytics
