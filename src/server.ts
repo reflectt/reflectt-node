@@ -16244,6 +16244,20 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, trends: getWeeklyTrends(weeks) }
   })
 
+  /**
+   * POST /tracking/live-cta — Track /live page CTA clicks
+   * Called by cloud app when user clicks "Start Free" on /live
+   * task-1774294960543-v778wwmio
+   */
+  app.post('/tracking/live-cta', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const sourcePage = body.sourcePage as string || '/live'
+    const ctaType = body.ctaType as string || 'unknown'
+    const userId = body.userId as string || 'anonymous'
+    console.log(`[live-cta] ${new Date().toISOString()} page=${sourcePage} cta=${ctaType} userId=${userId}`)
+    return { success: true, tracked: true }
+  })
+
   // Get task analytics
   app.get('/tasks/analytics', async (request) => {
     const query = request.query as Record<string, string>
