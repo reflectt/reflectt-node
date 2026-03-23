@@ -15492,7 +15492,6 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const { sendGhostSignupNudge } = await import('./ghost-signup-nudge.js')
 
-    // Email relay function — delegates to existing /email/send infrastructure
     const emailRelayFn = async (opts: {
       from: string; to: string; subject: string; html: string; text: string;
       tags?: Array<{ name: string; value: string }>;
@@ -15515,6 +15514,31 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const result = await sendGhostSignupNudge(userId, email, nudgeTier, emailRelayFn)
     return { success: true, result }
+  })
+
+  /**
+   * POST /tracking/live-cta — Track /live page CTA clicks
+   * Called by cloud app when user clicks "Start Free" on /live
+   * task-1774294960543-v778wwmio
+   */
+  app.post('/tracking/live-cta', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const source = body.source as string || 'unknown'
+    const url = body.url as string || ''
+    const ts = body.ts as number || Date.now()
+    console.log(`[live-cta] ${new Date().toISOString()} source=${source} url=${url} ts=${ts}`)
+    return { success: true, tracked: true }
+  })
+
+  /**
+   * POST /tracking/live-visit — Track /live page visits
+   * Simple hit counter - logs each visit to console
+   */
+  app.post('/tracking/live-visit', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const referrer = body.referrer as string || 'direct'
+    console.log(`[live-visit] ${new Date().toISOString()} referrer=${referrer}`)
+    return { success: true, visited: true }
   })
 
   // Get task analytics
