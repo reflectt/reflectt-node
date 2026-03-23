@@ -74,14 +74,14 @@ async function checkOverview() {
 
 async function checkFlyHealth() {
   try {
-    const res = await fetchWithTimeout(`${FLY_API}/api/hosts/${HOST_ID}/health`)
-    if (!res.ok && res.status !== 401) {
-      // 401 = auth required but server is up. 5xx = server down.
-      return { ok: false, msg: `Fly API returned ${res.status}` }
+    // Use the app URL (Vercel) — this is our public health check
+    const res = await fetchWithTimeout(`${APP_URL}/`, { method: 'HEAD' })
+    if (res.status >= 500) {
+      return { ok: false, msg: `App returned ${res.status}` }
     }
     return { ok: true }
   } catch (err) {
-    return { ok: false, msg: `Fly API unreachable: ${err.message}` }
+    return { ok: false, msg: `App unreachable: ${err.message}` }
   }
 }
 
@@ -117,15 +117,15 @@ async function checkCanvasData() {
 
 async function checkFlyCanvasEndpoint() {
   try {
-    // Hit the canvas endpoint on Fly (without auth — expect 401 but server should respond)
-    const res = await fetchWithTimeout(`${FLY_API}/api/hosts/${HOST_ID}/canvas`)
-    // 401 = server up, auth required. 200 = server up with data. 5xx = problem.
+    // Check cloud overview endpoint — uses app auth, not host auth
+    // If this returns 200, the cloud API is healthy for the org
+    const res = await fetchWithTimeout(`${APP_URL}/api/org/overview`)
     if (res.status >= 500) {
-      return { ok: false, msg: `Fly canvas endpoint returned ${res.status}` }
+      return { ok: false, msg: `Cloud overview returned ${res.status}` }
     }
     return { ok: true }
   } catch (err) {
-    return { ok: false, msg: `Fly canvas endpoint unreachable: ${err.message}` }
+    return { ok: false, msg: `Cloud overview unreachable: ${err.message}` }
   }
 }
 

@@ -11635,7 +11635,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const listenerId = `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     eventBus.on(listenerId, (event) => {
       if (closed) return
-      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression' && event.type !== 'canvas_message' && event.type !== 'canvas_push' && event.type !== 'canvas_artifact' && event.type !== 'canvas_takeover') return
+      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression' && event.type !== 'canvas_message' && event.type !== 'canvas_push' && event.type !== 'canvas_artifact' && event.type !== 'canvas_takeover' && event.type !== 'canvas_render') return
       try {
         reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event.data as object, t: event.timestamp })}\n\n`)
       } catch { closed = true }
@@ -11908,6 +11908,44 @@ export async function createServer(): Promise<FastifyInstance> {
     reply.header('cache-control', 'no-cache')
     return reply.send({ viewers: liveViewerCount })
   })
+
+  // ── Cloud push: periodically sync canvas state to reflectt-cloud API ─────────
+  // Node → cloud canvas state pipeline. Pushes every CLOUD_PUSH_INTERVAL ms.
+  let cloudPushTimer: ReturnType<typeof setTimeout> | null = null
+  let lastPushedState = ''
+  const CLOUD_PUSH_INTERVAL = 5_000
+
+  async function pushCanvasStateToCloud() {
+    const cloudUrl = process.env.REFLECTT_CLOUD_URL
+    const hostToken = process.env.REFLECTT_HOST_TOKEN
+    const hostId = process.env.REFLECTT_HOST_ID
+    if (!cloudUrl || !hostToken || !hostId) return
+    // Snapshot current canvas state
+    const activeSlots = canvasSlots.getActive()
+    const state = { slots: activeSlots, pushedAt: Date.now() }
+    const stateJson = JSON.stringify(state)
+    if (stateJson === lastPushedState) return
+    try {
+      const res = await fetch(`${cloudUrl}/api/hosts/${hostId}/canvas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${hostToken}` },
+        body: JSON.stringify({ state }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (res.ok) lastPushedState = stateJson
+    } catch { /* fire-and-forget */ }
+  }
+
+  function scheduleCloudPush() {
+    if (cloudPushTimer) clearTimeout(cloudPushTimer)
+    cloudPushTimer = setTimeout(async () => {
+      await pushCanvasStateToCloud()
+      scheduleCloudPush()
+    }, CLOUD_PUSH_INTERVAL)
+  }
+
+  // Start pushing canvas state to cloud
+  scheduleCloudPush()
 
   // ── Feedback Collection ─────────────────────────────────────────────
 

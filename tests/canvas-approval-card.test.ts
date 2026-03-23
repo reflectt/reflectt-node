@@ -68,6 +68,7 @@ describe('Approval card — canvas_push on validating transition', () => {
         url: `/tasks/${taskId}`,
         payload: {
           status: 'validating',
+          criteria_verified: true,
           metadata: {
             review_handoff: {
               task_id: taskId,
