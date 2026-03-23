@@ -848,8 +848,8 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/activation/doctor-gate` | Check whether the BYOH onboarding doctor-gate has been passed for a user. Query: `?userId=...`. Returns `{ passed: boolean, events: ActivationEvent[] }`. Used by cloud onboarding to gate progression to workspace-ready step. |
 | GET | `/activation/funnel` | Get funnel state. Query: `?userId=...` for single user, no params for aggregate summary. `?raw=true` includes internal/infrastructure users for debugging. |
 | GET | `/activation/dashboard` | Full onboarding telemetry dashboard: conversion funnel, failure distribution, weekly trends. Query: `?weeks=12`, `?raw=true`. |
-| GET | `/activation/ghost-signups` | List users who signed up but never passed preflight. Query: `?minAgeHours=2` (default 2). Returns `{ candidates: [{ userId, signupAt, hoursSinceSignup, preflightAttempted }] }`. |
-| POST | `/activation/ghost-signup-nudge` | Send re-engagement email to a ghost signup user. Body: `{ userId, email, nudgeTier?: '2h' \| '24h' }`. Idempotent — won't re-send if already nudged at same tier. |
+| POST | `/tracking/live-cta` | Track /live page CTA clicks. Called by cloud app when user clicks "Start Free" on /live. Body: `{ source?, url?, ts? }`. |
+| POST | `/tracking/live-visit` | Track /live page visits. Simple hit counter - logs each visit. Body: `{ referrer? }`. |
 | GET | `/activation/funnel/conversions` | Step-by-step conversion rates with per-step reach count, conversion rate, and median step timing. Query: `?raw=true` includes internal users. |
 | GET | `/activation/funnel/failures` | Failure-reason distribution per step. Shows where users drop off and why (from event metadata). |
 | GET | `/activation/funnel/weekly` | Weekly trend snapshots for planning. Query: `?weeks=12`. Exportable JSON with per-week step counts, new users, completion rate. |
