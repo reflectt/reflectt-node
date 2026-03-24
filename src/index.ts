@@ -526,7 +526,7 @@ async function main() {
               '',
               '### Steps:',
               '1. Read `TEAM_INTENT.md` for the full intent',
-              '2. Call `GET /bootstrap/team` for the TEAM-ROLES.yaml schema',
+              '2. Call `POST /bootstrap/team` (body: { useCase: "custom" }) to get the TEAM-ROLES.yaml schema',
               '3. Design agents that match what the user needs',
               '4. Save the team config via `PUT /config/team-roles`',
               '5. Post an intro to #general: "Hi! I\'m [name], your team lead. Here\'s the team I\'ve set up..."',
