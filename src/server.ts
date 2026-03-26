@@ -13965,6 +13965,109 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
+  // ── Bootstrap: generate team from intent (smaller-model-safe) ──────
+  // This endpoint takes the user's intent and generates a ready-to-save
+  // TEAM-ROLES.yaml without requiring the agent to understand the schema.
+  // The agent can optionally save it in the same call.
+  app.post('/bootstrap/generate', async (request, reply) => {
+    const body = (request.body || {}) as Record<string, unknown>
+    const intent = typeof body.intent === 'string' ? body.intent.trim() : ''
+    const save = body.save === true
+    const maxAgents = typeof body.maxAgents === 'number' ? Math.min(body.maxAgents, 10) : 4
+
+    if (!intent) {
+      reply.code(400)
+      return { success: false, error: 'intent is required (what the user wants their team to do)' }
+    }
+
+    // Parse intent into agent roles using keyword extraction
+    const intentLower = intent.toLowerCase()
+    const agents: Array<{ name: string; role: string; description: string; affinityTags: string[]; wipCap: number }> = []
+
+    // Common role patterns from intent keywords
+    const rolePatterns: Array<{ keywords: string[]; name: string; role: string; description: string; tags: string[] }> = [
+      { keywords: ['github', 'issue', 'triage', 'bug'], name: 'triage-bot', role: 'triage', description: 'Monitors and triages incoming issues', tags: ['triage', 'issues', 'bugs', 'github'] },
+      { keywords: ['code', 'build', 'develop', 'implement', 'fix', 'engineer'], name: 'builder', role: 'engineer', description: 'Writes and reviews code', tags: ['code', 'engineering', 'implementation', 'debugging'] },
+      { keywords: ['design', 'ui', 'ux', 'frontend', 'visual'], name: 'designer', role: 'designer', description: 'Designs interfaces and visual components', tags: ['design', 'ui', 'ux', 'frontend'] },
+      { keywords: ['ops', 'deploy', 'infra', 'monitor', 'devops', 'ci'], name: 'ops', role: 'ops', description: 'Manages infrastructure and deployments', tags: ['ops', 'infra', 'deployment', 'monitoring'] },
+      { keywords: ['content', 'write', 'document', 'docs', 'blog'], name: 'writer', role: 'content', description: 'Creates documentation and content', tags: ['content', 'docs', 'writing', 'communication'] },
+      { keywords: ['test', 'qa', 'quality', 'verify'], name: 'tester', role: 'qa', description: 'Tests and verifies quality', tags: ['testing', 'qa', 'verification', 'quality'] },
+      { keywords: ['assign', 'track', 'manage', 'coordinate', 'lead'], name: 'coordinator', role: 'lead', description: 'Coordinates work and tracks progress', tags: ['coordination', 'tracking', 'management', 'assignment'] },
+      { keywords: ['security', 'audit', 'compliance', 'review'], name: 'security', role: 'security', description: 'Reviews security and compliance', tags: ['security', 'audit', 'compliance', 'review'] },
+      { keywords: ['data', 'analytics', 'metrics', 'report'], name: 'analyst', role: 'analyst', description: 'Analyzes data and generates reports', tags: ['data', 'analytics', 'metrics', 'reporting'] },
+      { keywords: ['customer', 'support', 'help', 'respond'], name: 'support', role: 'support', description: 'Handles customer interactions and support', tags: ['support', 'customer', 'help', 'response'] },
+    ]
+
+    for (const pattern of rolePatterns) {
+      if (agents.length >= maxAgents) break
+      if (pattern.keywords.some(kw => intentLower.includes(kw))) {
+        agents.push({ name: pattern.name, role: pattern.role, description: pattern.description, affinityTags: pattern.tags, wipCap: 2 })
+      }
+    }
+
+    // Always include a lead/coordinator if we have agents but no lead
+    if (agents.length > 0 && !agents.some(a => a.role === 'lead')) {
+      if (agents.length < maxAgents) {
+        agents.push({ name: 'coordinator', role: 'lead', description: 'Coordinates work and tracks progress', affinityTags: ['coordination', 'tracking', 'management'], wipCap: 2 })
+      }
+    }
+
+    // If no patterns matched, create a generic small team
+    if (agents.length === 0) {
+      agents.push(
+        { name: 'builder', role: 'engineer', description: 'Implements features and fixes', affinityTags: ['code', 'engineering', 'implementation'], wipCap: 2 },
+        { name: 'reviewer', role: 'reviewer', description: 'Reviews work and ensures quality', affinityTags: ['review', 'quality', 'testing'], wipCap: 2 },
+      )
+    }
+
+    // Generate YAML
+    const yamlLines = ['agents:']
+    for (const agent of agents) {
+      yamlLines.push(`  - name: "${agent.name}"`)
+      yamlLines.push(`    role: "${agent.role}"`)
+      yamlLines.push(`    description: "${agent.description}"`)
+      yamlLines.push(`    affinityTags: [${agent.affinityTags.map(t => `"${t}"`).join(', ')}]`)
+      yamlLines.push(`    wipCap: ${agent.wipCap}`)
+    }
+    const yaml = yamlLines.join('\n')
+
+    // Optionally save immediately
+    if (save) {
+      try {
+        const { writeFileSync } = await import('node:fs')
+        const { join } = await import('node:path')
+        const filePath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
+        writeFileSync(filePath, yaml, 'utf-8')
+
+        const { loadAgentRoles } = await import('./assignment.js')
+        const reloaded = loadAgentRoles()
+
+        return {
+          success: true,
+          saved: true,
+          path: filePath,
+          agents: agents.length,
+          yaml,
+          roster: agents.map(a => ({ name: a.name, role: a.role })),
+          hint: 'Team saved and hot-reloaded. Post an intro to #general and create tasks for each agent.',
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Failed to save'
+        reply.code(500)
+        return { success: false, error: msg }
+      }
+    }
+
+    return {
+      success: true,
+      saved: false,
+      agents: agents.length,
+      yaml,
+      roster: agents.map(a => ({ name: a.name, role: a.role })),
+      hint: 'Review the roster. Call again with save:true to persist, or PUT /config/team-roles with the yaml field.',
+    }
+  })
+
   // ── Capabilities: lightweight, queryable alternative to /docs ────────
   // Full docs: GET /docs (68K chars / ~17K tokens)
   // This endpoint: ~2K chars filtered, ~4K unfiltered — 90%+ reduction
