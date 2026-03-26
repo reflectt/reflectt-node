@@ -153,6 +153,17 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
     }
   }
 
+  // Skip default roster when TEAM_INTENT is present — let the bootstrap agent
+  // create the team from the user's intent instead of loading our default agents.
+  if (process.env.TEAM_INTENT) {
+    // Only create the 'main' bootstrap agent role
+    const bootstrapRoles: AgentRole[] = [{ name: 'main', role: 'bootstrap', description: 'Bootstrap agent — reads TEAM_INTENT and creates the team.', affinityTags: [], wipCap: 1 }]
+    loadedRoles = bootstrapRoles
+    loadedFromPath = 'TEAM_INTENT-bootstrap'
+    console.log(`[Assignment] TEAM_INTENT detected — skipping default roster. Only bootstrap agent 'main' loaded.`)
+    return { roles: bootstrapRoles, source: 'TEAM_INTENT-bootstrap' }
+  }
+
   // Try defaults shipped with repo
   try {
     const defaultsPath = new URL('../defaults/TEAM-ROLES.yaml', import.meta.url)
