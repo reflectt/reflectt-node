@@ -455,7 +455,10 @@ async function main() {
       const allTasks = taskManager.listTasks({})
       const agentsDir = join(DATA_DIR, 'agents')
       const hasAgents = existsSync(agentsDir) && readdirSync(agentsDir).filter(f => !f.startsWith('.')).length > 0
-      if (allTasks.length === 0 && !hasAgents) {
+      // Also check if TEAM-ROLES.yaml exists — if it does, bootstrap already ran
+      const teamRolesPath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
+      const hasTeamRoles = existsSync(teamRolesPath)
+      if (allTasks.length === 0 && !hasAgents && !hasTeamRoles) {
         const teamIntent = process.env.TEAM_INTENT || ''
 
         if (teamIntent) {
