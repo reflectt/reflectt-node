@@ -536,11 +536,11 @@ export async function canvasInteractiveRoutes(
     const cached = ttsCache.get(key)
     if (cached && Date.now() - cached.ts < TTS_TTL) return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
 
-    // Try Kokoro first (10s timeout — fast enough to beat cold starts, falls through to ElevenLabs otherwise)
+    // Try Kokoro first (120s timeout — Fly free tier cold starts take 60-90s)
     if (KOKORO_BASE) {
       try {
         const ac = new AbortController()
-        setTimeout(() => ac.abort(), 10_000)
+        setTimeout(() => ac.abort(), 120_000)
         const r = await fetch(KOKORO_BASE + '/v1/audio/speech', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
