@@ -539,6 +539,7 @@ export async function canvasInteractiveRoutes(
     // Try Kokoro first (120s timeout — Fly free tier cold starts take 60-90s)
     if (KOKORO_BASE) {
       try {
+        console.log(`[voice] Kokoro fetch: ${KOKORO_BASE}/v1/audio/speech voice=${kokoroVoice} text="${text.substring(0, 30)}..."`)
         const ac = new AbortController()
         setTimeout(() => ac.abort(), 120_000)
         const r = await fetch(KOKORO_BASE + '/v1/audio/speech', {
@@ -547,12 +548,19 @@ export async function canvasInteractiveRoutes(
           body: JSON.stringify({ model: 'kokoro', input: text, voice: kokoroVoice }),
           signal: ac.signal,
         })
+        console.log(`[voice] Kokoro response: status=${r.status} ok=${r.ok}`)
         if (r.ok) {
           const buf = Buffer.from(await r.arrayBuffer())
+          console.log(`[voice] Kokoro audio: ${buf.byteLength} bytes, caching as ${key}`)
           ttsCache.set(key, { audio: buf, ts: Date.now() })
           return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
         }
-      } catch { /* fall through to ElevenLabs */ }
+      } catch (err) {
+        console.error(`[voice] Kokoro error:`, err instanceof Error ? err.message : err)
+        /* fall through to ElevenLabs */
+      }
+    } else {
+      console.warn(`[voice] KOKORO_BASE not set — skipping Kokoro`)
     }
 
     // ElevenLabs fallback
@@ -616,14 +624,20 @@ export async function canvasInteractiveRoutes(
 
     // Generate audio in background — do not await
     makeTts(text, agentId).then(async (result) => {
-      if (!result) return // Kokoro + ElevenLabs both failed
+      if (!result) {
+        console.error(`[voice] makeTts returned null for "${text.substring(0, 30)}..." — Kokoro + ElevenLabs both failed`)
+        return
+      }
+      console.log(`[voice] TTS ready: voiceId=${voiceId} url=${result.url} ms=${result.ms}`)
       // Re-emit with audio URL so clients can play
       const event = { type: 'voice_output', voiceId, text, url: result.url, agentId, agentName, durationMs: result.ms }
       const payload = JSON.stringify(event)
       for (const [, client] of renderStreamSubscribers) {
         try { client.send('event: voice_output\r\ndata: ' + payload + '\r\n\r\n') } catch {}
       }
-    }).catch(() => {})
+    }).catch((err) => {
+      console.error(`[voice] makeTts failed:`, err instanceof Error ? err.message : err)
+    })
 
     return { ok: true, voiceId, estimatedMs }
   })
