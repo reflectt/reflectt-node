@@ -37,6 +37,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY --from=build /app/dist/ dist/
+COPY --from=build /app/commit.txt commit.txt
 
 # Runtime assets (dashboard UI, role defaults, CLI templates)
 COPY public/ public/
