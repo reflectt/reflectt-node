@@ -458,7 +458,13 @@ async function main() {
       // Also check if TEAM-ROLES.yaml exists — if it does, bootstrap already ran
       const teamRolesPath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
       const hasTeamRoles = existsSync(teamRolesPath)
-      if (allTasks.length === 0 && !hasAgents && !hasTeamRoles) {
+      // Durable first-boot marker — survives restarts even if tasks/agents dirs are empty
+      const firstBootMarker = join(DATA_DIR, '.first-boot-done')
+      const hasBootstrapped = existsSync(firstBootMarker)
+      if (hasBootstrapped) {
+        console.log('[Boot] Restart detected — skipping first-boot (marker exists)')
+      }
+      if (allTasks.length === 0 && !hasAgents && !hasTeamRoles && !hasBootstrapped) {
         const teamIntent = process.env.TEAM_INTENT || ''
 
         if (teamIntent) {
@@ -549,6 +555,10 @@ async function main() {
             metadata: { source: 'first-boot-intent', reflection_exempt: true, reflection_exempt_reason: 'Auto-created bootstrap task' },
           })
           console.log('   Created bootstrap task for main agent')
+
+          // Write durable first-boot marker so restarts don't re-fire
+          writeFileSync(firstBootMarker, `first-boot-intent:${Date.now()}`, 'utf-8')
+          console.log(`   Wrote first-boot marker: ${firstBootMarker}`)
         } else {
           // ── Default bootstrap: no intent, create starter team ──
           console.log('🌱 First boot detected — seeding starter team…')
@@ -582,6 +592,10 @@ async function main() {
             metadata: { source: 'first-boot', reflection_exempt: true, reflection_exempt_reason: 'Auto-created welcome task' },
           })
           console.log('   Created welcome task')
+
+          // Write durable first-boot marker so restarts don't re-fire
+          writeFileSync(firstBootMarker, `first-boot-default:${Date.now()}`, 'utf-8')
+          console.log(`   Wrote first-boot marker: ${firstBootMarker}`)
         }
       }
       // Print clear next-steps for first-time users
