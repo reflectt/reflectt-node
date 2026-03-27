@@ -1911,6 +1911,42 @@ function validateOwnerApprovalPing(content: string, from: string, channel?: stri
   }
 }
 
+// Coordination channels where @mentions are expected for handoffs.
+// Messages without @mentions in these channels are likely dead handoffs.
+// task-1774579523544-kgi9nohd4
+const COORDINATION_CHANNELS = new Set([
+  'general', 'shipping', 'reviews', 'blockers', 'problems', 'ops',
+  'task-comments', 'task-notifications', 'decisions',
+])
+
+/**
+ * Check if a message in a coordination channel lacks @mentions.
+ * Returns a warning + auto-routes to main agent if so.
+ * Does NOT affect human/user chats or non-coordination channels.
+ */
+function buildNoMentionWarning(
+  content: string,
+  channel: string | undefined,
+  from: string,
+): { warning?: string; autoRouted?: string } {
+  if (!channel || !COORDINATION_CHANNELS.has(channel)) return {}
+  // Don't warn system or dashboard messages
+  if (from === 'system' || from === 'dashboard') return {}
+  const mentions = extractMentions(content)
+  if (mentions.length > 0) return {}
+  // No @mentions in a coordination channel — this is a dead handoff
+  // Find the main agent (first in roster, or kai as fallback)
+  const roster = presenceManager.getAllPresence()
+  const mainAgent = roster.find(r => (r as any).role === 'coordinator')?.agent
+    || roster.find(r => r.agent === 'kai')?.agent
+    || roster[0]?.agent
+    || 'kai'
+  return {
+    warning: `No @mention in #${channel} — this message won't trigger action from any agent. Consider adding @${mainAgent} or the relevant owner. Auto-routing visibility to @${mainAgent}.`,
+    autoRouted: mainAgent,
+  }
+}
+
 function buildMentionWarnings(content: string): MentionWarning[] {
   const mentions = extractMentions(content)
   if (mentions.length === 0) return []
@@ -4104,9 +4140,24 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Check for unmentioned coordination messages BEFORE sending
+    // so we can include the warning in the response.
+    // task-1774579523544-kgi9nohd4
+    const noMentionCheck = buildNoMentionWarning(data.content, data.channel, data.from)
+
     const message = await chatManager.sendMessage(data)
     const mentionWarnings = buildMentionWarnings(data.content)
     const autonomyWarnings = buildAutonomyWarnings(data.content)
+
+    // If no @mentions in coordination channel, auto-subscribe the main agent
+    // so the message appears in their inbox (not silently lost).
+    if (noMentionCheck.autoRouted && data.channel) {
+      chatManager.sendMessage({
+        from: 'system',
+        channel: data.channel,
+        content: `⚠️ @${data.from} posted without @mention in #${data.channel}. Auto-routing to @${noMentionCheck.autoRouted} for visibility.`,
+      }).catch(() => {}) // fire-and-forget
+    }
 
     // Track content messages for noise budget denominator
     // (agent/human messages posted via POST /chat/messages are content, not control-plane)
@@ -4178,6 +4229,7 @@ export async function createServer(): Promise<FastifyInstance> {
       ...(actionValidation.warnings.length > 0 ? { action_warnings: actionValidation.warnings } : {}),
       ...(autonomyWarnings.length > 0 ? { autonomy_warnings: autonomyWarnings } : {}),
       ...(approvalApplied ? { approval_applied: approvalApplied } : {}),
+      ...(noMentionCheck.warning ? { no_mention_warning: noMentionCheck.warning, auto_routed_to: noMentionCheck.autoRouted } : {}),
     }
   })
 
