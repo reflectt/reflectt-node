@@ -1937,7 +1937,7 @@ function buildNoMentionWarning(
   // No @mentions in a coordination channel — this is a dead handoff
   // Find the main agent (first in roster, or kai as fallback)
   const roster = presenceManager.getAllPresence()
-  const mainAgent = roster.find(r => r.role === 'coordinator')?.agent
+  const mainAgent = roster.find(r => (r as any).role === 'coordinator')?.agent
     || roster.find(r => r.agent === 'kai')?.agent
     || roster[0]?.agent
     || 'kai'
