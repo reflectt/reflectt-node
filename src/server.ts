@@ -11365,17 +11365,7 @@ export async function createServer(): Promise<FastifyInstance> {
     })
   })()
 
-  // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
-  // Phase 1: states, slots, slots/all, rejections
-  // Phase 2: presence, state, flow-score, team/mood
-  await app.register(canvasReadRoutes, {
-    canvasStateMap,
-    canvasSlots: { getActive: () => canvasSlots.getActive(), getAll: () => canvasSlots.getAll(), getStats: () => canvasSlots.getStats() },
-    agentIdentityColors: AGENT_IDENTITY_COLORS,
-    getDb,
-    getRecentRejections,
-    flowExpressionLog,
-  } as any)
+
   // ── Canvas interactive routes (extracted to src/canvas-interactive.ts) ─────
   // POST /canvas/gaze, POST /canvas/briefing, POST /canvas/victory,
   // POST /canvas/spark, POST /canvas/express, GET /canvas/render/stream
@@ -11430,11 +11420,29 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // canvas/activity-stream + canvas/attention → registered below (were defined but never hooked up)
+  // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
+  // Phase 1: states, slots, slots/all, rejections
+  // Phase 2: presence, state, flow-score, team/mood, attention, activity-stream
+  // Note: registered here (after activityRingBuffer/activityStreamSubscribers are defined)
+  // to satisfy CanvasRouteDeps contract.
+  await app.register(canvasReadRoutes, {
+    canvasStateMap,
+    canvasSlots: { getActive: () => canvasSlots.getActive(), getAll: () => canvasSlots.getAll(), getStats: () => canvasSlots.getStats() },
+    agentIdentityColors: AGENT_IDENTITY_COLORS,
+    getDb,
+    getRecentRejections,
+    flowExpressionLog,
+    taskManager,
+    activityRingBuffer,
+    activityStreamSubscribers,
+  } as any)
+
+  // ── Canvas Phase 2 routes (attention, activity-stream) ─────────────────
+  // Extracted to canvas-routes.ts but orphaned (not registered) — fix here.
   await app.register(canvasPhase2Routes, {
     eventBus,
     queueCanvasPushEvent,
-    taskManager: taskManager as any,
+    taskManager,
     getDb,
     activityRingBuffer,
     activityStreamSubscribers,
