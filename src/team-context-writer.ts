@@ -12,7 +12,7 @@
  * task-1774672289270-9qhb17cgk
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 
 // ── Types ──
@@ -159,7 +159,6 @@ export function syncTeamContextToAgents(reflecttHome: string): void {
   const content = readFileSync(sharedPath, 'utf-8')
 
   // Find all agent workspace directories
-  const { readdirSync, statSync } = require('node:fs') as typeof import('node:fs')
   try {
     const entries = readdirSync(reflecttHome)
     for (const entry of entries) {

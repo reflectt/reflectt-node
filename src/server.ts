@@ -9687,6 +9687,23 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       // ── End design handoff notification ──
 
+      // Emit task_updated event for team-context-writer and other listeners
+      // task-1774672289270-9qhb17cgk
+      if (parsed.status && parsed.status !== existing.status) {
+        eventBus.emit({
+          id: `task-updated-${task.id}-${Date.now()}`,
+          type: 'task_updated' as const,
+          timestamp: Date.now(),
+          data: {
+            taskId: task.id,
+            status: parsed.status,
+            previousStatus: existing.status,
+            assignee: task.assignee,
+            title: task.title,
+          },
+        })
+      }
+
       // Auto-update presence on task activity
       if (task.assignee) {
         if (parsed.status === 'done') {
