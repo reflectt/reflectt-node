@@ -192,6 +192,7 @@ import { startSelfKeepalive, stopSelfKeepalive, getSelfKeepaliveStatus, detectWa
 import { pauseTarget, unpauseTarget, checkPauseStatus, listPauseEntries } from './pause-controls.js'
 import { isLocalWhisperAvailable, transcribeLocally } from './local-whisper.js'
 import { inferFamilyFromTitle, backfillUncategorizedInsights, getAutoTagRules, setAutoTagRules, resetAutoTagRules, autoTagInsightIfUncategorized, DEFAULT_AUTO_TAG_RULES, type AutoTagRule } from './insight-auto-tagger.js'
+import { startTeamContextWriter, teamContextFactEndpoint } from './team-context-writer.js'
 
 // Schemas
 const ChatAttachmentSchema = z.object({
@@ -2604,6 +2605,14 @@ export async function createServer(): Promise<FastifyInstance> {
   // Shipped-artifact auto-heartbeat → #general on validating/done with artifact_path
   startShippedHeartbeat()
 
+  // Team context auto-writer — writes team facts to TEAM-CONTEXT.md on key events
+  // task-1774672289270-9qhb17cgk
+  startTeamContextWriter({
+    reflecttHome: REFLECTT_HOME,
+    eventBus,
+    taskManager: taskManager as any,
+  })
+
   // Calendar reminder engine — polls for pending reminders every 30s
   startReminderEngine()
 
@@ -2991,6 +3000,18 @@ export async function createServer(): Promise<FastifyInstance> {
     // List all pause entries
     const entries = listPauseEntries()
     return { entries, count: entries.length }
+  })
+
+  // ── Shared team context (TEAM-CONTEXT.md) ──────────────────────────────────
+  // POST /team-context/facts — agents write team-wide facts directly
+  // task-1774672289270-9qhb17cgk
+  app.post('/team-context/facts', teamContextFactEndpoint(REFLECTT_HOME) as any)
+
+  // GET /team-context — read current TEAM-CONTEXT.md
+  app.get('/team-context', async () => {
+    const filePath = join(REFLECTT_HOME, 'workspace', 'TEAM-CONTEXT.md')
+    if (!existsSync(filePath)) return { content: null, hint: 'No TEAM-CONTEXT.md yet. Facts will be written automatically on task completions and decisions.' }
+    return { content: readFileSync(filePath, 'utf-8') }
   })
 
   // Team configuration linter health (TEAM.md / TEAM-ROLES.yaml / TEAM-STANDARDS.md)
