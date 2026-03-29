@@ -11394,6 +11394,14 @@ export async function createServer(): Promise<FastifyInstance> {
   // Register capability routes: GET/POST /canvas/capability
   registerCapabilityRoutes(app)
 
+  // Seed capability map with platform integrations for all known agents
+  const { seedCapabilityMap } = await import('./canvas-interactive.js')
+  const allTasks = taskManager.listTasks({})
+  const agentNames = [...new Set([...allTasks.map((t: any) => t.assignee).filter(Boolean), 'kai'])]
+  const agents = agentNames.map((name: string) => ({ name }))
+  seedCapabilityMap(agents)
+  console.log(`[capabilities] seeded ${agents.length} agents with platform capabilities`)
+
   // ── Canvas activity stream — SSE with backfill ────────────────────────
   // New viewers get the last 20 canvas events immediately on connect (backfill),
   // then receive live events going forward. Canvas feels alive from frame 1.

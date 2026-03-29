@@ -34,11 +34,54 @@ const renderCommandLog: Array<{ id: string; ts: number; agentId: string; cmd: Re
 const MAX_RENDER_LOG = 20
 
 // ── Capability map ──────────────────────────────────────────────────────────────
-export type CapabilityId = 'email' | 'sms' | 'voice' | 'phone' | 'browser' | 'memory' | 'tasks' | 'canvas'
+export type CapabilityId = 'email' | 'sms' | 'voice' | 'phone' | 'browser' | 'memory' | 'tasks' | 'canvas' | 'github' | 'sentry' | 'chat' | 'storage'
 export type CapabilityStatus = 'active' | 'warning' | 'offline'
 export interface Capability { id: CapabilityId; status: CapabilityStatus; label?: string; detail?: string }
 export interface AgentCapabilities { agentId: string; agentName: string; capabilities: Capability[]; updatedAt: number }
 const agentCapabilitiesMap = new Map<string, AgentCapabilities>()
+
+/**
+ * Seed the capability map with platform integrations on startup.
+ * In production, agents self-register via POST /canvas/capability.
+ * This seeds the map so the UI always has real data to display.
+ */
+export function seedCapabilityMap(agents: Array<{ name: string; role?: string }>): void {
+  const PLATFORM_CAPABILITIES: Capability[] = [
+    { id: 'tasks', status: 'active', label: 'Tasks', detail: 'Create, assign, and track tasks' },
+    { id: 'canvas', status: 'active', label: 'Canvas', detail: 'Live visual canvas with orbs and panels' },
+    { id: 'chat', status: 'active', label: 'Chat', detail: 'Team messaging and coordination' },
+    { id: 'voice', status: process.env.KOKORO_MODEL_PATH ? 'active' : 'offline', label: 'Voice', detail: 'Speech synthesis via Kokoro TTS' },
+    { id: 'github', status: process.env.REFLECTT_GITHUB_APP_PRIVATE_KEY_SECRET ? 'active' : 'offline', label: 'GitHub', detail: 'PR creation and repository management' },
+    { id: 'sentry', status: process.env.SENTRY_DSN ? 'active' : 'offline', label: 'Sentry', detail: 'Error tracking and performance monitoring' },
+    { id: 'email', status: process.env.RESEND_API_KEY ? 'active' : 'offline', label: 'Email', detail: 'Transactional email via Resend' },
+    { id: 'storage', status: 'active', label: 'Storage', detail: 'Artifact store and file attachments' },
+    { id: 'browser', status: 'active', label: 'Browser', detail: 'Web browsing and scraping via browser toolkit' },
+  ]
+
+  for (const agent of agents) {
+    // All agents get core platform capabilities
+    const coreCaps = PLATFORM_CAPABILITIES.filter(c => c.status === 'active')
+    // Role-specific extras
+    const roleExtras: CapabilityId[] = agent.role === 'builder' || agent.role === 'backend'
+      ? ['memory']
+      : agent.role === 'designer' || agent.role === 'frontend'
+      ? ['browser']
+      : []
+    const allCaps = [
+      ...coreCaps,
+      ...PLATFORM_CAPABILITIES.filter(c => roleExtras.includes(c.id)),
+    ]
+    agentCapabilitiesMap.set(agent.name, {
+      agentId: agent.name,
+      agentName: agent.name,
+      capabilities: allCaps,
+      updatedAt: Date.now(),
+    })
+  }
+}
+
+export { agentCapabilitiesMap }
+
 function broadcastCapabilityEvent(agentId: string, caps: Capability[]) {
   const payload = JSON.stringify({ type: 'capability_setup', agentId, capabilities: caps, updatedAt: Date.now() })
   for (const [subId, sub] of renderStreamSubscribers) {
