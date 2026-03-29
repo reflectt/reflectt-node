@@ -15632,6 +15632,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
+  /**
    * POST /tracking/live-cta — Track /live page CTA clicks
    * Called by cloud app when user clicks "Start Free" on /live
    * task-1774294960543-v778wwmio
@@ -15642,6 +15643,26 @@ If your heartbeat shows **no active task** and **no next task**:
     const url = body.url as string || ''
     const ts = body.ts as number || Date.now()
     console.log(`[live-cta] ${new Date().toISOString()} source=${source} url=${url} ts=${ts}`)
+
+    // Persist to Supabase if configured
+    const sbUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (sbUrl && sbKey) {
+      try {
+        const { createClient } = await import('@supabase/supabase-js')
+        const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } })
+        await sb.from('live_page_events').insert({
+          event_type: 'cta_click',
+          source,
+          url,
+          event_ts: new Date(ts),
+          created_at: new Date(),
+        })
+      } catch (err) {
+        console.error('[live-cta] Supabase insert failed:', err)
+      }
+    }
+
     return { success: true, tracked: true }
   })
 
@@ -15653,6 +15674,24 @@ If your heartbeat shows **no active task** and **no next task**:
     const body = request.body as Record<string, unknown>
     const referrer = body.referrer as string || 'direct'
     console.log(`[live-visit] ${new Date().toISOString()} referrer=${referrer}`)
+
+    // Persist to Supabase if configured
+    const sbUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+    const sbKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    if (sbUrl && sbKey) {
+      try {
+        const { createClient } = await import('@supabase/supabase-js')
+        const sb = createClient(sbUrl, sbKey, { auth: { persistSession: false } })
+        await sb.from('live_page_events').insert({
+          event_type: 'page_visit',
+          referrer,
+          created_at: new Date(),
+        })
+      } catch (err) {
+        console.error('[live-visit] Supabase insert failed:', err)
+      }
+    }
+
     return { success: true, visited: true }
   })
 
