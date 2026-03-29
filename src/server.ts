@@ -162,7 +162,7 @@ import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats }
 import { startOpenClawUsageSync, stopOpenClawUsageSync, syncOpenClawUsage } from './openclaw-usage-sync.js'
 import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
-import { canvasReadRoutes, formatRecency } from './canvas-routes.js'
+import { canvasReadRoutes, canvasPhase2Routes, formatRecency } from './canvas-routes.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
@@ -11428,7 +11428,15 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // canvas/activity-stream + canvas/attention → already in canvas-routes.ts plugin
+  // canvas/activity-stream + canvas/attention → registered below (were defined but never hooked up)
+  await app.register(canvasPhase2Routes, {
+    eventBus,
+    queueCanvasPushEvent,
+    taskManager: taskManager as any,
+    getDb,
+    activityRingBuffer,
+    activityStreamSubscribers,
+  } as any)
 
   app.post('/canvas/pulse', async (request, reply) => {
     const body = request.body as Record<string, unknown>
@@ -11944,18 +11952,27 @@ export async function createServer(): Promise<FastifyInstance> {
       const assignee = task.assignee
       if (!assignee || assignee === 'unassigned') continue
       const agentId = assignee.toLowerCase()
+      const canvasEntry = canvasStateMap.get(agentId)
+      const isDone = task.status === 'done' || task.status === 'cancelled'
+      const isBlocked = task.status === 'blocked'
+      const isWorking = task.status === 'doing'
       if (!agentStates[agentId]) {
-        // Get canvas state if exists, otherwise default based on task status
-        const canvasEntry = canvasStateMap.get(agentId)
-        const isDone = task.status === 'done' || task.status === 'cancelled'
-        const isBlocked = task.status === 'blocked'
-        const isWorking = task.status === 'doing'
+        // First task for this agent — create entry with state derived from canvas or task status
+        const lastMsg = (canvasEntry as any)?.lastMessage
         agentStates[agentId] = {
           state: canvasEntry?.state || (isDone ? 'ambient' : isBlocked ? 'attention' : isWorking ? 'working' : 'floor'),
           currentTask: task.title,
           updatedAt: task.updatedAt || Date.now(),
-          sourceTasks: [{ id: task.id, title: task.title, status: task.status }],
+          sourceTasks: [],
+          lastMessage: lastMsg,
         }
+      }
+      // Accumulate ALL tasks for this agent (not just the first one)
+      agentStates[agentId].sourceTasks.push({ id: task.id, title: task.title, status: task.status })
+      // currentTask = most-recently-updated task
+      if ((agentStates[agentId].updatedAt || 0) < (task.updatedAt || 0)) {
+        agentStates[agentId].currentTask = task.title
+        agentStates[agentId].updatedAt = task.updatedAt || Date.now()
       }
     }
 
