@@ -696,6 +696,23 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_agent_presence_log_agent ON agent_presence_log(agent, recorded_at);
       `,
     },
+    {
+      version: 28,
+      sql: `
+        -- Live tracking: persisted /live page events for funnel analytics
+        CREATE TABLE IF NOT EXISTS live_page_events (
+          id          TEXT PRIMARY KEY,
+          event_type  TEXT NOT NULL,
+          source      TEXT,
+          url         TEXT,
+          referrer    TEXT,
+          event_ts    INTEGER,
+          created_at  INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_page_events_type ON live_page_events(event_type);
+        CREATE INDEX IF NOT EXISTS idx_live_page_events_created ON live_page_events(created_at);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')

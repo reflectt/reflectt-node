@@ -15632,6 +15632,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
+  /**
    * POST /tracking/live-cta — Track /live page CTA clicks
    * Called by cloud app when user clicks "Start Free" on /live
    * task-1774294960543-v778wwmio
@@ -15642,6 +15643,18 @@ If your heartbeat shows **no active task** and **no next task**:
     const url = body.url as string || ''
     const ts = body.ts as number || Date.now()
     console.log(`[live-cta] ${new Date().toISOString()} source=${source} url=${url} ts=${ts}`)
+
+    // Persist to SQLite
+    try {
+      const db = getDb()
+      db.prepare(`
+        INSERT INTO live_page_events (id, event_type, source, url, event_ts, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(crypto.randomUUID(), 'cta_click', source, url, ts, Date.now())
+    } catch (err) {
+      console.error('[live-cta] SQLite insert failed:', err)
+    }
+
     return { success: true, tracked: true }
   })
 
@@ -15653,6 +15666,18 @@ If your heartbeat shows **no active task** and **no next task**:
     const body = request.body as Record<string, unknown>
     const referrer = body.referrer as string || 'direct'
     console.log(`[live-visit] ${new Date().toISOString()} referrer=${referrer}`)
+
+    // Persist to SQLite
+    try {
+      const db = getDb()
+      db.prepare(`
+        INSERT INTO live_page_events (id, event_type, referrer, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(crypto.randomUUID(), 'page_visit', referrer, Date.now())
+    } catch (err) {
+      console.error('[live-visit] SQLite insert failed:', err)
+    }
+
     return { success: true, visited: true }
   })
 
