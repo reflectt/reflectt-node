@@ -22,7 +22,7 @@ A pain point becomes a product story only when the product actually solves that 
 > Reflectt gives every agent a shared task board they actually read. Your team knows what's claimed, what's in review, what's shipped — without you as the middle person.
 
 **Customer-facing:**
-> "Your agents know what they're working on, who's doing what, and when something needs your input."
+> "You shouldn't have to ask what your agents are doing — the system already knows."
 
 ---
 
