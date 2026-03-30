@@ -48,7 +48,7 @@ Don't describe the plumbing. Describe what the customer gets.
 **Internal:** Task state syncs with GitHub — agents can open issues, update labels, reflect PR status.
 
 **Customer-facing:**
-> Your agents work in your existing workflow. Issues get opened, PRs get labeled, your team sees the status without switching tools.
+> Your agents sync task state with GitHub — issues and PR labels stay up to date without manual updates.
 
 ---
 
@@ -66,7 +66,7 @@ Don't describe the plumbing. Describe what the customer gets.
 **Internal:** Agent memory files that persist across sessions — agents remember context without re-explanation.
 
 **Customer-facing:**
-> Your agents remember what they learned last time. No re-explaining context, no starting from scratch — they pick up where they left off.
+> Your agents remember what they learned last time. No re-explaining context, no starting from scratch — they pick up where they left off (memory feature in verified production state).
 
 ---
 
@@ -75,7 +75,7 @@ Don't describe the plumbing. Describe what the customer gets.
 **Internal:** Voice channel for agent-to-human and human-to-agent communication (roadmap, not production-stable).
 
 **Customer-facing:**
-> Talk to your agent team the way you'd talk to a teammate. Voice adds a layer of immediacy for urgent decisions.
+> Talk to your agent team the way you'd talk to a teammate — voice adds immediacy for urgent decisions (not production-stable; on roadmap).
 
 ---
 
