@@ -43,7 +43,7 @@ A: Yes. Reflectt's coordination primitives (task board, heartbeat, reviewer hand
 
 **SMS / iMessage:**
 - Status: Direct path being restored (fix in progress)
-- Current issue: SMS/iMessage contact path was broken; team is actively working it
+- Current issue: SMS — direct path; iMessage — separate integration, same restoration path contact path was broken; team is actively working it
 - Workaround: Other notification channels available while this is patched
 
 **GitHub:**
@@ -82,7 +82,7 @@ No. If you're running one agent doing one task, Reflectt is overkill. The coordi
 
 ## What's Coming
 
-- SMS/iMessage direct path restoration (imminent)
+- SMS — direct path; iMessage — separate integration, same restoration path direct path restoration (imminent)
 - Email send path stabilization (in progress)
 - Attribution report auth closure (closing out)
 - Mobile canvas UX polish (in progress)
