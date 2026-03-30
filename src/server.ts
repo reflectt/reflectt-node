@@ -3769,6 +3769,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ============ REMOTE MANAGEMENT API ============
   registerManageRoutes(app, {
     getBuildInfo: () => getBuildInfo() as unknown as Record<string, unknown>,
     getHealthStats: async () => {
@@ -3785,6 +3786,7 @@ export async function createServer(): Promise<FastifyInstance> {
     getStoredLogPath,
   })
 
+  // ============ RELEASE / DEPLOY ENDPOINTS ============
 
   app.get('/release/status', async () => {
     return releaseManager.getDeployStatus()
@@ -3835,6 +3837,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ============ DASHBOARD ============
 
   // Root redirects to dashboard — first thing a user sees
   app.get('/', async (_request, reply) => {
@@ -4034,6 +4037,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ============ CHAT ENDPOINTS ============
 
   // WebSocket for real-time chat (with ping/pong heartbeat)
   app.get('/chat/ws', { websocket: true }, (socket: WebSocket) => {
@@ -4750,6 +4754,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { messages: thread, count: thread.length }
   })
 
+  // ============ INBOX ENDPOINTS ============
 
   // Get inbox for an agent
   app.get<{ Params: { agent: string } }>('/inbox/:agent', async (request, reply) => {
@@ -4936,6 +4941,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, room }
   })
 
+  // ============ TASK ENDPOINTS ============
 
   const normalizeTeamId = (value: unknown): string | undefined => {
     if (typeof value !== 'string') return undefined
@@ -11365,7 +11371,17 @@ export async function createServer(): Promise<FastifyInstance> {
     })
   })()
 
-
+  // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
+  // Phase 1: states, slots, slots/all, rejections
+  // Phase 2: presence, state, flow-score, team/mood
+  await app.register(canvasReadRoutes, {
+    canvasStateMap,
+    canvasSlots: { getActive: () => canvasSlots.getActive(), getAll: () => canvasSlots.getAll(), getStats: () => canvasSlots.getStats() },
+    agentIdentityColors: AGENT_IDENTITY_COLORS,
+    getDb,
+    getRecentRejections,
+    flowExpressionLog,
+  } as any)
   // ── Canvas interactive routes (extracted to src/canvas-interactive.ts) ─────
   // POST /canvas/gaze, POST /canvas/briefing, POST /canvas/victory,
   // POST /canvas/spark, POST /canvas/express, GET /canvas/render/stream
@@ -11420,29 +11436,11 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
-  // Phase 1: states, slots, slots/all, rejections
-  // Phase 2: presence, state, flow-score, team/mood, attention, activity-stream
-  // Note: registered here (after activityRingBuffer/activityStreamSubscribers are defined)
-  // to satisfy CanvasRouteDeps contract.
-  await app.register(canvasReadRoutes, {
-    canvasStateMap,
-    canvasSlots: { getActive: () => canvasSlots.getActive(), getAll: () => canvasSlots.getAll(), getStats: () => canvasSlots.getStats() },
-    agentIdentityColors: AGENT_IDENTITY_COLORS,
-    getDb,
-    getRecentRejections,
-    flowExpressionLog,
-    taskManager,
-    activityRingBuffer,
-    activityStreamSubscribers,
-  } as any)
-
-  // ── Canvas Phase 2 routes (attention, activity-stream) ─────────────────
-  // Extracted to canvas-routes.ts but orphaned (not registered) — fix here.
+  // canvas/activity-stream + canvas/attention → registered below (were defined but never hooked up)
   await app.register(canvasPhase2Routes, {
     eventBus,
     queueCanvasPushEvent,
-    taskManager,
+    taskManager: taskManager as any,
     getDb,
     activityRingBuffer,
     activityStreamSubscribers,
@@ -14473,6 +14471,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { instrumentation }
   })
 
+  // ============ EXPERIMENT ENDPOINTS ============
 
   // Create experiment
   app.post('/experiments', async (request) => {
@@ -14491,6 +14490,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { experiments, count: experiments.length }
   })
 
+  // ============ RESEARCH ENDPOINTS ============
 
   app.get('/research/requests', async (request) => {
     const query = request.query as Record<string, string>
@@ -14613,6 +14613,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ============ MEMORY ENDPOINTS ============
 
   // Get all memory files for an agent
   app.get<{ Params: { agent: string } }>('/memory/:agent', async (request) => {
@@ -14652,6 +14653,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ============ PRESENCE ENDPOINTS ============
 
   // Update agent presence
   app.post<{ Params: { agent: string } }>('/presence/:agent', async (request) => {
@@ -15134,6 +15136,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { agent, timeline: sliced, count: sliced.length }
   })
 
+  // ============ TEAM MANIFEST ENDPOINT ============
 
   function parseMarkdownSections(markdown: string): Array<{ heading: string; level: number; content: string }> {
     const sections: Array<{ heading: string; level: number; content: string }> = []
@@ -15197,9 +15200,11 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ============ ACTIVITY FEED ENDPOINT ============
 
   // Legacy activity endpoint replaced by unified /activity timeline (see above)
 
+  // ============ SECRET VAULT ENDPOINTS ============
 
   // List secrets (metadata only — no plaintext)
   app.get('/secrets', async () => {
@@ -15269,6 +15274,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, entries: vault.getAuditLog(limit) }
   })
 
+  // ============ GITHUB APPROVALS / PER-ACTOR AUTH (OPS) ============
 
   // Whoami for a given actor's token (never returns token)
   app.get<{ Params: { actor: string } }>('/github/whoami/:actor', async (request, reply) => {
@@ -15405,6 +15411,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, pr_url: prUrl, actor, source: resolved.source }
   })
 
+  // ============ ANALYTICS ENDPOINTS ============
 
   // Get Vercel analytics for forAgents.dev
   app.get('/analytics/foragents', async (request) => {
@@ -16007,6 +16014,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return payload
   })
 
+  // ============ CONTENT ENDPOINTS ============
 
   // Log a published piece of content
   app.post('/content/published', async (request) => {
@@ -16164,6 +16172,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { stats }
   })
 
+  // ============ EVENT ENDPOINTS ============
 
   // Subscribe to events via SSE
   app.get('/events/subscribe', async (request, reply) => {
@@ -16220,6 +16229,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ============ DATABASE ============
 
   app.get('/db/status', async () => {
     const { getDb } = await import('./db.js')
@@ -16244,6 +16254,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ============ CLOUD INTEGRATION (see docs/CLOUD_ENDPOINTS.md) ============
 
   app.get('/cloud/status', async () => {
     const { getCloudStatus, getConnectionHealth, getConnectionEvents } = await import('./cloud.js')
@@ -16306,6 +16317,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ============ HOST PROVISIONING ============
 
   const provisioning = getProvisioningManager()
   provisioning.setVault(vault)
@@ -16398,6 +16410,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, message: 'Webhook removed' }
   })
 
+  // ============ WEBHOOK DELIVERY ENGINE ============
 
   const webhookDelivery = getWebhookDeliveryManager()
   webhookDelivery.init()
@@ -16658,6 +16671,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, event }
   })
 
+  // ============ PORTABILITY (Export / Import) ============
 
   // One-click export: config, secrets, webhooks, team files
   app.get('/portability/export', async () => {
@@ -16728,6 +16742,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ============ NOTIFICATION PREFERENCES ============
 
   const notificationManager = getNotificationManager()
   notificationManager.init()
@@ -16794,6 +16809,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, routing: result }
   })
 
+  // ============ CLOUD CONNECTIVITY STATE ============
 
   const connectivity = getConnectivityManager()
 
@@ -16844,6 +16860,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, state: connectivity.getState() }
   })
 
+  // ============ WATCHDOG DE-NOISE ============
 
   // Watchdog suppression status: show what's being suppressed and why
   app.get('/health/watchdog/suppression', async () => {
@@ -16940,6 +16957,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ============ OPENCLAW ENDPOINTS ============
 
   // OpenClaw status — show real config state + remediation when missing
   app.get('/openclaw/status', async () => {
@@ -16971,6 +16989,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // ============ MCP ENDPOINTS ============
 
   // MCP HTTP endpoint (new protocol)
   app.all('/mcp', async (request, reply) => {
