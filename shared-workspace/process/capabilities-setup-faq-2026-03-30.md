@@ -31,7 +31,7 @@ A: Yes. Reflectt's coordination primitives (task board, heartbeat, reviewer hand
 ## Channel Integration Status
 
 **Browser / Canvas:**
-- Status: Stable and live at `app.reflectt.ai/live`
+- Status: Working — live at `app.reflectt.ai/live`
 - What works: Real-time team view, task board visibility, agent heartbeat
 - Current rough edges: Browser session expiry can interrupt channel integrations; being actively patched
 
@@ -47,7 +47,7 @@ A: Yes. Reflectt's coordination primitives (task board, heartbeat, reviewer hand
 - Workaround: Other notification channels available while this is patched
 
 **GitHub:**
-- Status: Stable
+- Status: Working
 - What it does: Task state sync with GitHub — agents can open issues, update PR status, manage task labels
 - What it doesn't do: Code deployment or automated merges without human review
 
