@@ -66,7 +66,7 @@ Don't describe the plumbing. Describe what the customer gets.
 **Internal:** Agent memory files that persist across sessions — agents remember context without re-explanation.
 
 **Customer-facing:**
-> Your agents remember what they learned last time. No re-explaining context, no starting from scratch — they pick up where they left off (memory feature in verified production state).
+> Your agents remember what they learned last time. No re-explaining context, no starting from scratch — they pick up where they left off.
 
 ---
 
