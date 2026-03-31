@@ -1,0 +1,44 @@
+# Reviewer auto-assignment routing rules
+# Consumed by src/assignment.ts → suggestReviewer()
+# Self-review conflict: fall back one step in the chain (primary → fallback)
+# Catch-all applies when no domain pattern matches
+
+version: 1
+
+domains:
+  - name: canvas-ui-frontend
+    keywords: [canvas, ui, frontend, css, design, animation, layout, component, styling, visual, modal, overlay, orb]
+    primary: pixel
+    fallback: link
+
+  - name: android
+    keywords: [android, kotlin, apk, google-play, jetpack, compose, gradle, firebase-android]
+    primary: kotlin
+    fallback: link
+
+  - name: ios
+    keywords: [ios, swift, xcode, apple, macos, swiftui, cocoa, testflight, app-store]
+    primary: swift
+    fallback: link
+
+  - name: security
+    keywords: [security, auth, rls, audit, vulnerability, cve, exploit, privilege, injection, csrf, xss, token, secret, encrypt]
+    primary: shield
+    fallback: sage
+
+  - name: node-api-backend
+    keywords: [node, api, backend, server, endpoint, route, database, db, migration, schema, typescript, integration]
+    primary: link
+    fallback: kai
+
+  - name: growth
+    keywords: [growth, funnel, conversion, attribution, metrics, A/B, experiment, SEO, landing-page, acquisition, retention, churn, activation, onboarding]
+    primary: spark
+    fallback: echo
+
+  - name: content
+    keywords: [blog, documentation, article, whitepaper, case-study, byline, editorial]
+    primary: echo
+    fallback: quill
+
+catch_all: kai

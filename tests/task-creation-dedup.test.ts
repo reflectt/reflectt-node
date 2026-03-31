@@ -51,7 +51,7 @@ function testTask(overrides: Record<string, unknown> = {}) {
 }
 
 describe('Task creation dedup', () => {
-  it('rejects duplicate title+assignee with 409', async () => {
+  it('collapses duplicate title+assignee — returns 200 with deduplicated:true', async () => {
     const assignee = `dedup-dup-${Date.now()}`
     const title = `Dedup duplicate check ${Date.now()}`
     const task = dedupTask({ title, assignee })
@@ -62,12 +62,13 @@ describe('Task creation dedup', () => {
     expect(body1.success).toBe(true)
     createdIds.push(body1.task.id)
 
-    // Second identical submission → 409
+    // Second identical submission → 200 collapse (not 409) so agents don't retry
     const res2 = await app.inject({ method: 'POST', url: '/tasks', payload: task })
     const body2 = JSON.parse(res2.body)
-    expect(res2.statusCode).toBe(409)
-    expect(body2.code).toBe('DUPLICATE_TASK')
-    expect(body2.existing_id).toBe(body1.task.id)
+    expect(res2.statusCode).toBe(200)
+    expect(body2.success).toBe(true)
+    expect(body2.deduplicated).toBe(true)
+    expect(body2.task.id).toBe(body1.task.id)
   })
 
   it('case-insensitive title matching', async () => {
@@ -81,8 +82,9 @@ describe('Task creation dedup', () => {
     createdIds.push(JSON.parse(res1.body).task.id)
 
     const res2 = await app.inject({ method: 'POST', url: '/tasks', payload: task2 })
-    expect(res2.statusCode).toBe(409)
-    expect(JSON.parse(res2.body).code).toBe('DUPLICATE_TASK')
+    const body2 = JSON.parse(res2.body)
+    expect(res2.statusCode).toBe(200)
+    expect(body2.deduplicated).toBe(true)
   })
 
   it('allows same title with different assignee', async () => {
@@ -141,7 +143,7 @@ describe('Task creation dedup', () => {
     createdIds.push(JSON.parse(res2.body).task.id)
   })
 
-  it('returns existing_id and existing_status in 409 response', async () => {
+  it('returns collapsed task and hint in 200 dedup response', async () => {
     const assignee = `dedup-detail-${Date.now()}`
     const title = `Dedup detail check ${Date.now()}`
     const task = dedupTask({ title, assignee })
@@ -152,8 +154,10 @@ describe('Task creation dedup', () => {
 
     const res2 = await app.inject({ method: 'POST', url: '/tasks', payload: task })
     const body = JSON.parse(res2.body)
-    expect(body.existing_id).toBe(id1)
-    expect(body.existing_status).toBeDefined()
+    expect(res2.statusCode).toBe(200)
+    expect(body.deduplicated).toBe(true)
+    expect(body.task.id).toBe(id1)
+    expect(body.task.status).toBeDefined()
     expect(body.hint).toContain(assignee)
   })
 })

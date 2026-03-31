@@ -121,19 +121,32 @@ Verify the gateway connection: dashboard → your host → **Health**. If gatewa
 Prefer to run reflectt-node yourself? Skip the wizard:
 
 ```bash
+# 1. Install
 npm install -g reflectt-node
+
+# 2. Initialize workspace
 reflectt init
+
+# 3. Start the node
 reflectt start
+
+# 4. Verify your setup (required before connecting)
+reflectt doctor
 ```
+
+`reflectt doctor` checks your Node version, port availability, network connectivity, and auth config. It takes about 5 seconds and tells you exactly what to fix if anything fails. **Run this before connecting** — it's the most common reason connections fail.
 
 Then connect to cloud: `reflectt host connect --join-token <token>`
 
 Get your join token at app.reflectt.ai → your team → Settings → Join token.
 
+> **Cloud onboarding UI:** After `reflectt start`, the dashboard shows a "Verify your setup" step. It polls `GET /activation/doctor-gate?userId=<userId>` and enables the connect button once doctor passes. See `process/TASK-73ydeyx9n.md` for full UI spec.
+
 ---
 
 ## Related
 
+- [First-use verification (browser, SMS, email)](./FIRST-USE-VERIFICATION.md)
 - [Gateway setup](./gateway-setup.md)
 - [Agent API reference](http://localhost:4445/capabilities) (once your node is running)
 - [reflectt-node on GitHub](https://github.com/reflectt/reflectt-node)

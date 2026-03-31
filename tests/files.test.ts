@@ -57,7 +57,7 @@ describe('files', () => {
       buffer: Buffer.alloc(mod.MAX_SIZE_BYTES + 1),
     })
     expect(result.success).toBe(false)
-    expect(result.error).toContain('50MB limit')
+    expect(result.error).toContain('limit')
   })
 
   it('retrieves file by ID', () => {

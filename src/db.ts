@@ -521,6 +521,181 @@ export function runMigrations(db: Database.Database): void {
         CREATE INDEX IF NOT EXISTS idx_tasks_due_at ON tasks(due_at);
       `,
     },
+    {
+      version: 21,
+      sql: `
+        -- Agent runs: durable work sessions
+        CREATE TABLE IF NOT EXISTS agent_runs (
+          id              TEXT PRIMARY KEY,
+          agent_id        TEXT NOT NULL,
+          team_id         TEXT NOT NULL,
+          objective       TEXT NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'idle',
+          parent_run_id   TEXT,
+          context_snapshot TEXT DEFAULT '{}',
+          artifacts       TEXT DEFAULT '[]',
+          started_at      INTEGER NOT NULL,
+          updated_at      INTEGER NOT NULL,
+          completed_at    INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_team ON agent_runs(agent_id, team_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
+
+        -- Agent events: append-only event log
+        CREATE TABLE IF NOT EXISTS agent_events (
+          id          TEXT PRIMARY KEY,
+          run_id      TEXT,
+          agent_id    TEXT NOT NULL,
+          event_type  TEXT NOT NULL,
+          payload     TEXT NOT NULL DEFAULT '{}',
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_events_run ON agent_events(run_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_events_agent ON agent_events(agent_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_events_type ON agent_events(event_type, created_at);
+      `,
+    },
+    {
+      version: 22,
+      sql: `
+        -- Agent memories: persistent key-value with tags and expiration
+        CREATE TABLE IF NOT EXISTS agent_memories (
+          id          TEXT PRIMARY KEY,
+          agent_id    TEXT NOT NULL,
+          namespace   TEXT NOT NULL DEFAULT 'default',
+          key         TEXT NOT NULL,
+          content     TEXT NOT NULL,
+          tags        TEXT NOT NULL DEFAULT '[]',
+          expires_at  INTEGER,
+          created_at  INTEGER NOT NULL,
+          updated_at  INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_memories_unique ON agent_memories(agent_id, namespace, key);
+        CREATE INDEX IF NOT EXISTS idx_agent_memories_agent ON agent_memories(agent_id, namespace, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_memories_expires ON agent_memories(expires_at) WHERE expires_at IS NOT NULL;
+      `,
+    },
+    {
+      version: 23,
+      sql: `
+        -- Agent config: per-agent model preference, cost cap, and settings
+        CREATE TABLE IF NOT EXISTS agent_config (
+          agent_id        TEXT PRIMARY KEY,
+          team_id         TEXT NOT NULL DEFAULT 'default',
+          model           TEXT,
+          fallback_model  TEXT,
+          cost_cap_daily  REAL,
+          cost_cap_monthly REAL,
+          max_tokens_per_call INTEGER,
+          settings        TEXT NOT NULL DEFAULT '{}',
+          created_at      INTEGER NOT NULL,
+          updated_at      INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_config_team ON agent_config(team_id);
+      `,
+    },
+    {
+      version: 24,
+      sql: `
+        -- Agent messages: Host-native agent-to-agent messaging
+        CREATE TABLE IF NOT EXISTS agent_messages (
+          id          TEXT PRIMARY KEY,
+          from_agent  TEXT NOT NULL,
+          to_agent    TEXT NOT NULL,
+          channel     TEXT NOT NULL DEFAULT 'direct',
+          content     TEXT NOT NULL,
+          metadata    TEXT NOT NULL DEFAULT '{}',
+          read_at     INTEGER,
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_messages_to ON agent_messages(to_agent, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_messages_channel ON agent_messages(channel, created_at);
+        CREATE INDEX IF NOT EXISTS idx_agent_messages_unread ON agent_messages(to_agent, read_at) WHERE read_at IS NULL;
+        -- Artifacts: Host-native artifact store linked to runs/tasks
+        CREATE TABLE IF NOT EXISTS artifacts (
+          id          TEXT PRIMARY KEY,
+          agent_id    TEXT NOT NULL,
+          team_id     TEXT NOT NULL DEFAULT 'default',
+          run_id      TEXT,
+          task_id     TEXT,
+          name        TEXT NOT NULL,
+          mime_type   TEXT NOT NULL DEFAULT 'application/octet-stream',
+          size_bytes  INTEGER NOT NULL DEFAULT 0,
+          storage_path TEXT NOT NULL,
+          metadata    TEXT NOT NULL DEFAULT '{}',
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_artifacts_agent ON artifacts(agent_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_artifacts_run ON artifacts(run_id) WHERE run_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_artifacts_task ON artifacts(task_id) WHERE task_id IS NOT NULL;      `,
+    },
+    {
+      version: 25,
+      sql: `
+        -- Webhook payloads: persisted inbound email/SMS/webhook bodies
+        CREATE TABLE IF NOT EXISTS webhook_payloads (
+          id          TEXT PRIMARY KEY,
+          source      TEXT NOT NULL,
+          event_type  TEXT NOT NULL,
+          agent_id    TEXT,
+          body        TEXT NOT NULL,
+          headers     TEXT NOT NULL DEFAULT '{}',
+          processed   INTEGER NOT NULL DEFAULT 0,
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_webhook_payloads_source ON webhook_payloads(source, created_at);
+        CREATE INDEX IF NOT EXISTS idx_webhook_payloads_agent ON webhook_payloads(agent_id, created_at) WHERE agent_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_webhook_payloads_unprocessed ON webhook_payloads(processed, created_at) WHERE processed = 0;      `,
+    },
+    {
+      version: 26,
+      sql: `
+        -- Canvas session turns: write-through from in-memory Map for restart durability
+        CREATE TABLE IF NOT EXISTS canvas_sessions (
+          session_id  TEXT NOT NULL,
+          role        TEXT NOT NULL CHECK(role IN ('user','assistant')),
+          content     TEXT NOT NULL,
+          ts          INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_canvas_sessions_id_ts ON canvas_sessions(session_id, ts);
+      `,
+    },
+    {
+      version: 27,
+      sql: `
+        -- Agent notifications: structured notification delivery with ack workflow
+        CREATE TABLE IF NOT EXISTS agent_notifications (
+          id            TEXT PRIMARY KEY,
+          target_agent  TEXT NOT NULL,
+          source_agent  TEXT,
+          type          TEXT NOT NULL DEFAULT 'info',
+          title         TEXT NOT NULL,
+          body          TEXT,
+          priority      TEXT NOT NULL DEFAULT 'medium',
+          status        TEXT NOT NULL DEFAULT 'pending',
+          ack_decision  TEXT,
+          ack_at        INTEGER,
+          task_id       TEXT,
+          metadata      TEXT,
+          created_at    INTEGER NOT NULL,
+          expires_at    INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_notif_target ON agent_notifications(target_agent, status);
+        CREATE INDEX IF NOT EXISTS idx_agent_notif_created ON agent_notifications(created_at);
+
+        -- Agent presence log: historical presence state for analytics
+        CREATE TABLE IF NOT EXISTS agent_presence_log (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          agent       TEXT NOT NULL,
+          status      TEXT NOT NULL,
+          task        TEXT,
+          focus_level TEXT,
+          metadata    TEXT,
+          recorded_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_presence_log_agent ON agent_presence_log(agent, recorded_at);
+      `,
+    },
   ]
 
   const insertMigration = db.prepare('INSERT INTO _migrations (version) VALUES (?)')
@@ -555,8 +730,14 @@ export function runMigrations(db: Database.Database): void {
     { version: 16, tables: ['hosts'] },
     { version: 17, tables: ['system_loop_ticks'] },
     { version: 19, tables: ['kv'] },
+    { version: 21, tables: ['agent_runs', 'agent_events'] },
+    { version: 22, tables: ['agent_memories'] },
+    { version: 23, tables: ['agent_config'] },
+    { version: 24, tables: ['agent_messages', 'artifacts'] },
+    { version: 25, tables: ['webhook_payloads'] },
+    { version: 26, tables: ['canvas_sessions'] },
+    { version: 27, tables: ['agent_notifications', 'agent_presence_log'] },
   ]
-
   const existingTables = new Set(
     (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>)
       .map(r => r.name),

@@ -236,7 +236,314 @@ agents:
       - brand-copy
     wipCap: 1
 
+  - name: cos
+    role: chief-of-staff
+    description: Alignment and escalation router. Maintains decision log, tracks who owes what by when, packages escalations, prevents thrash. No final product/design decisions.
+    affinityTags:
+      - alignment
+      - escalation
+      - decisions
+      - process
+      - coordination
+      - strategy
+    routingMode: opt-in
+    neverRouteUnlessLane: alignment
+    alwaysRoute:
+      - alignment
+      - escalation
+      - process
+    neverRoute:
+      - backend
+      - frontend
+      - ui
+      - design
+      - security-review
+      - code-review
+    wipCap: 2
+
+  - name: coo
+    role: operations
+    description: Board execution, lane health, and ops monitoring. Owns board hygiene, task gate enforcement, EOD signal generation, SOUL.md patch cycle.
+    affinityTags:
+      - ops
+      - board-health
+      - lane-health
+      - monitoring
+      - execution
+      - watchdog
+    routingMode: opt-in
+    neverRouteUnlessLane: ops
+    alwaysRoute:
+      - ops
+      - board-health
+      - execution
+    neverRoute:
+      - backend
+      - frontend
+      - ui
+      - design
+    wipCap: 2
+
+  - name: pm
+    role: product-manager
+    description: Product spec, acceptance criteria, lane metrics, and shipping reports. Translates business goals into scoped tasks.
+    affinityTags:
+      - product
+      - spec
+      - ac
+      - reporting
+      - metrics
+      - prioritization
+    routingMode: opt-in
+    neverRouteUnlessLane: product
+    alwaysRoute:
+      - product
+      - spec
+      - reporting
+    neverRoute:
+      - backend
+      - ui
+      - security-review
+    wipCap: 2
+
+  - name: qa
+    role: quality
+    description: Regression testing, audit checklists, mobile QA, and test coverage validation.
+    affinityTags:
+      - qa
+      - testing
+      - regression
+      - audit
+      - checklist
+      - coverage
+      - mobile-qa
+    alwaysRoute:
+      - qa
+      - testing
+      - regression
+    neverRoute:
+      - brand-copy
+      - marketing
+    wipCap: 2
+
+  - name: swift
+    role: ios-engineer
+    description: iOS app development — Swift/SwiftUI, TestFlight pipeline, Apple Watch companion, App Store submission.
+    affinityTags:
+      - ios
+      - swift
+      - swiftui
+      - testflight
+      - apple
+      - watchos
+      - mobile
+    alwaysRoute:
+      - ios
+      - swift
+      - apple
+    neverRoute:
+      - android
+      - backend
+      - design
+    wipCap: 2
+
+  - name: kotlin
+    role: android-engineer
+    description: Android app development — Kotlin, Play Store submission, Firebase integration, CI/CD pipeline.
+    affinityTags:
+      - android
+      - kotlin
+      - play-store
+      - firebase
+      - mobile
+      - gradle
+    alwaysRoute:
+      - android
+      - kotlin
+      - play-store
+    neverRoute:
+      - ios
+      - backend
+      - design
+    wipCap: 2
+
+  - name: shield
+    role: security
+    description: Security audits — RLS policy review, IDOR checks, rate limiting, env var hygiene, Vercel config.
+    affinityTags:
+      - security
+      - rls
+      - audit
+      - idor
+      - rate-limiting
+      - env
+      - compliance
+    alwaysRoute:
+      - security
+      - rls
+      - security-review
+    neverRoute:
+      - brand-copy
+      - marketing
+      - design
+    protectedDomains:
+      - security
+    wipCap: 1
+
+  - name: artdirector
+    role: art-director
+    description: Visual design direction — host detail pages, design specs, screenshot audits, mobile layout direction.
+    affinityTags:
+      - design
+      - visual
+      - layout
+      - art-direction
+      - spec
+      - mockup
+    routingMode: opt-in
+    neverRouteUnlessLane: design
+    alwaysRoute:
+      - art-direction
+      - design-spec
+    neverRoute:
+      - backend
+      - security-review
+      - code-review
+    wipCap: 1
+
+  - name: uipolish
+    role: ui-polisher
+    description: Frontend polish — mobile layout fixes, density improvements, empty states, scroll affordances, visual regressions.
+    affinityTags:
+      - ui
+      - polish
+      - mobile
+      - css
+      - layout
+      - visual
+      - frontend
+    alwaysRoute:
+      - ui-polish
+      - visual-polish
+      - mobile
+    neverRoute:
+      - backend
+      - security-review
+      - api
+    wipCap: 2
+
+  - name: kindling
+    role: community
+    description: Community engagement — Discord posts, UTM tracking, community onboarding content.
+    affinityTags:
+      - community
+      - discord
+      - utm
+      - onboarding-content
+      - social
+    routingMode: opt-in
+    neverRouteUnlessLane: community
+    alwaysRoute:
+      - community
+      - discord
+    neverRoute:
+      - backend
+      - security-review
+      - code-review
+    wipCap: 1
+
+  - name: quill
+    role: writer
+    description: Long-form content — dev.to articles, changelogs, shipping summaries, community posts.
+    affinityTags:
+      - writing
+      - content
+      - changelog
+      - blog
+      - devto
+      - community-post
+    routingMode: opt-in
+    neverRouteUnlessLane: content
+    alwaysRoute:
+      - writing
+      - changelog
+      - blog
+    neverRoute:
+      - backend
+      - security-review
+      - code-review
+      - ui
+    wipCap: 1
+
+  - name: funnel
+    role: growth-funnel
+    description: Conversion funnel optimization — install drop-off fixes, onboarding UX, PATH guidance, curl installer.
+    affinityTags:
+      - funnel
+      - conversion
+      - install
+      - onboarding
+      - growth
+      - drop-off
+    alwaysRoute:
+      - funnel
+      - install
+      - onboarding-ux
+    neverRoute:
+      - security-review
+      - backend-infra
+    wipCap: 1
+
+  - name: attribution
+    role: analytics
+    description: Cost and attribution analytics — cost dashboards, spend alerts, model effectiveness tracking, UTM attribution.
+    affinityTags:
+      - analytics
+      - cost
+      - attribution
+      - spend
+      - reporting
+      - dashboard
+      - metrics
+    alwaysRoute:
+      - analytics
+      - cost-tracking
+      - attribution
+    neverRoute:
+      - security-review
+      - brand-copy
+    wipCap: 1
+
   # Removed agent-1/2/3 fallback entries — were leaking into dashboard as ghost agents
+
+# Decision authority — what the team owns vs. what requires a human
+# This section survives cold-start and new installs.
+# Agents reading this on first boot should NOT default to Ryan for decisions in the team-decides list.
+decision_authority:
+  team_decides:
+    - Product feature scope and prioritization (P0/P1/P2/P3 assignment)
+    - Architecture and technical decisions (API shape, data model, infra choices)
+    - Pricing tier structure and copy
+    - PR merges within approved feature scope
+    - Task creation, assignment, reassignment, and cancellation
+    - Agent role definitions and team composition changes
+    - API spend thresholds and monitoring rules
+    - Design, UX, and content decisions
+    - Marketing copy, social posts, and community messaging
+    - Internal process decisions (SOUL.md patches, PROGRAM.md updates, TEAM-STANDARDS.md)
+    - Review approvals and rejections
+    - Budget allocation between work streams (within overall investment context)
+    - Continuity loop configuration and agent protocols
+  escalate_to_human:
+    - External credentials and secrets (Apple Developer enrollment, Play Console, API keys, OAuth tokens)
+    - Legal agreements, terms of service, and compliance sign-offs
+    - Founder vision conflicts or major strategic pivots (e.g., changing the core product direction)
+    - Privacy policy content and publication (requires human approval before going live)
+    - External service account creation requiring identity verification (app store developer accounts)
+    - Any decision where a mistake could cause irreversible public harm or legal liability
+  escalation_channel: cloud app task assignment or email — never #general chat @mention
+  note: When in doubt, make the call. A reversible decision made by the team beats a correct decision that
+        waits for Ryan. Escalate only when the decision is genuinely irreversible or legally significant.
 
 # Lane definitions for ready-queue engine.
 # Each lane groups agents into a work stream with floor + WIP controls.
@@ -244,17 +551,17 @@ agents:
 # wipLimit   — max simultaneous doing tasks per agent (/tasks/next enforces this)
 lanes:
   - name: engineering
-    agents: [link]
+    agents: [link, swift, kotlin]
     readyFloor: 2
     wipLimit: 2
 
   - name: design
-    agents: [pixel]
+    agents: [pixel, artdirector, uipolish]
     readyFloor: 1
     wipLimit: 1
 
   - name: operations
-    agents: [sage, rhythm]
+    agents: [sage, rhythm, coo, cos, pm, qa]
     readyFloor: 1
     wipLimit: 1
 
@@ -264,11 +571,16 @@ lanes:
     wipLimit: 1
 
   - name: growth
-    agents: [spark]
+    agents: [spark, funnel, attribution]
     readyFloor: 1
     wipLimit: 1
 
   - name: content
-    agents: [echo]
+    agents: [echo, quill, kindling]
+    readyFloor: 1
+    wipLimit: 1
+
+  - name: security
+    agents: [shield]
     readyFloor: 1
     wipLimit: 1

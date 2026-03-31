@@ -1,0 +1,195 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Reflectt Design Tokens v0
+   ═══════════════════════════════════════════════════════════════════════
+   Single source of truth for all visual values across web, iOS, Android.
+   Platform implementations should map these to native equivalents:
+   - iOS: UIColor extensions + CGFloat constants
+   - Android: colors.xml + dimens.xml + attrs.xml
+   - Web: CSS custom properties (this file)
+
+   Usage: @import url('/design-tokens.css');
+   Or: <link rel="stylesheet" href="/design-tokens.css">
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Brand Colors ─────────────────────────────────────────────────── */
+  --color-brand-primary: #7C3AED;       /* Purple 600 — main brand */
+  --color-brand-primary-light: #A78BFA; /* Purple 400 — hover/active */
+  --color-brand-primary-dark: #5B21B6;  /* Purple 800 — pressed */
+  --color-brand-accent: #8B5CF6;        /* Purple 500 — secondary accent */
+
+  /* ── Semantic Colors ──────────────────────────────────────────────── */
+  --color-success: #10B981;       /* Emerald 500 */
+  --color-success-bg: #D1FAE5;   /* Emerald 100 */
+  --color-warning: #F59E0B;       /* Amber 500 */
+  --color-warning-bg: #FEF3C7;   /* Amber 100 */
+  --color-error: #EF4444;         /* Red 500 */
+  --color-error-bg: #FEE2E2;     /* Red 100 */
+  --color-info: #3B82F6;          /* Blue 500 */
+  --color-info-bg: #DBEAFE;      /* Blue 100 */
+
+  /* ── Canvas State Colors ──────────────────────────────────────────── */
+  /* Maps to the 8-state machine from interface-os-v0-state-machine.html */
+  --color-state-floor: #1F2937;          /* Gray 800 — resting */
+  --color-state-listening: #7C3AED;      /* Purple 600 — active listening */
+  --color-state-thinking: #6366F1;       /* Indigo 500 — processing */
+  --color-state-rendering: #8B5CF6;      /* Purple 500 — outputting */
+  --color-state-ambient: #374151;        /* Gray 700 — passive monitoring */
+  --color-state-decision: #F59E0B;       /* Amber 500 — needs human input */
+  --color-state-urgent: #EF4444;         /* Red 500 — critical alert */
+  --color-state-handoff: #10B981;        /* Emerald 500 — transferring control */
+
+  /* ── Trust Indicator ──────────────────────────────────────────────── */
+  --color-trust-mic: #F87171;            /* Red 400 — visible without alarming */            /* Red — microphone active */
+  --color-trust-camera: #F87171;         /* Red — camera active */
+  --color-trust-mic-camera: #EF4444;  /* Red 500 — both sensors escalated */     /* Red 600 — both active */
+  --trust-indicator-size: 10px;
+  --trust-indicator-position-top: env(safe-area-inset-top, 8px);
+  --trust-indicator-position-left: 12px;
+  --trust-indicator-z-index: 9999;
+
+  /* ── Surface / Background ─────────────────────────────────────────── */
+  --color-bg-primary: #FFFFFF;
+  --color-bg-secondary: #F9FAFB;     /* Gray 50 */
+  --color-bg-tertiary: #F3F4F6;      /* Gray 100 */
+  --color-bg-elevated: #FFFFFF;
+  --color-bg-overlay: rgba(0, 0, 0, 0.5);
+  --color-bg-canvas: #0F0F0F;        /* Near-black for canvas surface */
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --color-text-primary: #111827;      /* Gray 900 */
+  --color-text-secondary: #6B7280;    /* Gray 500 */
+  --color-text-tertiary: #9CA3AF;     /* Gray 400 */
+  --color-text-inverse: #FFFFFF;
+  --color-text-link: #7C3AED;
+  --color-text-on-brand: #FFFFFF;
+
+  /* ── Borders ──────────────────────────────────────────────────────── */
+  --color-border-default: #E5E7EB;    /* Gray 200 */
+  --color-border-hover: #D1D5DB;      /* Gray 300 */
+  --color-border-focus: #7C3AED;
+  --color-border-error: #EF4444;
+
+  /* ── Typography ───────────────────────────────────────────────────── */
+  --font-family-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-family-mono: 'SF Mono', SFMono-Regular, ui-monospace, 'Cascadia Code', Menlo, monospace;
+
+  --font-size-xs: 0.75rem;     /* 12px */
+  --font-size-sm: 0.875rem;    /* 14px */
+  --font-size-base: 1rem;      /* 16px */
+  --font-size-lg: 1.125rem;    /* 18px */
+  --font-size-xl: 1.25rem;     /* 20px */
+  --font-size-2xl: 1.5rem;     /* 24px */
+  --font-size-3xl: 1.875rem;   /* 30px */
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+
+  /* ── Spacing ──────────────────────────────────────────────────────── */
+  --space-0: 0;
+  --space-1: 0.25rem;   /* 4px */
+  --space-2: 0.5rem;    /* 8px */
+  --space-3: 0.75rem;   /* 12px */
+  --space-4: 1rem;      /* 16px */
+  --space-5: 1.25rem;   /* 20px */
+  --space-6: 1.5rem;    /* 24px */
+  --space-8: 2rem;      /* 32px */
+  --space-10: 2.5rem;   /* 40px */
+  --space-12: 3rem;     /* 48px */
+  --space-16: 4rem;     /* 64px */
+
+  /* ── Border Radius ────────────────────────────────────────────────── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ──────────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-glow-brand: 0 0 20px rgba(124, 58, 237, 0.3);
+  --shadow-glow-urgent: 0 0 20px rgba(239, 68, 68, 0.4);
+
+  /* ── Transitions ──────────────────────────────────────────────────── */
+  --transition-fast: 150ms;
+  --transition-base: 250ms;
+  --transition-slow: 350ms;
+  --transition-canvas: 500ms;    /* Canvas state transitions */
+
+  --easing-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --easing-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --easing-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --easing-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --easing-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+  /* ── Z-Index Scale ────────────────────────────────────────────────── */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-popover: 500;
+  --z-toast: 600;
+  --z-override-bar: 800;      /* Persistent controls */
+  --z-trust-indicator: 9999;   /* Non-dismissable, always on top */
+
+  /* ── Interactive Elements ─────────────────────────────────────────── */
+  --tap-target-min: 44px;      /* WCAG minimum */
+  --tap-target-urgent: 52px;   /* Enlarged in urgent state */
+  --focus-ring: 0 0 0 3px rgba(124, 58, 237, 0.4);
+
+  /* ── Canvas / Orb ─────────────────────────────────────────────────── */
+  --orb-size-idle: 64px;
+  --orb-size-active: 64px;
+  --orb-size-transcript: 44px;   /* Shrinks when transcript appears */
+  --orb-glow-duration: 1.8s;
+  --orb-color: var(--color-brand-primary);
+
+  /* ── Override Bar ─────────────────────────────────────────────────── */
+  --override-bar-height: 52px;
+  --override-bar-bg: rgba(0, 0, 0, 0.85);
+  --override-bar-blur: 20px;
+
+  /* ── Presence Dot ─────────────────────────────────────────────────── */
+  --presence-dot-size: 8px;
+  --presence-dot-active: #10B981;    /* Online */
+  --presence-dot-idle: #F59E0B;      /* Away */
+  --presence-dot-offline: #6B7280;   /* Disconnected */
+}
+
+/* ── Dark Mode ──────────────────────────────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg-primary: #111827;
+    --color-bg-secondary: #1F2937;
+    --color-bg-tertiary: #374151;
+    --color-bg-elevated: #1F2937;
+    --color-bg-overlay: rgba(0, 0, 0, 0.7);
+
+    --color-text-primary: #F9FAFB;
+    --color-text-secondary: #9CA3AF;
+    --color-text-tertiary: #6B7280;
+
+    --color-border-default: #374151;
+    --color-border-hover: #4B5563;
+
+    --color-success-bg: rgba(16, 185, 129, 0.15);
+    --color-warning-bg: rgba(245, 158, 11, 0.15);
+    --color-error-bg: rgba(239, 68, 68, 0.15);
+    --color-info-bg: rgba(59, 130, 246, 0.15);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4);
+  }
+}

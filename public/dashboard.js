@@ -1457,6 +1457,7 @@ async function loadHealth() {
     const team = health.team || { blockers: [], overlaps: [], compliance: null, agents: [] };
     const agentsSummary = health.agentsSummary || { agents: [] };
     const idleNudgeDebug = health.idleNudgeDebug || null;
+    const scope = team.scope || null;
 
     healthAgentMap = new Map((team.agents || []).map(a => [String(a.agent || '').toLowerCase(), a]));
     const workflow = health.workflow || { agents: [] };
@@ -1524,6 +1525,16 @@ async function loadHealth() {
 
     const body = document.getElementById('health-body');
     let html = '';
+
+    if (scope) {
+      const orgHealthLink = scope.orgHealthUrl
+        ? ` <a href="${esc(scope.orgHealthUrl)}" target="_blank" rel="noopener">Open org-health</a>`
+        : '';
+      html += `<div class="blocker-item" style="border-left:4px solid var(--yellow);margin-bottom:12px">
+        <div class="blocker-agent">${esc(scope.label || 'Host-local health')}</div>
+        <div class="blocker-text">${esc(scope.message || '')}${orgHealthLink}</div>
+      </div>`;
+    }
 
     // Agent Health Grid
     if (displayAgents.length > 0) {
@@ -1633,7 +1644,7 @@ async function loadDoctorPage() {
     const rows = [
       ['Status', data.status ?? '—'],
       ['Version', data.version ?? '—'],
-      ['Uptime', data.uptime != null ? `${Math.floor(data.uptime / 60)}m ${data.uptime % 60}s` : '—'],
+      ['Uptime', data.uptime_seconds != null ? `${Math.floor(data.uptime_seconds / 60)}m ${data.uptime_seconds % 60}s` : '—'],
       ['PID', data.pid ?? data.runtime?.pid ?? '—'],
       ['Node', data.nodeVersion ?? data.runtime?.nodeVersion ?? '—'],
       ['Port', data.port ?? data.runtime?.port ?? '—'],
@@ -1803,6 +1814,18 @@ function normalizeEpochMs(v) {
   return v;
 }
 
+function hasReviewerDecision(task) {
+  const meta = task && task.metadata && typeof task.metadata === 'object' ? task.metadata : null;
+  const decision = meta && meta.reviewer_decision && typeof meta.reviewer_decision === 'object'
+    ? meta.reviewer_decision
+    : null;
+  return !!decision;
+}
+
+function shouldEscalateReviewerSla(task) {
+  return task && task.slaState === 'breach' && !hasReviewerDecision(task);
+}
+
 function renderReviewQueue() {
   const panel = document.getElementById('review-queue-panel');
   const body = document.getElementById('review-queue-body');
@@ -1817,10 +1840,16 @@ function renderReviewQueue() {
       const meta = t.metadata || {};
       const reviewState = typeof meta.review_state === 'string' ? meta.review_state : '';
       const reviewerDecision = meta.reviewer_decision;
+      const prMerged = !!(meta.pr_merged || (meta.pr_integrity && meta.pr_integrity.pr_merged));
+
+      // If reviewer approved AND PR is merged, this task is effectively done —
+      // don't page anyone. It just needs the status transition to 'done'.
+      // This prevents false-positive "Author action needed" alerts on completed work.
+      const isEffectivelyDone = prMerged && reviewerDecision && reviewerDecision.decision === 'approved';
 
       // If reviewer has acted (needs_author or reviewer_decision recorded), the ball is with the assignee.
       // We still track an SLA timer, but it should page the assignee (author), not the reviewer.
-      const waitOn = (reviewState === 'needs_author' || reviewerDecision != null) ? 'author' : 'reviewer';
+      const waitOn = isEffectivelyDone ? 'done' : (reviewState === 'needs_author' || reviewerDecision != null) ? 'author' : 'reviewer';
 
       const rawEntered = waitOn === 'author'
         ? (reviewerDecision && reviewerDecision.decidedAt) || meta.review_last_activity_at || meta.entered_validating_at || t.updatedAt || t.createdAt
@@ -1830,7 +1859,7 @@ function renderReviewQueue() {
       const timeInReview = Math.min(Math.max(0, now - enteredAt), MAX_REVIEW_MS);
       const slaState = getReviewSlaState(timeInReview);
 
-      return { ...t, timeInReview, slaState, enteredAt, waitOn, reviewState, hasReviewerDecision: reviewerDecision != null };
+      return { ...t, timeInReview, slaState, enteredAt, waitOn, reviewState, hasReviewerDecision: reviewerDecision != null, prMerged };
     })
     .sort((a, b) => {
       // Breaches first, then by time descending
@@ -1842,6 +1871,8 @@ function renderReviewQueue() {
 
   const reviewerQueue = validating.filter(t => t.waitOn === 'reviewer');
   const authorQueue = validating.filter(t => t.waitOn === 'author');
+  // Tasks where PR is merged + reviewer approved — effectively done, no alerts needed
+  const doneQueue = validating.filter(t => t.waitOn === 'done');
 
   if (validating.length === 0) {
     panel.style.display = '';
@@ -1910,8 +1941,9 @@ function renderReviewQueue() {
   bindTaskLinkHandlers(body);
 
   // SLA breach escalation: split reviewer-wait vs author-wait so we page the right person.
+  // shouldEscalateReviewerSla() suppresses escalation when reviewer_decision already exists.
   if (reviewerBreachCount > 0) {
-    escalateReviewerBreaches(reviewerQueue.filter(t => t.slaState === 'breach'));
+    escalateReviewerBreaches(reviewerQueue.filter(shouldEscalateReviewerSla));
   }
   if (authorBreachCount > 0) {
     escalateAuthorBreaches(authorQueue.filter(t => t.slaState === 'breach'));
@@ -2195,6 +2227,70 @@ async function batchApproveHighConfidence() {
   } catch (e) { console.error('Batch approve failed:', e); }
 }
 
+// ---- Agent Action Approval Queue (review_requested events from agent runs) ----
+let agentApprovalData = null;
+
+async function loadAgentApprovals() {
+  try {
+    const res = await fetch(BASE + '/approval-queue?category=review');
+    agentApprovalData = await res.json();
+    renderAgentApprovals();
+  } catch (e) {
+    const body = document.getElementById('agent-approval-body');
+    if (body) body.innerHTML = '<div class="empty">Failed to load agent approvals</div>';
+  }
+}
+
+function renderAgentApprovals() {
+  const body = document.getElementById('agent-approval-body');
+  const count = document.getElementById('agent-approval-count');
+  if (!body) return;
+
+  const items = (agentApprovalData && agentApprovalData.items) ? agentApprovalData.items : [];
+  if (count) count.textContent = items.length > 0 ? items.length + ' pending' : '';
+
+  if (items.length === 0) {
+    body.innerHTML = '<div class="empty" style="text-align:center;padding:20px;color:var(--text-dim)">✓ No pending agent approvals.</div>';
+    return;
+  }
+
+  let html = '';
+  items.forEach(function(item) {
+    const urgencyColor = item.urgency === 'critical' ? '#ef4444' : item.urgency === 'high' ? '#f59e0b' : 'var(--text-dim)';
+    const title = (item.title || item.event && item.event.payload && item.event.payload.action_required || 'Agent action pending').substring(0, 80);
+    const desc = item.description || (item.event && item.event.payload && item.event.payload.description) || '';
+    const agentId = item.agentId || '?';
+    const runId = item.runId || '';
+    html += '<div class="approval-card" style="border-left:3px solid ' + urgencyColor + '">';
+    html += '<div class="approval-header">';
+    html += '<span style="color:' + urgencyColor + '">⚡</span> ';
+    html += '<span class="approval-title">' + esc(title) + '</span>';
+    html += '<span class="assignee-tag" style="margin-left:8px">@' + esc(agentId) + '</span>';
+    if (item.urgency) html += '<span style="font-size:10px;color:' + urgencyColor + ';margin-left:6px">' + esc(item.urgency) + '</span>';
+    html += '</div>';
+    if (desc) html += '<div class="approval-meta" style="font-size:12px;margin-top:4px">' + esc(desc.substring(0, 120)) + '</div>';
+    if (runId) html += '<div class="approval-meta" style="font-size:10px;color:var(--text-dim)">Run: ' + esc(runId) + '</div>';
+    html += '<div class="approval-actions">';
+    html += '<button class="btn-reject" onclick="decideAgentApproval(\'' + esc(item.id) + '\',\'reject\')">✗ Reject</button>';
+    html += '<button class="btn-approve" onclick="decideAgentApproval(\'' + esc(item.id) + '\',\'approve\')">✓ Approve</button>';
+    html += '</div>';
+    html += '</div>';
+  });
+
+  body.innerHTML = html;
+}
+
+async function decideAgentApproval(eventId, decision) {
+  try {
+    await fetch(BASE + '/approval-queue/' + encodeURIComponent(eventId) + '/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision: decision, actor: 'dashboard' })
+    });
+    await loadAgentApprovals();
+  } catch (e) { console.error('Agent approval decision failed:', e); }
+}
+
 // ---- Routing Policy Editor ----
 function toggleRoutingPolicy() {
   routingPolicyVisible = !routingPolicyVisible;
@@ -2370,7 +2466,7 @@ async function refresh() {
   if (refreshCount === 1 || forceFull) await refreshAgentRegistry();
   await loadTasks(forceFull);
   renderReviewQueue();
-  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadFeedback(), loadPauseStatus(), loadIntensityControl(), loadPolls()]);
+  await Promise.all([loadPresence(), loadChat(forceFull), loadActivity(forceFull), loadResearch(), loadSharedArtifacts(), loadHealth(), loadReleaseStatus(forceFull), loadBuildInfo(), loadRuntimeTruthCard(), loadApprovalQueue(), loadAgentApprovals(), loadFeedback(), checkPauseBanner(), loadIntensityControl(), loadPolls()]);
   await renderPromotionSSOT();
 }
 

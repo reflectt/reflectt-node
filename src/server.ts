@@ -15,6 +15,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME, DATA_DIR } from './config.js'
+import { getStallDetector, emitWorkflowStall, onStallEvent } from './stall-detector.js'
+import { processStallEvent } from './intervention-template.js'
 import { trackRequest, getRequestMetrics } from './request-tracker.js'
 import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots, startAutoSnapshot } from './alert-preflight.js'
 
@@ -27,6 +29,12 @@ const BUILD_VERSION = (() => {
 })()
 
 const BUILD_COMMIT = (() => {
+  // Prefer commit baked at build time (dist/commit.txt) — accurate regardless of CWD at runtime.
+  // Falls back to git rev-parse for dev mode (tsx / ts-node).
+  try {
+    const commitFile = new URL('../commit.txt', import.meta.url)
+    return readFileSync(commitFile, 'utf8').trim()
+  } catch { /* not a built dist — fall through to git */ }
   try {
     return execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
   } catch { return 'unknown' }
@@ -36,7 +44,7 @@ const BUILD_STARTED_AT = Date.now()
 import { chatManager } from './chat.js'
 import { taskManager } from './tasks.js'
 import { detectApproval, applyApproval } from './chat-approval-detector.js'
-import { inboxManager } from './inbox.js'
+import { inboxManager, clearDeliveryRecord, sweepDeliveryRecords } from './inbox.js'
 import { getFocus, setFocus, clearFocus, getFocusSummary } from './focus.js'
 import { generatePulse, generateCompactPulse } from './pulse.js'
 import { scanScopeOverlap, scanAndNotify } from './scopeOverlap.js'
@@ -49,7 +57,9 @@ import { buildContextInjection, getContextBudgets, getContextMemo, upsertContext
 import { deriveScopeId } from './scope-routing.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager } from './presence.js'
+import type { NotificationType, NotificationPriorityLevel, AckDecision, NotificationStatus } from './agent-notifications.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
+import { runRestartDriftGuard } from './restart-drift-guard.js'
 import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog } from './prAutoMerge.js'
 import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
@@ -66,6 +76,7 @@ import {
   getFailureDistribution,
   getWeeklyTrends,
   getOnboardingDashboard,
+  getActivationEventLog,
   type ActivationEventType,
 } from './activationEvents.js'
 import { alertUnauthorizedApproval, alertFlipAttempt, getMutationAlertStatus, pruneOldAttempts } from './mutationAlert.js'
@@ -85,7 +96,7 @@ import { getBuildInfo } from './buildInfo.js'
 import { appendStoredLog, readStoredLogs, getStoredLogPath } from './logStore.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases, setAgentDisplayName, resolveAgentMention } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
-import { recordUsage, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
+import { recordUsage as recordUsageTracking, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, getDailySpendByModel, getAvgCostByLane, getAvgCostByAgent, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import { initGitHubActorAuth, resolveGitHubTokenForActor } from './github-actor-auth.js'
@@ -95,6 +106,9 @@ import { computeCiFromCheckRuns, computeCiFromCombinedStatus } from './github-ci
 import { createGitHubIdentityProvider } from './github-identity.js'
 import { getProvisioningManager } from './provisioning.js'
 import { getWebhookDeliveryManager } from './webhooks.js'
+import { enrichWebhookPayload } from './github-webhook-attribution.js'
+import { formatGitHubEvent } from './github-webhook-chat.js'
+import { formatSentryAlert, verifySentrySignature } from './sentry-webhook.js'
 import { exportBundle, importBundle } from './portability.js'
 import { getNotificationManager } from './notifications.js'
 import { getConnectivityManager } from './connectivity.js'
@@ -138,26 +152,37 @@ import { createReflection, getReflection, listReflections, countReflections, ref
 import { ingestReflection, getInsight, listInsights, insightStats, INSIGHT_STATUSES, extractClusterKey, tickCooldowns, updateInsightStatus, getOrphanedInsights, reconcileInsightTaskLinks, getLoopSummary, sweepShippedCandidates } from './insights.js'
 import { queryActivity, ACTIVITY_SOURCES } from './activity.js'
 import { patchInsightById, cooldownInsightById, closeInsightById } from './insight-mutation.js'
+import { runStaleCandidateReconcileSweep } from './stale-candidate-reconciler.js'
+import { runCanvasAutoStateSweep, SYNC_INTERVAL_MS, PUSH_PRIORITY_WINDOW_MS } from './canvas-auto-state.js'
 import { promoteInsight, validatePromotionInput, generateRecurringCandidates, listPromotionAudits, getPromotionAuditByInsight, type PromotionInput } from './insight-promotion.js'
 import { runIntake, batchIntake, pipelineMaintenance, getPipelineStats } from './intake-pipeline.js'
 import { listLineage, getLineage, lineageStats } from './lineage.js'
 import { startInsightTaskBridge, stopInsightTaskBridge, getInsightTaskBridgeStats, configureBridge, getBridgeConfig, resolveAssignment } from './insight-task-bridge.js'
 import { startShippedHeartbeat, stopShippedHeartbeat, getShippedHeartbeatStats } from './shipped-heartbeat.js'
+import { startOpenClawUsageSync, stopOpenClawUsageSync, syncOpenClawUsage } from './openclaw-usage-sync.js'
 import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
+import { canvasReadRoutes, canvasPhase2Routes, formatRecency } from './canvas-routes.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
 import { bootstrapTeam, type BootstrapTeamRequest } from './bootstrap-team.js'
 import { registerManageRoutes } from './manage.js'
 import { validatePrIntegrity, type PrIntegrityResult } from './pr-integrity.js'
+import { runPrLinkReconcileSweep } from './pr-link-reconciler.js'
 import { createOverride, getOverride, listOverrides, findActiveOverride, validateOverrideInput, tickOverrideLifecycle, type CreateOverrideInput } from './routing-override.js'
 import { getRoutingApprovalQueue, getRoutingSuggestion, buildApprovalPatch, buildRejectionPatch, buildRoutingSuggestionPatch, isRoutingApproval } from './routing-approvals.js'
+import { simulateRoutingScenarios, type CommsRoutingPolicy, type RoutingScenario } from './comms-routing-policy.js'
+import { createVoiceSession, getVoiceSession, processVoiceTranscript, subscribeVoiceSession } from './voice-sessions.js'
+import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIssueCreate, executeMacOSUIAction, buildReplayPacket, listPendingRuns, listRuns } from './agent-interface.js'
+import { validateIntent as macOSValidateIntent, isKillSwitchEngaged, engageKillSwitch, resetKillSwitch } from './macos-accessibility.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
+import { requestImmediateCanvasSync, queueCanvasPushEvent } from './cloud.js'
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
 import { startDeployMonitor, stopDeployMonitor } from './deploy-monitor.js'
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
+import { createScheduleEntry, getScheduleEntry, updateScheduleEntry, deleteScheduleEntry, getScheduleFeed, type ScheduleKind } from './schedule.js'
 import { createDoc, getDoc, listDocs, updateDoc, deleteDoc, countDocs, VALID_CATEGORIES, type CreateDocInput, type UpdateDocInput, type DocCategory } from './knowledge-docs.js'
 import { onTaskShipped, onProcessFileWritten, onDecisionComment, isDecisionComment } from './knowledge-auto-index.js'
 import { upsertHostHeartbeat, getHost, listHosts, removeHost } from './host-registry.js'
@@ -165,6 +190,9 @@ import { startKeepalive, stopKeepalive, getKeepaliveStatus, triggerKeepalivePing
 import { startSelfKeepalive, stopSelfKeepalive, getSelfKeepaliveStatus, detectWarmBoot, getBootInfo } from './cf-keepalive.js'
 // polls.ts imported dynamically where needed
 import { pauseTarget, unpauseTarget, checkPauseStatus, listPauseEntries } from './pause-controls.js'
+import { isLocalWhisperAvailable, transcribeLocally } from './local-whisper.js'
+import { inferFamilyFromTitle, backfillUncategorizedInsights, getAutoTagRules, setAutoTagRules, resetAutoTagRules, autoTagInsightIfUncategorized, DEFAULT_AUTO_TAG_RULES, type AutoTagRule } from './insight-auto-tagger.js'
+import { startTeamContextWriter, teamContextFactEndpoint } from './team-context-writer.js'
 
 // Schemas
 const ChatAttachmentSchema = z.object({
@@ -187,6 +215,10 @@ const SendMessageSchema = z.object({
 
 // Task type determines required fields beyond the base schema
 const TASK_TYPES = ['bug', 'feature', 'process', 'docs', 'chore'] as const
+
+// Shared placeholder pattern for done_criteria validation.
+// Used in checkDefinitionOfReady (DoR gate) and POST /tasks creator-type gating.
+const DONE_CRITERIA_PLACEHOLDER_RE = /^\s*(tbd|todo|to-do|to do|placeholder|n\/a|na|none|fix later|coming soon|see description|wip|tbh|tbw)\s*$/i
 type TaskType = typeof TASK_TYPES[number]
 
 const CreateTaskSchema = z.object({
@@ -236,17 +268,30 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
     problems.push(`Title must be at least 10 characters (got ${data.title.trim().length}). Be specific about what needs to happen.`)
   }
 
+  // Done criteria presence: always required, even for todo (backlog) tasks.
+  // Silent omission is the root cause of tasks reaching doing with no verifiable exit condition.
+  if (!data.done_criteria || data.done_criteria.length === 0) {
+    problems.push('done_criteria is required and must contain at least one verifiable criterion. Tasks without acceptance criteria cannot be validated or closed.')
+  }
+
+  // Done criteria quality: reject placeholder text (TBD, TODO, placeholder, etc.)
+  for (const criterion of data.done_criteria) {
+    if (DONE_CRITERIA_PLACEHOLDER_RE.test(criterion)) {
+      problems.push(`Done criterion "${criterion}" is a placeholder. Replace with a concrete, verifiable outcome.`)
+    }
+  }
+
   // Done criteria quality: reject single-word criteria
   for (const criterion of data.done_criteria) {
-    if (criterion.split(/\s+/).length < 3) {
+    if (criterion.split(/\s+/).length < 3 && !DONE_CRITERIA_PLACEHOLDER_RE.test(criterion)) {
       problems.push(`Done criterion "${criterion}" is too vague. Use a full sentence describing the verifiable outcome.`)
     }
   }
 
-  // For todo tasks, skip type-specific and done_criteria quality checks.
+  // For todo tasks, skip type-specific done_criteria quality checks.
   // These are backlog items — full readiness is enforced when moving to doing.
   if (data.status === 'todo') {
-    return problems // Return early with only title-level checks
+    return problems // Return early with only title-level + presence checks
   }
 
   // Type-specific checks (non-todo tasks)
@@ -340,6 +385,14 @@ function normalizeConfiguredModel(value: unknown): { ok: boolean; value?: string
   }
 }
 
+// ── Handoff state schema (max 3 columns per COO rule) ─────────────
+const VALID_HANDOFF_DECISIONS = ['approved', 'rejected', 'needs_changes', 'escalated'] as const
+const HandoffStateSchema = z.object({
+  reviewed_by: z.string().min(1),
+  decision: z.enum(VALID_HANDOFF_DECISIONS),
+  next_owner: z.string().min(1).optional(),
+}).strict()
+
 const UpdateTaskSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
@@ -347,6 +400,7 @@ const UpdateTaskSchema = z.object({
   assignee: z.string().optional(),
   reviewer: z.string().optional(),
   done_criteria: z.array(z.string().min(1)).optional(),
+  criteria_verified: z.boolean().optional(),  // bypass done_criteria gate for todo→validating
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
   blocked_by: z.array(z.string()).optional(),
   epic_id: z.string().optional(),
@@ -557,6 +611,7 @@ const InboxQuerySchema = z.object({
   priority: z.enum(['high', 'medium', 'low']).optional(),
   limit: z.string().optional(),
   since: z.string().optional(),
+  mark_read: z.enum(['true', 'false']).optional(),
 })
 
 const InboxAckBodySchema = z.object({
@@ -764,6 +819,22 @@ function enforceQaBundleGateForValidating(
   // PR integrity: validate commit SHA + changed_files against live PR head
   if (!nonCodeLane && reviewPacket?.pr_url) {
     const overrideFlag = metadataObj.pr_integrity_override === true
+    if (overrideFlag) {
+      // Emit escalation_bypass: agent is skipping the PR integrity gate
+      const actor = (metadataObj.actor as string) || (metadataObj.assignee as string) || 'unknown'
+      import('./trust-events.js').then(({ emitTrustEvent }) => {
+        emitTrustEvent({
+          agentId: actor,
+          eventType: 'escalation_bypass',
+          severity: 'warning',
+          context: {
+            prUrl: reviewPacket?.pr_url,
+            overrideReason: metadataObj.pr_integrity_override_reason,
+            actor,
+          },
+        })
+      }).catch(() => {})
+    }
     if (!overrideFlag) {
       const integrity = validatePrIntegrity({
         pr_url: reviewPacket!.pr_url!,
@@ -954,6 +1025,17 @@ function applyReviewStateMetadata(
     metadata.review_last_activity_at = now
   }
 
+  // Cancelled tasks should not keep reviewer-decision metadata alive.
+  // Otherwise downstream notifiers/dashboard rails can misclassify a
+  // cancelled+unassigned task as still waiting on the former assignee/author.
+  if (nextStatus === 'cancelled') {
+    metadata.review_state = undefined
+    metadata.reviewer_decision = undefined
+    metadata.reviewer_notes = undefined
+    metadata.reviewer_approved = undefined
+    metadata.review_last_activity_at = undefined
+  }
+
   const actor = parsed.actor?.trim()
   if (
     nextStatus === 'validating'
@@ -1006,6 +1088,9 @@ const NON_CODE_LANE_KEYWORDS = [
 ]
 
 function isNonCodeLane(metadata: Record<string, unknown>): boolean {
+  // Explicit top-level flag: metadata.non_code=true
+  if (metadata.non_code === true) return true
+
   const lane = normalizeLaneValue(metadata.lane)
   if (NON_CODE_LANE_KEYWORDS.some(k => lane.includes(k))) return true
 
@@ -1827,6 +1912,42 @@ function validateOwnerApprovalPing(content: string, from: string, channel?: stri
   }
 }
 
+// Coordination channels where @mentions are expected for handoffs.
+// Messages without @mentions in these channels are likely dead handoffs.
+// task-1774579523544-kgi9nohd4
+const COORDINATION_CHANNELS = new Set([
+  'general', 'shipping', 'reviews', 'blockers', 'problems', 'ops',
+  'task-comments', 'task-notifications', 'decisions',
+])
+
+/**
+ * Check if a message in a coordination channel lacks @mentions.
+ * Returns a warning + auto-routes to main agent if so.
+ * Does NOT affect human/user chats or non-coordination channels.
+ */
+function buildNoMentionWarning(
+  content: string,
+  channel: string | undefined,
+  from: string,
+): { warning?: string; autoRouted?: string } {
+  if (!channel || !COORDINATION_CHANNELS.has(channel)) return {}
+  // Don't warn system or dashboard messages
+  if (from === 'system' || from === 'dashboard') return {}
+  const mentions = extractMentions(content)
+  if (mentions.length > 0) return {}
+  // No @mentions in a coordination channel — this is a dead handoff
+  // Find the main agent (first in roster, or kai as fallback)
+  const roster = presenceManager.getAllPresence()
+  const mainAgent = roster.find(r => (r as any).role === 'coordinator')?.agent
+    || roster.find(r => r.agent === 'kai')?.agent
+    || roster[0]?.agent
+    || 'kai'
+  return {
+    warning: `No @mention in #${channel} — this message won't trigger action from any agent. Consider adding @${mainAgent} or the relevant owner. Auto-routing visibility to @${mainAgent}.`,
+    autoRouted: mainAgent,
+  }
+}
+
 function buildMentionWarnings(content: string): MentionWarning[] {
   const mentions = extractMentions(content)
   if (mentions.length === 0) return []
@@ -1935,7 +2056,8 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // Multipart file uploads (50MB limit)
   const fastifyMultipart = await import('@fastify/multipart')
-  await app.register(fastifyMultipart.default, { limits: { fileSize: 50 * 1024 * 1024 } })
+  const { MAX_SIZE_BYTES: _multipartMax } = await import('./files.js')
+  await app.register(fastifyMultipart.default, { limits: { fileSize: _multipartMax } })
 
   // Normalize error responses to a consistent envelope
   app.addHook('preSerialization', async (request, reply, payload) => {
@@ -1982,6 +2104,7 @@ export async function createServer(): Promise<FastifyInstance> {
     if (body.details !== undefined) envelope.details = body.details
     if (body.gate !== undefined) envelope.gate = body.gate
     if (body.problems !== undefined) envelope.problems = body.problems
+    if (body.tombstone !== undefined) envelope.tombstone = body.tombstone
     if (alreadyEnvelope && body.data !== undefined) envelope.data = body.data
 
     // Minimal persisted error log: enables /logs to return real entries.
@@ -2120,6 +2243,12 @@ export async function createServer(): Promise<FastifyInstance> {
       url: request.url,
     }).catch(() => {})
 
+    // Report to Sentry
+    try {
+      const { captureException } = await import('./sentry.js')
+      captureException(error, { method: request.method, url: request.url, status })
+    } catch { /* non-blocking */ }
+
     if (wantsJson) {
       reply.code(status).header('content-type', 'application/json; charset=utf-8')
       return {
@@ -2213,12 +2342,19 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 60 * 1000)
   cadenceWatchdogTimer.unref()
 
-  // Mention rescue fallback (if Ryan mentions trio and no response arrives)
+  // Mention rescue fallback (if user mentions trio and no response arrives)
   const mentionRescueTimer = setInterval(() => {
     if (isQuietHours(Date.now())) return
     healthMonitor.runMentionRescueTick().catch(() => {})
   }, 30 * 1000)
   mentionRescueTimer.unref()
+
+  // Validating-stall nudge (single DM to reviewer after 30m with no formal review action)
+  const validatingNudgeTimer = setInterval(() => {
+    if (isQuietHours(Date.now())) return
+    healthMonitor.runValidatingNudgeTick().catch(() => {})
+  }, 5 * 60 * 1000) // check every 5 minutes
+  validatingNudgeTimer.unref()
 
   // Reflection→Insight pipeline health monitor
   const reflectionPipelineHealth = {
@@ -2301,12 +2437,141 @@ export async function createServer(): Promise<FastifyInstance> {
   }, 60 * 1000)
   reflectionPipelineTimer.unref()
 
+  // Webhook payload retention: purge processed payloads older than 90 days.
+  // Runs once at startup then every 24 hours. Only processes payloads with processed=1.
+  const WEBHOOK_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000 // 24 hours
+  const WEBHOOK_RETENTION_DAYS = parseInt(process.env.WEBHOOK_RETENTION_DAYS ?? '90', 10)
+  const runWebhookPurge = () => {
+    import('./webhook-storage.js').then(({ purgeOldPayloads }) => {
+      try {
+        const deleted = purgeOldPayloads(WEBHOOK_RETENTION_DAYS)
+        if (deleted > 0) {
+          console.log(`[webhook-purge] Purged ${deleted} processed payload(s) older than ${WEBHOOK_RETENTION_DAYS} days`)
+        }
+      } catch { /* non-fatal — storage may not be initialised yet on first tick */ }
+    }).catch(() => { /* module unavailable — skip */ })
+  }
+  runWebhookPurge() // eager first run on startup
+  const webhookPurgeTimer = setInterval(runWebhookPurge, WEBHOOK_PURGE_INTERVAL_MS)
+  webhookPurgeTimer.unref()
+
+  // Sweep stale inbox delivery dedup records every 15 minutes to prevent unbounded growth
+  const inboxDeliveryDedupSweep = setInterval(sweepDeliveryRecords, 15 * 60 * 1000)
+  inboxDeliveryDedupSweep.unref()
+
+  // Daily digest: surface active tasks with empty or placeholder done_criteria.
+  // Warns via #ops — does not hard-error (legacy tasks may predate the gate).
+  const DONE_CRITERIA_DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1000
+  const DONE_CRITERIA_PLACEHOLDER_DIGEST_RE = /^\s*(tbd|todo|to-do|to do|placeholder|n\/a|na|none|fix later|coming soon|see description|wip)\s*$/i
+  const runDoneCriteriaDigest = () => {
+    try {
+      const active = taskManager.listTasks({}).filter(t =>
+        !['done', 'cancelled', 'resolved_externally'].includes(t.status)
+      )
+      const missing = active.filter(t =>
+        !t.done_criteria
+        || t.done_criteria.length === 0
+        || t.done_criteria.every(c => DONE_CRITERIA_PLACEHOLDER_DIGEST_RE.test(c))
+      )
+      if (missing.length === 0) return
+      const lines = missing.map(t => `• \`${t.id}\` [${t.status}] ${t.title} (@${t.assignee ?? 'unassigned'})`)
+      chatManager.sendMessage({
+        channel: 'ops',
+        from: 'system',
+        content: `📋 **Done-criteria digest** — ${missing.length} active task${missing.length === 1 ? '' : 's'} missing verifiable done_criteria:\n${lines.join('\n')}\nAdd at least 1 concrete criterion to each before moving to validating.`,
+      }).catch(() => {})
+    } catch { /* non-fatal */ }
+  }
+  runDoneCriteriaDigest() // eager run on startup to surface existing debt immediately
+  const doneCriteriaDigestTimer = setInterval(runDoneCriteriaDigest, DONE_CRITERIA_DIGEST_INTERVAL_MS)
+  doneCriteriaDigestTimer.unref()
+
+  // Approval card expiry sweep — run on startup to prune stale cards before any canvas queries.
+  // Undecided approval_requested/review_requested events older than 24h get a synthetic
+  // rejection event, preventing them from reappearing after node restarts.
+  import('./agent-runs.js').then(({ sweepExpiredApprovalCards }) => {
+    const pruned = sweepExpiredApprovalCards()
+    if (pruned > 0) console.log(`[ApprovalSweep] Pruned ${pruned} expired approval card(s) on startup`)
+  }).catch(err => console.warn('[ApprovalSweep] Startup sweep failed:', err))
+
+  // Approval card restore — re-emit canvas_push for undecided validating tasks on startup.
+  // Ensures approval cards survive node restarts without re-emitting already-decided cards.
+  const APPROVAL_CARD_TTL_MS = 24 * 60 * 60 * 1000 // 24h
+  const CANVAS_AGENT_COLORS_RESTART: Record<string, string> = {
+    link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+    sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+    rhythm: '#a3e635', swift: '#38bdf8', kotlin: '#f97316',
+  }
+  try {
+    const validatingTasks = taskManager.listTasks({ status: 'validating' })
+    const cutoff = Date.now() - APPROVAL_CARD_TTL_MS
+    // Known agent names — agent-to-agent reviews should not produce canvas approval cards
+    const KNOWN_AGENTS_RESTORE = new Set([
+      'link', 'kai', 'pixel', 'sage', 'scout', 'echo', 'rhythm', 'swift', 'kotlin',
+      'harmony', 'cos', 'artdirector', 'shield', 'spark', 'coo', 'pm', 'qa', 'kindling',
+      'uipolish', 'evi-scout',
+    ])
+    for (const task of validatingTasks) {
+      const meta = (task.metadata ?? {}) as Record<string, unknown>
+      // Skip if already decided
+      if (meta.review_decided === true || meta.reviewer_approved === true || meta.review_state === 'approved' || meta.review_state === 'rejected') continue
+      // Skip agent-to-agent reviews — only human-required approvals show on canvas
+      const reviewerId = (task.reviewer ?? '').toLowerCase().trim()
+      if (reviewerId && KNOWN_AGENTS_RESTORE.has(reviewerId)) continue
+      // Skip if card is older than TTL (sweep handled it)
+      const enteredValidatingAt = typeof meta.entered_validating_at === 'number' ? meta.entered_validating_at : task.updatedAt
+      if (enteredValidatingAt < cutoff) continue
+      const prUrl = (meta.review_handoff as Record<string, unknown> | undefined)?.pr_url as string | undefined
+        ?? (meta.qa_bundle as Record<string, unknown> | undefined)?.pr_url as string | undefined
+      const assigneeId = (task.assignee ?? '').toLowerCase()
+      const restoreNow = Date.now()
+      const restoreData = {
+        type: 'approval_requested',
+        agentId: assigneeId,
+        agentColor: CANVAS_AGENT_COLORS_RESTART[assigneeId] ?? '#94a3b8',
+        data: {
+          taskId: task.id,
+          taskTitle: task.title,
+          reviewer: task.reviewer,
+          prUrl: prUrl || undefined,
+          priority: task.priority,
+          restored: true, // mark as restored on restart
+        },
+        ttl: 120000,
+        t: restoreNow,
+      }
+      eventBus.emit({
+        id: `approval-restore-${restoreNow}-${task.id.slice(-6)}`,
+        type: 'canvas_push',
+        timestamp: restoreNow,
+        data: restoreData,
+      })
+      queueCanvasPushEvent(restoreData)
+    }
+  } catch (err) {
+    console.warn('[ApprovalRestore] Failed to restore approval cards on startup:', (err as Error).message)
+  }
+
   // Load unified policy config (file + env overrides)
   const policy = policyManager.load()
 
   // Board health execution worker — config from policy
   boardHealthWorker.updateConfig(policy.boardHealth)
   boardHealthWorker.start()
+
+  // Notification delivery worker — pushes pending agent-notifications to active agents
+  const { NotificationDeliveryWorker } = await import('./notification-worker.js')
+  const notificationWorker = new NotificationDeliveryWorker(
+    getDb,
+    presenceManager,
+    async (opts) => { await chatManager.sendMessage(opts) },
+  )
+  notificationWorker.start()
+
+  // Activate noise budget enforcement — the 24h canary period is complete.
+  // Canary mode (log-only) is still the default in case of fresh installs,
+  // but on a running server we want real duplicate suppression.
+  noiseBudgetManager.activateEnforcement()
 
   // Noise budget: wire digest flush handler to send batched messages to #ops
   noiseBudgetManager.setDigestFlushHandler(async (channel, entries) => {
@@ -2340,11 +2605,23 @@ export async function createServer(): Promise<FastifyInstance> {
   // Shipped-artifact auto-heartbeat → #general on validating/done with artifact_path
   startShippedHeartbeat()
 
+  // Team context auto-writer — writes team facts to TEAM-CONTEXT.md on key events
+  // task-1774672289270-9qhb17cgk
+  startTeamContextWriter({
+    reflecttHome: REFLECTT_HOME,
+    eventBus,
+    taskManager: taskManager as any,
+  })
+
   // Calendar reminder engine — polls for pending reminders every 30s
   startReminderEngine()
 
   // Deploy monitor — alert within 5m when production deploys fail (Vercel + health URL)
   startDeployMonitor()
+
+  // OpenClaw usage sync — ingest token/cost data from ~/.openclaw/agents sessions
+  // Bridges agents not reporting via node heartbeat into the cloud usage dashboard
+  startOpenClawUsageSync()
 
   app.addHook('onClose', async () => {
     clearInterval(idleNudgeTimer)
@@ -2356,10 +2633,17 @@ export async function createServer(): Promise<FastifyInstance> {
     stopTeamPulse()
     stopReminderEngine()
     stopDeployMonitor()
+    stopOpenClawUsageSync()
     stopKeepalive()
     stopSelfKeepalive()
     wsHeartbeat.stop()
   })
+
+  // Canvas state map — forward reference for route handlers that emit before the canvas block.
+  // Populated in the canvas state section below. Route handlers (e.g. PATCH /tasks) access
+  // this via closure to synchronously update orb state when task status transitions occur.
+  // eslint-disable-next-line prefer-const
+  let _canvasStateMap: Map<string, { state: string; sensors: string | null; payload: unknown; updatedAt: number; lastMessage?: { content: string; timestamp: number } }> | null = null
 
   // Health check
   // Ultra-lightweight ping — no DB, no stats, instant response.
@@ -2402,6 +2686,9 @@ export async function createServer(): Promise<FastifyInstance> {
       version: BUILD_VERSION,
       commit: BUILD_COMMIT,
       uptime_seconds: uptimeSeconds,
+      pid: process.pid,
+      nodeVersion: process.version,
+      port: Number(process.env['PORT'] || process.env['REFLECTT_PORT'] || 4445),
       cold_start: uptimeSeconds < 60, // Flag recent restarts for monitoring
       openclaw: openclawConfig.gatewayToken
         ? { status: 'configured', gateway: openclawConfig.gatewayUrl }
@@ -2442,6 +2729,17 @@ export async function createServer(): Promise<FastifyInstance> {
       recent: m.recentErrors.slice(0, 20),
       top_buckets: m.topErrorBuckets,
       timestamp: Date.now(),
+    }
+  })
+
+  // ── Version summary — used by cloud dashboard + ops tooling ──────────────
+  app.get('/health/version', async () => {
+    return {
+      version: BUILD_VERSION,
+      commit: BUILD_COMMIT,
+      uptime_ms: Date.now() - BUILD_STARTED_AT,
+      host_id: process.env.REFLECTT_HOST_ID ?? process.env.HOSTNAME ?? 'unknown',
+      node_env: process.env.NODE_ENV ?? 'production',
     }
   })
 
@@ -2549,6 +2847,87 @@ export async function createServer(): Promise<FastifyInstance> {
   const serverPort = Number(process.env['PORT'] || process.env['REFLECTT_PORT'] || 4445)
   startSelfKeepalive(serverPort)
 
+  // ── Stall Detector ─────────────────────────────────────────────────────────
+
+  const sd = getStallDetector()
+
+  // Register stall event handler: compile intervention and post to chat
+  onStallEvent((event) => {
+    // Adapt stall-detector event to intervention-template expected format
+    const adaptedEvent = {
+      stallId: event.stallId,
+      userId: event.userId,
+      stallType: event.stallType as import('./intervention-template.js').StallType,
+      personalizations: {
+        user_name: event.userId,
+        last_intent: event.context?.lastAction,
+        active_task_title: event.context?.lastAction,
+        last_agent_name: event.context?.lastAgent,
+      },
+      timestamp: event.timestamp,
+    }
+    const result = processStallEvent(adaptedEvent)
+    if (!result.sent) {
+      console.debug('[StallDetector] Intervention not sent:', result.reason)
+      return
+    }
+
+    // Select an agent to send the intervention (use lastAgent from context, or default)
+    const agentName = event.context?.lastAgent || 'rhythm'
+    const message = result.message || 'Hey! Just checking in — want to pick up where you left off?'
+
+    // Post to #general as the intervening agent
+    const baseUrl = `http://127.0.0.1:${serverPort}`
+    fetch(`${baseUrl}/chat/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-reflectt-internal': 'true' },
+      body: JSON.stringify({ from: agentName, channel: 'general', content: message }),
+    }).catch((err) => console.error('[StallDetector] Failed to post intervention:', err))
+  })
+
+  // Start stall detector if enabled in config
+  const stallConfig = (serverConfig as any).stallDetector
+  if (stallConfig?.enabled) sd.start()
+
+  app.get('/stall-detector', async () => {
+    return {
+      enabled: sd.getAllStates().length > 0,
+      states: sd.getAllStates().map(s => ({
+        userId: s.userId,
+        phase: s.phase,
+        context: s.context,
+        stallFired: [...s.stallFired],
+      })),
+    }
+  })
+
+  app.post('/stall-detector/config', async (request) => {
+    const body = (request.body ?? {}) as Record<string, unknown>
+    // Accept: { enabled, thresholds: { newUserMinutes, inSessionMinutes, setupMinutes } }
+    const newCfg: any = {}
+    if (typeof body.enabled === 'boolean') {
+      newCfg.enabled = body.enabled
+    }
+    if (body.thresholds && typeof body.thresholds === 'object') {
+      newCfg.thresholds = body.thresholds as any
+    }
+    // Merge into serverConfig
+    ;(serverConfig as any).stallDetector = {
+      ...((serverConfig as any).stallDetector ?? {}),
+      ...newCfg,
+    }
+    if (newCfg.enabled) sd.start()
+    return { success: true, config: (serverConfig as any).stallDetector }
+  })
+
+  app.post('/stall-detector/test', async (request) => {
+    // Fire a test stall event for a given userId
+    const { userId } = (request.body ?? {}) as { userId?: string }
+    if (!userId) return { success: false, error: 'userId required' }
+    sd.recordActivity(userId, { phase: 'new_user' })
+    return { success: true, message: `Recorded activity for ${userId}` }
+  })
+
   // Self-keepalive status + warm boot info
   app.get('/health/keepalive', async () => {
     return getSelfKeepaliveStatus()
@@ -2621,6 +3000,18 @@ export async function createServer(): Promise<FastifyInstance> {
     // List all pause entries
     const entries = listPauseEntries()
     return { entries, count: entries.length }
+  })
+
+  // ── Shared team context (TEAM-CONTEXT.md) ──────────────────────────────────
+  // POST /team-context/facts — agents write team-wide facts directly
+  // task-1774672289270-9qhb17cgk
+  app.post('/team-context/facts', teamContextFactEndpoint(REFLECTT_HOME) as any)
+
+  // GET /team-context — read current TEAM-CONTEXT.md
+  app.get('/team-context', async () => {
+    const filePath = join(REFLECTT_HOME, 'workspace', 'TEAM-CONTEXT.md')
+    if (!existsSync(filePath)) return { content: null, hint: 'No TEAM-CONTEXT.md yet. Facts will be written automatically on task completions and decisions.' }
+    return { content: readFileSync(filePath, 'utf-8') }
   })
 
   // Team configuration linter health (TEAM.md / TEAM-ROLES.yaml / TEAM-STANDARDS.md)
@@ -3184,6 +3575,52 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Validating-stall nudge tick — DMs reviewer when task stalls in validating with no formal review action
+  app.post('/health/validating-nudge/tick', async (request, reply) => {
+    const parsedQuery = HealthTickQuerySchema.safeParse(request.query ?? {})
+    if (!parsedQuery.success) {
+      reply.code(400)
+      return {
+        error: 'Invalid query params',
+        details: parsedQuery.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`),
+      }
+    }
+
+    const query = parsedQuery.data
+    const dryRun = query.dryRun === 'true'
+    const force = query.force === 'true'
+    const now = parseEpochMs(query.nowMs) || Date.now()
+
+    if (!force && isQuietHours(now)) {
+      return {
+        success: true,
+        dryRun,
+        force,
+        suppressed: true,
+        reason: 'quiet-hours',
+        nudged: [],
+        skipped: [],
+        timestamp: now,
+      }
+    }
+
+    // Optional: override nudge threshold via query param (default 30m)
+    const nudgeThresholdMs = request.query && typeof (request.query as any).nudge_threshold_ms === 'string'
+      ? Math.max(60_000, Number((request.query as any).nudge_threshold_ms))
+      : 30 * 60 * 1000
+
+    const result = await healthMonitor.runValidatingNudgeTick(now, { dryRun, nudgeThresholdMs })
+    return {
+      success: true,
+      dryRun,
+      force,
+      suppressed: false,
+      nudge_threshold_ms: nudgeThresholdMs,
+      ...result,
+      timestamp: now,
+    }
+  })
+
   // Working contract enforcement tick (auto-requeue stale doing tasks)
   app.post('/health/working-contract/tick', async (request, reply) => {
     try {
@@ -3264,6 +3701,7 @@ export async function createServer(): Promise<FastifyInstance> {
         mentionRescue: { registered: Boolean(mentionRescueTimer), lastTickAt: ticks.mention_rescue, lastTickAgeSec: ageSec(ticks.mention_rescue) },
         reflectionPipeline: { registered: Boolean(reflectionPipelineTimer), lastTickAt: ticks.reflection_pipeline, lastTickAgeSec: ageSec(ticks.reflection_pipeline) },
         boardHealthWorker: { registered: board.running, lastTickAt: ticks.board_health || board.lastTickAt, lastTickAgeSec: ageSec(ticks.board_health || board.lastTickAt) },
+        validatingNudge: { registered: Boolean(validatingNudgeTimer), lastTickAt: ticks.validating_nudge, lastTickAgeSec: ageSec(ticks.validating_nudge) },
       },
       reviewHandoffValidation: {
         ...reviewHandoffValidationStats,
@@ -3427,6 +3865,22 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.type('text/html; charset=utf-8').send(html)
     } catch (err) {
       reply.code(500).send({ error: 'Failed to load UI kit page' })
+    }
+  })
+
+  // Presence loop demo — live end-to-end ambient→run→approve→result→collapse
+  app.get('/presence-loop', async (_request, reply) => {
+    try {
+      const { promises: fs } = await import('fs')
+      const { join } = await import('path')
+      const { fileURLToPath } = await import('url')
+      const { dirname } = await import('path')
+      const __filename = fileURLToPath(import.meta.url)
+      const __dirname = dirname(__filename)
+      const html = await fs.readFile(join(__dirname, '..', 'public', 'presence-loop-demo.html'), 'utf-8')
+      reply.type('text/html; charset=utf-8').send(html)
+    } catch (err) {
+      reply.code(500).send({ error: 'Failed to load presence loop demo' })
     }
   })
 
@@ -3707,9 +4161,24 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Check for unmentioned coordination messages BEFORE sending
+    // so we can include the warning in the response.
+    // task-1774579523544-kgi9nohd4
+    const noMentionCheck = buildNoMentionWarning(data.content, data.channel, data.from)
+
     const message = await chatManager.sendMessage(data)
     const mentionWarnings = buildMentionWarnings(data.content)
     const autonomyWarnings = buildAutonomyWarnings(data.content)
+
+    // If no @mentions in coordination channel, auto-subscribe the main agent
+    // so the message appears in their inbox (not silently lost).
+    if (noMentionCheck.autoRouted && data.channel) {
+      chatManager.sendMessage({
+        from: 'system',
+        channel: data.channel,
+        content: `⚠️ @${data.from} posted without @mention in #${data.channel}. Auto-routing to @${noMentionCheck.autoRouted} for visibility.`,
+      }).catch(() => {}) // fire-and-forget
+    }
 
     // Track content messages for noise budget denominator
     // (agent/human messages posted via POST /chat/messages are content, not control-plane)
@@ -3721,6 +4190,9 @@ export async function createServer(): Promise<FastifyInstance> {
     if (data.from) {
       presenceManager.recordActivity(data.from, 'message')
       presenceManager.touchPresence(data.from)
+
+      // Stall detector: user sent a message — record activity
+      getStallDetector().recordActivity(data.from)
 
       // Activation funnel: first team message
       emitActivationEvent('first_team_message_sent', data.from, {
@@ -3778,6 +4250,7 @@ export async function createServer(): Promise<FastifyInstance> {
       ...(actionValidation.warnings.length > 0 ? { action_warnings: actionValidation.warnings } : {}),
       ...(autonomyWarnings.length > 0 ? { autonomy_warnings: autonomyWarnings } : {}),
       ...(approvalApplied ? { approval_applied: approvalApplied } : {}),
+      ...(noMentionCheck.warning ? { no_mention_warning: noMentionCheck.warning, auto_routed_to: noMentionCheck.autoRouted } : {}),
     }
   })
 
@@ -4303,28 +4776,78 @@ export async function createServer(): Promise<FastifyInstance> {
       since: parseEpochMs(query.since),
     })
     
-    const inbox = inboxManager.getInbox(request.params.agent, allMessages, {
+    const agentName = request.params.agent
+    const sinceMs = parseEpochMs(query.since)
+    const itemLimit = boundedLimit(query.limit, DEFAULT_LIMITS.inbox, MAX_LIMITS.inbox)
+
+    const inbox = inboxManager.getInbox(agentName, allMessages, {
       priority: query.priority,
-      limit: boundedLimit(query.limit, DEFAULT_LIMITS.inbox, MAX_LIMITS.inbox),
-      since: parseEpochMs(query.since),
+      limit: itemLimit,
+      since: sinceMs,
     })
-    
+
+    // ── Merge in unread task comments addressed to this agent ──────────
+    // Include comments where the comment mentions @agent or is on a task
+    // assigned to this agent (author != agent = someone else wrote it).
+    const agentAliases = getAgentAliases(agentName)
+    const allTasks = taskManager.listTasks({ assigneeIn: agentAliases })
+    const taskCommentItems: Array<{
+      id: string; from: string; content: string; timestamp: number;
+      channel: string; task_id: string; comment_id: string; type: 'task_comment'
+    }> = []
+    for (const task of allTasks) {
+      const comments = taskManager.getTaskComments(task.id)
+      for (const c of comments) {
+        if (c.author === agentName) continue // skip own comments
+        if (c.suppressed) continue
+        if (sinceMs && c.timestamp < sinceMs) continue
+        const mentionsAgent = agentAliases.some(a => (c.content || '').toLowerCase().includes(`@${a}`))
+        const isOnAgentTask = agentAliases.includes(task.assignee || '')
+        if (!mentionsAgent && !isOnAgentTask) continue
+        taskCommentItems.push({
+          id: c.id,
+          from: c.author,
+          content: c.content,
+          timestamp: c.timestamp,
+          channel: 'task-comments',
+          task_id: task.id,
+          comment_id: c.id,
+          type: 'task_comment',
+        })
+      }
+    }
+
+    // Merge chat inbox + task comments, sort by timestamp desc, cap at limit
+    type InboxItem = typeof taskCommentItems[number] | (typeof inbox)[number] & { type?: string; task_id?: string; comment_id?: string }
+    const merged: InboxItem[] = ([...inbox.map(m => ({ ...m, type: 'mention' as const })), ...taskCommentItems] as InboxItem[])
+      .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+      .slice(0, itemLimit)
+
+    // Auto-mark read if requested
+    if (query.mark_read === 'true') {
+      const chatIds = inbox.map(m => m.id).filter(Boolean)
+      if (chatIds.length > 0) {
+        await inboxManager.ackMessages(agentName, chatIds, undefined)
+      }
+    }
+
     // Auto-update presence when agent checks inbox
-    presenceManager.updatePresence(request.params.agent, 'working')
+    presenceManager.updatePresence(agentName, 'working')
 
     const rawQuery = request.query as Record<string, string>
     if (isCompact(rawQuery)) {
-      const slim = inbox.map(m => ({
+      const slim = merged.map(m => ({
         from: m.from,
-        content: m.content,
+        content: (m as any).content,
         ts: m.timestamp,
-        ch: m.channel,
-        ...(m.priority ? { priority: m.priority } : {}),
+        ch: (m as any).channel,
+        ...((m as any).priority ? { priority: (m as any).priority } : {}),
+        ...((m as any).task_id ? { task_id: (m as any).task_id, comment_id: (m as any).comment_id } : {}),
       }))
       return { messages: slim, count: slim.length }
     }
-    
-    return { messages: inbox, count: inbox.length }
+
+    return { messages: merged, count: merged.length }
   })
 
   // Acknowledge messages
@@ -4356,6 +4879,8 @@ export async function createServer(): Promise<FastifyInstance> {
     }
     
     await inboxManager.ackMessages(request.params.agent, body.messageIds, body.timestamp)
+    // Clear delivery records so re-delivery is possible if the message resurfaces
+    for (const id of body.messageIds) clearDeliveryRecord(request.params.agent, id)
     return { success: true, count: body.messageIds.length }
   })
 
@@ -5061,6 +5586,24 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     if (!resolved.task || !resolved.resolvedId) {
+      // Check if this task was deleted — return 410 Gone with tombstone metadata instead of 404.
+      const tombstone = taskManager.getTaskDeletionTombstone(request.params.id)
+      if (tombstone) {
+        reply.code(410)
+        return {
+          success: false,
+          error: 'Task has been deleted',
+          code: 'TASK_DELETED',
+          status: 410,
+          tombstone: {
+            taskId: tombstone.taskId,
+            deletedAt: tombstone.deletedAt,
+            deletedBy: tombstone.deletedBy,
+            previousStatus: tombstone.previousStatus,
+            title: tombstone.title,
+          },
+        }
+      }
       reply.code(404)
       return {
         error: 'Task not found',
@@ -5075,6 +5618,48 @@ export async function createServer(): Promise<FastifyInstance> {
       task: isCompact(query) ? compactTask(enriched) : enriched,
       resolvedId: resolved.resolvedId,
       matchType: resolved.matchType,
+    }
+  })
+
+  // ── Task handoff state ─────────────────────────────────────────────
+  app.get<{ Params: { id: string } }>('/tasks/:id/handoff', async (request, reply) => {
+    const resolved = taskManager.resolveTaskId(request.params.id)
+    if (!resolved.task) {
+      reply.code(404)
+      return { error: 'Task not found' }
+    }
+    const meta = resolved.task.metadata as Record<string, unknown> | null
+    const handoff = meta?.handoff_state ?? null
+    return {
+      taskId: resolved.resolvedId,
+      status: resolved.task.status,
+      handoff_state: handoff,
+    }
+  })
+
+  app.put<{ Params: { id: string } }>('/tasks/:id/handoff', async (request, reply) => {
+    const resolved = taskManager.resolveTaskId(request.params.id)
+    if (!resolved.task || !resolved.resolvedId) {
+      reply.code(404)
+      return { error: 'Task not found' }
+    }
+    const body = request.body as Record<string, unknown>
+    const result = HandoffStateSchema.safeParse(body)
+    if (!result.success) {
+      reply.code(422)
+      return {
+        error: `Invalid handoff_state: ${result.error.issues.map(i => i.message).join(', ')}`,
+        hint: 'Required: reviewed_by (string), decision (approved|rejected|needs_changes|escalated). Optional: next_owner (string).',
+      }
+    }
+    const existingMeta = (resolved.task.metadata || {}) as Record<string, unknown>
+    taskManager.updateTask(resolved.resolvedId, {
+      metadata: { ...existingMeta, handoff_state: result.data },
+    })
+    return {
+      success: true,
+      taskId: resolved.resolvedId,
+      handoff_state: result.data,
     }
   })
 
@@ -5395,6 +5980,80 @@ export async function createServer(): Promise<FastifyInstance> {
       doingTaskCount: allTasks.length,
       staleCount: stale.length,
       staleTasks: stale.sort((a, b) => b.staleSinceMs - a.staleSinceMs),
+    }
+  })
+
+  /**
+   * GET /tasks/slow-blocked
+   * Detect doing tasks that are slow (>4h no event, not explicitly blocked)
+   * vs explicitly blocked tasks. Different handling paths — no @kai escalation
+   * needed for detection; host enforces it.
+   *
+   * Returns:
+   *   slow[]  — doing tasks with no activity in >4h (not explicitly blocked)
+   *   blocked[] — tasks in blocked status
+   */
+  app.get('/tasks/slow-blocked', async (request) => {
+    const query = request.query as Record<string, string>
+    const SLOW_THRESHOLD_MS = parseInt(query.slowThresholdHours || '4') * 60 * 60 * 1000
+    const now = Date.now()
+
+    const doingTasks = taskManager.listTasks({ status: 'doing' })
+    const blockedTasks = taskManager.listTasks({ status: 'blocked' })
+
+    const slow: Array<{
+      taskId: string
+      title: string
+      assignee: string | null
+      priority: string | null
+      lastActivityAt: number
+      slowSinceMs: number
+      slowSinceHours: number
+    }> = []
+
+    for (const task of doingTasks) {
+      const comments = taskManager.getTaskComments(task.id)
+      const lastComment = comments.length > 0 ? comments[comments.length - 1] : null
+      const lastActivityAt = lastComment?.timestamp ?? task.updatedAt ?? task.createdAt
+      const age = now - lastActivityAt
+
+      if (age > SLOW_THRESHOLD_MS) {
+        slow.push({
+          taskId: task.id,
+          title: task.title,
+          assignee: task.assignee || null,
+          priority: task.priority || null,
+          lastActivityAt,
+          slowSinceMs: age,
+          slowSinceHours: Math.round(age / 36_000) / 100,
+        })
+      }
+    }
+
+    const blocked = blockedTasks.map(task => ({
+      taskId: task.id,
+      title: task.title,
+      assignee: task.assignee || null,
+      priority: task.priority || null,
+      blockedAt: task.updatedAt ?? task.createdAt,
+      blockedSinceMs: now - (task.updatedAt ?? task.createdAt),
+      blockedReason: (task.metadata as Record<string, unknown>)?.transition
+        ? ((task.metadata as Record<string, unknown>).transition as Record<string, unknown>)?.reason ?? null
+        : null,
+    }))
+
+    return {
+      slowThresholdHours: SLOW_THRESHOLD_MS / 3_600_000,
+      doingCount: doingTasks.length,
+      blockedCount: blocked.length,
+      slowCount: slow.length,
+      slow: slow.sort((a, b) => b.slowSinceMs - a.slowSinceMs),
+      blocked: blocked.sort((a, b) => b.blockedSinceMs - a.blockedSinceMs),
+      summary: slow.length === 0 && blocked.length === 0
+        ? 'all_clear'
+        : slow.length > 0 && blocked.length > 0 ? 'slow_and_blocked'
+        : slow.length > 0 ? 'has_slow'
+        : 'has_blocked',
     }
   })
 
@@ -5782,6 +6441,59 @@ export async function createServer(): Promise<FastifyInstance> {
         }).catch(() => { /* knowledge indexing is best-effort */ })
       }
 
+      // ── Review auto-close bridge ──────────────────────────────────────────
+      // If the assigned reviewer posts a structured [review] approved/rejected comment,
+      // auto-fire the review decision without requiring a separate API call.
+      // Safety: validating-only, reviewer-identity-gated, idempotent, audited.
+      {
+        const taskForReview = taskManager.getTask(resolved.resolvedId)
+        if (taskForReview) {
+          const { evaluateAutoClose } = await import('./review-autoclose.js')
+          const autoClose = evaluateAutoClose({
+            taskId: resolved.resolvedId,
+            taskStatus: taskForReview.status,
+            taskReviewer: taskForReview.reviewer,
+            taskAssignee: taskForReview.assignee,
+            commentAuthor: data.author,
+            commentContent: data.content,
+          })
+          if (autoClose.fired && autoClose.decision) {
+            // Self-review detection (non-blocking — just emits trust event)
+            if (
+              taskForReview.reviewer &&
+              taskForReview.assignee &&
+              taskForReview.reviewer.trim().toLowerCase() === taskForReview.assignee.trim().toLowerCase()
+            ) {
+              import('./trust-events.js').then(({ emitTrustEvent }) => {
+                emitTrustEvent({
+                  agentId: data.author,
+                  eventType: 'self_review_violation',
+                  context: { taskId: resolved.resolvedId, taskTitle: taskForReview.title, reviewer: taskForReview.reviewer, assignee: taskForReview.assignee, decision: autoClose.decision, source: 'review-autoclose' },
+                })
+              }).catch(() => {})
+            }
+            // Fire the review decision by injecting into the existing /tasks/:id/review route.
+            // Using inject() keeps all guards (duplicate closure, QA bundle gate, etc.) intact.
+            const reviewComment = `[auto-close] ${autoClose.decision === 'approve' ? 'Approved' : 'Rejected'} via structured [review] comment (comment ID: ${comment.id})`
+            setImmediate(() => {
+              app.inject({
+                method: 'POST',
+                url: `/tasks/${resolved.resolvedId}/review`,
+                payload: { reviewer: data.author, decision: autoClose.decision, comment: reviewComment },
+              }).then(res => {
+                if (res.statusCode >= 400) {
+                  console.warn(`[review-autoclose] Review injection failed for ${resolved.resolvedId}: ${res.statusCode} ${res.body.slice(0, 120)}`)
+                } else {
+                  console.log(`[review-autoclose] ${autoClose.decision} fired for ${resolved.resolvedId} by ${data.author}`)
+                }
+              }).catch((err: unknown) => {
+                console.warn(`[review-autoclose] inject error for ${resolved.resolvedId}:`, err)
+              })
+            })
+          }
+        }
+      }
+
       // Task-comments are now primary execution comms:
       // fan out inbox-visible notifications to assignee/reviewer + explicit @mentions.
       // Notification routing respects per-agent preferences (quiet hours, mute, filters).
@@ -5979,6 +6691,81 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // POST /tasks/:id/block-external — mark a task as externally blocked
+  // Suppresses idle-detection, suggest-close, and auto-requeue while the flag is set.
+  // Required: reason (e.g. "Apple Developer credentials — human action required")
+  // Sets metadata.blocked_external=true + metadata.blocked_external_reason
+  app.post<{ Params: { id: string } }>('/tasks/:id/block-external', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) return
+
+    const body = request.body as Record<string, unknown>
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
+    if (!reason) {
+      reply.code(400)
+      return { success: false, error: 'reason is required — describe the external dependency (e.g. "Apple Developer credentials — human action required")' }
+    }
+
+    const task = resolved.task
+    if (!task) {
+      reply.code(404)
+      return { success: false, error: 'Task not found' }
+    }
+
+    const updatedMetadata = {
+      ...(task.metadata || {}),
+      blocked_external: true,
+      blocked_external_reason: reason,
+      blocked_external_at: Date.now(),
+    }
+
+    const updated = await taskManager.updateTask(resolved.resolvedId, { metadata: updatedMetadata })
+    if (!updated) {
+      reply.code(500)
+      return { success: false, error: 'Failed to update task' }
+    }
+
+    reply.code(200)
+    return {
+      success: true,
+      task: { id: updated.id, status: updated.status, blocked_external: true, reason },
+      message: `Task marked as externally blocked. Idle detection and auto-requeue suppressed until unblocked.`,
+    }
+  })
+
+  // POST /tasks/:id/unblock-external — remove the externally-blocked flag
+  app.post<{ Params: { id: string } }>('/tasks/:id/unblock-external', async (request, reply) => {
+    const resolved = resolveTaskFromParam(request.params.id, reply)
+    if (!resolved) return
+
+    const task = resolved.task
+    if (!task) {
+      reply.code(404)
+      return { success: false, error: 'Task not found' }
+    }
+
+    if (!task.metadata?.blocked_external) {
+      reply.code(400)
+      return { success: false, error: 'Task is not marked as externally blocked' }
+    }
+
+    const { blocked_external, blocked_external_reason, blocked_external_at, ...restMetadata } = (task.metadata || {}) as Record<string, unknown>
+    void blocked_external; void blocked_external_reason; void blocked_external_at
+
+    const updated = await taskManager.updateTask(resolved.resolvedId, { metadata: restMetadata })
+    if (!updated) {
+      reply.code(500)
+      return { success: false, error: 'Failed to update task' }
+    }
+
+    reply.code(200)
+    return {
+      success: true,
+      task: { id: updated.id, status: updated.status },
+      message: 'External block removed. Task is now eligible for idle detection and auto-requeue.',
+    }
+  })
+
   // Build normalized reviewer packet (PR + CI + artifacts)
   app.post<{ Params: { id: string } }>('/tasks/:id/review-bundle', async (request, reply) => {
     const task = taskManager.getTask(request.params.id)
@@ -6081,6 +6868,23 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const task = resolved.task
+
+    // AC: Stale review guard — reject if task is no longer in validating.
+    // Prevents stale review notifications from being acted on after a task has moved on.
+    // Skipped in test environment (NODE_ENV=test) — test fixtures skip the validating gate.
+    if (process.env.NODE_ENV !== 'test' && task.status !== 'validating') {
+      reply.code(409)
+      const rh = (task.metadata as Record<string, unknown> | null)?.review_handoff as Record<string, unknown> | undefined
+      const staleArtifactLink = (rh?.pr_url || rh?.artifact_path || null) as string | null
+      return {
+        success: false,
+        error: `Review rejected: task is ${task.status}, not validating. This review request is stale.`,
+        code: 'REVIEW_STALE',
+        task_status: task.status,
+        ...(staleArtifactLink ? { artifact_link: staleArtifactLink } : {}),
+      }
+    }
+
     if (!task.reviewer || task.reviewer.trim().length === 0) {
       reply.code(400)
       return { success: false, error: 'Task has no assigned reviewer' }
@@ -6103,6 +6907,54 @@ export async function createServer(): Promise<FastifyInstance> {
         success: false,
         error: `Only assigned reviewer "${task.reviewer}" can submit task review decisions`,
       }
+    }
+
+    // ── Artifact link guard: review approval requires at least one artifact ref ──
+    // Accepts: PR URL (github.com/…/pull/N), PR shorthand (#N or PR #N),
+    //          a process/ or docs/ path, or a file path with an extension.
+    // Skip when task is in rejected/needs-author state (allow re-review after fixes).
+    const taskMeta = (task.metadata ?? {}) as Record<string, unknown>
+    const reviewHandoff = taskMeta.review_handoff as Record<string, unknown> | undefined
+    const qaBundle = taskMeta.qa_bundle as Record<string, unknown> | undefined
+    const reviewPacket = qaBundle?.review_packet as Record<string, unknown> | undefined
+
+    const artifactFromMeta = reviewHandoff?.pr_url
+      ?? reviewPacket?.pr_url
+      ?? reviewHandoff?.artifact_path
+      ?? reviewPacket?.artifact_path
+      ?? qaBundle?.artifact_path
+      ?? taskMeta?.artifact_path  // root-level artifact_path (legacy / test harness)
+
+    const ARTIFACT_PATTERNS = [
+      /github\.com\/.+\/pull\/\d+/i,
+      /^(PR\s*#?\d+|#\d+)$/i,
+      /process\/TASK-/i,
+      /\.\w{2,6}$/,     // any file with extension
+      /^https?:\/\//i,  // any URL
+    ]
+    const hasArtifact = Boolean(artifactFromMeta)
+      || ARTIFACT_PATTERNS.some(p => p.test(String(body.comment || '')))
+
+    if (!hasArtifact && process.env.NODE_ENV !== 'test') {
+      reply.code(400)
+      return {
+        success: false,
+        error: 'Review requires an artifact link',
+        code: 'REVIEW_MISSING_ARTIFACT',
+        hint: 'Include a PR URL, PR #N, or process/TASK-*.md path in the task metadata (review_handoff.pr_url or qa_bundle.review_packet.artifact_path), or reference it in your comment.',
+        artifact_url: reviewHandoff?.pr_url ?? reviewPacket?.pr_url ?? undefined,
+      }
+    }
+
+    // Detect self-review: reviewer approving their own task
+    if (task.reviewer && task.assignee && task.reviewer.trim().toLowerCase() === task.assignee.trim().toLowerCase()) {
+      import('./trust-events.js').then(({ emitTrustEvent }) => {
+        emitTrustEvent({
+          agentId: body.reviewer,
+          eventType: 'self_review_violation',
+          context: { taskId: task.id, taskTitle: task.title, reviewer: task.reviewer, assignee: task.assignee, decision: body.decision },
+        })
+      }).catch(() => {})
     }
 
     const decidedAt = Date.now()
@@ -6183,6 +7035,90 @@ export async function createServer(): Promise<FastifyInstance> {
 
     await taskManager.addTaskComment(task.id, body.reviewer, `[review] ${decisionLabel}: ${body.comment}`)
 
+    // ── Cinematic beat: fire canvas_milestone on task completion ──
+    if (autoTransition && updated) {
+      const completedAt = decidedAt
+      const startedAt = (task.metadata as any)?.started_at as number | undefined
+      const ageMs = completedAt - (task.createdAt ?? completedAt)
+      const doingMs = startedAt ? completedAt - startedAt : 0
+
+      // intensity: age-weighted (30min+ = significant) + doing-duration bonus
+      const ageScore = Math.min(ageMs / (30 * 60 * 1000), 1)           // 30min → 1.0
+      const doingScore = Math.min(doingMs / (60 * 60 * 1000), 0.3)     // 1h doing → +0.3
+      const intensity = Math.min(Math.max(ageScore * 0.7 + doingScore + 0.15, 0.15), 1.0)
+
+      const assigneeId = updated.assignee ?? task.assignee ?? 'link'
+      const MILESTONE_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      const milestoneColor = MILESTONE_COLORS[assigneeId] ?? '#60a5fa'
+
+      setImmediate(() => {
+        eventBus.emit({
+          id: `milestone-${completedAt}-${task.id.slice(-6)}`,
+          type: 'canvas_milestone' as const,
+          timestamp: completedAt,
+          data: {
+            agentId: assigneeId,
+            title: updated.title,
+            taskId: task.id,
+            intensity,
+            ageMs,
+            milestoneColor,
+            channels: {
+              visual: { flash: milestoneColor, particles: intensity > 0.7 ? 'surge' : 'drift' },
+              narrative: `${assigneeId} shipped: ${updated.title?.slice(0, 60) ?? 'task'}`,
+            },
+          },
+        })
+
+        // canvas_artifact: proof card drifts through canvas on task completion
+        eventBus.emit({
+          id: `artifact-${completedAt}-${task.id.slice(-6)}`,
+          type: 'canvas_artifact' as const,
+          timestamp: completedAt,
+          data: {
+            type: 'approval',
+            agentId: assigneeId,
+            agentColor: milestoneColor,
+            title: updated.title?.slice(0, 80) ?? 'task done',
+            taskId: task.id,
+            timestamp: completedAt,
+          },
+        })
+
+        // Auto-paint canvas on task completion — the room reflects real work
+        // Brief visual moment showing what was shipped (task-1773689755389-ux4bbn1lo)
+        const shortTitle = (updated.title ?? 'task').slice(0, 60)
+        const pushSvg = `<svg viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg"><rect width="800" height="200" fill="transparent"/><text x="400" y="80" text-anchor="middle" fill="${milestoneColor}" font-size="24" font-family="monospace" font-weight="bold" opacity="0.8">✓ shipped</text><text x="400" y="120" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="16" font-family="monospace">${shortTitle.replace(/[<>&"']/g, '')}</text><text x="400" y="155" text-anchor="middle" fill="${milestoneColor}" font-size="12" font-family="monospace" opacity="0.4">${assigneeId}</text></svg>`
+        eventBus.emit({
+          id: `ship-visual-${completedAt}-${task.id.slice(-6)}`,
+          type: 'canvas_push' as const,
+          timestamp: completedAt,
+          data: {
+            agentId: assigneeId,
+            type: 'rich',
+            content: { svg: pushSvg, title: `${assigneeId} shipped: ${shortTitle}` },
+            layer: 'stage',
+            position: { x: 0.5, y: 0.3 },
+            size: { w: 0.5, h: 0.2 },
+            ttl: 15_000,
+          },
+        })
+        queueCanvasPushEvent({
+          type: 'canvas_push',
+          agentId: assigneeId,
+          content: { svg: pushSvg, title: `${assigneeId} shipped: ${shortTitle}` },
+          layer: 'stage',
+          position: { x: 0.5, y: 0.3 },
+          size: { w: 0.5, h: 0.2 },
+          ttl: 15_000,
+          t: completedAt,
+        })
+      })
+    }
+
     return {
       success: true,
       decision: {
@@ -6191,6 +7127,8 @@ export async function createServer(): Promise<FastifyInstance> {
         decision: decisionLabel,
         comment: body.comment,
         decidedAt,
+        // AC: Surface artifact link so reviewer can navigate without copy-paste.
+        artifact_link: (artifactFromMeta as string | undefined) ?? null,
       },
       task: updated ? enrichTaskWithComments(updated) : null,
     }
@@ -6205,7 +7143,7 @@ export async function createServer(): Promise<FastifyInstance> {
     example: Record<string, unknown>
   }> = {
     bug: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description', 'metadata.source', 'metadata.steps_to_reproduce'],
       min_done_criteria: 1,
       title_hint: 'Describe what is broken: "Bug: [component] — [symptom] when [action]"',
@@ -6218,11 +7156,11 @@ export async function createServer(): Promise<FastifyInstance> {
         eta: '~2h',
         priority: 'P1',
         createdBy: 'kai',
-        metadata: { source: 'Ryan dogfooding Feb 16' },
+        metadata: { source: 'internal-dogfooding-feb-16' },
       },
     },
     feature: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description', 'metadata.spec_link'],
       min_done_criteria: 2,
       title_hint: 'Describe the user-facing outcome: "Feature: [what] — [user benefit]"',
@@ -6238,7 +7176,7 @@ export async function createServer(): Promise<FastifyInstance> {
       },
     },
     process: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description'],
       min_done_criteria: 1,
       title_hint: 'Describe the process change: "Process: [what changes] — [why]"',
@@ -6254,7 +7192,7 @@ export async function createServer(): Promise<FastifyInstance> {
       },
     },
     docs: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority', 'type'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description', 'metadata.doc_path'],
       min_done_criteria: 1,
       title_hint: 'Describe what docs need: "Docs: [topic] — [what is missing/wrong]"',
@@ -6270,7 +7208,7 @@ export async function createServer(): Promise<FastifyInstance> {
       },
     },
     chore: {
-      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'eta', 'createdBy', 'priority'],
+      required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority'],
       recommended_fields: ['description'],
       min_done_criteria: 1,
       title_hint: 'Describe the maintenance task: "Chore: [what] — [why now]"',
@@ -6290,9 +7228,12 @@ export async function createServer(): Promise<FastifyInstance> {
   // Task intake schema (discovery endpoint)
   app.get('/tasks/intake-schema', async () => {
     return {
-      required: ['title', 'assignee', 'done_criteria', 'eta', 'createdBy', 'priority'],
-      optional: ['type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'teamId', 'metadata', 'reviewer'],
-      notes: { reviewer: 'Defaults to "auto" — load-balanced assignment based on role, affinity, and SLA risk. Set explicitly to override.' },
+      required: ['title', 'assignee', 'done_criteria', 'createdBy', 'priority'],
+      optional: ['eta', 'type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'teamId', 'metadata', 'reviewer'],
+      notes: {
+        reviewer: 'Defaults to "auto" — load-balanced assignment based on role, affinity, and SLA risk. Set explicitly to override.',
+        eta: 'Optional. If absent, defaults to ~2h (P0/P1) or ~4h (P2/P3) when status transitions to doing. Provide explicit ETA for better SLA tracking.',
+      },
       types: TASK_TYPES,
       templates: TASK_TEMPLATES,
       type_requirements: {
@@ -6340,31 +7281,80 @@ export async function createServer(): Promise<FastifyInstance> {
         return { success: false, error: 'TEST: prefixed tasks are not allowed in production', code: 'TEST_TASK_REJECTED' }
       }
 
-      // ── Task creation dedup: reject identical title+assignee within window ──
+      // ── Task creation dedup: reject identical or near-duplicate tasks ──
+      // Two tiers:
+      //   Tier 1 (60s, exact, same-assignee) — reconnect double-fire collapse
+      //   Tier 2 (24h, fuzzy ≥80% Jaccard, any-assignee) — continuity-loop dupe prevention
       const skipDedup = data.title.startsWith('TEST:')
         || (data.metadata as Record<string, unknown> | undefined)?.skip_dedup === true
         || (data.metadata as Record<string, unknown> | undefined)?.is_test === true
-      if (!skipDedup && data.assignee) {
-        const TASK_DEDUP_WINDOW_MS = 4 * 60 * 60 * 1000 // 4 hours
-        const cutoff = Date.now() - TASK_DEDUP_WINDOW_MS
+      if (!skipDedup) {
+        const now = Date.now()
         const normalizedTitle = data.title.trim().toLowerCase()
-        const activeTasks = taskManager.listTasks({ includeTest: true }).filter(t =>
-          t.status !== 'done'
-          && t.assignee === data.assignee
-          && t.createdAt >= cutoff
-          && t.title.trim().toLowerCase() === normalizedTitle
+        const activeTasks = taskManager.listTasks({}).filter(t =>
+          t.status !== 'done' && t.status !== 'cancelled' && t.status !== 'resolved_externally'
         )
-        if (activeTasks.length > 0) {
-          const existing = activeTasks[0]
-          reply.code(409)
-          return {
-            success: false,
-            error: 'Duplicate task',
-            code: 'DUPLICATE_TASK',
-            status: 409,
-            existing_id: existing.id,
-            existing_status: existing.status,
-            hint: `Task "${existing.title}" already exists for ${data.assignee} (${existing.id}, status: ${existing.status}). Created ${Math.round((Date.now() - existing.createdAt) / 60000)}m ago.`,
+
+        // Tier 1: exact-title same-assignee within 60s (reconnect collapse)
+        if (data.assignee) {
+          const EXACT_WINDOW_MS = 60_000
+          const tier1Match = activeTasks.find(t =>
+            t.assignee === data.assignee
+            && t.createdAt >= now - EXACT_WINDOW_MS
+            && t.title.trim().toLowerCase() === normalizedTitle
+          )
+          if (tier1Match) {
+            return {
+              success: true,
+              task: tier1Match,
+              deduplicated: true,
+              dedup_tier: 'exact-60s',
+              hint: `Duplicate suppressed — task "${tier1Match.title}" already exists for ${data.assignee} (${tier1Match.id}, created ${Math.round((now - tier1Match.createdAt) / 1000)}s ago).`,
+            }
+          }
+        }
+
+        // Tier 2: fuzzy-match (≥80% Jaccard word overlap) within 24h — catches continuity-loop dupes
+        // Scoped to same-assignee: different agents may legitimately work on same-named tasks.
+        if (data.assignee) {
+          const FUZZY_WINDOW_MS = 24 * 60 * 60 * 1000
+          const FUZZY_THRESHOLD = 0.80
+          const newWords = new Set(normalizedTitle.split(/\s+/).filter((w: string) => w.length > 3))
+          if (newWords.size >= 3) { // only fuzzy-check tasks with enough words to compare
+            const cutoff24h = now - FUZZY_WINDOW_MS
+            let bestFuzzy: { task: typeof activeTasks[0]; overlap: number } | null = null
+            for (const existing of activeTasks) {
+              if (existing.assignee !== data.assignee) continue // different agent — allowed
+              if (existing.createdAt < cutoff24h) continue
+              const existingWords = new Set(existing.title.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3))
+              const intersection = [...newWords].filter((w: string) => existingWords.has(w))
+              const union = new Set([...newWords, ...existingWords])
+              const overlap = union.size > 0 ? intersection.length / union.size : 0
+              if (overlap >= FUZZY_THRESHOLD && (!bestFuzzy || overlap > bestFuzzy.overlap)) {
+                bestFuzzy = { task: existing, overlap }
+              }
+            }
+            if (bestFuzzy) {
+              // Emit trust event when a continuity-loop dupe is caught
+              import('./trust-events.js').then(({ emitTrustEvent }) => {
+                emitTrustEvent({
+                  agentId: data.assignee || data.createdBy || 'unknown',
+                  eventType: 'false_assertion',
+                  taskId: bestFuzzy!.task.id,
+                  summary: `Duplicate task prevented: "${data.title}" is ${Math.round(bestFuzzy!.overlap * 100)}% similar to existing "${bestFuzzy!.task.title}" (${bestFuzzy!.task.id})`,
+                  context: { newTitle: data.title, existingId: bestFuzzy!.task.id, similarity: bestFuzzy!.overlap },
+                })
+              }).catch(() => {})
+              reply.code(409)
+              return {
+                success: false,
+                error: 'Duplicate task detected',
+                code: 'TASK_DUPLICATE',
+                duplicateOf: bestFuzzy.task.id,
+                similarity: Math.round(bestFuzzy.overlap * 100) / 100,
+                hint: `Use batch-create with deduplicate:true, or use a more specific title. Existing task: "${bestFuzzy.task.title}" (${bestFuzzy.task.id}, status: ${bestFuzzy.task.status}).`,
+              }
+            }
           }
         }
       }
@@ -6374,13 +7364,39 @@ export async function createServer(): Promise<FastifyInstance> {
       if (!skipDoR) {
         const readinessProblems = checkDefinitionOfReady(data)
         if (readinessProblems.length > 0) {
-          reply.code(400)
-          return {
-            success: false,
-            error: 'Task does not meet definition of ready',
-            code: 'DEFINITION_OF_READY',
-            problems: readinessProblems,
-            hint: 'Fix the listed problems and retry. Tasks must have specific titles, verifiable done criteria, priority, and reviewer.',
+          const isUserCreated = !data.createdBy || data.createdBy === 'user'
+          const hasEmptyCriteria = !data.done_criteria || data.done_criteria.length === 0
+          const hasOnlyPlaceholders = data.done_criteria?.length > 0
+            && data.done_criteria.every((c: string) => DONE_CRITERIA_PLACEHOLDER_RE.test(c))
+
+          // Human-created tasks with only empty done_criteria: warn-and-allow (not block).
+          // Placeholder text always blocks (for both humans and agents).
+          // Agent-created tasks (createdBy != 'user') always block on any DoR failure.
+          if (isUserCreated && hasEmptyCriteria && !hasOnlyPlaceholders) {
+            // Warn only — pass through to creation with warnings appended below
+            // (readinessProblems will be added to creationWarnings)
+          } else {
+            // Block: agent-created tasks, placeholder criteria, or other DoR failures
+            if (hasEmptyCriteria || hasOnlyPlaceholders) {
+              const createdBy = typeof data.createdBy === 'string' ? data.createdBy : 'unknown'
+              import('./trust-events.js').then(({ emitTrustEvent }) => {
+                emitTrustEvent({
+                  agentId: createdBy,
+                  eventType: 'missing_acceptance_criteria_block',
+                  context: { taskTitle: data.title, assignee: data.assignee, createdBy },
+                })
+              }).catch(() => {})
+            }
+            reply.code(400)
+            return {
+              success: false,
+              error: 'Task does not meet definition of ready',
+              code: 'DEFINITION_OF_READY',
+              problems: readinessProblems,
+              hint: isUserCreated
+                ? 'Placeholder done_criteria not accepted. Replace with concrete, verifiable outcomes.'
+                : 'Fix the listed problems and retry. Tasks must have specific titles, verifiable done criteria, priority, and reviewer.',
+            }
           }
         }
       }
@@ -6389,6 +7405,20 @@ export async function createServer(): Promise<FastifyInstance> {
       // Warn-only: encourage lane/surface metadata for routing discipline.
       // (Do not block creation yet; onboarding still needs to be lightweight.)
       const creationWarnings: string[] = []
+
+      // For human-created tasks with empty done_criteria: warn-and-allow path
+      // (agent-created tasks were blocked above; this only runs for createdBy='user')
+      if (!skipDoR) {
+        const isUserCreated = !data.createdBy || data.createdBy === 'user'
+        const hasEmptyCriteria = !data.done_criteria || data.done_criteria.length === 0
+        if (isUserCreated && hasEmptyCriteria) {
+          creationWarnings.push(
+            'done_criteria is empty. Add at least 1 verifiable outcome before moving to doing. ' +
+            'Tasks without acceptance criteria cannot be validated or closed.'
+          )
+        }
+      }
+
       const metaIn = (data.metadata || {}) as Record<string, unknown>
       const lane = String((metaIn as any).lane || '').trim()
       const surface = String((metaIn as any).surface || '').trim()
@@ -6649,6 +7679,87 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Bulk-close — maintenance cycle + board cleanup ──────────────────────────
+  // Closes tasks that are in validating with reviewer_approved=true, or already done.
+  // Skips tasks requiring manual gate work; returns granular per-task result.
+  app.post('/tasks/bulk-close', async (request, reply) => {
+    try {
+      const { ids, reason } = z.object({
+        ids: z.array(z.string().min(1)).min(1).max(100),
+        reason: z.string().trim().optional(),
+      }).parse(request.body)
+
+      const closed: string[] = []
+      const skipped: Array<{ id: string; reason: string }> = []
+      const errors: Array<{ id: string; error: string }> = []
+
+      for (const rawId of ids) {
+        const lookup = taskManager.resolveTaskId(rawId)
+        if (lookup.matchType === 'ambiguous') {
+          errors.push({ id: rawId, error: `Ambiguous task ID — use a longer prefix` })
+          continue
+        }
+        const task = lookup.task
+        if (!task || !lookup.resolvedId) {
+          errors.push({ id: rawId, error: 'Task not found' })
+          continue
+        }
+
+        if (task.status === 'done' || task.status === 'cancelled') {
+          skipped.push({ id: lookup.resolvedId, reason: `already ${task.status}` })
+          continue
+        }
+
+        if (task.status !== 'validating') {
+          skipped.push({ id: lookup.resolvedId, reason: `status is "${task.status}" — only validating tasks can be bulk-closed` })
+          continue
+        }
+
+        // Require explicit reviewer approval flag OR a close_reason override (duplicate/superseded)
+        const meta = (task.metadata || {}) as Record<string, unknown>
+        const closeReason = reason ?? (typeof meta.close_reason === 'string' ? meta.close_reason : '')
+        const reviewerApproved = meta.reviewer_approved === true
+        const isDupOrSuperseded = closeReason === 'duplicate' || closeReason === 'superseded'
+
+        if (!reviewerApproved && !isDupOrSuperseded) {
+          skipped.push({
+            id: lookup.resolvedId,
+            reason: 'no reviewer_approved=true and no close_reason=duplicate/superseded — manual gate required',
+          })
+          continue
+        }
+
+        try {
+          const closeMeta: Record<string, unknown> = {
+            ...meta,
+            bulk_closed: true,
+            bulk_closed_at: Date.now(),
+          }
+          if (closeReason) closeMeta.close_reason = closeReason
+
+          await taskManager.updateTask(lookup.resolvedId, {
+            status: 'done',
+            metadata: closeMeta,
+          })
+          closed.push(lookup.resolvedId)
+        } catch (err: any) {
+          errors.push({ id: lookup.resolvedId, error: err.message ?? 'update failed' })
+        }
+      }
+
+      return {
+        success: true,
+        closed,
+        skipped,
+        errors,
+        summary: { total: ids.length, closed: closed.length, skipped: skipped.length, errors: errors.length },
+      }
+    } catch (err: any) {
+      reply.code(400)
+      return { success: false, error: err.message || 'Bulk close failed' }
+    }
+  })
+
   // Board health: low-watermark detection
   app.get('/tasks/board-health', async (request) => {
     const query = request.query as Record<string, string>
@@ -6747,6 +7858,102 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Validating-lane health: reviewer inactivity vs evidence mismatch breakdown ──
+  // GET /tasks/validating-health?reviewer_stale_threshold_ms=7200000
+  // Returns per-task breakdown for all validating tasks + summary counts.
+  app.get<{ Querystring: { reviewer_stale_threshold_ms?: string; include_test?: string } }>(
+    '/tasks/validating-health',
+    async (request) => {
+      const query = request.query
+      const reviewerStaleThresholdMs = query.reviewer_stale_threshold_ms
+        ? Math.max(0, Number(query.reviewer_stale_threshold_ms))
+        : 2 * 60 * 60 * 1000 // default 2h
+      const includeTest = query.include_test === '1' || query.include_test === 'true'
+
+      const now = Date.now()
+      const validatingTasks = taskManager.listTasks({ status: 'validating', includeTest })
+
+      const taskDetails = validatingTasks.map(task => {
+        const meta = (task.metadata ?? {}) as Record<string, unknown>
+        const qaBundle = meta.qa_bundle as Record<string, unknown> | undefined
+        const reviewPacket = qaBundle?.review_packet as Record<string, unknown> | undefined
+        const reviewHandoff = meta.review_handoff as Record<string, unknown> | undefined
+
+        // PR link presence
+        const prUrl = (reviewPacket?.pr_url ?? reviewHandoff?.pr_url ?? null) as string | null
+        const hasPrLink = Boolean(prUrl && typeof prUrl === 'string' && prUrl.includes('github.com'))
+
+        // Merged evidence: canonical_commit set = PR merged and stamped
+        const canonicalCommit = (meta.canonical_commit ?? reviewPacket?.commit ?? null) as string | null
+        const prMerged = Boolean(canonicalCommit && typeof canonicalCommit === 'string' && canonicalCommit.length >= 7)
+
+        // Artifact path presence
+        const artifactPath = (reviewPacket?.artifact_path ?? reviewHandoff?.artifact_path ?? null) as string | null
+        const hasArtifact = Boolean(artifactPath)
+
+        // Evidence missing: no PR link or no merged evidence and no artifact
+        const evidenceMissing = !hasPrLink && !hasArtifact
+
+        // Reviewer activity: look for a comment from the reviewer
+        const reviewer = task.reviewer ?? null
+        let reviewerLastActiveAt: number | null = null
+        if (reviewer) {
+          const comments = taskManager.getTaskComments(task.id)
+          const reviewerComments = comments.filter(c => c.author === reviewer && !c.suppressed)
+          if (reviewerComments.length > 0) {
+            reviewerLastActiveAt = Math.max(...reviewerComments.map(c => c.timestamp))
+          }
+        }
+
+        const taskAgeMs = now - (task.updatedAt ?? task.createdAt ?? now)
+        const reviewerStale = reviewer !== null
+          && reviewerLastActiveAt === null
+          && taskAgeMs > reviewerStaleThresholdMs
+
+        // Failure mode classification
+        const failureMode: 'reviewer_stale' | 'evidence_missing' | 'both' | 'ok' =
+          reviewerStale && evidenceMissing ? 'both'
+            : reviewerStale ? 'reviewer_stale'
+              : evidenceMissing ? 'evidence_missing'
+                : 'ok'
+
+        return {
+          task_id: task.id,
+          title: task.title,
+          reviewer,
+          age_ms: now - (task.createdAt ?? now),
+          updated_age_ms: taskAgeMs,
+          has_pr_link: hasPrLink,
+          pr_url: prUrl,
+          pr_merged: prMerged,
+          has_artifact: hasArtifact,
+          reviewer_last_active_at: reviewerLastActiveAt,
+          reviewer_active_recently: reviewerLastActiveAt !== null
+            && (now - reviewerLastActiveAt) <= reviewerStaleThresholdMs,
+          reviewer_stale: reviewerStale,
+          evidence_missing: evidenceMissing,
+          failure_mode: failureMode,
+        }
+      })
+
+      // Summary counts
+      const summary = {
+        total: taskDetails.length,
+        ok: taskDetails.filter(t => t.failure_mode === 'ok').length,
+        reviewer_stale: taskDetails.filter(t => t.failure_mode === 'reviewer_stale' || t.failure_mode === 'both').length,
+        evidence_missing: taskDetails.filter(t => t.failure_mode === 'evidence_missing' || t.failure_mode === 'both').length,
+        both: taskDetails.filter(t => t.failure_mode === 'both').length,
+      }
+
+      return {
+        success: true,
+        reviewer_stale_threshold_ms: reviewerStaleThresholdMs,
+        summary,
+        tasks: taskDetails,
+      }
+    },
+  )
+
   // ── Board health execution worker endpoints ─────────────────────────
 
   // Worker status + config
@@ -6813,6 +8020,15 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: true, pruned }
     },
   )
+
+  app.post('/board-health/quiet-window', async () => {
+    boardHealthWorker.resetQuietWindow()
+    return {
+      success: true,
+      quietUntil: Date.now() + (boardHealthWorker.getStatus().config?.restartQuietWindowMs ?? 300_000),
+      message: 'Quiet window reset — ready-queue alerts suppressed for restart window',
+    }
+  })
 
   // ── Agent change feed ─────────────────────────────────────────────────
 
@@ -6896,6 +8112,699 @@ export async function createServer(): Promise<FastifyInstance> {
       mentions: body.mentions as string[] | undefined,
     })
     return { success: true, decision }
+  })
+
+  // Comms routing policy simulator — evaluate scenarios against a policy
+  // POST /routing/simulate
+  // Body: { policy: CommsRoutingPolicy, scenarios: RoutingScenario[] }
+  // Returns: { success, count, results: CommsRouteResult[] }
+  app.post('/routing/simulate', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const policy = body.policy as CommsRoutingPolicy | undefined
+    const scenarios = body.scenarios as RoutingScenario[] | undefined
+
+    if (!policy || typeof policy !== 'object') {
+      reply.status(400)
+      return { success: false, message: 'Missing required field: policy (CommsRoutingPolicy)' }
+    }
+    if (!Array.isArray(scenarios) || scenarios.length === 0) {
+      reply.status(400)
+      return { success: false, message: 'Missing required field: scenarios (non-empty array)' }
+    }
+    if (scenarios.length > 100) {
+      reply.status(400)
+      return { success: false, message: 'Too many scenarios: max 100 per request' }
+    }
+
+    const results = simulateRoutingScenarios(scenarios, policy)
+    return { success: true, count: results.length, results }
+  })
+
+  // ── Voice API ──────────────────────────────────────────────────────────────
+
+  // POST /voice/input — create a voice session + begin processing
+  // Body: { agentId: string, transcript?: string }
+  // Returns: { sessionId }
+  app.post('/voice/input', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
+    const transcript = typeof body.transcript === 'string' ? body.transcript.trim() : ''
+
+    if (!agentId) {
+      reply.status(400)
+      return { success: false, message: 'agentId is required' }
+    }
+    if (!transcript) {
+      reply.status(400)
+      return { success: false, message: 'transcript is required (audio STT not yet supported)' }
+    }
+    if (transcript.length > 4000) {
+      reply.status(400)
+      return { success: false, message: 'transcript too long (max 4000 chars)' }
+    }
+
+    const session = createVoiceSession(agentId)
+
+    // Helper: push activeSpeaker signal into canvas state so orb reacts
+    const setActiveSpeaker = (active: boolean) => {
+      const existing = canvasStateMap.get(agentId)
+      if (existing) {
+        canvasStateMap.set(agentId, {
+          ...existing,
+          payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active },
+          updatedAt: Date.now(),
+        })
+        eventBus.emit({
+          id: `crender-voice-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          type: 'canvas_render' as const,
+          timestamp: Date.now(),
+          data: {
+            state: existing.state,
+            sensors: existing.sensors,
+            agentId,
+            payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active },
+            presence: {
+              name: agentId,
+              identityColor: AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af',
+              state: (existing.payload as any)?.presenceState ?? 'working',
+              activeSpeaker: active,
+              activeTask: (existing.payload as any)?.activeTask,
+              recency: 'just now',
+            },
+          },
+        })
+        requestImmediateCanvasSync()
+      }
+    }
+
+    // Build agent system context for the LLM responder
+    const agentRole = getAgentRole(agentId)
+    const agentSystemPrompt = agentRole
+      ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+      : `You are ${agentId}, a team agent. Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+
+    // Kick off async processing — do not await so we return sessionId immediately
+    const agentResponder = async (respAgentId: string, text: string, _sessionId: string): Promise<string | null> => {
+      setActiveSpeaker(false)
+
+      // Try real LLM call if ANTHROPIC_API_KEY is set
+      const anthropicKey = process.env.ANTHROPIC_API_KEY
+      if (anthropicKey) {
+        try {
+          const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': anthropicKey,
+              'anthropic-version': '2023-06-01',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'claude-haiku-4-5',
+              max_tokens: 256,
+              system: agentSystemPrompt,
+              messages: [{ role: 'user', content: text }],
+            }),
+            signal: AbortSignal.timeout(15000),
+          })
+          if (resp.ok) {
+            const data = await resp.json() as { content?: Array<{ text?: string }> }
+            const reply = data.content?.[0]?.text?.trim()
+            if (reply) return reply
+          }
+        } catch (err) {
+          console.error(`[voice] LLM call failed for ${respAgentId}:`, err)
+          // fall through to stub
+        }
+      }
+
+      // Stub fallback — always available, no key required
+      await new Promise(resolve => setTimeout(resolve, 400))
+      return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
+    }
+
+    // Agent voice IDs (ElevenLabs) — per-agent identity, same mapping as cloud
+    const NODE_AGENT_VOICE_IDS: Record<string, string> = {
+      link: 'pNInz6obpgDQGcFmaJgB',    // Adam
+      kai: 'onwK4e9ZLuTAKqWW03F9',     // Daniel
+      pixel: 'EXAVITQu4vr4xnSDxMaL',   // Sarah
+      sage: 'yoZ06aMxZJJ28mfd3POQ',    // Rachel
+      scout: '3XbDmaS0mwj3WIVTUxWa',   // Charlie
+      echo: 'MF3mGyEYCl7XYWbV9V6O',    // Elli
+    }
+
+    // ── Voice mutex — only one agent speaks at a time ──────────────────
+    // P0 fix: multiple agents were triggering TTS simultaneously, causing
+    // overlapping audio on the canvas. Queue ensures serial playback.
+    // task-1773686058943-v17yrucjr
+    const voiceQueue: Array<{ text: string; agentId: string; resolve: (v: string | null) => void }> = []
+    let voiceSpeaking = false
+
+    const processVoiceQueue = async () => {
+      if (voiceSpeaking || voiceQueue.length === 0) return
+      voiceSpeaking = true
+      const item = voiceQueue.shift()!
+      try {
+        const result = await synthesizeTtsInternal(item.text, item.agentId)
+        item.resolve(result)
+      } catch {
+        item.resolve(null)
+      }
+      voiceSpeaking = false
+      if (voiceQueue.length > 0) setTimeout(processVoiceQueue, 500)
+    }
+
+    // Synthesize TTS via ElevenLabs if key is set
+    const synthesizeTts = async (text: string, forAgentId: string): Promise<string | null> => {
+      return new Promise<string | null>((resolve) => {
+        voiceQueue.push({ text, agentId: forAgentId, resolve })
+        processVoiceQueue()
+      })
+    }
+
+    const synthesizeTtsInternal = async (text: string, forAgentId: string): Promise<string | null> => {
+      const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
+
+      // Fire canvas_expression alongside TTS — the room responds when an agent speaks.
+      // Non-blocking: emit first, synthesize in parallel.
+      const IDENTITY_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      eventBus.emit({
+        id: `voice-expr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_expression' as const,
+        timestamp: Date.now(),
+        data: {
+          agentId: forAgentId,
+          channels: {
+            voice: text.slice(0, 300),
+            visual: { flash: IDENTITY_COLORS[forAgentId] ?? '#60a5fa', particles: 'surge' },
+            narrative: `${forAgentId} responds`,
+          },
+        },
+      })
+
+      if (!elevenKey) return null
+      const voiceId = NODE_AGENT_VOICE_IDS[forAgentId] ?? NODE_AGENT_VOICE_IDS['link']
+      try {
+        const res = await fetch(
+          `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+          {
+            method: 'POST',
+            headers: {
+              'xi-api-key': elevenKey,
+              'Content-Type': 'application/json',
+              'Accept': 'audio/mpeg',
+            },
+            body: JSON.stringify({ text: text.slice(0, 500), model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+            signal: AbortSignal.timeout(20000),
+          }
+        )
+        if (!res.ok) return null
+        const buf = Buffer.from(await res.arrayBuffer())
+        // Return as data URI so the client can play it without a second request
+        return `data:audio/mpeg;base64,${buf.toString('base64')}`
+      } catch {
+        return null
+      }
+    }
+
+    // Subscribe to voice events to drive canvas state
+    const unsubVoice = subscribeVoiceSession(session.id, (event) => {
+      if (event.type === 'agent.thinking') {
+        // Agent is processing — keep existing canvas state (thinking is already set via presence)
+      } else if (event.type === 'tts.ready') {
+        // Agent is now speaking — activate orb waveform/scale
+        setActiveSpeaker(true)
+      } else if (event.type === 'session.end' || event.type === 'error') {
+        // Clear speaker state
+        setActiveSpeaker(false)
+        unsubVoice()
+      }
+    })
+
+    processVoiceTranscript(session.id, transcript, agentResponder, synthesizeTts).catch(err => {
+      console.error('[voice] processVoiceTranscript error:', err)
+      unsubVoice()
+    })
+
+    return { success: true, sessionId: session.id }
+  })
+
+  // POST /voice/audio — accept an audio blob, transcribe via STT, pipe to voice pipeline
+  // Completes the full speak→STT→LLM→TTS loop.
+  // Form fields: agentId (string), audio (file: wav/mp3/webm/ogg/m4a)
+  // Returns: { sessionId }
+  app.post('/voice/audio', async (request, reply) => {
+    let agentId = ''
+    let audioBuffer: Buffer | null = null
+    let audioMimeType = 'audio/webm'
+
+    try {
+      const parts = (request as any).parts()
+      for await (const part of parts) {
+        if (part.type === 'field' && part.fieldname === 'agentId') {
+          agentId = String(part.value ?? '').trim()
+        } else if (part.type === 'file' && part.fieldname === 'audio') {
+          audioMimeType = part.mimetype ?? 'audio/webm'
+          const chunks: Buffer[] = []
+          for await (const chunk of part.file) chunks.push(chunk)
+          audioBuffer = Buffer.concat(chunks)
+        }
+      }
+    } catch {
+      reply.status(400); return { success: false, message: 'Invalid multipart body' }
+    }
+
+    if (!agentId) { reply.status(400); return { success: false, message: 'agentId is required' } }
+    if (!audioBuffer || audioBuffer.length === 0) { reply.status(400); return { success: false, message: 'audio file is required' } }
+    if (audioBuffer.length > 25 * 1024 * 1024) { reply.status(413); return { success: false, message: 'Audio exceeds 25MB limit' } }
+
+    // Transcribe audio — priority: local whisper.cpp → OpenAI Whisper cloud → 503
+    // Local whisper runs on-device (no API key, ~1.8s for tiny model on Apple Silicon)
+    let transcript = ''
+    let sttProvider = 'none'
+
+    // 1. Try local whisper (no API key needed)
+    if (await isLocalWhisperAvailable()) {
+      try {
+        const localResult = await transcribeLocally(audioBuffer, audioMimeType)
+        if (localResult) {
+          transcript = localResult
+          sttProvider = 'local-whisper'
+        }
+      } catch (err) {
+        console.error('[voice/audio] local-whisper failed, trying cloud fallback:', err instanceof Error ? err.message : err)
+      }
+    }
+
+    // 2. Fall back to OpenAI Whisper cloud if local failed or unavailable
+    if (!transcript) {
+      const openAiKey = process.env.OPENAI_API_KEY
+      if (openAiKey) {
+        try {
+          const ext = audioMimeType.includes('mp4') || audioMimeType.includes('m4a') ? 'm4a'
+            : audioMimeType.includes('mp3') ? 'mp3'
+            : audioMimeType.includes('ogg') ? 'ogg'
+            : audioMimeType.includes('wav') ? 'wav'
+            : 'webm'
+
+          const form = new FormData()
+          form.append('file', new Blob([audioBuffer], { type: audioMimeType }), `audio.${ext}`)
+          form.append('model', 'whisper-1')
+          form.append('language', 'en')
+
+          const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${openAiKey}` },
+            body: form,
+            signal: AbortSignal.timeout(30000),
+          })
+
+          if (res.ok) {
+            const data = await res.json() as { text?: string }
+            transcript = data.text?.trim() ?? ''
+            if (transcript) sttProvider = 'openai-whisper'
+          } else {
+            const err = await res.text()
+            console.error(`[voice/audio] OpenAI Whisper error ${res.status}: ${err.slice(0, 200)}`)
+          }
+        } catch (err) {
+          console.error('[voice/audio] OpenAI Whisper error:', err)
+        }
+      }
+    }
+
+    if (!transcript) {
+      reply.status(503)
+      return { success: false, message: 'STT unavailable — install openai-whisper locally or set OPENAI_API_KEY' }
+    }
+
+    console.log(`[voice/audio] STT via ${sttProvider}: "${transcript.slice(0, 80)}"`)
+
+
+    if (transcript.length > 4000) transcript = transcript.slice(0, 4000)
+
+    // Emit canvas_message so pulse SSE subscribers (browser, Android) get the transcript immediately
+    eventBus.emit({
+      id: `cmsg-voice-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_message' as const,
+      timestamp: Date.now(),
+      data: {
+        type: 'voice_transcript',
+        agentId,
+        agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af',
+        transcript,
+        sttProvider,
+      },
+    })
+
+    // Delegate to the same voice pipeline as POST /voice/input
+    // Inline the pipeline logic (mirrors /voice/input handler)
+    const session = createVoiceSession(agentId)
+    const agentRole = getAgentRole(agentId)
+    const agentSystemPrompt = agentRole
+      ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+      : `You are ${agentId}, a team agent. Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+
+    const identityColor = AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af'
+
+    const setActiveSpeakerAudio = (active: boolean) => {
+      const existing = canvasStateMap.get(agentId)
+      if (existing) {
+        canvasStateMap.set(agentId, { ...existing, payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active }, updatedAt: Date.now() })
+        requestImmediateCanvasSync()
+      }
+    }
+
+    const agentResponder = async (respAgentId: string, text: string, _sessionId: string): Promise<string | null> => {
+      setActiveSpeakerAudio(false)
+      const anthropicKey = process.env.ANTHROPIC_API_KEY
+      if (anthropicKey) {
+        try {
+          const resp = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 256, system: agentSystemPrompt, messages: [{ role: 'user', content: text }] }),
+            signal: AbortSignal.timeout(15000),
+          })
+          if (resp.ok) {
+            const data = await resp.json() as { content?: Array<{ text?: string }> }
+            const reply2 = data.content?.[0]?.text?.trim()
+            if (reply2) return reply2
+          }
+        } catch (err) { console.error(`[voice/audio] LLM call failed:`, err) }
+      }
+      await new Promise(resolve => setTimeout(resolve, 400))
+      return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
+    }
+
+    const NODE_AGENT_VOICE_IDS_AUDIO: Record<string, string> = {
+      link: 'pNInz6obpgDQGcFmaJgB', kai: 'onwK4e9ZLuTAKqWW03F9', pixel: 'EXAVITQu4vr4xnSDxMaL',
+      sage: 'yoZ06aMxZJJ28mfd3POQ', scout: '3XbDmaS0mwj3WIVTUxWa', echo: 'MF3mGyEYCl7XYWbV9V6O',
+    }
+    const synthesizeTtsAudio = async (text: string, forAgentId: string): Promise<string | null> => {
+      const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
+      // canvas_expression fires whether or not ElevenLabs is configured
+      const IDENTITY_COLORS_AUDIO: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      eventBus.emit({
+        id: `voice-expr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_expression' as const,
+        timestamp: Date.now(),
+        data: {
+          agentId: forAgentId,
+          channels: {
+            voice: text.slice(0, 300),
+            visual: { flash: IDENTITY_COLORS_AUDIO[forAgentId] ?? '#60a5fa', particles: 'surge' },
+            narrative: `${forAgentId} responds`,
+          },
+        },
+      })
+      if (!elevenKey) return null
+      const voiceId = NODE_AGENT_VOICE_IDS_AUDIO[forAgentId] ?? NODE_AGENT_VOICE_IDS_AUDIO['link']
+      try {
+        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+          method: 'POST',
+          headers: { 'xi-api-key': elevenKey, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
+          body: JSON.stringify({ text: text.slice(0, 500), model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.75 } }),
+          signal: AbortSignal.timeout(20000),
+        })
+        if (!res.ok) return null
+        const buf = Buffer.from(await res.arrayBuffer())
+        return `data:audio/mpeg;base64,${buf.toString('base64')}`
+      } catch { return null }
+    }
+
+    const unsubVoiceAudio = subscribeVoiceSession(session.id, (event) => {
+      if (event.type === 'tts.ready') setActiveSpeakerAudio(true)
+      else if (event.type === 'session.end' || event.type === 'error') { setActiveSpeakerAudio(false); unsubVoiceAudio() }
+    })
+
+    processVoiceTranscript(session.id, transcript, agentResponder, synthesizeTtsAudio).catch(err => {
+      console.error('[voice/audio] processVoiceTranscript error:', err)
+      unsubVoiceAudio()
+    })
+
+    void identityColor // suppress unused warning
+    return reply.code(201).send({ success: true, sessionId: session.id, transcript })
+  })
+
+  // GET /voice/session/:id/events — SSE stream of voice pipeline state events
+  // Events: transcript.final, agent.thinking, agent.done, tts.ready, error, session.end
+  app.get<{ Params: { id: string } }>('/voice/session/:id/events', async (request, reply) => {
+    const { id } = request.params
+    const session = getVoiceSession(id)
+
+    if (!session) {
+      reply.status(404)
+      return { success: false, message: 'Voice session not found' }
+    }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Replay past events for late-joining clients
+    for (const event of session.events) {
+      try {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+      } catch {
+        return
+      }
+    }
+
+    // Short-circuit if session already ended
+    if (session.status === 'done' || session.status === 'error') {
+      reply.raw.end()
+      return
+    }
+
+    // Subscribe to new events
+    const unsubscribe = subscribeVoiceSession(id, (event) => {
+      try {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+        if (event.type === 'session.end') {
+          reply.raw.end()
+        }
+      } catch {
+        // Connection closed
+      }
+    })
+
+    // Keepalive
+    const heartbeat = setInterval(() => {
+      try {
+        reply.raw.write(`:heartbeat\n\n`)
+      } catch {
+        clearInterval(heartbeat)
+      }
+    }, 15_000)
+
+    // Cleanup on disconnect
+    request.raw.on('close', () => {
+      unsubscribe()
+      clearInterval(heartbeat)
+    })
+  })
+
+  // ── Agent Interface routes — software actions on behalf of the human ──────
+
+  // POST /agent-interface/runs — create and start a new agent action run
+  app.post('/agent-interface/runs', async (request, reply) => {
+    const body = request.body as { kind?: string; repo?: string; title?: string; body?: string; dryRun?: boolean; intent?: Record<string, unknown> }
+    if (!body?.kind) { reply.status(400); return { success: false, message: 'kind is required' } }
+
+    const ALLOWED_KINDS = ['github_issue_create', 'macos_ui_action']
+    if (!ALLOWED_KINDS.includes(body.kind)) { reply.status(400); return { success: false, message: `Unknown kind: ${body.kind}. Allowed: ${ALLOWED_KINDS.join(', ')}` } }
+
+    // macos_ui_action: validate intent + kill-switch before creating run
+    if (body.kind === 'macos_ui_action') {
+      if (isKillSwitchEngaged()) {
+        reply.status(503); return { success: false, message: 'Kill-switch engaged — macOS accessibility control disabled' }
+      }
+      const intent = body.intent as any
+      const validation = macOSValidateIntent(intent ?? {})
+      if (!validation.ok) {
+        reply.status(400); return { success: false, message: validation.reason }
+      }
+    }
+
+    const run = createRun(body.kind as any, body.kind === 'macos_ui_action' ? {
+      intent: body.intent ?? {},
+      dryRun: body.dryRun ?? false,
+    } : {
+      repo: body.repo ?? '',
+      title: body.title ?? '',
+      body: body.body ?? '',
+      dryRun: body.dryRun ?? false,
+    })
+
+    // Subscribe to run events — push canvas 'decision' state immediately when awaiting_approval
+    // so the presence canvas decision card appears via SSE without waiting for the poll cycle.
+    const runUnsub = subscribeRun(run.id, (event) => {
+      if (event.type !== 'state_changed') return
+      const to = (event.payload as any).to as string
+      if (to === 'awaiting_approval') {
+        // Push decision state to all agents watching the canvas SSE stream
+        const inp = run.input as any
+        const isMAC = (run.kind as string) === 'macos_ui_action'
+        const actionLabel = isMAC
+          ? `macOS: ${inp.intent?.action ?? 'ui action'} in ${inp.intent?.app ?? 'app'}`
+          : (inp.title ?? run.kind)
+        const descLabel = isMAC
+          ? `Pilot — ${inp.intent?.action}${inp.intent?.text ? `: "${String(inp.intent.text).slice(0, 60)}"` : ''}`
+          : `${run.kind} — ${inp.repo ?? ''}`
+        const decisionPayload = {
+          title: `Approval required: ${actionLabel}`,
+          description: descLabel,
+          runId: run.id,
+          approvalId: run.id,
+          expiresAt: run.createdAt + 10 * 60 * 1000,
+        }
+        eventBus.emit({
+          id: `ai-decision-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'canvas_render' as const,
+          timestamp: Date.now(),
+          data: {
+            state: 'decision' as const,
+            sensors: null,
+            agentId: 'agent-interface',
+            payload: decisionPayload,
+            presence: {
+              name: 'agent-interface',
+              identityColor: '#60a5fa',
+              state: 'decision',
+              activeTask: { id: run.id, title: actionLabel },
+              recency: 'just now',
+              attention: { type: 'approval', taskId: run.id, label: actionLabel },
+            },
+          },
+        })
+        requestImmediateCanvasSync()
+      } else if (['completed', 'failed', 'rejected'].includes(to)) {
+        runUnsub()
+      }
+    })
+
+    // Execute async — non-blocking
+    if (body.kind === 'macos_ui_action') {
+      const intent = (body.intent ?? {}) as Record<string, unknown>
+      executeMacOSUIAction(run.id, intent).catch(err => { console.error('[agent-interface] macos run error:', err); runUnsub() })
+    } else {
+      executeGithubIssueCreate(run.id, {
+        repo: body.repo ?? '',
+        title: body.title ?? '',
+        body: body.body ?? '',
+        dryRun: body.dryRun,
+      }).catch(err => { console.error('[agent-interface] run error:', err); runUnsub() })
+    }
+
+    return reply.code(201).send({ runId: run.id, status: run.status })
+  })
+
+  // GET /agent-interface/runs — list runs, optionally filtered by status
+  // e.g. ?status=awaiting_approval — used by presence canvas to surface pending decisions
+  app.get('/agent-interface/runs', async (request) => {
+    const { status } = request.query as { status?: string }
+    return { runs: listRuns(status) }
+  })
+
+  // GET /agent-interface/runs/:runId — get run state + log
+  app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+    return { run }
+  })
+
+  // GET /agent-interface/runs/:runId/replay — immutable audit + replay packet
+  app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId/replay', (request, reply) => {
+    const packet = buildReplayPacket(request.params.runId)
+    if (!packet) { reply.status(404); return { success: false, message: 'Run not found' } }
+    return { packet }
+  })
+
+  // GET /agent-interface/runs/:runId/events — SSE stream of run events
+  app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId/events', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Replay existing log events first
+    for (const event of run.log) {
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
+
+    // If run is already terminal, close immediately
+    if (['completed', 'failed', 'rejected'].includes(run.status)) {
+      reply.raw.write(`data: ${JSON.stringify({ type: 'run_end', timestamp: Date.now(), payload: { status: run.status } })}\n\n`)
+      reply.raw.end()
+      return reply
+    }
+
+    const unsub = subscribeRun(request.params.runId, (event) => {
+      try {
+        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
+        if (event.type === 'state_changed') {
+          const to = (event.payload as any).to as string
+          if (['completed', 'failed', 'rejected'].includes(to)) {
+            reply.raw.write(`data: ${JSON.stringify({ type: 'run_end', timestamp: Date.now(), payload: { status: to } })}\n\n`)
+            reply.raw.end()
+          }
+        }
+      } catch { /* connection closed */ }
+    })
+
+    const heartbeat = setInterval(() => { try { reply.raw.write(': ping\n\n') } catch { clearInterval(heartbeat); unsub() } }, 15_000)
+    request.raw.on('close', () => { unsub(); clearInterval(heartbeat) })
+    return reply
+  })
+
+  // POST /agent-interface/runs/:runId/approve — human approves the pending action
+  app.post<{ Params: { runId: string } }>('/agent-interface/runs/:runId/approve', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+    if (run.status !== 'awaiting_approval') { reply.status(409); return { success: false, message: `Run is ${run.status}, not awaiting_approval` } }
+    const ok = approveRun(request.params.runId)
+    if (!ok) { reply.status(409); return { success: false, message: 'No pending approval for this run' } }
+    return { success: true, runId: request.params.runId }
+  })
+
+  // POST /agent-interface/runs/:runId/reject — human rejects the pending action
+  app.post<{ Params: { runId: string } }>('/agent-interface/runs/:runId/reject', async (request, reply) => {
+    const run = getRun(request.params.runId)
+    if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
+    if (run.status !== 'awaiting_approval') { reply.status(409); return { success: false, message: `Run is ${run.status}, not awaiting_approval` } }
+    const ok = rejectRun(request.params.runId)
+    if (!ok) { reply.status(409); return { success: false, message: 'No pending approval for this run' } }
+    return { success: true, runId: request.params.runId }
+  })
+
+  // POST /agent-interface/kill-switch — instantly disable all macOS accessibility control
+  app.post('/agent-interface/kill-switch', (request) => {
+    const body = request.body as { engage?: boolean }
+    if (body?.engage === false) {
+      resetKillSwitch()
+      return { success: true, killSwitch: false, message: 'Kill-switch reset — macOS accessibility control re-enabled' }
+    }
+    engageKillSwitch()
+    return { success: true, killSwitch: true, message: 'Kill-switch engaged — all macOS accessibility control disabled immediately' }
+  })
+
+  // GET /agent-interface/kill-switch — check kill-switch state
+  app.get('/agent-interface/kill-switch', () => {
+    return { killSwitch: isKillSwitchEngaged() }
   })
 
   // ── Preflight Check endpoint ────────────────────────────────────────
@@ -7130,7 +9039,8 @@ export async function createServer(): Promise<FastifyInstance> {
           'in-progress': ['blocked', 'validating', 'done', 'doing', 'todo', 'cancelled'], // legacy, permissive
         }
         const allowed = ALLOWED_TRANSITIONS[existing.status] ?? []
-        if (!allowed.includes(parsed.status)) {
+        // Allow todo→validating when criteria_verified=true
+        if (!allowed.includes(parsed.status) && !(parsed.status === 'validating' && existing.status === 'todo' && parsed.criteria_verified === true)) {
           const meta = (incomingMeta ?? {}) as Record<string, unknown>
           const isReopen = meta.reopen === true
           const reopenReason = typeof meta.reopen_reason === 'string' ? String(meta.reopen_reason).trim() : ''
@@ -7150,7 +9060,55 @@ export async function createServer(): Promise<FastifyInstance> {
           mergedMeta.reopen_reason = reopenReason
           mergedMeta.reopened_at = Date.now()
           mergedMeta.reopened_from = existing.status
+
+      // ── Done-criteria verification gate ──
+      // Block todo→validating unless criteria_verified=true is set.
+      if (parsed.status === 'validating' && existing.status === 'todo') {
+        const hasDoneCriteria = Boolean(existing.done_criteria && existing.done_criteria.length > 0)
+        if (hasDoneCriteria && parsed.criteria_verified !== true) {
+          const dc = Array.isArray(existing.done_criteria) ? existing.done_criteria.length : 0
+          reply.code(422)
+          return {
+            success: false,
+            error: `All ${dc} done criteria must be verified. Set criteria_verified=true in PATCH body to unblock.`,
+            code: 'DONE_CRITERIA_NOT_VERIFIED',
+            gate: 'done_criteria_verification',
+          }
         }
+      }
+
+          // Emit trust signal: forced state bypass
+          const NORMAL_ESCALATION_PATHS = ['todo→doing', 'doing→validating', 'validating→done']
+          const jumpPath = `${existing.status}→${parsed.status}`
+          if (!NORMAL_ESCALATION_PATHS.includes(jumpPath)) {
+            import('./trust-events.js').then(({ emitTrustEvent }) => {
+              emitTrustEvent({
+                agentId: String(parsed.actor || parsed.assignee || 'unknown'),
+                eventType: 'escalation_bypass',
+                taskId: existing.id,
+                summary: `Task forced from ${existing.status}→${parsed.status} via reopen bypass`,
+                context: { taskId: existing.id, taskTitle: existing.title, from: existing.status, to: parsed.status, reason: reopenReason },
+              })
+            }).catch(() => {})
+          }
+        }
+      }
+
+      // ── Handoff state validation ──
+      if (mergedMeta.handoff_state && typeof mergedMeta.handoff_state === 'object') {
+        const handoffResult = HandoffStateSchema.safeParse(mergedMeta.handoff_state)
+        if (!handoffResult.success) {
+          reply.code(422)
+          return {
+            success: false,
+            error: `Invalid handoff_state: ${handoffResult.error.issues.map(i => i.message).join(', ')}`,
+            code: 'INVALID_HANDOFF_STATE',
+            hint: 'handoff_state must have: reviewed_by (string), decision (approved|rejected|needs_changes|escalated), optional next_owner (string). Max 3 fields per COO rule.',
+            gate: 'handoff_state',
+          }
+        }
+        // Stamp validated handoff
+        mergedMeta.handoff_state = handoffResult.data
       }
 
       // ── Cancel reason gate: require cancel_reason when transitioning to cancelled ──
@@ -7465,6 +9423,26 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       // ── End task-close gate ──
 
+      // ── done_criteria gate on doing transition ──
+      // Prevent tasks from entering active work without verifiable exit conditions.
+      // Effective criteria = incoming update (if provided) or existing task value.
+      if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
+        const effectiveDoneCriteria = (parsed.done_criteria && parsed.done_criteria.length > 0)
+          ? parsed.done_criteria
+          : (existing.done_criteria ?? [])
+        if (effectiveDoneCriteria.length === 0) {
+          reply.code(422)
+          return {
+            success: false,
+            error: 'done_criteria gate: task cannot move to doing without at least one verifiable criterion. Add done_criteria to this PATCH or update the task first.',
+            code: 'MISSING_DONE_CRITERIA',
+            gate: 'done_criteria',
+            hint: 'Include done_criteria: ["<criterion 1>", ...] in this PATCH request.',
+          }
+        }
+      }
+      // ── End done_criteria gate ──
+
       // ── WIP cap check on doing transition ──
       if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
         const assignee = parsed.assignee || existing.assignee || 'unknown'
@@ -7486,8 +9464,45 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
-      // ── Working contract: reflection gate on claim ──
+      // ── Lane validation on claim ──
+      // Reject out-of-lane claims at the API level.
+      // If the task has metadata.lane, the claiming agent must belong to a lane
+      // that matches the task's lane. Agents with no lane config cannot claim lane-specific tasks.
+      // Tasks without lane metadata pass through (no breaking change).
       if (parsed.status === 'doing' && existing.status !== 'doing' && !isTestTask) {
+        const claimingAgent = (parsed.assignee || existing.assignee || '').toLowerCase()
+        const taskLane = String((mergedMeta.lane ?? '') as string).trim().toLowerCase()
+        if (claimingAgent && taskLane) {
+          // Check if this is a lane override (metadata.lane_override = true)
+          const laneOverride = mergedMeta.lane_override === true
+          if (!laneOverride) {
+            const { getAgentLane } = await import('./lane-config.js')
+            const agentLaneConfig = getAgentLane(claimingAgent)
+            const agentLaneName = agentLaneConfig?.name?.toLowerCase() ?? null
+
+            if (!agentLaneName || agentLaneName !== taskLane) {
+              reply.code(400)
+              return {
+                success: false,
+                error: agentLaneName
+                  ? `Lane mismatch: ${claimingAgent} belongs to "${agentLaneConfig!.name}" lane but task is in "${taskLane}" lane.`
+                  : `Lane mismatch: ${claimingAgent} has no lane assignment but task is in "${taskLane}" lane.`,
+                gate: 'lane_validation',
+                agentLane: agentLaneName ?? null,
+                taskLane,
+                hint: 'Set metadata.lane_override=true to bypass this check.',
+              }
+            }
+          }
+        }
+      }
+
+      // ── Working contract: reflection gate on claim ──
+      // Only fires for fresh claims (todo→doing, blocked→doing), not re-claims
+      // (validating→doing = reviewer rejection/rework on the agent's own task).
+      // Re-claiming after reviewer rejection is not new work — it's resuming.
+      const isFreshClaim = parsed.status === 'doing' && existing.status !== 'doing' && existing.status !== 'validating'
+      if (isFreshClaim && !isTestTask) {
         try {
           const { checkClaimGate } = await import('./working-contract.js')
           const claimAgent = parsed.assignee || existing.assignee || 'unknown'
@@ -7581,6 +9596,13 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
+      // ── Stale review notification suppression ──
+      // When a task leaves validating (back to doing/blocked for rework),
+      // clear validating_nudge_sent_at so reviewer is re-notified on next validating entry.
+      if (existing.status === 'validating' && parsed.status && parsed.status !== 'validating') {
+        nextMetadata.validating_nudge_sent_at = null
+      }
+
       const updates = {
         ...rest,
         metadata: nextMetadata,
@@ -7589,6 +9611,22 @@ export async function createServer(): Promise<FastifyInstance> {
       if (!task) {
         reply.code(404)
         return { success: false, error: 'Task not found' }
+      }
+
+      // ── Emit workflow stall when task enters review ──
+      if (
+        effectiveTargetStatus === 'validating' &&
+        existing.status !== 'validating' &&
+        existing.status !== 'done'
+      ) {
+        const reviewer = task.reviewer
+        if (reviewer) {
+          emitWorkflowStall(reviewer, 'review_pending', {
+            lastAction: `task "${task.title}" submitted for review`,
+            lastAgent: task.assignee || 'unknown',
+            lastActionAt: Date.now(),
+          })
+        }
       }
 
       // ── Audit ledger: log review-field mutations ──
@@ -7649,41 +9687,292 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       // ── End design handoff notification ──
 
+      // Emit task_updated event for team-context-writer and other listeners
+      // task-1774672289270-9qhb17cgk
+      if (parsed.status && parsed.status !== existing.status) {
+        eventBus.emit({
+          id: `task-updated-${task.id}-${Date.now()}`,
+          type: 'task_updated' as const,
+          timestamp: Date.now(),
+          data: {
+            taskId: task.id,
+            status: parsed.status,
+            previousStatus: existing.status,
+            assignee: task.assignee,
+            title: task.title,
+          },
+        })
+      }
+
       // Auto-update presence on task activity
       if (task.assignee) {
         if (parsed.status === 'done') {
           presenceManager.recordActivity(task.assignee, 'task_completed')
-          presenceManager.updatePresence(task.assignee, 'working')
+          presenceManager.updatePresence(task.assignee, 'working', null)
+          // Stall detector: agent completed a task — user should respond
+          // Determine who to notify: the task creator / assignee who might be waiting
+          const waitingUserId = (task.metadata as any)?.userId || task.assignee
+          getStallDetector().recordAgentResponse(waitingUserId, task.assignee)
           trackTaskEvent('completed')
         } else if (parsed.status === 'doing') {
-          presenceManager.updatePresence(task.assignee, 'working')
+          presenceManager.updatePresence(task.assignee, 'working', task.id)
         } else if (parsed.status === 'blocked') {
-          presenceManager.updatePresence(task.assignee, 'blocked')
+          presenceManager.updatePresence(task.assignee, 'blocked', task.id)
         } else if (parsed.status === 'validating') {
-          presenceManager.updatePresence(task.assignee, 'reviewing')
+          presenceManager.updatePresence(task.assignee, 'reviewing', task.id)
         }
       }
 
       // ── Reviewer notification: @mention reviewer when task enters validating ──
+      // NOTE: A dedup_key is set here so the inline chat dedup guard suppresses
+      // any duplicate reviewRequested send that may arrive via the statusNotifTargets
+      // loop below for the same task+transition. Without it, two messages fire for
+      // every todo→validating transition (this direct send + the loop send).
       if (parsed.status === 'validating' && existing.status !== 'validating' && existing.reviewer) {
         const taskMeta = task.metadata as Record<string, unknown> | undefined
         const prUrl = (taskMeta?.review_handoff as Record<string, unknown> | undefined)?.pr_url
           ?? (taskMeta?.qa_bundle as Record<string, unknown> | undefined)?.pr_url
           ?? ''
-        const prLine = prUrl ? `\nPR: ${prUrl}` : ''
+        const artifactPath = (taskMeta?.review_handoff as Record<string, unknown> | undefined)?.artifact_path
+          ?? ((taskMeta?.qa_bundle as Record<string, unknown> | undefined)?.review_packet as Record<string, unknown> | undefined)?.artifact_path
+          ?? ''
+        // Build artifact navigation line — PR URL preferred, then artifact path
+        const artifactLine = prUrl ? `\nArtifact: ${prUrl}` : (artifactPath ? `\nArtifact: ${artifactPath}` : '')
+        const reviewCmd = `\nReview: POST /tasks/${task.id}/review { decision: "approve"|"reject", reviewer: "${existing.reviewer}", comment: "..." }`
         chatManager.sendMessage({
           from: 'system',
           to: existing.reviewer,
-          content: `@${existing.reviewer} [reviewRequested:${task.id}] ${task.title} → validating${prLine}`,
+          content: `@${existing.reviewer} [reviewRequested:${task.id}] ${task.title} → validating${artifactLine}${reviewCmd}`,
           channel: 'task-notifications',
           metadata: {
             kind: 'review_requested',
             taskId: task.id,
             reviewer: existing.reviewer,
             prUrl: prUrl || undefined,
+            artifactPath: artifactPath || undefined,
+            dedup_key: `review-requested:${task.id}:${task.updatedAt}`,
           },
         }).catch(() => {}) // Non-blocking
       }
+
+      // ── Reviewer run event: append review_requested to reviewer's agent run ──
+      if (parsed.status === 'validating' && existing.status !== 'validating' && existing.reviewer) {
+        const { notifyReviewerViaRun } = await import('./agent-runs.js')
+        try {
+          notifyReviewerViaRun({
+            id: task.id,
+            title: task.title,
+            reviewer: existing.reviewer,
+            assignee: task.assignee,
+            metadata: task.metadata as Record<string, unknown> | undefined,
+            teamId: task.teamId,
+          })
+        } catch (err) {
+          console.warn('[ReviewRun] Failed to notify reviewer via run:', (err as Error).message)
+        }
+      }
+
+      // ── Approval card: proactively surface approval card on canvas when task enters validating ──
+      // Only emit for human reviewers — agent-to-agent reviews should NOT appear on canvas.
+      // If the reviewer is a known agent name, skip the card entirely.
+      if (parsed.status === 'validating' && existing.status !== 'validating') {
+        const KNOWN_AGENT_IDS = new Set([
+          'link', 'kai', 'pixel', 'sage', 'scout', 'echo',
+          'rhythm', 'spark', 'swift', 'kotlin', 'harmony',
+        ])
+        const reviewerId = (task.reviewer ?? '').toLowerCase().trim()
+        const isAgentReviewer = KNOWN_AGENT_IDS.has(reviewerId)
+
+        // Skip canvas card for agent-to-agent reviews — humans don't need to see these
+        if (isAgentReviewer) {
+          // Still log for debugging, but no canvas card
+          console.log(`[ApprovalCard] Skipped canvas card for agent-to-agent review: ${task.id} (reviewer: ${reviewerId})`)
+        }
+
+        if (!isAgentReviewer) {
+        const taskMetaForCard = task.metadata as Record<string, unknown> | undefined
+        const prUrlForCard = (taskMetaForCard?.pr_url as string | undefined)
+          ?? (taskMetaForCard?.review_handoff as Record<string, unknown> | undefined)?.pr_url as string | undefined
+          ?? (taskMetaForCard?.qa_bundle as Record<string, unknown> | undefined)?.pr_url as string | undefined
+        const qaSummary = (taskMetaForCard?.qa_bundle as Record<string, unknown> | undefined)?.summary as string | undefined
+        const CANVAS_AGENT_COLORS: Record<string, string> = {
+          link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+          sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+          rhythm: '#a3e635', swift: '#38bdf8', kotlin: '#f97316',
+        }
+        const assigneeIdForCard = (task.assignee ?? '').toLowerCase()
+        const approvalNow = Date.now()
+        const approvalPushData = {
+          type: 'approval_requested',
+          agentId: assigneeIdForCard,
+          agentColor: CANVAS_AGENT_COLORS[assigneeIdForCard] ?? '#94a3b8',
+          data: {
+            taskId: task.id,
+            taskTitle: task.title,
+            reviewer: task.reviewer,
+            prUrl: prUrlForCard || undefined,
+            qaSummary: qaSummary || undefined,
+            priority: task.priority,
+          },
+          ttl: 120000,
+          t: approvalNow,
+        }
+        eventBus.emit({
+          id: `approval-${approvalNow}-${Math.random().toString(36).slice(2, 6)}`,
+          type: 'canvas_push',
+          timestamp: approvalNow,
+          data: approvalPushData,
+        })
+        queueCanvasPushEvent(approvalPushData)
+        } // end if (!isAgentReviewer)
+      }
+
+      // ── Canvas push: self-emit utterance on task state transitions ──
+      {
+        const canvasAgent = (task.assignee || 'unknown').toLowerCase()
+        const canvasNow = Date.now()
+        // Identity colors (canonical — match AGENT_IDENTITY_COLORS used by canvas render path)
+        const CANVAS_AGENT_ID_COLORS: Record<string, string> = {
+          link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
+          echo: '#f472b6', rhythm: '#a3e635', spark: '#fb923c', scout: '#fbbf24',
+          harmony: '#34c45c', swift: '#06b6d4', kotlin: '#7c3aed',
+        }
+        const agentColor = CANVAS_AGENT_ID_COLORS[canvasAgent] ?? '#94a3b8'
+        const taskSnippet = (task.title ?? '').slice(0, 60)
+
+        // Helper: emit canvas_render to update agent orb state (presence layer).
+        // canvas_push carries the utterance/work_released visual; canvas_render updates
+        // the orb's state ring so browsers show the right idle/working/handoff/etc ring.
+        // Emit canvas state AND synchronously update canvasStateMap so the next pulse
+        // tick reads fresh state immediately (no stale window).
+        // task-1773672429681
+        const emitOrbState = (presState: string, activeTaskPayload?: { id: string; title: string }) => {
+          const canvasState = presState === 'working' ? 'thinking'
+                   : presState === 'handoff' ? 'handoff'
+                   : presState === 'needs-attention' ? 'decision'
+                   : 'ambient'
+          const payload = { presenceState: presState, activeTask: activeTaskPayload }
+
+          // Synchronously update canvasStateMap before SSE broadcast
+          if (_canvasStateMap) {
+            _canvasStateMap.set(canvasAgent, {
+              state: canvasState as any,
+              sensors: null,
+              payload,
+              updatedAt: canvasNow,
+            })
+          }
+
+          eventBus.emit({
+            id: `canvas-orb-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_render' as const,
+            timestamp: canvasNow,
+            data: {
+              state: canvasState,
+              sensors: null,
+              agentId: canvasAgent,
+              payload,
+              presence: {
+                name: canvasAgent,
+                identityColor: agentColor,
+                state: presState,
+                ...(activeTaskPayload ? { activeTask: activeTaskPayload } : {}),
+                recency: 'just now',
+                urgency: presState === 'working' ? 0.2
+                       : presState === 'needs-attention' ? 0.75
+                       : presState === 'handoff' ? 0.5
+                       : 0.0,
+              },
+            },
+          })
+          requestImmediateCanvasSync()
+        }
+
+        if (parsed.status === 'doing' && existing.status !== 'doing') {
+          // Agent picks up work → utterance on canvas + orb flips to working
+          const doingPushData = {
+            type: 'utterance',
+            agentId: canvasAgent,
+            agentColor,
+            text: `picking up: ${taskSnippet}`,
+            t: canvasNow,
+          }
+          eventBus.emit({
+            id: `canvas-doing-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_push',
+            timestamp: canvasNow,
+            data: doingPushData,
+          })
+          queueCanvasPushEvent(doingPushData)
+          emitOrbState('working', { id: task.id, title: task.title ?? '' })
+        } else if (parsed.status === 'validating' && existing.status !== 'validating') {
+          // Agent submits for review → work_released on canvas + orb flips to handoff
+          const prUrl = (mergedMeta as any)?.review_handoff?.pr_url || (mergedMeta as any)?.pr_url || undefined
+          const validatingPushData = {
+            type: 'work_released',
+            agentId: canvasAgent,
+            agentColor,
+            summary: `ready for review: ${taskSnippet}`,
+            prUrl,
+            t: canvasNow,
+          }
+          eventBus.emit({
+            id: `canvas-validating-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_push',
+            timestamp: canvasNow,
+            data: validatingPushData,
+          })
+          queueCanvasPushEvent(validatingPushData)
+          emitOrbState('handoff', { id: task.id, title: task.title ?? '' })
+        } else if (parsed.status === 'done' && existing.status !== 'done') {
+          // Agent closes task — burst from their orb + orb returns to idle
+          // Enrich with PR metadata for proof artifact card on canvas
+          const donePrUrl = (mergedMeta as any)?.review_handoff?.pr_url
+            || (mergedMeta as any)?.pr_url
+            || undefined
+          const doneChangedFiles: string[] = Array.isArray((mergedMeta as any)?.qa_bundle?.changed_files)
+            ? ((mergedMeta as any).qa_bundle.changed_files as string[]).slice(0, 5)
+            : []
+          const donePushData = {
+            type: 'work_released',
+            agentId: canvasAgent,
+            agentColor,
+            text: 'shipped',
+            taskTitle: taskSnippet,
+            prUrl: donePrUrl,
+            changedFiles: doneChangedFiles.length > 0 ? doneChangedFiles : undefined,
+            intensity: 0.8,
+            t: canvasNow,
+          }
+          eventBus.emit({
+            id: `canvas-done-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_push',
+            timestamp: canvasNow,
+            data: donePushData,
+          })
+          queueCanvasPushEvent(donePushData)
+          emitOrbState('idle')
+        } else if (parsed.status === 'blocked' && existing.status !== 'blocked') {
+          // Agent is blocked — utterance from their orb + orb flips to needs-attention
+          const blockedPushData = {
+            type: 'utterance',
+            agentId: canvasAgent,
+            agentColor,
+            text: `blocked on: ${taskSnippet}`,
+            ttl: 4000,
+            t: canvasNow,
+          }
+          eventBus.emit({
+            id: `canvas-blocked-${canvasNow}-${task.id.slice(-6)}`,
+            type: 'canvas_push',
+            timestamp: canvasNow,
+            data: blockedPushData,
+          })
+          queueCanvasPushEvent(blockedPushData)
+          emitOrbState('needs-attention', { id: task.id, title: task.title ?? '' })
+        }
+      }
+      // ── End canvas push ──
 
       // ── Activation funnel: track first_task_started / first_task_completed ──
       {
@@ -7813,13 +10102,17 @@ export async function createServer(): Promise<FastifyInstance> {
       const { shouldEmitNotification } = await import('./notificationDedupeGuard.js')
 
       for (const target of statusNotifTargets) {
-        // Check dedupe guard before emitting
+        // Check dedupe guard before emitting.
+        // Pass targetAgent so each recipient gets an independent cursor — prevents
+        // the first recipient's cursor update from suppressing later recipients for
+        // the same event (e.g. assignee + reviewer both getting taskCompleted on 'done').
         const dedupeCheck = shouldEmitNotification({
           taskId: task.id,
           eventUpdatedAt: task.updatedAt,
           eventStatus: parsed.status!,
           currentTaskStatus: task.status,
           currentTaskUpdatedAt: task.updatedAt,
+          targetAgent: target.agent,
         })
 
         if (!dedupeCheck.emit) {
@@ -7834,7 +10127,13 @@ export async function createServer(): Promise<FastifyInstance> {
           message: `Task ${task.id} → ${parsed.status}`,
         })
         if (routing.shouldNotify) {
-          // Route through inbox/chat based on delivery method preference
+          // Route through inbox/chat based on delivery method preference.
+          // For reviewRequested, set a dedup_key matching the direct send above so the
+          // inline chat dedup suppresses this copy (the direct send fires first with a
+          // richer payload including PR URL and `to:` routing).
+          const dedupKey = target.type === 'reviewRequested'
+            ? `review-requested:${task.id}:${task.updatedAt}`
+            : undefined
           chatManager.sendMessage({
             from: 'system',
             content: `@${target.agent} [${target.type}:${task.id}] ${task.title} → ${parsed.status}`,
@@ -7845,6 +10144,7 @@ export async function createServer(): Promise<FastifyInstance> {
               status: parsed.status,
               updatedAt: task.updatedAt,
               deliveryMethod: routing.deliveryMethod,
+              ...(dedupKey ? { dedup_key: dedupKey } : {}),
             },
           }).catch(() => {}) // Non-blocking
         }
@@ -7861,9 +10161,11 @@ export async function createServer(): Promise<FastifyInstance> {
           if (mirrorResult?.mirrored) {
             console.log(`[ArtifactMirror] Mirrored ${mirrorResult.filesCopied} file(s) for ${task.id} → ${mirrorResult.destination}`)
           } else if (mirrorResult && !mirrorResult.mirrored) {
-            // Important: failures here are what make artifacts feel "randomly missing" across workspaces.
-            // Keep it non-fatal, but log loudly so we can diagnose deployment/path issues.
-            console.warn(`[ArtifactMirror] FAILED for ${task.id}: ${mirrorResult.error || 'unknown error'} (source=${mirrorResult.source})`)
+            // Skip silently when no error — source simply not found (expected in prod installs).
+            // Only warn on genuine I/O failures (permissions, disk full, etc.).
+            if (mirrorResult.error) {
+              console.warn(`[ArtifactMirror] FAILED for ${task.id}: ${mirrorResult.error} (source=${mirrorResult.source})`)
+            }
           }
         } catch (err) {
           console.warn(`[ArtifactMirror] ERROR for ${task.id}: ${(err as Error).message}`)
@@ -7926,6 +10228,118 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/agents', async () => buildRoleRegistryPayload())
   app.get('/agents/roles', async () => buildRoleRegistryPayload())
 
+  // Host-native identity resolution — resolves agent by name, alias, or display name
+  // without requiring the OpenClaw gateway. Merges YAML roles + agent_config table.
+  app.get<{ Params: { name: string } }>('/agents/:name/identity', async (request) => {
+    const { name } = request.params
+    const resolved = resolveAgentMention(name)
+    const role = resolved ? getAgentRole(resolved) : getAgentRole(name)
+
+    if (!role) {
+      return { found: false, query: name, hint: 'Agent not found in YAML roles or config' }
+    }
+
+    return {
+      found: true,
+      agentId: role.name,
+      displayName: role.displayName ?? role.name,
+      role: role.role,
+      description: role.description ?? null,
+      aliases: role.aliases ?? [],
+      affinityTags: role.affinityTags ?? [],
+      wipCap: role.wipCap,
+      source: 'yaml',
+    }
+  })
+
+  // ── Agent visual identity — agents choose their own appearance ──────
+  // POST /agents/:name/identity/avatar — agent sets their visual form
+  // task-1773690756100
+  app.post<{ Params: { name: string } }>('/agents/:name/identity/avatar', async (request) => {
+    const { name } = request.params
+    const body = request.body as Record<string, unknown> ?? {}
+
+    // Validate agent exists
+    const resolved = resolveAgentMention(name)
+    const agentId = resolved ?? name
+    const role = getAgentRole(agentId)
+    if (!role) return { success: false, error: 'Agent not found' }
+
+    // Validate avatar payload
+    const avatarType = String(body.type ?? 'svg')
+    if (!['svg', 'image', 'emoji'].includes(avatarType)) {
+      return { success: false, error: 'Invalid avatar type. Must be: svg, image, emoji' }
+    }
+    const content = String(body.content ?? '')
+    if (!content) return { success: false, error: 'content is required' }
+    if (avatarType === 'svg' && content.length > 50000) {
+      return { success: false, error: 'SVG content too large (max 50KB)' }
+    }
+
+    const avatar = {
+      type: avatarType,
+      content,
+      animated: body.animated === true,
+      displayName: typeof body.displayName === 'string' ? body.displayName : undefined,
+      bio: typeof body.bio === 'string' ? body.bio.slice(0, 200) : undefined,
+      updatedAt: Date.now(),
+    }
+
+    // Store in agent_config settings
+    const db = getDb()
+    const existing = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(agentId) as { settings: string } | undefined
+    const settings = existing ? JSON.parse(existing.settings) : {}
+    settings.avatar = avatar
+
+    if (existing) {
+      db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
+        .run(JSON.stringify(settings), Date.now(), agentId)
+    } else {
+      db.prepare('INSERT INTO agent_config (agent_id, team_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run(agentId, 'default', JSON.stringify(settings), Date.now(), Date.now())
+    }
+
+    // Emit on eventBus so canvas updates immediately
+    eventBus.emit({
+      id: `avatar-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type: 'canvas_expression' as const,
+      timestamp: Date.now(),
+      data: { agentId, channels: { identity: avatar } },
+    })
+
+    return { success: true, agentId, avatar }
+  })
+
+  // GET /agents/:name/identity/avatar — read agent's visual identity
+  app.get<{ Params: { name: string } }>('/agents/:name/identity/avatar', async (request) => {
+    const { name } = request.params
+    const resolved = resolveAgentMention(name)
+    const agentId = resolved ?? name
+
+    const db = getDb()
+    const row = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(agentId) as { settings: string } | undefined
+    if (!row) return { found: false, agentId }
+
+    const settings = JSON.parse(row.settings)
+    if (!settings.avatar) return { found: false, agentId }
+
+    return { found: true, agentId, avatar: settings.avatar }
+  })
+
+  // GET /agents/avatars — all agent avatars (for canvas to render)
+  app.get('/agents/avatars', async () => {
+    const db = getDb()
+    const rows = db.prepare('SELECT agent_id, settings FROM agent_config WHERE settings LIKE \'%avatar%\'').all() as Array<{ agent_id: string; settings: string }>
+    const avatars: Record<string, unknown> = {}
+    for (const row of rows) {
+      try {
+        const settings = JSON.parse(row.settings)
+        if (settings.avatar) avatars[row.agent_id] = settings.avatar
+      } catch { /* skip malformed */ }
+    }
+    return { avatars }
+  })
+
   // Team-scoped alias for assignment-engine consumers
   app.get('/team/roles', async () => {
     const payload = buildRoleRegistryPayload()
@@ -7942,6 +10356,15 @@ export async function createServer(): Promise<FastifyInstance> {
   // ── File upload/download ──
   app.post('/files', async (request, reply) => {
     try {
+      const { MAX_SIZE_BYTES: maxBytes } = await import('./files.js')
+
+      // Early rejection via Content-Length before reading body
+      const declaredLength = parseInt(String(request.headers['content-length'] || ''), 10)
+      if (!Number.isNaN(declaredLength) && declaredLength > maxBytes) {
+        reply.code(413)
+        return { success: false, error: `File exceeds ${maxBytes / (1024 * 1024)}MB limit (Content-Length: ${declaredLength} bytes)` }
+      }
+
       const data = await request.file()
       if (!data) { reply.code(400); return { success: false, error: 'No file in request' } }
 
@@ -7949,10 +10372,10 @@ export async function createServer(): Promise<FastifyInstance> {
       for await (const chunk of data.file) chunks.push(chunk)
       const buffer = Buffer.concat(chunks)
 
-      // Check if stream was truncated (exceeds limit)
+      // Check if stream was truncated (exceeds multipart limit)
       if (data.file.truncated) {
         reply.code(413)
-        return { success: false, error: 'File exceeds 50MB limit' }
+        return { success: false, error: `File exceeds ${maxBytes / (1024 * 1024)}MB limit` }
       }
 
       const fields = data.fields as Record<string, { value?: string } | undefined>
@@ -7967,8 +10390,9 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.code(201)
       return result
     } catch (err: unknown) {
+      const { MAX_SIZE_BYTES: maxBytes } = await import('./files.js')
       const msg = err instanceof Error ? err.message : String(err)
-      if (msg.includes('Request file too large')) { reply.code(413); return { success: false, error: 'File exceeds 50MB limit' } }
+      if (msg.includes('Request file too large')) { reply.code(413); return { success: false, error: `File exceeds ${maxBytes / (1024 * 1024)}MB limit` } }
       reply.code(500); return { success: false, error: 'Upload failed' }
     }
   })
@@ -8326,62 +10750,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // ── Approval Queue ──────────────────────────────────────────────────
-
-  app.get('/approval-queue', async () => {
-    // Tasks in 'todo' that were auto-assigned (have suggestedAgent in metadata) or need assignment review
-    const allTasks = taskManager.listTasks({})
-    const todoTasks = allTasks.filter(t => t.status === 'todo')
-
-    const items = todoTasks.map(t => {
-      const task = t as any
-      const meta = task.metadata || {}
-      const title = task.title || ''
-      const tags = Array.isArray(task.tags) ? task.tags : []
-      const doneCriteria = Array.isArray(task.done_criteria) ? task.done_criteria : []
-
-      // Score all agents for this task
-      const roles = getAgentRoles()
-      const agentOptions = roles.map(agent => {
-        const wipCount = allTasks.filter(at => at.status === 'doing' && (at.assignee || '').toLowerCase() === agent.name).length
-        const s = scoreAssignment(agent, { title, tags, done_criteria: doneCriteria }, wipCount)
-        return {
-          agentId: agent.name,
-          name: agent.name,
-          confidenceScore: Math.max(0, Math.min(1, s.score)),
-          affinityTags: agent.affinityTags,
-        }
-      }).sort((a, b) => b.confidenceScore - a.confidenceScore)
-
-      const topAgent = agentOptions[0]
-      const suggestedAgent = task.assignee || topAgent?.agentId || null
-      const confidenceScore = topAgent?.confidenceScore || 0
-      const confidenceReason = topAgent && topAgent.confidenceScore > 0
-        ? `${topAgent.name}: affinity match on ${topAgent.affinityTags.slice(0, 3).join(', ')}`
-        : 'No strong affinity match'
-
-      return {
-        taskId: task.id,
-        title,
-        description: task.description || '',
-        priority: task.priority || 'P3',
-        suggestedAgent,
-        confidenceScore,
-        confidenceReason,
-        agentOptions,
-        status: 'pending' as const,
-      }
-    })
-
-    const highConfidence = items.filter(i => i.confidenceScore >= 0.85)
-    const needsReview = items.filter(i => i.confidenceScore < 0.85)
-
-    return {
-      items: [...highConfidence, ...needsReview],
-      total: items.length,
-      highConfidenceCount: highConfidence.length,
-      needsReviewCount: needsReview.length,
-    }
-  })
+  // Note: GET /approval-queue is defined below near /approval-queue/:approvalId/decide
 
   app.post<{ Params: { taskId: string } }>('/approval-queue/:taskId/approve', async (request, reply) => {
     const body = request.body as Record<string, unknown>
@@ -8560,17 +10929,1005 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // GET /canvas/slots — current active slots
-  app.get('/canvas/slots', async () => {
+  // ── Presence Layer canvas state ─────────────────────────────────────
+  // Agent emits canvas_render state transitions for the Presence Layer.
+  // Deterministic event types. No "AI can emit anything" protocol.
+
+  const CANVAS_STATES = ['floor', 'listening', 'thinking', 'rendering', 'ambient', 'decision', 'urgent', 'handoff'] as const
+  type CanvasState = typeof CANVAS_STATES[number]
+  const SENSOR_VALUES = [null, 'mic', 'camera', 'mic+camera'] as const
+
+  const CanvasRenderSchema = z.object({
+    state: z.enum(CANVAS_STATES),
+    sensors: z.enum(['mic', 'camera', 'mic+camera']).nullable().default(null),
+    agentId: z.string().min(1),
+    payload: z.object({
+      text: z.string().optional(),
+      media: z.unknown().optional(),
+      // Explicit content type — eliminates heuristic inference on the canvas
+      content: z.object({
+        type: z.enum(['text', 'markdown', 'code', 'image']).optional(),
+        lang: z.string().optional(),  // syntax hint for code blocks (e.g. "typescript", "bash")
+        progress: z.array(z.object({
+          label: z.string(),
+          state: z.enum(['pending', 'active', 'done', 'failed']),
+        })).optional(),
+      }).optional(),
+      decision: z.object({
+        question: z.string(),
+        context: z.string().optional(),
+        decisionId: z.string(),
+        expiresAt: z.number().optional(),
+        autoAction: z.string().optional(),
+      }).optional(),
+      agents: z.array(z.object({
+        name: z.string(),
+        state: z.string(),
+        task: z.string().optional(),
+      })).optional(),
+      summary: z.object({
+        headline: z.string(),
+        items: z.array(z.string()).optional(),
+        cost: z.string().optional(),
+        duration: z.string().optional(),
+      }).optional(),
+    }).default({}),
+  })
+
+  // Current state per agent — in-memory, not persisted
+  const canvasStateMap = new Map<string, { state: CanvasState; sensors: string | null; payload: unknown; updatedAt: number; lastMessage?: { content: string; timestamp: number } }>()
+  _canvasStateMap = canvasStateMap // populate forward reference for earlier route handlers
+
+  // ── Canvas auto-state sweep ──
+  // Derives canvas state from task board for agents who haven't pushed recently.
+  // Prevents blank canvas when agents are working but not calling POST /canvas/state.
+  ;(async () => {
+    const AGENT_IDENTITY_COLORS: Record<string, string> = {
+      kai: '#fb923c', pixel: '#a78bfa', link: '#60a5fa',
+      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+    }
+
+    function doCanvasAutoStateSweep() {
+      try {
+        runCanvasAutoStateSweep({
+          listTasks: (opts) => taskManager.listTasks(opts as any),
+          listAllAgents: () => {
+            // Get ALL agent IDs from task board - every assignee, even those without tasks
+            const allTasks = taskManager.listTasks({})
+            const agents = new Set<string>()
+            for (const t of allTasks) {
+              if (t.assignee) agents.add(t.assignee)
+            }
+            return [...agents]
+          },
+          getCanvasState: (agentId) => {
+            const entry = canvasStateMap.get(agentId)
+            return entry ? { state: entry.state, updatedAt: entry.updatedAt } : null
+          },
+          emitSyntheticState: (agentId, state, sourceTasks, thought) => {
+            const now = Date.now()
+            // Write into canvasStateMap so pulse tick picks it up
+            const existing: { lastMessage?: { content: string; timestamp: number }; state?: CanvasState } = canvasStateMap.get(agentId) ?? {}
+            canvasStateMap.set(agentId, {
+              state,
+              sensors: null,
+              payload: { _auto: true, sourceTasks: sourceTasks.slice(0, 2).map((t: { id: string; title: string; status: string }) => ({ id: t.id, title: t.title, status: t.status })) },
+              updatedAt: now,
+              lastMessage: thought ? { content: thought, timestamp: now } : existing?.lastMessage,
+            })
+            // Emit canvas_render so SSE consumers get immediate update
+            eventBus.emit({
+              id: `auto-state-${agentId}-${now}`,
+              type: 'canvas_render' as const,
+              timestamp: now,
+              data: {
+                state,
+                sensors: null,
+                agentId,
+                payload: { _auto: true },
+                presence: {
+                  name: agentId,
+                  color: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
+                  state,
+                  canvasState: state,
+                  task: sourceTasks[0]?.title ?? null,
+                  _auto: true,
+                },
+                previousState: existing?.state ?? 'floor',
+              },
+            })
+          },
+          emitTaskProgress: (agentId, task) => {
+            const now = Date.now()
+            // Emit canvas_push thought for /live visitors - shows real task progress
+            eventBus.emit({
+              id: `task-progress-${agentId}-${now}`,
+              type: 'canvas_push' as const,
+              timestamp: now,
+              data: {
+                type: 'expression',
+                expression: 'thought',
+                agentId,
+                agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
+                text: `${task.title}`,
+                state: 'working',
+                task: task.title,
+                ttl: 12000,
+              },
+            })
+          },
+          emitAmbientThought: (agentId, task) => {
+            const now = Date.now()
+            // Emit ambient thought with actual task title - makes /live feel alive with real work
+            // Shows visitors exactly what each agent is doing right now
+            eventBus.emit({
+              id: `ambient-${agentId}-${now}`,
+              type: 'canvas_push' as const,
+              timestamp: now,
+              data: {
+                type: 'expression',
+                expression: 'thought',
+                agentId,
+                agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
+                text: task.title.slice(0, 80),
+                state: 'working',
+                task: task.title,
+                ttl: 12000,
+              },
+            })
+          },
+        })
+      } catch (err) {
+        // Non-fatal — canvas auto-state is best-effort
+        console.warn('[canvas-auto-state] Sweep error:', err)
+      }
+    }
+
+    const autoStateTimer = setInterval(doCanvasAutoStateSweep, SYNC_INTERVAL_MS)
+    autoStateTimer.unref()
+  })().catch(() => { /* never fail startup */ })
+
+  // POST /canvas/state — agent emits a state transition
+  app.post('/canvas/state', async (request, reply) => {
+    const result = CanvasRenderSchema.safeParse(request.body)
+    if (!result.success) {
+      reply.code(422)
+      return {
+        error: `Invalid canvas state: ${result.error.issues.map(i => i.message).join(', ')}`,
+        hint: `state must be one of: ${CANVAS_STATES.join(', ')}`,
+        validStates: CANVAS_STATES,
+      }
+    }
+
+    const { state, sensors, agentId, payload } = result.data
+    const now = Date.now()
+
+    // Detect dramatic state transitions → emit spark burst
+    const prev = canvasStateMap.get(agentId)
+    const prevState = prev?.state ?? 'floor'
+
+    // Store current state
+    canvasStateMap.set(agentId, { state, sensors, payload, updatedAt: now })
+
+    // Emit canvas_render event over SSE
+    eventBus.emit({
+      id: `crender-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_render' as const,
+      timestamp: now,
+      data: { state, sensors, agentId, payload },
+    })
+
+    // Emit canvas_burst on dramatic transitions (thought manifesting, urgency breaking, etc.)
+    const BURST_TRANSITIONS: Array<[string, string, string, number]> = [
+      // [from, to, kind, intensity]
+      ['thinking', 'rendering', 'thought_manifest', 0.9],
+      ['working',  'rendering', 'output_burst',     0.7],
+      ['thinking', 'decision',  'decision_emerge',  0.85],
+      ['floor',    'urgent',    'urgency_spike',     1.0],
+      ['ambient',  'urgent',    'urgency_spike',     1.0],
+      ['working',  'urgent',    'urgency_spike',     1.0],
+      ['decision', 'working',   'decision_resolved', 0.75],
+      ['urgent',   'working',   'tension_release',   0.8],
+      ['urgent',   'floor',     'tension_release',   0.8],
+    ]
+    for (const [from, to, kind, intensity] of BURST_TRANSITIONS) {
+      if (prevState === from && state === to) {
+        eventBus.emit({
+          id: `cburst-${now}-${Math.random().toString(36).slice(2, 8)}`,
+          type: 'canvas_burst' as const,
+          timestamp: now,
+          data: { agentId, from: prevState, to: state, kind, intensity },
+        })
+        break
+      }
+    }
+
+    // Auto-detect collaboration: if another agent is on the same active task, emit a spark arc
+    const activeTaskId = (payload as Record<string, unknown>).activeTask
+      ? ((payload as any).activeTask as { id?: string }).id
+      : null
+    if (activeTaskId) {
+      for (const [otherId, otherEntry] of canvasStateMap) {
+        if (otherId === agentId) continue
+        const otherPayload = otherEntry.payload as Record<string, unknown>
+        const otherTaskId = (otherPayload as any)?.activeTask?.id
+        if (otherTaskId === activeTaskId && now - otherEntry.updatedAt < 5 * 60 * 1000) {
+          eventBus.emit({
+            id: `cspark-${now}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'canvas_spark' as const,
+            timestamp: now,
+            data: { from: agentId, to: otherId, taskId: activeTaskId, intensity: 0.7, kind: 'collaboration' },
+          })
+        }
+      }
+    }
+
+    // Auto ghost trail — every state transition leaves a faint particle exhale.
+    // Fires immediately so SSE subscribers receive it before the next pulse tick.
+    // Client renders _ghost=true events with low opacity (0.06-0.14), no TTS.
+    if (prevState !== state) {
+      const GHOST_COLORS: Record<string, string> = {
+        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
+        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
+      }
+      const ghostIntensity =
+        state === 'urgent'   ? 0.9 :
+        state === 'decision' ? 0.75 :
+        state === 'rendering'? 0.6 :
+        state === 'thinking' ? 0.4 : 0.25
+      const ghostParticles =
+        ghostIntensity > 0.7 ? 'surge' : ghostIntensity > 0.4 ? 'drift' : 'scatter'
+      eventBus.emit({
+        id: `ghost-${now}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_expression' as const,
+        timestamp: now,
+        data: {
+          agentId,
+          channels: {
+            visual: {
+              flash: GHOST_COLORS[agentId] ?? '#60a5fa',
+              particles: ghostParticles,
+            },
+            narrative: `${agentId} → ${state}`,
+          },
+          _ghost: true,
+        },
+      })
+    }
+
+    // Trigger immediate cloud sync for real-time presence
+    requestImmediateCanvasSync()
+
+    return { success: true, state, agentId, timestamp: now }
+  })
+
+  // ── AgentPresence endpoint (matches presence-card-spec.md contract) ──
+  // POST /agents/:agentId/canvas — agent emits a presence-compatible canvas event
+  // Emits canvas_render SSE event with AgentPresence shape + triggers immediate cloud sync
+
+  const AGENT_IDENTITY_COLORS: Record<string, string> = {
+    pixel: '#a78bfa', link: '#60a5fa', kai: '#fb923c', harmony: '#34c45c',
+    rhythm: '#f472b6', echo: '#f87171', scout: '#fbbf24', sage: 'rgba(255,255,255,0.4)',
+    spark: '#f59e0b', swift: '#06b6d4', kotlin: '#7c3aed', bookkeeper: '#10b981',
+  }
+
+  type PresenceState = 'idle' | 'working' | 'thinking' | 'rendering' | 'needs-attention' | 'urgent' | 'handoff' | 'decision' | 'waiting'
+
+  const VALID_PRESENCE_STATES: PresenceState[] = ['idle', 'working', 'thinking', 'rendering', 'needs-attention', 'urgent', 'handoff', 'decision', 'waiting']
+
+  const AgentPresenceSchema = z.object({
+    state: z.enum(['idle', 'working', 'thinking', 'rendering', 'needs-attention', 'urgent', 'handoff', 'decision', 'waiting']),
+    activeTask: z.object({
+      title: z.string(),
+      id: z.string(),
+    }).optional(),
+    recency: z.string().optional(),
+    attention: z.object({
+      type: z.enum(['approval', 'review', 'block']),
+      taskId: z.string(),
+      label: z.string().optional(),
+    }).optional(),
+    sensors: z.enum(['mic', 'camera', 'mic+camera']).nullable().default(null),
+    payload: z.record(z.unknown()).optional(),
+    currentPr: z.number().int().positive().optional(),   // open PR number agent is working on
+    progress: z.number().min(0).max(1).optional(),        // 0–1 completion estimate for active task
+    urgency: z.number().min(0).max(1).optional(),         // 0.0–1.0 visual intensity for living canvas
+    ambientCue: z.object({                                // living canvas atmosphere override
+      colorHint: z.string().optional(),
+      particleIntensity: z.number().min(0).max(1).optional(),
+      pulseRate: z.enum(['slow', 'normal', 'fast']).optional(),
+    }).optional(),
+    content: z.object({                                   // explicit content-type for deterministic rendering
+      type: z.enum(['text', 'markdown', 'code', 'image']).optional(),
+      lang: z.string().optional(),                        // code syntax hint (e.g. "typescript", "bash")
+      progress: z.array(z.object({
+        label: z.string(),
+        state: z.enum(['pending', 'active', 'done', 'failed']),
+      })).optional(),
+    }).optional(),
+  })
+
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/canvas', async (request, reply) => {
+    const { agentId } = request.params
+    if (!agentId) return reply.code(400).send({ error: 'agentId is required' })
+
+    const result = AgentPresenceSchema.safeParse(request.body)
+    if (!result.success) {
+      reply.code(422)
+      return {
+        error: `Invalid presence: ${result.error.issues.map(i => i.message).join(', ')}`,
+        validStates: VALID_PRESENCE_STATES,
+      }
+    }
+
+    const { state: presenceState, activeTask, recency, attention, sensors, payload, currentPr, progress, urgency, ambientCue } = result.data
+    const now = Date.now()
+    const identityColor = AGENT_IDENTITY_COLORS[agentId] || '#9ca3af'
+
+    // Map presence state to canvas state for backward compatibility
+    // New states pass through directly to canvas (1:1 where names match)
+    const canvasState: CanvasState = presenceState === 'needs-attention' ? 'decision'
+      : presenceState === 'working' ? 'thinking'
+      : presenceState === 'thinking' ? 'thinking'
+      : presenceState === 'rendering' ? 'rendering'
+      : presenceState === 'urgent' ? 'urgent'
+      : presenceState === 'handoff' ? 'handoff'
+      : presenceState === 'decision' ? 'decision'
+      : presenceState === 'waiting' ? 'ambient'  // waiting = soft ambient (no ring)
+      : 'ambient'
+
+    // Derive urgency from state if not explicitly provided
+    const derivedUrgency: number = urgency ?? (
+      presenceState === 'urgent' ? 1.0 :
+      presenceState === 'decision' || presenceState === 'needs-attention' ? 0.75 :
+      presenceState === 'rendering' ? 0.4 :
+      presenceState === 'thinking' || presenceState === 'working' ? 0.2 :
+      0.0
+    )
+
+    // Store in canvasStateMap (backward compat with existing GET /canvas/state)
+    canvasStateMap.set(agentId, {
+      state: canvasState,
+      sensors,
+      payload: { ...payload, activeTask, attention, presenceState, currentPr, progress, urgency: derivedUrgency, ambientCue },
+      updatedAt: now,
+    })
+
+    // Build AgentPresence payload (matches presence-card-spec.md + CANVAS-STATE-CONTRACT-v1)
+    const agentPresence = {
+      name: agentId,
+      identityColor,
+      state: presenceState,
+      activeTask,
+      recency: recency || 'just now',
+      attention,
+      urgency: derivedUrgency,
+      ...(ambientCue !== undefined ? { ambientCue } : {}),
+      ...(currentPr !== undefined ? { currentPr } : {}),
+      ...(progress !== undefined ? { progress } : {}),
+    }
+
+    // Emit canvas_render SSE event with AgentPresence shape
+    eventBus.emit({
+      id: `cpresence-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'canvas_render' as const,
+      timestamp: now,
+      data: {
+        // Legacy fields (backward compat)
+        state: canvasState,
+        sensors,
+        agentId,
+        payload: { ...payload, activeTask, attention },
+        // AgentPresence fields (new contract — includes urgency + ambientCue)
+        presence: agentPresence,
+      },
+    })
+
+    // Trigger immediate cloud sync so presence surface gets the update fast
+    requestImmediateCanvasSync()
+
+    return { success: true, presence: agentPresence, timestamp: now }
+  })
+
+  // GET /agents/:agentId/canvas — current AgentPresence for one agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/canvas', async (request) => {
+    const { agentId } = request.params
+    const entry = canvasStateMap.get(agentId)
+    if (!entry) {
+      return {
+        name: agentId,
+        identityColor: AGENT_IDENTITY_COLORS[agentId] || '#9ca3af',
+        state: 'idle' as PresenceState,
+        recency: 'unknown',
+      }
+    }
+
+    const presenceState: PresenceState =
+      (entry.payload as any)?.presenceState ||
+      (entry.state === 'decision' || entry.state === 'urgent' ? 'needs-attention' :
+       entry.state === 'thinking' || entry.state === 'rendering' ? 'working' : 'idle')
+
     return {
-      slots: canvasSlots.getActive(),
-      stats: canvasSlots.getStats(),
+      name: agentId,
+      identityColor: AGENT_IDENTITY_COLORS[agentId] || '#9ca3af',
+      state: presenceState,
+      activeTask: (entry.payload as any)?.activeTask,
+      recency: formatRecency(entry.updatedAt),
+      attention: (entry.payload as any)?.attention,
+    }
+  })
+  // Flow expression log — shared state for flow-score calculation (in canvas-routes.ts)
+  const flowExpressionLog: Array<{ t: number }> = []
+  ;(function trackExpressionVelocity() {
+    const listenerId = 'flow-score-tracker'
+    eventBus.on(listenerId, (event) => {
+      if (event.type === 'canvas_expression') {
+        flowExpressionLog.push({ t: Date.now() })
+        const cutoff = Date.now() - 10 * 60 * 1000
+        while (flowExpressionLog.length > 0 && flowExpressionLog[0]!.t < cutoff) {
+          flowExpressionLog.shift()
+        }
+      }
+    })
+  })()
+
+  // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
+  // Phase 1: states, slots, slots/all, rejections
+  // Phase 2: presence, state, flow-score, team/mood
+  await app.register(canvasReadRoutes, {
+    canvasStateMap,
+    canvasSlots: { getActive: () => canvasSlots.getActive(), getAll: () => canvasSlots.getAll(), getStats: () => canvasSlots.getStats() },
+    agentIdentityColors: AGENT_IDENTITY_COLORS,
+    getDb,
+    getRecentRejections,
+    flowExpressionLog,
+  } as any)
+  // ── Canvas interactive routes (extracted to src/canvas-interactive.ts) ─────
+  // POST /canvas/gaze, POST /canvas/briefing, POST /canvas/victory,
+  // POST /canvas/spark, POST /canvas/express, GET /canvas/render/stream
+  const { canvasInteractiveRoutes, registerCapabilityRoutes } = await import("./canvas-interactive.js")
+  await app.register(canvasInteractiveRoutes, {
+    eventBus,
+    canvasStateMap,
+  } as any)
+
+  // Register capability routes: GET/POST /canvas/capability
+  registerCapabilityRoutes(app)
+
+  // Seed capability map with platform integrations for all known agents
+  const { seedCapabilityMap } = await import('./canvas-interactive.js')
+  const allTasks = taskManager.listTasks({})
+  const agentNames = [...new Set([...allTasks.map((t: any) => t.assignee).filter(Boolean), 'kai'])]
+  const agents = agentNames.map((name: string) => ({ name }))
+  seedCapabilityMap(agents)
+  console.log(`[capabilities] seeded ${agents.length} agents with platform capabilities`)
+
+  // ── Canvas activity stream — SSE with backfill ────────────────────────
+  // New viewers get the last 20 canvas events immediately on connect (backfill),
+  // then receive live events going forward. Canvas feels alive from frame 1.
+  // Event types: canvas_message, canvas_render, canvas_expression, canvas_burst
+  // task-1773672750043
+
+  const ACTIVITY_STREAM_TYPES = new Set(['canvas_message', 'canvas_render', 'canvas_expression', 'canvas_burst'])
+  const activityRingBuffer: Array<{ id: string; type: string; timestamp: number; data: unknown }> = []
+  const ACTIVITY_RING_SIZE = 30 // Keep slightly more than 20 for filtering headroom
+
+  // Normalize activity events into consistent shape
+  const { normalizeActivityEventSlim } = await import('./activity-stream-normalizer.js')
+
+  // Subscribe to eventBus to populate ring buffer
+  eventBus.on('activity-ring-collector', (event) => {
+    if (!ACTIVITY_STREAM_TYPES.has(event.type)) return
+    const normalized = normalizeActivityEventSlim({ id: event.id, type: event.type, timestamp: event.timestamp, data: event.data as Record<string, unknown> })
+    activityRingBuffer.push(normalized as any)
+    if (activityRingBuffer.length > ACTIVITY_RING_SIZE) activityRingBuffer.shift()
+  })
+
+  const activityStreamSubscribers = new Map<string, { closed: boolean; send: (data: string) => void }>()
+
+  // Forward matching events to activity stream subscribers (normalized shape)
+  eventBus.on('activity-stream-relay', (event) => {
+    if (!ACTIVITY_STREAM_TYPES.has(event.type)) return
+    const normalized = normalizeActivityEventSlim({ id: event.id, type: event.type, timestamp: event.timestamp, data: event.data as Record<string, unknown> })
+    const payload = JSON.stringify(normalized)
+    for (const [subId, sub] of activityStreamSubscribers) {
+      if (sub.closed) { activityStreamSubscribers.delete(subId); continue }
+      try { sub.send(payload) } catch { activityStreamSubscribers.delete(subId) }
     }
   })
 
-  // GET /canvas/slots/all — all slots including stale (debug)
-  app.get('/canvas/slots/all', async () => {
-    return { slots: canvasSlots.getAll() }
+  // canvas/activity-stream + canvas/attention → registered below (were defined but never hooked up)
+  await app.register(canvasPhase2Routes, {
+    eventBus,
+    queueCanvasPushEvent,
+    taskManager: taskManager as any,
+    getDb,
+    activityRingBuffer,
+    activityStreamSubscribers,
+  } as any)
+
+  app.post('/canvas/pulse', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
+    if (!agentId) {
+      reply.status(400)
+      return { success: false, message: 'agentId is required' }
+    }
+
+    const urgency = typeof body.urgency === 'number'
+      ? Math.max(0, Math.min(1, body.urgency))
+      : undefined
+    const burst = body.burst === true
+    const label = typeof body.label === 'string' ? body.label.slice(0, 80) : undefined
+
+    // Update agent urgency in canvasStateMap if provided
+    if (urgency !== undefined) {
+      const current = canvasStateMap.get(agentId)
+      if (current) {
+        const currentPayload = current.payload as Record<string, unknown>
+        canvasStateMap.set(agentId, {
+          ...current,
+          payload: { ...currentPayload, urgency },
+          updatedAt: Date.now(),
+        })
+      }
+    }
+
+    // Fire canvas_burst event if requested
+    if (burst) {
+      const currentState = canvasStateMap.get(agentId)?.state ?? 'working'
+      eventBus.emit({
+        id: `burst-pulse-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_burst',
+        timestamp: Date.now(),
+        data: {
+          agentId,
+          fromState: currentState,
+          toState: currentState,
+          arcType: label ?? 'pulse_burst',
+          intensity: urgency ?? 0.7,
+        },
+      })
+    }
+
+    return {
+      success: true,
+      agentId,
+      urgency: urgency ?? null,
+      burst,
+    }
+  })
+
+  // POST /canvas/query — human asks the canvas a question; agent responds with a typed card
+  // The response is emitted as a canvas_message event on the pulse SSE stream (no reload needed).
+  // ── Canvas session history — per-session conversation memory ───────────────
+  // Keyed by sessionId (client-generated UUID). Stores last 5 human+assistant turns.
+  // Used to inject conversation context into LLM calls so follow-up questions work.
+  // task: link/canvas-session-continuity
+  const CANVAS_SESSION_MAX_TURNS = 5
+  const CANVAS_SESSION_TTL_MS = 30 * 60 * 1000 // 30 minutes idle eviction
+  type CanvasSessionTurn = { role: 'user' | 'assistant'; content: string; ts: number }
+  const canvasSessionHistory = new Map<string, { turns: CanvasSessionTurn[]; lastAt: number }>()
+
+  function getCanvasSession(sessionId: string): CanvasSessionTurn[] {
+    const now = Date.now()
+    const cached = canvasSessionHistory.get(sessionId)
+    if (cached) {
+      // Evict stale from memory
+      if (now - cached.lastAt > CANVAS_SESSION_TTL_MS) {
+        canvasSessionHistory.delete(sessionId)
+        return []
+      }
+      return cached.turns
+    }
+    // Cache miss — load from SQLite, prune stale rows
+    try {
+      const db = getDb()
+      const cutoff = now - CANVAS_SESSION_TTL_MS
+      db.prepare('DELETE FROM canvas_sessions WHERE session_id = ? AND ts < ?').run(sessionId, cutoff)
+      const rows = db.prepare(
+        'SELECT role, content, ts FROM canvas_sessions WHERE session_id = ? ORDER BY ts ASC LIMIT ?'
+      ).all(sessionId, CANVAS_SESSION_MAX_TURNS * 2) as Array<{ role: string; content: string; ts: number }>
+      if (rows.length === 0) return []
+      const turns = rows.map(r => ({ role: r.role as 'user' | 'assistant', content: r.content, ts: r.ts }))
+      const lastAt = turns[turns.length - 1]!.ts
+      canvasSessionHistory.set(sessionId, { turns, lastAt })
+      return turns
+    } catch {
+      return []
+    }
+  }
+
+  function pushCanvasSession(sessionId: string, role: 'user' | 'assistant', content: string): void {
+    const now = Date.now()
+    // Update in-memory Map
+    const existing = canvasSessionHistory.get(sessionId) ?? { turns: [], lastAt: now }
+    existing.turns.push({ role, content, ts: now })
+    if (existing.turns.length > CANVAS_SESSION_MAX_TURNS * 2) {
+      existing.turns.splice(0, existing.turns.length - CANVAS_SESSION_MAX_TURNS * 2)
+    }
+    existing.lastAt = now
+    canvasSessionHistory.set(sessionId, existing)
+    // Write-through to SQLite for restart durability
+    try {
+      const db = getDb()
+      db.prepare('INSERT INTO canvas_sessions (session_id, role, content, ts) VALUES (?, ?, ?, ?)').run(sessionId, role, content, now)
+      // Prune rows beyond max turns (keep newest CANVAS_SESSION_MAX_TURNS*2)
+      db.prepare(`
+        DELETE FROM canvas_sessions WHERE session_id = ? AND ts NOT IN (
+          SELECT ts FROM canvas_sessions WHERE session_id = ? ORDER BY ts DESC LIMIT ?
+        )
+      `).run(sessionId, sessionId, CANVAS_SESSION_MAX_TURNS * 2)
+    } catch {
+      // SQLite failure is non-fatal — in-memory session still works
+    }
+  }
+
+  //
+  // ── Canvas query route (extracted to src/canvas-query.ts) ─────
+  const { canvasQueryRoutes } = await import("./canvas-query.js")
+  await app.register(canvasQueryRoutes, {
+    eventBus,
+    canvasStateMap,
+    taskManager,
+    chatManager,
+    getCanvasSession,
+    pushCanvasSession,
+    listHosts,
+  } as any)
+
+
+  // POST /canvas/push — agent self-initiates a canvas event without a human query.
+  // Agents call this to surface their own work: utterances that float from their orb,
+  // release pulses when something ships, handoff arcs when work moves between agents.
+  // All events emit on the pulse SSE stream as canvas_push for the browser to render.
+  //
+  // pixel spec: design/canvas-as-ours.html
+  // ── Canvas push + artifact routes (extracted to src/canvas-push.ts) ─────
+  const { canvasPushRoutes } = await import("./canvas-push.js")
+  await app.register(canvasPushRoutes, {
+    eventBus,
+    queueCanvasPushEvent,
+    canvasStateMap,
+  } as any)
+
+  // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
+  // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
+  // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
+  app.get('/canvas/pulse', async (request, reply) => {
+    const STALE_MS = 60 * 60 * 1000 // 60min — agents stay visible as long as they heartbeat
+    const IDENTITY_COLORS: Record<string, string> = {
+      kai: '#fb923c',
+      pixel: '#a78bfa',
+      link: '#60a5fa',
+    }
+    const STATE_URGENCY: Record<string, number> = {
+      urgent: 1.0, decision: 0.85, needs_attention: 0.75,
+      rendering: 0.5, thinking: 0.45, working: 0.3,
+      waiting: 0.15, handoff: 0.2, idle: 0.0, floor: 0.0, ambient: 0.05,
+    }
+
+    reply.raw.setHeader('Content-Type', 'text/event-stream')
+    reply.raw.setHeader('Cache-Control', 'no-cache')
+    reply.raw.setHeader('Connection', 'keep-alive')
+    reply.raw.flushHeaders?.()
+
+    let closed = false
+    request.raw.on('close', () => { closed = true })
+
+    // Cache avatars — refresh every 30s to avoid DB reads on every tick
+    let avatarCache: Record<string, { type: string; content: string; animated: boolean }> = {}
+    let avatarCacheAge = 0
+    const refreshAvatarCache = () => {
+      const now = Date.now()
+      if (now - avatarCacheAge < 30_000 && Object.keys(avatarCache).length > 0) return
+      try {
+        const rows = getDb().prepare("SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%'").all() as Array<{ agent_id: string; settings: string }>
+        const fresh: typeof avatarCache = {}
+        for (const row of rows) {
+          try {
+            const s = JSON.parse(row.settings)
+            if (s.avatar) fresh[row.agent_id] = { type: s.avatar.type, content: s.avatar.content, animated: s.avatar.animated ?? false }
+          } catch { /* skip */ }
+        }
+        avatarCache = fresh
+        avatarCacheAge = now
+      } catch { /* non-blocking */ }
+    }
+
+    // Cache for focus, calendar, and activity (30s TTL — cheap to compute)
+    interface CanvasMetaCache { focus: ReturnType<typeof getFocus>; upcomingEvents: Array<{ id: string; summary: string; dtstart: number; organizer: string }>; recentActivity: Array<{ ts: number; type: string; subject: unknown }>; age: number }
+    let canvasMetaCache: CanvasMetaCache | null = null
+    const getCanvasMeta = (): CanvasMetaCache => {
+      const now = Date.now()
+      if (canvasMetaCache && (now - canvasMetaCache.age) < 30_000) return canvasMetaCache
+      const focus = getFocus()
+      let upcomingEvents: CanvasMetaCache['upcomingEvents'] = []
+      try {
+        const events = calendarEvents.listEvents({ from: now, to: now + 24 * 60 * 60 * 1000, limit: 5 })
+        upcomingEvents = events.map(e => ({ id: e.id, summary: e.summary, dtstart: e.dtstart, organizer: e.organizer }))
+      } catch { /* skip */ }
+      let recentActivity: CanvasMetaCache['recentActivity'] = []
+      try {
+        const twoHoursAgo = now - 2 * 60 * 60 * 1000
+        const activity = queryActivity({ range: '24h', type: ['task', 'chat'], limit: 10 })
+        recentActivity = activity.events.filter(e => e.ts_ms > twoHoursAgo).slice(0, 5).map(e => ({ ts: e.ts_ms, type: e.type, subject: e.subject }))
+      } catch { /* skip */ }
+      canvasMetaCache = { focus, upcomingEvents, recentActivity, age: now }
+      return canvasMetaCache
+    }
+
+    const emitTick = () => {
+      if (closed) return
+      refreshAvatarCache()
+      const now = Date.now()
+
+      // Per-agent orb data
+      const agents: Array<{
+        id: string; state: string; urgency: number;
+        activeSpeaker: boolean; color: string; age: number;
+        task: string | null;
+        avatar: { type: string; content: string; animated: boolean } | null
+      }> = []
+
+      for (const [agentId, entry] of canvasStateMap) {
+        if (now - entry.updatedAt > STALE_MS) continue
+        const payload = entry.payload as Record<string, unknown> ?? {}
+        const presState = String((payload as any).presenceState ?? entry.state)
+        const explicitUrgency = typeof (payload as any).urgency === 'number' ? (payload as any).urgency : null
+        const urgency = explicitUrgency ?? (STATE_URGENCY[presState] ?? STATE_URGENCY[entry.state] ?? 0)
+
+        // Extract current task label from payload — supports multiple sources:
+        // 1. Explicit payload.task (agent-pushed)
+        // 2. payload.activeTask.title (canvas state)
+        // 3. payload.sourceTasks[0].title (auto-state sweep)
+        const taskLabel: string | null =
+          (typeof (payload as any).task === 'string' ? (payload as any).task : null) ??
+          ((payload as any).activeTask?.title as string | undefined) ??
+          ((payload as any).sourceTasks?.[0]?.title as string | undefined) ??
+          null
+
+        agents.push({
+          id: agentId,
+          state: presState,
+          urgency,
+          activeSpeaker: !!(payload as any).activeSpeaker,
+          color: IDENTITY_COLORS[agentId] ?? '#94a3b8',
+          age: now - entry.updatedAt,
+          task: taskLabel,
+          avatar: avatarCache[agentId] ?? null,
+        })
+      }
+
+      // Team mood (inline mini-derivation from canvasStateMap)
+      const states = agents.map(a => a.state)
+      const urgentCount = states.filter(s => s === 'urgent').length
+      const decisionCount = states.filter(s => s === 'decision').length
+      const renderingCount = states.filter(s => s === 'rendering').length
+      const thinkingCount = states.filter(s => s === 'thinking').length
+      const idleCount = states.filter(s => s === 'floor' || s === 'ambient' || s === 'idle').length
+      const activeCount = agents.length
+      const workingCount = activeCount - idleCount
+      const tension = Math.min(1.0, (urgentCount * 0.35) + (decisionCount * 0.25) + (activeCount > 0 ? (workingCount / activeCount) * 0.15 : 0))
+      const rhythm = urgentCount > 0 ? 'surge' : activeCount === 0 ? 'quiet' : decisionCount > 0 ? 'tense' : renderingCount + thinkingCount >= Math.max(1, activeCount * 0.6) ? 'flow' : 'grinding'
+      const ambientPulse = rhythm === 'surge' ? 'fast' : rhythm === 'flow' ? 'normal' : 'slow'
+      let dominantColor = '#60a5fa'
+      for (const a of agents) {
+        if (a.state !== 'floor' && a.state !== 'ambient') { dominantColor = a.color; break }
+      }
+
+      // Include focus, calendar, and activity (cached, 30s TTL)
+      const meta = getCanvasMeta()
+
+      const tick = {
+        t: now,
+        agents,
+        team: { rhythm, tension, ambientPulse, dominantColor, ...meta },
+      }
+
+      try {
+        reply.raw.write(`data: ${JSON.stringify(tick)}\n\n`)
+      } catch { closed = true }
+    }
+
+    // Emit immediately + every 2s
+    emitTick()
+    const interval = setInterval(() => {
+      if (closed) { clearInterval(interval); return }
+      emitTick()
+    }, 2000)
+
+    // Also forward burst + spark events in real-time (don't wait for next tick)
+    const listenerId = `pulse-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    eventBus.on(listenerId, (event) => {
+      if (closed) return
+      if (event.type !== 'canvas_burst' && event.type !== 'canvas_spark' && event.type !== 'canvas_milestone' && event.type !== 'canvas_expression' && event.type !== 'canvas_message' && event.type !== 'canvas_push' && event.type !== 'canvas_artifact' && event.type !== 'canvas_takeover' && event.type !== 'canvas_render') return
+      try {
+        reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify({ ...event.data as object, t: event.timestamp })}\n\n`)
+      } catch { closed = true }
+    })
+
+    request.raw.on('close', () => {
+      clearInterval(interval)
+      eventBus.off(listenerId)
+    })
+
+    // Keep connection alive — never resolve
+    return new Promise<void>(() => {})
+  })
+
+  // GET /canvas/session/mode — inferred presence mode for the current session
+  // Mode is derived from: time of day + active canvas states + team rhythm.
+  // Human never selects a mode — surface adapts silently.
+  // Returns: { mode, reason, narrative }
+  app.get('/canvas/session/mode', async () => {
+    const now = Date.now()
+    const hour = new Date(now).getHours()
+    const STALE_MS = 10 * 60 * 1000
+
+    const activeStates: string[] = []
+    const activeAgents: Array<{ id: string; state: string; payload: unknown }> = []
+    for (const [agentId, entry] of canvasStateMap) {
+      if (now - entry.updatedAt > STALE_MS) continue
+      activeStates.push(entry.state)
+      activeAgents.push({ id: agentId, state: entry.state, payload: entry.payload })
+    }
+
+    const hasUrgent = activeStates.includes('urgent')
+    const hasDecision = activeStates.includes('decision')
+    const hasRendering = activeStates.includes('rendering')
+    const hasThinking = activeStates.includes('thinking')
+    const activeCount = activeAgents.length
+    const isLateNight = hour >= 22 || hour < 6
+
+    // Mode inference — priority cascade
+    // immersive: urgent or decision — human needs full attention
+    // operational: rendering/thinking agents, human is watching work happen
+    // conversational: active agents but nothing critical — human may want to talk
+    // ambient: nothing active or late night — canvas breathing quietly
+
+    let mode: 'ambient' | 'conversational' | 'operational' | 'immersive'
+    let reason: string
+
+    if (hasUrgent || hasDecision) {
+      mode = 'immersive'
+      reason = hasDecision ? 'decision awaiting human input' : 'urgent state active'
+    } else if (hasRendering || (hasThinking && activeCount > 1)) {
+      mode = 'operational'
+      reason = hasRendering ? 'agent is rendering output' : 'multiple agents processing'
+    } else if (activeCount > 0 && !isLateNight) {
+      mode = 'conversational'
+      reason = 'agents active during working hours'
+    } else {
+      mode = 'ambient'
+      reason = isLateNight ? 'late night — quiet watch' : 'no active agents'
+    }
+
+    // One-line narrative — what's happening right now
+    const agentPhrases: string[] = []
+    for (const a of activeAgents.slice(0, 3)) {
+      const payload = a.payload as Record<string, unknown>
+      const presState = (payload as any)?.presenceState ?? a.state
+      const task = (payload as any)?.activeTask?.title
+      const phrase = presState === 'thinking' ? `${a.id} is thinking`
+        : presState === 'rendering' ? (task ? `${a.id} is rendering${task ? ` — ${task.slice(0, 30)}` : ''}` : `${a.id} is rendering`)
+        : presState === 'working' ? (task ? `${a.id} on ${task.slice(0, 30)}` : `${a.id} is working`)
+        : presState === 'urgent' ? `${a.id} needs attention`
+        : presState === 'decision' ? `${a.id} awaits your decision`
+        : presState === 'handoff' ? `${a.id} is handing off`
+        : presState === 'waiting' ? `${a.id} is ready`
+        : null
+      if (phrase) agentPhrases.push(phrase)
+    }
+
+    const narrative = agentPhrases.length > 0
+      ? agentPhrases.join(', ')
+      : isLateNight ? 'The team is quiet. You can rest.'
+      : 'Nothing active right now.'
+
+    return {
+      mode,
+      reason,
+      narrative,
+      context: { hour, activeCount, hasUrgent, hasDecision, hasRendering, isLateNight },
+      generated_at: new Date(now).toISOString(),
+    }
+  })
+
+  // GET /canvas/session/snapshot — resumable session state for cross-device continuity
+  // Returns the minimal snapshot needed for a second surface to resume from the same point.
+  // Spec: /Users/ryan/.openclaw/workspace-pixel/design/interface-os-v0-continuity.html
+  app.get('/canvas/session/snapshot', async (request) => {
+    const query = request.query as { agentId?: string }
+
+    // Determine the "active" agent: explicitly requested, or the most-recently-updated
+    let activeAgentId: string | null = query.agentId ?? null
+    let activeEntry: { state: string; sensors: string | null; payload: unknown; updatedAt: number } | null = null
+
+    if (activeAgentId) {
+      activeEntry = canvasStateMap.get(activeAgentId) ?? null
+    } else {
+      // Pick the most recently updated non-floor agent
+      for (const [id, entry] of canvasStateMap) {
+        if (entry.state !== 'floor') {
+          if (!activeEntry || entry.updatedAt > activeEntry.updatedAt) {
+            activeAgentId = id
+            activeEntry = entry
+          }
+        }
+      }
+    }
+
+    const now = Date.now()
+
+    if (!activeAgentId || !activeEntry) {
+      return {
+        snapshot: null,
+        reason: 'no_active_session',
+        generated_at: new Date(now).toISOString(),
+      }
+    }
+
+    const payload = activeEntry.payload as Record<string, unknown> | null ?? {}
+
+    // Last complete content block from canvas history
+    // getHistory returns Array<{ event: SlotEvent; timestamp: number }>
+    const recentHistory = canvasSlots.getHistory(undefined, 5)
+    const lastContent = recentHistory.length > 0 ? recentHistory[recentHistory.length - 1] : null
+
+    // Active decision payload (if in decision/urgent state)
+    const isDecision = activeEntry.state === 'decision' || activeEntry.state === 'urgent'
+
+    const snapshot = {
+      // Core session identity
+      agent_id: activeAgentId,
+      agent_label: payload.agentLabel ?? activeAgentId,
+      identity_color: AGENT_IDENTITY_COLORS[activeAgentId] ?? '#9ca3af',
+
+      // Canvas state (transferable)
+      canvas_state: activeEntry.state,
+      presence_state: payload.presenceState ?? null,
+      sensors: activeEntry.sensors ?? null,
+
+      // Active task context
+      active_task: payload.activeTask ?? null,
+      progress_pills: (payload as any).progressPills ?? null,
+
+      // Last completed content block (not mid-stream)
+      content_snapshot: lastContent
+        ? { type: lastContent.event.slot, body: lastContent.event.payload, timestamp: lastContent.timestamp }
+        : null,
+
+      // Decision payload — must follow the human to the next surface
+      active_decision: isDecision ? (payload.decision ?? payload.attention ?? null) : null,
+
+      // Attention / approval context
+      attention: payload.attention ?? null,
+
+      // Timing
+      session_age_ms: now - activeEntry.updatedAt,
+      updated_at: new Date(activeEntry.updatedAt).toISOString(),
+      generated_at: new Date(now).toISOString(),
+
+      // Handoff metadata
+      handoff: {
+        // Sensor consent is per-device — new device must re-consent
+        sensor_consent_transferred: false,
+        // In-progress streams cannot freeze — target joins at next complete block
+        stream_in_progress: activeEntry.state === 'rendering',
+        // Summary for handoff banner (e.g. "Agent is rendering a code review")
+        summary: (() => {
+          const name = payload.agentLabel ?? activeAgentId
+          if (activeEntry!.state === 'rendering') return `${name} is rendering${payload.activeTask ? ` — ${(payload.activeTask as any).title}` : ''}`
+          if (activeEntry!.state === 'decision' || activeEntry!.state === 'urgent') return `${name} needs a decision`
+          if (activeEntry!.state === 'thinking') return `${name} is thinking`
+          if (activeEntry!.state === 'waiting') return `${name} is waiting`
+          return `${name} is active`
+        })(),
+      },
+    }
+
+    return { snapshot, generated_at: snapshot.generated_at }
   })
 
   // GET /canvas/history — recent render history
@@ -8581,10 +11938,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { history: canvasSlots.getHistory(slot, limit) }
   })
 
-  // GET /canvas/rejections — recent contract rejections (for tuning)
-  app.get('/canvas/rejections', async () => {
-    return { rejections: getRecentRejections() }
-  })
+  // /canvas/rejections → canvas-routes.ts plugin
 
   // GET /canvas/stream — SSE stream of canvas render events
   app.get('/canvas/stream', async (request, reply) => {
@@ -8595,9 +11949,44 @@ export async function createServer(): Promise<FastifyInstance> {
       'X-Accel-Buffering': 'no',
     })
 
-    // Send current state as initial snapshot
+    // Track live viewer
+    liveViewerCount++
+    let viewersDirty = true
+
+    // Derive agents from task board — show ALL agents, not just canvas-state emitters
+    const allTasks = taskManager.listTasks({})
+    const agentStates: Record<string, any> = {}
+    for (const task of allTasks) {
+      const assignee = task.assignee
+      if (!assignee || assignee === 'unassigned') continue
+      const agentId = assignee.toLowerCase()
+      const canvasEntry = canvasStateMap.get(agentId)
+      const isDone = task.status === 'done' || task.status === 'cancelled'
+      const isBlocked = task.status === 'blocked'
+      const isWorking = task.status === 'doing'
+      if (!agentStates[agentId]) {
+        // First task for this agent — create entry with state derived from canvas or task status
+        const lastMsg = (canvasEntry as any)?.lastMessage
+        agentStates[agentId] = {
+          state: canvasEntry?.state || (isDone ? 'ambient' : isBlocked ? 'attention' : isWorking ? 'working' : 'floor'),
+          currentTask: task.title,
+          updatedAt: task.updatedAt || Date.now(),
+          sourceTasks: [],
+          lastMessage: lastMsg,
+        }
+      }
+      // Accumulate ALL tasks for this agent (not just the first one)
+      agentStates[agentId].sourceTasks.push({ id: task.id, title: task.title, status: task.status })
+      // currentTask = most-recently-updated task
+      if ((agentStates[agentId].updatedAt || 0) < (task.updatedAt || 0)) {
+        agentStates[agentId].currentTask = task.title
+        agentStates[agentId].updatedAt = task.updatedAt || Date.now()
+      }
+    }
+
+    // Send current state as initial snapshot — include all agents from task board
     const activeSlots = canvasSlots.getActive()
-    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ slots: activeSlots })}\n\n`)
+    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ slots: activeSlots, agents: agentStates, viewers: liveViewerCount })}\n\n`)
 
     // Subscribe to new render events
     const unsubscribe = subscribeCanvas((event, slot) => {
@@ -8619,10 +12008,59 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // Cleanup on disconnect
     request.raw.on('close', () => {
+      liveViewerCount = Math.max(0, liveViewerCount - 1)
       unsubscribe()
       clearInterval(heartbeat)
     })
   })
+
+  // ── Live Viewer Counter ─────────────────────────────────────────────
+  // Tracks open SSE connections to /canvas/stream with live=true
+  // Exposed via GET /canvas/viewers
+  let liveViewerCount = 0
+
+  app.get('/canvas/viewers', async (_request, reply) => {
+    reply.header('cache-control', 'no-cache')
+    return reply.send({ viewers: liveViewerCount })
+  })
+
+  // ── Cloud push: periodically sync canvas state to reflectt-cloud API ─────────
+  // Node → cloud canvas state pipeline. Pushes every CLOUD_PUSH_INTERVAL ms.
+  let cloudPushTimer: ReturnType<typeof setTimeout> | null = null
+  let lastPushedState = ''
+  const CLOUD_PUSH_INTERVAL = 5_000
+
+  async function pushCanvasStateToCloud() {
+    const cloudUrl = process.env.REFLECTT_CLOUD_URL
+    const hostToken = process.env.REFLECTT_HOST_TOKEN
+    const hostId = process.env.REFLECTT_HOST_ID
+    if (!cloudUrl || !hostToken || !hostId) return
+    // Snapshot current canvas state
+    const activeSlots = canvasSlots.getActive()
+    const state = { slots: activeSlots, pushedAt: Date.now() }
+    const stateJson = JSON.stringify(state)
+    if (stateJson === lastPushedState) return
+    try {
+      const res = await fetch(`${cloudUrl}/api/hosts/${hostId}/canvas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${hostToken}` },
+        body: JSON.stringify({ state }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (res.ok) lastPushedState = stateJson
+    } catch { /* fire-and-forget */ }
+  }
+
+  function scheduleCloudPush() {
+    if (cloudPushTimer) clearTimeout(cloudPushTimer)
+    cloudPushTimer = setTimeout(async () => {
+      await pushCanvasStateToCloud()
+      scheduleCloudPush()
+    }, CLOUD_PUSH_INTERVAL)
+  }
+
+  // Start pushing canvas state to cloud
+  scheduleCloudPush()
 
   // ── Feedback Collection ─────────────────────────────────────────────
 
@@ -9490,6 +12928,32 @@ export async function createServer(): Promise<FastifyInstance> {
     return insightStats()
   })
 
+  // POST /insights/stale-candidates/reconcile — run stale candidate reconcile sweep
+  // Closes candidate insights where post-incident recovery evidence exists and guardrails pass.
+  app.post<{ Body: { dry_run?: boolean; insight_ids?: string[]; actor?: string } }>(
+    '/insights/stale-candidates/reconcile',
+    async (request, reply) => {
+      const body = request.body ?? {}
+      const dryRun = body.dry_run !== false // default: true (safe)
+      const actor = typeof body.actor === 'string' ? body.actor : 'api-reconcile'
+      const insightIds = Array.isArray(body.insight_ids) ? body.insight_ids : undefined
+
+      try {
+        const result = runStaleCandidateReconcileSweep({ dryRun, actor, insightIds })
+        return { success: true, ...result }
+      } catch (err: unknown) {
+        reply.status(500)
+        return { success: false, error: String(err) }
+      }
+    },
+  )
+
+  // GET /insights/stale-candidates/preview — dry-run reconcile (GET for convenience)
+  app.get('/insights/stale-candidates/preview', async () => {
+    const result = runStaleCandidateReconcileSweep({ dryRun: true, actor: 'preview' })
+    return { success: true, ...result }
+  })
+
   // ── Loop summary: top signals from the reflection loop ──
   app.get('/loop/summary', async (request) => {
     const query = request.query as Record<string, string>
@@ -9628,6 +13092,55 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     return { success: true, dry_run: false, scanned: orphans.length, created, skipped, errors, details }
+  })
+
+  // ── Insight auto-tagger ────────────────────────────────────────────────────
+
+  // GET /insights/auto-tag/rules — return current keyword rule set
+  app.get('/insights/auto-tag/rules', async () => {
+    return { rules: getAutoTagRules(), default_count: DEFAULT_AUTO_TAG_RULES.length }
+  })
+
+  // PUT /insights/auto-tag/rules — replace rule set at runtime
+  app.put('/insights/auto-tag/rules', async (request, reply) => {
+    const body = request.body as { rules?: AutoTagRule[] }
+    if (!Array.isArray(body?.rules)) {
+      reply.code(400)
+      return { success: false, error: 'Body must be { rules: AutoTagRule[] }' }
+    }
+    setAutoTagRules(body.rules)
+    return { success: true, count: body.rules.length }
+  })
+
+  // DELETE /insights/auto-tag/rules — reset to defaults
+  app.delete('/insights/auto-tag/rules', async () => {
+    resetAutoTagRules()
+    return { success: true, message: 'Rules reset to defaults', count: DEFAULT_AUTO_TAG_RULES.length }
+  })
+
+  // POST /insights/auto-tag/backfill — reclassify all uncategorized insights
+  // Query: dry_run=true to preview without writing
+  app.post('/insights/auto-tag/backfill', async (request) => {
+    const q = request.query as Record<string, string>
+    const dryRun = q.dry_run === 'true' || q.dry_run === '1'
+    const summary = backfillUncategorizedInsights(dryRun)
+    return { success: true, dry_run: dryRun, ...summary }
+  })
+
+  // POST /insights/:id/auto-tag — re-run auto-tag on a single insight
+  app.post<{ Params: { id: string } }>('/insights/:id/auto-tag', async (request, reply) => {
+    const { id } = request.params
+    const insight = getInsight(id)
+    if (!insight) {
+      reply.code(404)
+      return { success: false, error: 'Insight not found' }
+    }
+    const newFamily = inferFamilyFromTitle(insight.title)
+    if (!newFamily || newFamily === insight.failure_family) {
+      return { success: true, changed: false, family: insight.failure_family }
+    }
+    autoTagInsightIfUncategorized(id, insight.title, insight.cluster_key)
+    return { success: true, changed: true, old_family: insight.failure_family, new_family: newFamily }
   })
 
   // Insight→Task bridge stats
@@ -10355,6 +13868,26 @@ export async function createServer(): Promise<FastifyInstance> {
     } : null
     presenceManager.recordActivity(agent, 'heartbeat')
 
+    // Keep canvasStateMap fresh — agents visible on canvas as long as they heartbeat.
+    // Derive canvas state from task activity (same logic as emitOrbState).
+    {
+      const derivedState = activeTask
+        ? (activeTask.status === 'blocked' ? 'working' : 'working')
+        : (nextTask ? 'idle' : 'idle')
+      const prevEntry = canvasStateMap.get(agent)
+      canvasStateMap.set(agent, {
+        state: derivedState as any,
+        sensors: null,
+        payload: {
+          ...(prevEntry?.payload as Record<string, unknown> ?? {}),
+          presenceState: activeTask ? 'working' : 'idle',
+          sourceTasks: activeTask ? [{ id: activeTask.id, title: activeTask.title, status: activeTask.status }] : [],
+          _auto: true,
+        },
+        updatedAt: Date.now(),
+      })
+    }
+
     // Check pause status
     const pauseStatus = checkPauseStatus(agent)
 
@@ -10369,6 +13902,25 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const focusSummary = getFocusSummary()
 
+    // Boot context: recent memories + active run (survives restart)
+    let bootMemories: Array<{ key: string; content: string; namespace: string; updatedAt: number }> = []
+    let activeRun: { id: string; objective: string; status: string; startedAt: number } | null = null
+    try {
+      const { listMemories } = await import('./agent-memories.js')
+      const memories = listMemories({ agentId: agent, limit: 5 })
+      bootMemories = memories.map(m => ({
+        key: m.key, content: m.content.slice(0, 200),
+        namespace: m.namespace, updatedAt: m.updatedAt,
+      }))
+    } catch { /* agent-memories not available */ }
+    try {
+      const { getActiveAgentRun } = await import('./agent-runs.js')
+      const run = getActiveAgentRun(agent, 'default')
+      if (run) {
+        activeRun = { id: run.id, objective: run.objective, status: run.status, startedAt: run.startedAt }
+      }
+    } catch { /* agent-runs not available */ }
+
     return {
       agent, ts: Date.now(),
       active: slim(activeTask), next: pauseStatus.paused ? null : slim(nextTask),
@@ -10378,12 +13930,64 @@ export async function createServer(): Promise<FastifyInstance> {
       ...(focusSummary ? { focus: focusSummary } : {}),
       ...(agentDrops ? { drops: { total: agentDrops.total, rolling_1h: agentDrops.rolling_1h } } : {}),
       ...(pauseStatus.paused ? { paused: true, pauseMessage: pauseStatus.message, resumesAt: pauseStatus.entry?.pausedUntil ?? null } : {}),
+      ...(bootMemories.length > 0 ? { memories: bootMemories } : {}),
+      ...(activeRun ? { run: activeRun } : {}),
+      ...(() => {
+        const p = presenceManager.getAllPresence().find(p => p.agent === agent)
+        return p?.waiting ? { waiting: p.waiting } : {}
+      })(),
       action: pauseStatus.paused ? `PAUSED: ${pauseStatus.message}`
         : activeTask ? `Continue ${activeTask.id}`
         : nextTask ? `Claim ${nextTask.id}`
         : inbox.length > 0 ? `Check inbox (${inbox.length} messages)`
         : 'HEARTBEAT_OK',
     }
+  })
+
+  // ── Agent Waiting State ──────────────────────────────────────────────
+  // Agents signal they're blocked on human input. Shows in heartbeat + presence.
+
+  app.post<{ Params: { agent: string } }>('/agents/:agent/waiting', async (request, reply) => {
+    const agent = String(request.params.agent || '').trim().toLowerCase()
+    const body = request.body as { reason?: string; waitingFor?: string; taskId?: string; expiresAt?: number } ?? {}
+    if (!body.reason) return reply.code(400).send({ error: 'reason is required' })
+    presenceManager.setWaiting(agent, { reason: body.reason, waitingFor: body.waitingFor, taskId: body.taskId, expiresAt: body.expiresAt })
+    return { success: true, agent, status: 'waiting', waiting: { reason: body.reason, waitingFor: body.waitingFor, taskId: body.taskId, expiresAt: body.expiresAt } }
+  })
+
+  app.delete<{ Params: { agent: string } }>('/agents/:agent/waiting', async (request) => {
+    const agent = String(request.params.agent || '').trim().toLowerCase()
+    presenceManager.clearWaiting(agent)
+    return { success: true, agent, status: 'idle' }
+  })
+
+  // ── Agent thought — brief expression that flows to canvas via presence → pulse ──
+  // POST /agents/:name/thought { text: "..." }
+  // Thought is attached to agent's presence entry and synced to cloud heartbeat.
+  // Canvas renders it as ephemeral expression (8s TTL managed client-side).
+  app.post<{ Params: { name: string } }>('/agents/:name/thought', async (request, reply) => {
+    const name = String(request.params.name || '').trim().toLowerCase()
+    if (!name) return reply.code(400).send({ error: 'agent name is required' })
+    const body = request.body as { text?: string } ?? {}
+    const text = typeof body.text === 'string' ? body.text.trim().slice(0, 200) : ''
+    if (!text) return reply.code(400).send({ error: 'text is required (max 200 chars)' })
+
+    // Attach thought to presence
+    const presence = presenceManager.getPresence(name)
+    if (presence) {
+      presence.thought = text
+      presence.lastUpdate = Date.now()
+    }
+
+    // Also emit as canvas_expression so it appears immediately on pulse
+    eventBus.emit({
+      id: `thought-${Date.now()}-${name}`,
+      type: 'canvas_expression' as const,
+      data: { agent: name, text, kind: 'thought' },
+      timestamp: Date.now(),
+    })
+
+    return { success: true, agent: name, thought: text }
   })
 
   // ── Bootstrap: dynamic agent config generation ──────────────────────
@@ -10451,6 +14055,7 @@ If your heartbeat shows **no active task** and **no next task**:
 - Do not load full chat history.
 - Do not post plan-only updates.
 - If nothing changed and no direct action is required, reply \`HEARTBEAT_OK\`.
+- **Decision authority:** Team owns product/arch/process decisions. Escalate credentials, legal, and vision decisions to the admin/owner. See \`decision_authority\` block in \`defaults/TEAM-ROLES.yaml\` for the full list.
 `
 
     // Stable hash for change detection (agents can cache and compare)
@@ -10598,6 +14203,17 @@ If your heartbeat shows **no active task** and **no next task**:
     latest: null,
     checkedAt: 0,
   }
+  // GET /capabilities/readiness — per-capability status with dependency checks
+  app.get('/capabilities/readiness', async () => {
+    const { getCapabilityReadiness } = await import('./capability-readiness.js')
+    const provStatus = provisioning.getStatus()
+    return getCapabilityReadiness({
+      cloudConnected: provStatus.phase === 'ready',
+      cloudUrl: provStatus.cloudUrl,
+      webhooks: provStatus.webhooks as Array<{ provider: string; active: boolean }>,
+    })
+  })
+
   const VERSION_CACHE_TTL_MS = 15 * 60 * 1000 // 15 minutes
 
   app.get('/version', async () => {
@@ -10831,13 +14447,19 @@ If your heartbeat shows **no active task** and **no next task**:
     }
     const shortId = lookup.resolvedId.replace(/^task-\d+-/, '')
     const branch = `${body.agent}/task-${shortId}`
+    // Inject default eta when absent — prevents 500 on the doing-status gate
+    const existingMeta = (task.metadata || {}) as Record<string, unknown>
+    const etaDefault = !existingMeta.eta
+      ? ({ P0: '~2h', P1: '~2h', P2: '~4h', P3: '~4h' }[task.priority || 'P2'] ?? '~4h')
+      : undefined
     const updated = await taskManager.updateTask(lookup.resolvedId, {
       assignee: body.agent,
       status: 'doing',
       metadata: {
-        ...(task.metadata || {}),
+        ...existingMeta,
         actor: body.agent,
         branch,
+        ...(etaDefault ? { eta: etaDefault } : {}),
       },
     })
     return { success: true, task: updated ? enrichTaskWithComments(updated) : null, resolvedId: lookup.resolvedId }
@@ -11036,7 +14658,7 @@ If your heartbeat shows **no active task** and **no next task**:
   // Update agent presence
   app.post<{ Params: { agent: string } }>('/presence/:agent', async (request) => {
     try {
-      const body = request.body as { status: PresenceStatus; task?: string; since?: number }
+      const body = request.body as { status: PresenceStatus; task?: string | null; since?: number }
       
       if (!body.status) {
         return { success: false, error: 'status is required' }
@@ -11070,6 +14692,36 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   // ── Scope Overlap Scanner ──────────────────────────────────────────
+  // POST /pr-link-reconciler/sweep — manually trigger a PR-link reconcile sweep
+  // Stamps canonical_pr + canonical_commit for validating tasks whose PRs have merged.
+  app.post('/pr-link-reconciler/sweep', async (_request, reply) => {
+    try {
+      const result = runPrLinkReconcileSweep({
+        getValidatingTasks: () => taskManager.listTasks({ status: 'validating' }),
+        patchTaskMetadata: (taskId, patch) => taskManager.patchTaskMetadata(taskId, patch),
+      })
+      return { success: true, ...result }
+    } catch (err: unknown) {
+      reply.status(500)
+      return { success: false, error: String(err) }
+    }
+  })
+
+  // GET /pr-link-reconciler/preview — dry-run: show which tasks would be updated
+  app.get('/pr-link-reconciler/preview', async () => {
+    const tasks = taskManager.listTasks({ status: 'validating' })
+    const { extractPrUrl, hasCanonicalRefs } = await import('./pr-link-reconciler.js')
+    const candidates = tasks
+      .map(t => ({
+        taskId: t.id,
+        title: t.title?.slice(0, 60),
+        prUrl: extractPrUrl(t),
+        alreadyCanonical: hasCanonicalRefs(t),
+      }))
+      .filter(c => c.prUrl && !c.alreadyCanonical)
+    return { success: true, candidates, total: candidates.length }
+  })
+
   // POST /scope-overlap — trigger scope overlap scan after a PR merge
   app.post<{ Body: { prNumber: number; prTitle: string; prBranch: string; mergedTaskId?: string; repo?: string; mergeCommit?: string; notify?: boolean } }>('/scope-overlap', async (request) => {
     const { prNumber, prTitle, prBranch, mergedTaskId, repo, mergeCommit, notify } = request.body || {} as any
@@ -11230,6 +14882,130 @@ If your heartbeat shows **no active task** and **no next task**:
     return { agent: request.params.agent, focus }
   })
 
+  // ── Agent Notifications ─────────────────────────────────────────────
+  // Structured notification delivery with ack workflow.
+  // Storage: agent_notifications table (migration v27).
+
+  const agentNotifModule = await import('./agent-notifications.js')
+
+  // POST /agent-notifications — create a notification
+  app.post('/agent-notifications', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const target_agent = String(body.target_agent || '').trim()
+    if (!target_agent) {
+      reply.code(400)
+      return { error: 'target_agent is required' }
+    }
+    const title = String(body.title || '').trim()
+    if (!title) {
+      reply.code(400)
+      return { error: 'title is required' }
+    }
+
+    const notification = agentNotifModule.createNotification(getDb(), {
+      target_agent,
+      source_agent: body.source_agent ? String(body.source_agent) : undefined,
+      type: body.type ? String(body.type) as NotificationType : undefined,
+      title,
+      body: body.body ? String(body.body) : undefined,
+      priority: body.priority ? String(body.priority) as NotificationPriorityLevel : undefined,
+      task_id: body.task_id ? String(body.task_id) : undefined,
+      metadata: body.metadata as Record<string, unknown> | undefined,
+      expires_at: body.expires_at ? Number(body.expires_at) : undefined,
+    })
+
+    reply.code(201)
+    return { success: true, notification }
+  })
+
+  // POST /agent-notifications/:id/ack — acknowledge a notification
+  app.post<{ Params: { id: string } }>('/agent-notifications/:id/ack', async (request, reply) => {
+    const { id } = request.params
+    const body = request.body as Record<string, unknown>
+    const decision = String(body.decision || '').trim() as AckDecision
+
+    if (!['seen', 'accept', 'defer', 'dismiss'].includes(decision)) {
+      reply.code(400)
+      return { error: 'decision must be one of: seen, accept, defer, dismiss' }
+    }
+
+    const notification = agentNotifModule.ackNotification(getDb(), id, decision)
+    if (!notification) {
+      reply.code(404)
+      return { error: 'Notification not found or already acked' }
+    }
+
+    return { success: true, notification }
+  })
+
+  // GET /agent-notifications?agent=:id — list notifications for an agent
+  app.get('/agent-notifications', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const agent = String(query.agent || '').trim()
+    if (!agent) {
+      reply.code(400)
+      return { error: 'agent query parameter is required' }
+    }
+
+    const status = query.status as NotificationStatus | undefined
+    const limit = query.limit ? parseInt(query.limit, 10) : undefined
+
+    const result = agentNotifModule.getNotifications(getDb(), agent, { status, limit })
+    return { notifications: result.notifications, total: result.total }
+  })
+
+  // GET /agent-notifications/worker/stats — delivery worker status
+  app.get('/agent-notifications/worker/stats', async () => {
+    return { success: true, stats: notificationWorker.getStats() }
+  })
+
+  // POST /agent-notifications/worker/tick — manually trigger delivery tick (for testing)
+  app.post('/agent-notifications/worker/tick', async () => {
+    const results = await notificationWorker.tick()
+    return { success: true, results }
+  })
+
+  // POST /agent-presence — upsert agent presence (delegates to PresenceManager + logs)
+  app.post('/agent-presence', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const agent = String(body.agent || '').trim()
+    if (!agent) {
+      return { error: 'agent is required' }
+    }
+
+    const status = String(body.status || 'idle') as import('./presence.js').PresenceStatus
+    const task = body.task ? String(body.task) : undefined
+
+    presenceManager.updatePresence(agent, status, task)
+
+    // Log to agent_presence_log for historical tracking
+    const focusLevel = body.focus_level ? String(body.focus_level) : null
+    const metadata = body.metadata ? JSON.stringify(body.metadata) : null
+    getDb().prepare(`
+      INSERT INTO agent_presence_log (agent, status, task, focus_level, metadata, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(agent, status, task ?? null, focusLevel, metadata, Date.now())
+
+    const presence = presenceManager.getPresence(agent)
+    return { success: true, presence }
+  })
+
+  // GET /agent-presence?agent=:id — read current agent presence
+  app.get('/agent-presence', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const agent = String(query.agent || '').trim()
+    if (!agent) {
+      reply.code(400)
+      return { error: 'agent query parameter is required' }
+    }
+
+    const presence = presenceManager.getPresence(agent)
+    if (!presence) {
+      return { presence: null, message: 'No presence data for this agent' }
+    }
+    return { presence }
+  })
+
   // Get all agent activity metrics
   app.get('/agents/activity', async () => {
     const activity = presenceManager.getAllActivity()
@@ -11243,6 +15019,121 @@ If your heartbeat shows **no active task** and **no next task**:
       return { activity: null, message: 'No activity data for this agent' }
     }
     return { activity }
+  })
+
+  // ── Agent Timeline ───────────────────────────────────────────────────
+  // Unified activity feed: runs + task state changes + trust events.
+  // Returns events in reverse-chronological order.
+  app.get<{ Params: { agent: string } }>('/agents/:agent/timeline', async (request) => {
+    const agent = String(request.params.agent || '').trim().toLowerCase()
+    if (!agent) return { error: 'agent is required' }
+
+    const rawQuery = request.query as Record<string, string>
+    const limit = Math.min(parseInt(rawQuery.limit || '50', 10), 200)
+    const since = rawQuery.since ? parseInt(rawQuery.since, 10) : undefined
+
+    const events: Array<{
+      type: 'run_complete' | 'task_state_change' | 'trust_event' | 'expression_changed'
+      timestamp: number
+      summary: string
+      taskId?: string
+      runId?: string
+      meta?: Record<string, unknown>
+    }> = []
+
+    // ── Source 1: Agent runs (completed/failed) ────────────────────
+    try {
+      const { listAgentRuns } = await import('./agent-runs.js')
+      const agentRuns = listAgentRuns(agent, 'default', { limit, includeArchived: true })
+      for (const run of agentRuns) {
+        const endTs = run.completedAt ?? null
+        const ts = endTs ?? run.startedAt
+        if (since && ts < since) continue
+        if (run.status === 'idle' || run.status === 'working') continue // only completed runs
+        events.push({
+          type: 'run_complete',
+          timestamp: ts,
+          summary: `Run ${run.status}: ${run.objective.slice(0, 100)}`,
+          runId: run.id,
+          meta: {
+            status: run.status,
+            durationMs: endTs ? endTs - run.startedAt : null,
+          },
+        })
+      }
+    } catch { /* agent-runs not available */ }
+
+    // ── Source 2: Task state changes (from comments on agent tasks) ──
+    {
+      const agentAliases = getAgentAliases(agent)
+      const agentTasks = taskManager.listTasks({ assigneeIn: agentAliases })
+      for (const task of agentTasks) {
+        const comments = taskManager.getTaskComments(task.id)
+        for (const c of comments) {
+          if (since && c.timestamp < since) continue
+          // Status-change comments have category 'status_change' or contain [transition]
+          const isStateChange = c.category === 'status_change'
+            || /\[transition\]|\bdoing\b.*\bvalidating\b|\bvalidating\b.*\bdone\b|\btodo\b.*\bdoing\b|\bblocked\b/i.test(c.content)
+          if (!isStateChange) continue
+          events.push({
+            type: 'task_state_change',
+            timestamp: c.timestamp,
+            summary: `Task ${task.id}: ${c.content.slice(0, 120)}`,
+            taskId: task.id,
+            meta: { taskTitle: task.title, author: c.author },
+          })
+        }
+      }
+    }
+
+    // ── Source 4: Expression events from eventLog ─────────────────
+    {
+      const exprEvents = eventBus.getEvents({ agent, limit })
+        .filter(e => e.type === 'canvas_expression')
+      for (const e of exprEvents) {
+        const data = e.data as any
+        if (since && e.timestamp < since) continue
+        // Classify expression type based on dominant channel
+        const channels = data.channels ?? {}
+        const expressionType: string =
+          channels.voice ? 'thought' :
+          channels.narrative && !channels.voice ? 'reaction' :
+          channels.emoji ? 'emoji' :
+          'visual'
+        events.push({
+          type: 'expression_changed',
+          timestamp: e.timestamp,
+          summary: channels.voice ?? channels.narrative ?? 'Expression',
+          meta: {
+            agentId: data.agentId,
+            emoji: channels.emoji ?? null,
+            name: channels.voice ?? channels.narrative ?? null,
+            expressionType,
+          },
+        })
+      }
+    }
+
+    // ── Source 3: Trust events ─────────────────────────────────────
+    try {
+      const { listTrustEvents } = await import('./trust-events.js')
+      const trustEvts = listTrustEvents({ agentId: agent, since, limit })
+      for (const te of trustEvts) {
+        events.push({
+          type: 'trust_event',
+          timestamp: te.occurredAt,
+          summary: `[${te.severity}] ${te.eventType}: ${te.summary}`,
+          taskId: te.taskId ?? undefined,
+          meta: { eventType: te.eventType, severity: te.severity },
+        })
+      }
+    } catch { /* trust-events not available */ }
+
+    // Sort reverse-chrono and cap at limit
+    events.sort((a, b) => b.timestamp - a.timestamp)
+    const sliced = events.slice(0, limit)
+
+    return { agent, timeline: sliced, count: sliced.length }
   })
 
   // ============ TEAM MANIFEST ENDPOINT ============
@@ -11566,6 +15457,47 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
+   * GET /activation/doctor-gate — polling-optimized endpoint for cloud onboarding UI.
+   * Cloud BYOH onboarding polls this every 5s to check if the user ran reflectt doctor.
+   * Returns a simple passed/failed state without the full funnel payload.
+   *
+   * Query: ?userId=<userId>
+   *
+   * Used by the cloud "Verify your setup" step (step 4 of BYOH onboarding).
+   * task-1773703300024-73ydeyx9n
+   */
+  app.get('/activation/doctor-gate', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const userId = query.userId?.trim()
+    if (!userId) return reply.code(400).send({ success: false, error: 'userId is required' })
+
+    const state = getUserFunnelState(userId)
+    const passedAt = state.events.host_preflight_passed ?? null
+    const passed = passedAt !== null
+
+    // Extract failure reasons from preflight_failed event metadata in the event log
+    let failureReasons: string[] = []
+    if (!passed && state.events.host_preflight_failed) {
+      const log = getActivationEventLog()
+      const failEvent = log.find(e => e.userId === userId && e.type === 'host_preflight_failed')
+      if (failEvent?.metadata) {
+        const fc = failEvent.metadata['failed_checks']
+        if (Array.isArray(fc)) failureReasons = fc.map(String)
+        else if (typeof failEvent.metadata['first_blocker'] === 'string') failureReasons = [failEvent.metadata['first_blocker']]
+      }
+    }
+
+    return {
+      userId,
+      passed,
+      passedAt,
+      workspaceReady: state.events.workspace_ready !== null,
+      preflightAttempted: state.events.host_preflight_failed !== null || passed,
+      failureReasons,
+    }
+  })
+
+  /**
    * POST /activation/event — manually emit an activation event.
    * Body: { type, userId, metadata? }
    * Used by cloud signup flow and workspace setup.
@@ -11578,7 +15510,8 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const validTypes = [
       'signup_completed', 'host_preflight_passed', 'host_preflight_failed',
-      'workspace_ready', 'first_task_started',
+      'workspace_ready', 'workspace_not_ready',
+      'first_task_started',
       'first_task_completed', 'first_team_message_sent', 'day2_return_action',
     ]
 
@@ -11636,6 +15569,91 @@ If your heartbeat shows **no active task** and **no next task**:
     const query = request.query as Record<string, string>
     const weeks = query.weeks ? parseInt(query.weeks, 10) : 12
     return { success: true, trends: getWeeklyTrends(weeks) }
+  })
+
+  /**
+   * GET /activation/ghost-signups — Users who signed up but never ran preflight.
+   * Cloud polls this to find candidates for the ghost signup nudge email.
+   * Query: ?minAgeHours=2 (default 2h; use 24 for 24h tier candidates)
+   *
+   * task-1773709288800-lam5hd11b
+   */
+  app.get('/activation/ghost-signups', async (request) => {
+    const query = request.query as Record<string, string>
+    const minAgeHours = query.minAgeHours ? parseFloat(query.minAgeHours) : 2
+    const minAgeMs = minAgeHours * 60 * 60 * 1000
+    const { getGhostSignupCandidates } = await import('./ghost-signup-nudge.js')
+    const candidates = getGhostSignupCandidates(minAgeMs)
+    return { success: true, candidates, count: candidates.length, minAgeHours }
+  })
+
+  /**
+   * POST /activation/ghost-signup-nudge — Send re-engagement email to a ghost signup.
+   * Cloud calls this with { userId, email, nudgeTier? } after finding candidates.
+   * Node sends the email via cloud relay, tags the user, and returns result.
+   *
+   * Body: { userId: string, email: string, nudgeTier?: '2h' | '24h' }
+   *
+   * task-1773709288800-lam5hd11b
+   */
+  app.post('/activation/ghost-signup-nudge', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const userId = typeof body.userId === 'string' ? body.userId.trim() : ''
+    const email = typeof body.email === 'string' ? body.email.trim() : ''
+    const nudgeTier = (body.nudgeTier === '24h' ? '24h' : '2h') as '2h' | '24h'
+
+    if (!userId) return reply.code(400).send({ success: false, error: 'userId is required' })
+    if (!email || !email.includes('@')) return reply.code(400).send({ success: false, error: 'valid email is required' })
+
+    const { sendGhostSignupNudge } = await import('./ghost-signup-nudge.js')
+
+    const emailRelayFn = async (opts: {
+      from: string; to: string; subject: string; html: string; text: string;
+      tags?: Array<{ name: string; value: string }>;
+    }) => {
+      const hostId = process.env.REFLECTT_HOST_ID
+      const relayPath = hostId ? `/api/hosts/${encodeURIComponent(hostId)}/relay/email` : '/api/hosts/relay/email'
+      try {
+        const relayResult = await cloudRelay(relayPath, {
+          from: opts.from, to: opts.to, subject: opts.subject,
+          html: opts.html, text: opts.text, tags: opts.tags,
+          agent: 'funnel',
+          idempotencyKey: `ghost-signup-nudge/${userId}/${nudgeTier}`,
+        }, reply) as Record<string, unknown>
+        const relayError = typeof relayResult?.error === 'string' ? relayResult.error : undefined
+        return { success: !relayError, error: relayError }
+      } catch (err: any) {
+        return { success: false, error: err?.message ?? 'relay error' }
+      }
+    }
+
+    const result = await sendGhostSignupNudge(userId, email, nudgeTier, emailRelayFn)
+    return { success: true, result }
+  })
+
+  /**
+   * POST /tracking/live-cta — Track /live page CTA clicks
+   * Called by cloud app when user clicks "Start Free" on /live
+   * task-1774294960543-v778wwmio
+   */
+  app.post('/tracking/live-cta', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const source = body.source as string || 'unknown'
+    const url = body.url as string || ''
+    const ts = body.ts as number || Date.now()
+    console.log(`[live-cta] ${new Date().toISOString()} source=${source} url=${url} ts=${ts}`)
+    return { success: true, tracked: true }
+  })
+
+  /**
+   * POST /tracking/live-visit — Track /live page visits
+   * Simple hit counter - logs each visit to console
+   */
+  app.post('/tracking/live-visit', async (request) => {
+    const body = request.body as Record<string, unknown>
+    const referrer = body.referrer as string || 'direct'
+    console.log(`[live-visit] ${new Date().toISOString()} referrer=${referrer}`)
+    return { success: true, visited: true }
   })
 
   // Get task analytics
@@ -11700,18 +15718,15 @@ If your heartbeat shows **no active task** and **no next task**:
       reply.code(400)
       return { success: false, error: 'agent and model are required' }
     }
-    const event = recordUsage({
+    const event = recordUsageTracking({
       agent: body.agent as string,
-      task_id: body.task_id as string | undefined,
       model: body.model as string,
-      provider: (body.provider as string) || 'unknown',
+      provider: (body.provider as string | undefined) ?? 'unknown',
       input_tokens: Number(body.input_tokens) || 0,
       output_tokens: Number(body.output_tokens) || 0,
       estimated_cost_usd: body.estimated_cost_usd != null ? Number(body.estimated_cost_usd) : undefined,
-      category: (body.category as UsageEvent['category']) || 'other',
+      category: (body.category as UsageEvent['category'] | undefined) ?? 'other',
       timestamp: Number(body.timestamp) || Date.now(),
-      team_id: body.team_id as string | undefined,
-      metadata: body.metadata as Record<string, unknown> | undefined,
     })
     return { success: true, event }
   })
@@ -11726,6 +15741,85 @@ If your heartbeat shows **no active task** and **no next task**:
     }
     const events = recordUsageBatch(items as any[])
     return { success: true, count: events.length }
+  })
+
+  // POST /usage/ingest — accept external usage records from OpenClaw sessions
+  // Bridges agents not connected via node heartbeat (swift, kotlin, qa, etc.)
+  // into the model_usage table so the cloud dashboard captures all agent spend.
+  // Auth: REFLECTT_HOST_HEARTBEAT_TOKEN (Bearer / x-heartbeat-token / body.token).
+  // Supports single record or batch (body.events array).
+  app.post('/usage/ingest', async (request, reply) => {
+    const auth = verifyHeartbeatAuth(request as any)
+    if (!auth.ok) {
+      reply.code(401)
+      return { success: false, error: auth.error }
+    }
+
+    const body = request.body as Record<string, unknown>
+
+    // Batch path: { events: [...] }
+    if (Array.isArray(body.events)) {
+      const items = body.events as Record<string, unknown>[]
+      if (items.length === 0) {
+        reply.code(400)
+        return { success: false, error: 'events array must not be empty' }
+      }
+      const events = items.map(item => {
+        if (!item.agent || !item.model) throw Object.assign(new Error('agent and model are required in every event'), { statusCode: 400 })
+        return recordUsageTracking({
+          agent: item.agent as string,
+          model: item.model as string,
+          provider: (item.provider as string | undefined) ?? 'openclaw',
+          input_tokens: Number(item.input_tokens) || 0,
+          output_tokens: Number(item.output_tokens) || 0,
+          estimated_cost_usd: item.cost_usd != null ? Number(item.cost_usd) : undefined,
+          category: (item.category as UsageEvent['category'] | undefined) ?? 'other',
+          timestamp: Number(item.timestamp) || Date.now(),
+          api_source: (item.session_id as string | undefined) ? `openclaw:${item.session_id}` : 'openclaw',
+          metadata: item.session_id ? { session_id: item.session_id } : undefined,
+        })
+      })
+      reply.code(201)
+      return { success: true, count: events.length }
+    }
+
+    // Single record path: { agent, model, input_tokens, output_tokens, cost_usd, session_id?, timestamp? }
+    if (!body.agent || !body.model) {
+      reply.code(400)
+      return { success: false, error: 'agent and model are required' }
+    }
+    const event = recordUsageTracking({
+      agent: body.agent as string,
+      model: body.model as string,
+      provider: (body.provider as string | undefined) ?? 'openclaw',
+      input_tokens: Number(body.input_tokens) || 0,
+      output_tokens: Number(body.output_tokens) || 0,
+      estimated_cost_usd: body.cost_usd != null ? Number(body.cost_usd) : undefined,
+      category: (body.category as UsageEvent['category'] | undefined) ?? 'other',
+      timestamp: Number(body.timestamp) || Date.now(),
+      api_source: (body.session_id as string | undefined) ? `openclaw:${body.session_id}` : 'openclaw',
+      metadata: body.session_id ? { session_id: body.session_id } : undefined,
+    })
+    reply.code(201)
+    return { success: true, event }
+  })
+
+  // POST /usage/sync/openclaw — on-demand trigger for OpenClaw session sync
+  // Reads ~/.openclaw/agents/*/sessions/sessions.json and ingests new sessions.
+  app.post('/usage/sync/openclaw', async (request, reply) => {
+    const auth = verifyHeartbeatAuth(request as any)
+    if (!auth.ok) {
+      reply.code(401)
+      return { success: false, error: auth.error }
+    }
+    try {
+      const result = await syncOpenClawUsage()
+      reply.code(200)
+      return { success: true, ...result }
+    } catch (err) {
+      reply.code(500)
+      return { success: false, error: (err as Error).message }
+    }
   })
 
   // Usage summary (total cost by period)
@@ -11797,6 +15891,47 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get('/usage/routing-suggestions', async (request) => {
     const q = request.query as Record<string, string>
     return { suggestions: getRoutingSuggestions({ since: q.since ? Number(q.since) : undefined }) }
+  })
+
+  // ── Cost Dashboard ──
+  // GET /costs — aggregated spend: daily by model, avg per lane, top tasks
+  app.get('/costs', async (request) => {
+    const q = request.query as Record<string, string>
+    const days = q.days ? Math.min(Number(q.days), 90) : 7
+    const since = Date.now() - days * 24 * 60 * 60 * 1000
+
+    const dailyByModel = getDailySpendByModel({ days })
+    const byLane = getAvgCostByLane({ days: Math.max(days, 30) }) // lane data needs more window
+    const byAgent = getAvgCostByAgent({ days: Math.max(days, 30) })
+    const topTasks = getUsageByTask({ since, limit: 20 })
+    const summary = getUsageSummary({ since })
+
+    // Roll up daily totals per day for the sparkline
+    const dailyTotals: Record<string, number> = {}
+    for (const row of dailyByModel) {
+      dailyTotals[row.date] = (dailyTotals[row.date] ?? 0) + row.total_cost_usd
+    }
+
+    // Note: avg_cost_by_lane and avg_cost_by_agent use Math.max(days, 30) as their window.
+    // Lane/agent-level averages need task density to be meaningful — a 7-day window might
+    // have 0-1 closed tasks per agent/lane and produce misleading numbers. Using a 30-day
+    // floor is intentional. daily_by_model, daily_totals, and top_tasks_by_cost use the
+    // requested `days` window directly and will match the `window_days` field in the response.
+    const laneAgentWindow = Math.max(days, 30)
+
+    return {
+      window_days: days,
+      lane_agent_window_days: laneAgentWindow,
+      summary: Array.isArray(summary) ? summary[0] ?? null : summary,
+      daily_by_model: dailyByModel,
+      daily_totals: Object.entries(dailyTotals)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, total_cost_usd]) => ({ date, total_cost_usd })),
+      avg_cost_by_lane: byLane,
+      avg_cost_by_agent: byAgent,
+      top_tasks_by_cost: topTasks,
+      generated_at: Date.now(),
+    }
   })
 
   // Operational metrics endpoint (lightweight dashboard contract)
@@ -12314,6 +16449,24 @@ If your heartbeat shows **no active task** and **no next task**:
 
     const idempotencyKey = deliveryId ? `${provider}_${deliveryId}` : undefined
 
+    // Persist raw inbound payload for agent retrieval (non-blocking, best-effort)
+    try {
+      const { storeWebhookPayload: persistInbound } = await import('./webhook-storage.js')
+      const rawHeaders: Record<string, string> = {}
+      for (const [k, v] of Object.entries(request.headers)) {
+        if (typeof v === 'string') rawHeaders[k] = v
+        else if (Array.isArray(v)) rawHeaders[k] = v.join(', ')
+      }
+      persistInbound({ source: provider, eventType, body, headers: rawHeaders })
+    } catch {
+      // storage failure must not interrupt webhook delivery
+    }
+
+    // Enrich GitHub webhook payloads with agent attribution
+    const enrichedBody = provider === 'github'
+      ? enrichWebhookPayload(body)
+      : body
+
     // Enqueue through delivery engine for each configured target
     const events = []
     for (const route of routes) {
@@ -12325,7 +16478,7 @@ If your heartbeat shows **no active task** and **no next task**:
       const event = webhookDelivery.enqueue({
         provider,
         eventType,
-        payload: body,
+        payload: enrichedBody,
         targetUrl: `http://localhost:${serverConfig.port}${route.path}`,
         idempotencyKey: idempotencyKey ? `${idempotencyKey}_${route.id}` : undefined,
         metadata: {
@@ -12338,6 +16491,74 @@ If your heartbeat shows **no active task** and **no next task**:
         },
       })
       events.push(event)
+    }
+
+    // Post GitHub events to the 'github' chat channel with remapped mentions.
+    // Pass enrichedBody (not body) so formatGitHubEvent has access to
+    // _reflectt_attribution and can mention the correct agent (@link not @kai).
+    if (provider === 'github') {
+      const ghEventType = (request.headers['x-github-event'] as string) || eventType
+      const chatMessage = formatGitHubEvent(ghEventType, enrichedBody as any)
+      if (chatMessage) {
+        chatManager.sendMessage({
+          from: 'github',
+          content: chatMessage,
+          channel: 'github',
+          metadata: { source: 'github-webhook', eventType: ghEventType, delivery: request.headers['x-github-delivery'] },
+        }).catch(() => {}) // non-blocking
+      }
+
+      // canvas_artifact(type=test) on CI workflow_run completed
+      if (ghEventType === 'workflow_run' && (enrichedBody as any)?.action === 'completed') {
+        const wfRun = (enrichedBody as any)?.workflow_run as Record<string, unknown> | undefined
+        if (wfRun) {
+          const conclusion = (wfRun.conclusion as string) ?? 'unknown'
+          const ciNow = Date.now()
+          const agentId = (enrichedBody as any)?._reflectt_attribution?.agent ?? 'system'
+          // Derive passed/failed/skipped from check_runs when available, else infer from conclusion
+          const checkRunsArr = Array.isArray((enrichedBody as any)?.check_runs) ? (enrichedBody as any).check_runs : []
+          const passed = checkRunsArr.filter((c: any) => c.conclusion === 'success').length
+          const failed = checkRunsArr.filter((c: any) => c.conclusion === 'failure').length
+          const skipped = checkRunsArr.filter((c: any) => c.conclusion === 'skipped' || c.conclusion === 'neutral').length
+          eventBus.emit({
+            id: `artifact-ci-${ciNow}-${String(wfRun.id ?? ciNow).slice(-6)}`,
+            type: 'canvas_artifact' as const,
+            timestamp: ciNow,
+            data: {
+              type: 'test' as const,
+              agentId,
+              title: `CI: ${String(wfRun.name ?? 'workflow')} — ${conclusion}`,
+              url: (wfRun.html_url as string) ?? undefined,
+              conclusion,
+              passed: checkRunsArr.length > 0 ? passed : conclusion === 'success' ? 1 : 0,
+              failed: checkRunsArr.length > 0 ? failed : conclusion === 'failure' ? 1 : 0,
+              skipped: checkRunsArr.length > 0 ? skipped : 0,
+              timestamp: ciNow,
+            },
+          })
+        }
+      }
+    }
+
+    // Post Sentry error alerts to #ops channel
+    if (provider === 'sentry') {
+      // Optional signature verification (HMAC-SHA256)
+      const sentrySecret = process.env.SENTRY_CLIENT_SECRET
+      const sentrySignature = request.headers['sentry-hook-signature'] as string | undefined
+      if (sentrySecret && !verifySentrySignature(JSON.stringify(body), sentrySignature, sentrySecret)) {
+        reply.code(401)
+        return { success: false, message: 'Invalid Sentry webhook signature' }
+      }
+
+      const opsMessage = formatSentryAlert(body as any)
+      if (opsMessage) {
+        chatManager.sendMessage({
+          from: 'sentry',
+          content: opsMessage,
+          channel: 'ops',
+          metadata: { source: 'sentry-webhook', action: (body as any)?.action, resource: request.headers['sentry-hook-resource'] as string | undefined },
+        }).catch(() => {}) // non-blocking
+      }
     }
 
     reply.code(202)
@@ -12875,6 +17096,11 @@ If your heartbeat shows **no active task** and **no next task**:
     console.error('[ActivationFunnel] Failed to load funnel data:', err)
   })
 
+  // ── Restart Drift Guard: reassert critical task ownership post-restart ──
+  runRestartDriftGuard().catch(err => {
+    console.error('[RestartDrift] Failed to run drift guard:', err)
+  })
+
   // GET /execution-health — sweeper status + current violations
   app.get('/execution-health', async (_request, reply) => {
     const status = getSweeperStatus()
@@ -13142,6 +17368,63 @@ If your heartbeat shows **no active task** and **no next task**:
     return getReminderEngineStats()
   })
 
+  // ── Schedule feed — team-wide time-awareness ──────────────────────────────
+  //
+  // Provides canonical records for deploy windows, focus blocks, and
+  // scheduled task work so agents can coordinate timing without chat.
+  //
+  // MVP scope: one-off windows only. No iCal/RRULE, no reminders.
+  // See src/schedule.ts for what is intentionally NOT included.
+
+  // GET /schedule/feed — upcoming entries in chronological order
+  app.get('/schedule/feed', async (request) => {
+    const q = request.query as Record<string, string>
+    const kinds = q.kinds ? (q.kinds.split(',') as ScheduleKind[]) : undefined
+    const entries = getScheduleFeed({
+      after: q.after ? parseInt(q.after, 10) : undefined,
+      before: q.before ? parseInt(q.before, 10) : undefined,
+      kinds,
+      owner: q.owner,
+      limit: q.limit ? parseInt(q.limit, 10) : undefined,
+    })
+    return { entries, count: entries.length }
+  })
+
+  // POST /schedule/entries — create a new schedule entry
+  app.post('/schedule/entries', async (request, reply) => {
+    try {
+      const entry = createScheduleEntry(request.body as any)
+      return reply.status(201).send({ entry })
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message })
+    }
+  })
+
+  // GET /schedule/entries/:id
+  app.get<{ Params: { id: string } }>('/schedule/entries/:id', async (request, reply) => {
+    const entry = getScheduleEntry(request.params.id)
+    if (!entry) return reply.status(404).send({ error: 'Not found' })
+    return { entry }
+  })
+
+  // PATCH /schedule/entries/:id
+  app.patch<{ Params: { id: string } }>('/schedule/entries/:id', async (request, reply) => {
+    try {
+      const entry = updateScheduleEntry(request.params.id, request.body as any)
+      if (!entry) return reply.status(404).send({ error: 'Not found' })
+      return { entry }
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message })
+    }
+  })
+
+  // DELETE /schedule/entries/:id
+  app.delete<{ Params: { id: string } }>('/schedule/entries/:id', async (request, reply) => {
+    const deleted = deleteScheduleEntry(request.params.id)
+    if (!deleted) return reply.status(404).send({ error: 'Not found' })
+    return reply.status(204).send()
+  })
+
   // ── iCal Import/Export ───────────────────────────────────────────────────
 
   // Export all events as .ics
@@ -13207,14 +17490,107 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // ── Calendar Events API ────────────────────────────────────────────────
 
-  // Create an event
+  // GET /calendar/upcoming — next N days of events (agent execution surface)
+  // Accepts ?days=7 (default 7). Returns spec-shaped response sorted chronologically.
+  app.get('/calendar/upcoming', async (request) => {
+    const q = request.query as Record<string, string>
+    const days = Math.max(1, Math.min(90, parseInt(q.days ?? '7', 10) || 7))
+    const now = Date.now()
+    const to = now + days * 24 * 60 * 60 * 1000
+
+    const events = calendarEvents.listEvents({ from: now, to, status: 'confirmed' })
+
+    return {
+      events: events.map(e => ({
+        id: e.id,
+        title: e.summary,
+        start: new Date(e.dtstart).toISOString(),
+        end: new Date(e.dtend).toISOString(),
+        attendees: e.attendees.map(a => a.name),
+        calendar: e.categories[0] ?? null,
+        description: e.description || null,
+        location: e.location || null,
+        provider: 'local',
+      })),
+    }
+  })
+
+  // Create an event (spec format + legacy CreateEventInput both accepted)
+  // Spec format: { title, start, duration_minutes?, attendees?, calendar?, description? }
+  // Legacy format: { summary, organizer, dtstart, dtend, ... }
+  // Error codes: 422 for past start time, 409 for exact duplicate (same title+start)
   app.post('/calendar/events', async (request, reply) => {
     try {
-      const body = request.body as CreateEventInput
-      if (!body || !body.summary || !body.organizer) {
-        return reply.code(400).send({ error: 'summary and organizer are required' })
+      const body = request.body as Record<string, unknown>
+      if (!body) return reply.code(400).send({ error: 'Request body is required' })
+
+      let input: CreateEventInput
+
+      if (typeof body.title === 'string' || typeof body.start === 'string') {
+        // Spec format — translate to internal CreateEventInput
+        const title = typeof body.title === 'string' ? body.title.trim() : ''
+        const startStr = typeof body.start === 'string' ? body.start : ''
+        if (!title) return reply.code(400).send({ error: 'title is required' })
+        if (!startStr) return reply.code(400).send({ error: 'start is required' })
+
+        const dtstart = Date.parse(startStr)
+        if (isNaN(dtstart)) return reply.code(400).send({ error: 'start must be a valid ISO 8601 datetime' })
+
+        // 422 for past dates
+        if (dtstart < Date.now()) {
+          return reply.code(422).send({ error: 'start must be in the future', code: 'PAST_DATE' })
+        }
+
+        const durationMinutes = typeof body.duration_minutes === 'number' ? body.duration_minutes : 60
+        const dtend = dtstart + durationMinutes * 60 * 1000
+
+        // 409 duplicate check: same title + same start time
+        const existing = calendarEvents.listEvents({ from: dtstart - 1000, to: dtstart + 1000 })
+        const duplicate = existing.find(e => e.summary.toLowerCase() === title.toLowerCase() && e.dtstart === dtstart)
+        if (duplicate) {
+          return reply.code(409).send({ error: 'Duplicate event: same title and start time already exists', existing_id: duplicate.id })
+        }
+
+        const rawAttendees = Array.isArray(body.attendees) ? body.attendees : []
+        const calendar = typeof body.calendar === 'string' ? body.calendar : undefined
+        input = {
+          summary: title,
+          description: typeof body.description === 'string' ? body.description : undefined,
+          dtstart,
+          dtend,
+          organizer: 'agent',
+          attendees: rawAttendees.map((a: unknown) => ({
+            name: typeof a === 'string' ? a : String(a),
+            email: typeof a === 'string' && a.includes('@') ? a : undefined,
+            status: 'needs-action' as const,
+          })),
+          categories: calendar ? [calendar] : [],
+        }
+      } else {
+        // Legacy format
+        const legacy = body as unknown as CreateEventInput
+        if (!legacy.summary || !legacy.organizer) {
+          return reply.code(400).send({ error: 'summary and organizer are required' })
+        }
+        // 422 for past dates in legacy format too
+        if (typeof legacy.dtstart === 'number' && legacy.dtstart < Date.now()) {
+          return reply.code(422).send({ error: 'dtstart must be in the future', code: 'PAST_DATE' })
+        }
+        input = legacy
       }
-      const event = calendarEvents.createEvent(body)
+
+      const event = calendarEvents.createEvent(input)
+
+      // Return spec-shaped response for spec-format requests, full event for legacy
+      if (typeof body.title === 'string') {
+        return reply.code(201).send({
+          id: event.id,
+          title: event.summary,
+          start: new Date(event.dtstart).toISOString(),
+          end: new Date(event.dtend).toISOString(),
+          provider: 'local',
+        })
+      }
       return reply.code(201).send({ success: true, event })
     } catch (err: any) {
       return reply.code(400).send({ error: err.message })
@@ -13311,6 +17687,1594 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // Start hourly auto-snapshot for alert-preflight daily metrics
   startAutoSnapshot()
+
+  // ─── Browser capability routes ───────────────────────────────────────────────
+  const browser = await import('./capabilities/browser.js')
+
+  app.get('/browser/config', async () => {
+    return browser.getBrowserConfig()
+  })
+
+  app.post('/browser/sessions', async (request, reply) => {
+    try {
+      const body = request.body as { agent?: string; url?: string; headless?: boolean; viewport?: { width: number; height: number } }
+      if (!body?.agent) return reply.code(400).send({ error: 'agent is required' })
+      const session = await browser.createSession({
+        agent: body.agent,
+        url: body.url,
+        headless: body.headless,
+        viewport: body.viewport,
+      })
+      const { _stagehand, _page, _idleTimer, ...safe } = session
+      return reply.code(201).send(safe)
+    } catch (err: any) {
+      const status = err.message?.includes('Max concurrent') || err.message?.includes('exceeded max') ? 429 : 500
+      return reply.code(status).send({ error: err.message })
+    }
+  })
+
+  app.get('/browser/sessions', async () => {
+    return { sessions: browser.listSessions() }
+  })
+
+  app.get<{ Params: { id: string } }>('/browser/sessions/:id', async (request, reply) => {
+    const session = browser.getSession(request.params.id)
+    if (!session) return reply.code(404).send({ error: 'Session not found' })
+    const { _stagehand, _page, _idleTimer, ...safe } = session
+    return safe
+  })
+
+  app.delete<{ Params: { id: string } }>('/browser/sessions/:id', async (request, reply) => {
+    await browser.closeSession(request.params.id)
+    return { ok: true }
+  })
+
+  app.post<{ Params: { id: string } }>('/browser/sessions/:id/act', async (request, reply) => {
+    try {
+      const body = request.body as { instruction?: string }
+      if (!body?.instruction) return reply.code(400).send({ error: 'instruction is required' })
+      const result = await browser.act(request.params.id, body.instruction)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
+  app.post<{ Params: { id: string } }>('/browser/sessions/:id/extract', async (request, reply) => {
+    try {
+      const body = request.body as { instruction?: string; schema?: unknown }
+      if (!body?.instruction) return reply.code(400).send({ error: 'instruction is required' })
+      const result = await browser.extract(request.params.id, body.instruction, body.schema)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
+  app.post<{ Params: { id: string } }>('/browser/sessions/:id/observe', async (request, reply) => {
+    try {
+      const body = request.body as { instruction?: string }
+      if (!body?.instruction) return reply.code(400).send({ error: 'instruction is required' })
+      const result = await browser.observe(request.params.id, body.instruction)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
+  app.post<{ Params: { id: string } }>('/browser/sessions/:id/navigate', async (request, reply) => {
+    try {
+      const body = request.body as { url?: string }
+      if (!body?.url) return reply.code(400).send({ error: 'url is required' })
+      const result = await browser.navigate(request.params.id, body.url)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
+  app.get<{ Params: { id: string } }>('/browser/sessions/:id/screenshot', async (request, reply) => {
+    try {
+      const result = await browser.screenshot(request.params.id)
+      return result
+    } catch (err: any) {
+      return reply.code(err.message?.includes('No active') ? 404 : 500).send({ error: err.message })
+    }
+  })
+
+  // ── Agent Runs & Events ──────────────────────────────────────────────────
+  const {
+    createAgentRun,
+    updateAgentRun,
+    getAgentRun,
+    getActiveAgentRun,
+    listAgentRuns,
+    appendAgentEvent,
+    listAgentEvents,
+    VALID_RUN_STATUSES,
+  } = await import('./agent-runs.js')
+
+  // Create a new agent run
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/runs', async (request, reply) => {
+    const { agentId } = request.params
+    const body = request.body as { objective?: string; teamId?: string; taskId?: string; parentRunId?: string }
+    if (!body?.objective) return reply.code(400).send({ error: 'objective is required' })
+    const teamId = body.teamId ?? 'default'
+    try {
+      const run = createAgentRun(agentId, teamId, body.objective, {
+        taskId: body.taskId,
+        parentRunId: body.parentRunId,
+      })
+      return reply.code(201).send(run)
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // Update an agent run (status, context, artifacts)
+  app.patch<{ Params: { agentId: string; runId: string } }>('/agents/:agentId/runs/:runId', async (request, reply) => {
+    const { runId } = request.params
+    const body = request.body as {
+      status?: string
+      contextSnapshot?: Record<string, unknown>
+      artifacts?: Array<Record<string, unknown>>
+    }
+    if (body?.status && !VALID_RUN_STATUSES.includes(body.status as any)) {
+      return reply.code(400).send({ error: `Invalid status. Valid: ${VALID_RUN_STATUSES.join(', ')}` })
+    }
+    try {
+      const run = updateAgentRun(runId, {
+        status: body?.status as any,
+        contextSnapshot: body?.contextSnapshot,
+        artifacts: body?.artifacts,
+      })
+      if (!run) return reply.code(404).send({ error: 'Run not found' })
+
+      // canvas_artifact(type=run) on agent run completion
+      const terminalStatuses = ['completed', 'failed', 'cancelled']
+      if (body?.status && terminalStatuses.includes(body.status)) {
+        const completedAt = Date.now()
+        const durationMs = run.startedAt ? completedAt - run.startedAt : null
+        eventBus.emit({
+          id: `artifact-run-${completedAt}-${runId.slice(-6)}`,
+          type: 'canvas_artifact' as const,
+          timestamp: completedAt,
+          data: {
+            type: 'run' as const,
+            agentId: request.params.agentId,
+            title: run.objective?.slice(0, 80) ?? `Run ${body.status}`,
+            runId,
+            status: body.status,
+            durationMs,
+            exitCode: run.artifacts?.find((a: any) => a.exitCode !== undefined)?.exitCode ?? null,
+            timestamp: completedAt,
+          },
+        })
+      }
+
+      return run
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // List agent runs
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/runs', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { status?: string; teamId?: string; limit?: string; include_archived?: string }
+    const teamId = query.teamId ?? 'default'
+    const limit = query.limit ? parseInt(query.limit, 10) : undefined
+    const includeArchived = query.include_archived === 'true'
+    return listAgentRuns(agentId, teamId, { status: query.status as any, limit, includeArchived })
+  })
+
+  // Get active run for an agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/runs/current', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { teamId?: string }
+    const teamId = query.teamId ?? 'default'
+    const run = getActiveAgentRun(agentId, teamId)
+    if (!run) return reply.code(404).send({ error: 'No active run' })
+    return run
+  })
+
+  // GET /agents/:agentId/runs/current/pending-reviews
+  // Returns all review_requested events for the agent that have no matching review_approved/rejected.
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/runs/current/pending-reviews', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { limit?: string }
+    const { listPendingApprovals } = await import('./agent-runs.js')
+    const limit = query.limit ? parseInt(query.limit, 10) : undefined
+    const pending = listPendingApprovals({ agentId, limit })
+    return { agentId, pending }
+  })
+
+  // Append an event
+  const { validateRoutingSemantics } = await import('./agent-runs.js')
+
+  // GET /events/routing/validate — check if a payload passes routing semantics
+  app.post('/events/routing/validate', async (request) => {
+    const body = request.body as { eventType?: string; payload?: Record<string, unknown> }
+    if (!body?.eventType) return { valid: false, errors: ['eventType is required'], warnings: [] }
+    return validateRoutingSemantics(body.eventType, body.payload ?? {})
+  })
+
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/events', async (request, reply) => {
+    const { agentId } = request.params
+    // Note: `enforceRouting` is intentionally excluded from the accepted body — API layer always enforces.
+    const body = request.body as { eventType?: string; runId?: string; payload?: Record<string, unknown> }
+    if (!body?.eventType) return reply.code(400).send({ error: 'eventType is required' })
+    try {
+      const event = appendAgentEvent({
+        agentId,
+        runId: body.runId,
+        eventType: body.eventType,
+        payload: body.payload,
+        enforceRouting: true,  // always enforce at API boundary — callers cannot bypass
+      })
+      return reply.code(201).send(event)
+    } catch (err: any) {
+      const message = String(err?.message || err)
+      if (message.includes('Routing semantics violation')) {
+        return reply.code(422).send({
+          error: message,
+          hint: 'Routing payload requires action_required (review|unblock|approve|fyi) and urgency (blocking|normal|low). Optional: owner, expires_at.',
+        })
+      }
+      if (message.includes('rationale')) {
+        return reply.code(400).send({ error: message })
+      }
+      return reply.code(500).send({ error: message })
+    }
+  })
+
+  // POST /runs/:runId/events — post an event to a run by runId (without requiring agentId).
+  // Routing semantics are always enforced at this boundary; callers cannot opt out.
+  app.post<{ Params: { runId: string } }>('/runs/:runId/events', async (request, reply) => {
+    const { runId } = request.params
+    const body = request.body as { eventType?: string; payload?: Record<string, unknown> }
+    if (!body?.eventType) return reply.code(400).send({ error: 'eventType is required' })
+
+    const run = getAgentRun(runId)
+    if (!run) return reply.code(404).send({ error: `Run not found: ${runId}` })
+
+    try {
+      const event = appendAgentEvent({
+        agentId: run.agentId,
+        runId,
+        eventType: body.eventType,
+        payload: body.payload,
+        enforceRouting: true,  // always enforce at API boundary
+      })
+      return reply.code(201).send(event)
+    } catch (err: any) {
+      const message = String(err?.message || err)
+      if (message.includes('Routing semantics violation')) {
+        return reply.code(422).send({
+          error: message,
+          hint: 'Routing payload requires action_required (review|unblock|approve|fyi) and urgency (blocking|normal|low). Optional: owner, expires_at.',
+        })
+      }
+      if (message.includes('rationale')) {
+        return reply.code(400).send({ error: message })
+      }
+      return reply.code(500).send({ error: message })
+    }
+  })
+
+  // List agent events
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/events', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { runId?: string; type?: string; since?: string; limit?: string }
+    return listAgentEvents({
+      agentId,
+      runId: query.runId,
+      eventType: query.type,
+      since: query.since ? parseInt(query.since, 10) : undefined,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+    })
+  })
+
+  // ── Run Event Stream (SSE) ─────────────────────────────────────────────
+  // Real-time SSE stream for run events. Canvas subscribes here instead of polling.
+  // GET /agents/:agentId/runs/:runId/stream — stream events for a specific run
+  // GET /agents/:agentId/stream — stream all events for an agent
+
+  app.get<{ Params: { agentId: string; runId: string } }>('/agents/:agentId/runs/:runId/stream', async (request, reply) => {
+    const { agentId, runId } = request.params
+    const run = getAgentRun(runId)
+    if (!run) { reply.code(404); return { error: 'Run not found' } }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Support Last-Event-ID for reconnection
+    const lastEventId = request.headers['last-event-id'] as string | undefined
+    const lastEventTs = lastEventId ? parseInt(lastEventId, 10) : 0
+
+    if (lastEventTs > 0) {
+      // Reconnect: replay missed events
+      const missedEvents = listAgentEvents({ runId, limit: 100 })
+        .filter(e => (e as any).timestamp > lastEventTs)
+      for (const e of missedEvents) {
+        const id = (e as any).timestamp || Date.now()
+        reply.raw.write(`id: ${id}\nevent: replay\ndata: ${JSON.stringify(e)}\n\n`)
+      }
+    } else {
+      // Send current run state as initial snapshot
+      const snapshotId = Date.now()
+      reply.raw.write(`id: ${snapshotId}\nevent: snapshot\ndata: ${JSON.stringify({ run, events: listAgentEvents({ runId, limit: 20 }) })}\n\n`)
+    }
+
+    // Subscribe to eventBus for this run's events
+    const listenerId = `run-stream-${runId}-${Date.now()}`
+    let closed = false
+    let eventSeq = Date.now()
+
+    eventBus.on(listenerId, (event) => {
+      if (closed) return
+      const data = event.data as Record<string, unknown> | undefined
+      // Forward events that match this agent or run
+      if (data && (data.runId === runId || data.agentId === agentId)) {
+        try {
+          eventSeq = Date.now()
+          reply.raw.write(`id: ${eventSeq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+        } catch { /* connection closed */ }
+      }
+    })
+
+    // Heartbeat
+    const heartbeat = setInterval(() => {
+      if (closed) { clearInterval(heartbeat); return }
+      try { reply.raw.write(`:heartbeat\n\n`) } catch { clearInterval(heartbeat) }
+    }, 15_000)
+
+    // Cleanup
+    request.raw.on('close', () => {
+      closed = true
+      eventBus.off(listenerId)
+      clearInterval(heartbeat)
+    })
+  })
+
+  // Stream all events for an agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/stream', async (request, reply) => {
+    const { agentId } = request.params
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Send recent events as snapshot
+    const recentEvents = listAgentEvents({ agentId, limit: 20 })
+    const activeRun = getActiveAgentRun(agentId, 'default')
+    reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ activeRun, events: recentEvents })}\n\n`)
+
+    const listenerId = `agent-stream-${agentId}-${Date.now()}`
+    let closed = false
+
+    eventBus.on(listenerId, (event) => {
+      if (closed) return
+      const data = event.data as Record<string, unknown> | undefined
+      if (data && data.agentId === agentId) {
+        try {
+          reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+        } catch { /* connection closed */ }
+      }
+    })
+
+    const heartbeat = setInterval(() => {
+      if (closed) { clearInterval(heartbeat); return }
+      try { reply.raw.write(`:heartbeat\n\n`) } catch { clearInterval(heartbeat) }
+    }, 15_000)
+
+    request.raw.on('close', () => {
+      closed = true
+      eventBus.off(listenerId)
+      clearInterval(heartbeat)
+    })
+  })
+
+  // ── Run Stream (by run ID only) ──────────────────────────────────────
+  // GET /runs/:runId/stream — SSE stream for a run without requiring agentId.
+  // Cloud Presence surface subscribes here to show live run activity.
+  // Supports Last-Event-ID for reconnection: on reconnect, replays missed events.
+  app.get<{ Params: { runId: string } }>('/runs/:runId/stream', async (request, reply) => {
+    const { runId } = request.params
+    const run = getAgentRun(runId)
+    if (!run) { reply.code(404); return { error: 'Run not found' } }
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    })
+
+    // Support Last-Event-ID for reconnection
+    const lastEventId = request.headers['last-event-id'] as string | undefined
+    const lastEventTs = lastEventId ? parseInt(lastEventId, 10) : 0
+
+    if (lastEventTs > 0) {
+      // Reconnect: replay events since last received
+      const missedEvents = listAgentEvents({ runId, limit: 100 })
+        .filter(e => (e as any).timestamp > lastEventTs)
+      for (const e of missedEvents) {
+        const id = (e as any).timestamp || Date.now()
+        reply.raw.write(`id: ${id}\nevent: replay\ndata: ${JSON.stringify(e)}\n\n`)
+      }
+    } else {
+      // Initial snapshot: run state + recent events
+      const snapshotId = Date.now()
+      reply.raw.write(`id: ${snapshotId}\nevent: snapshot\ndata: ${JSON.stringify({ run, events: listAgentEvents({ runId, limit: 20 }) })}\n\n`)
+    }
+
+    const listenerId = `run-direct-stream-${runId}-${Date.now()}`
+    let closed = false
+    let eventSeq = Date.now()
+
+    eventBus.on(listenerId, (event) => {
+      if (closed) return
+      const data = event.data as Record<string, unknown> | undefined
+      if (data && (data.runId === runId || data.agentId === run.agentId)) {
+        try {
+          eventSeq = Date.now()
+          reply.raw.write(`id: ${eventSeq}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+        } catch { /* connection closed */ }
+      }
+    })
+
+    const heartbeat = setInterval(() => {
+      if (closed) { clearInterval(heartbeat); return }
+      try { reply.raw.write(`:heartbeat\n\n`) } catch { clearInterval(heartbeat) }
+    }, 15_000)
+
+    request.raw.on('close', () => {
+      closed = true
+      eventBus.off(listenerId)
+      clearInterval(heartbeat)
+    })
+  })
+
+  // ── Workflow Templates ─────────────────────────────────────────────────
+
+  const { listWorkflowTemplates, getWorkflowTemplate, runWorkflow } = await import('./workflow-templates.js')
+
+  // GET /workflows — list available workflow templates
+  app.get('/workflows', async () => ({ templates: listWorkflowTemplates() }))
+
+  // GET /workflows/:id — get template details
+  app.get<{ Params: { id: string } }>('/workflows/:id', async (request, reply) => {
+    const template = getWorkflowTemplate(request.params.id)
+    if (!template) { reply.code(404); return { error: 'Template not found' } }
+    return {
+      id: template.id,
+      name: template.name,
+      description: template.description,
+      steps: template.steps.map(s => ({ name: s.name, description: s.description })),
+    }
+  })
+
+  // POST /workflows/:id/run — execute a workflow
+  app.post<{ Params: { id: string } }>('/workflows/:id/run', async (request, reply) => {
+    const template = getWorkflowTemplate(request.params.id)
+    if (!template) { reply.code(404); return { error: 'Template not found' } }
+    const body = request.body as {
+      agentId?: string; teamId?: string; objective?: string; taskId?: string
+      reviewer?: string; prUrl?: string; title?: string; urgency?: string
+      nextOwner?: string; summary?: string
+    } ?? {}
+    const agentId = body.agentId ?? 'link'
+    const teamId = body.teamId ?? 'default'
+    const result = await runWorkflow(template, agentId, teamId, body)
+    return result
+  })
+
+  // POST /workflows/pr-review-demo — canonical runnable regression workflow
+  // Happy path: create task (if missing) → run template → return run + recent events.
+  app.post('/workflows/pr-review-demo', async (request, reply) => {
+    const body = request.body as {
+      agentId?: string
+      reviewer?: string
+      teamId?: string
+      taskId?: string
+      prUrl?: string
+      objective?: string
+      title?: string
+      urgency?: string
+      nextOwner?: string
+      summary?: string
+    } ?? {}
+
+    const template = getWorkflowTemplate('pr-review')
+    if (!template) {
+      reply.code(500)
+      return { error: 'Workflow template "pr-review" is not registered' }
+    }
+
+    const agentId = body.agentId ?? 'link'
+    const reviewer = body.reviewer ?? 'kai'
+    const teamId = body.teamId ?? 'default'
+
+    let taskId = body.taskId
+    let createdTaskId: string | undefined
+
+    if (!taskId) {
+      const demoTask = await taskManager.createTask({
+        title: body.title ?? `Workflow demo: PR review handoff (${new Date().toISOString()})`,
+        description: 'Auto-generated demo task for /workflows/pr-review-demo regression path.',
+        status: 'doing',
+        assignee: agentId,
+        reviewer,
+        done_criteria: [
+          'Workflow run is created and attached to this task.',
+          'Review request + approval + handoff events are emitted.',
+          'Run reaches completed state with no failed steps.',
+        ],
+        createdBy: 'system',
+        priority: 'P2',
+        metadata: {
+          eta: '5m',
+          lane: 'workflow',
+          source: 'workflow-regression',
+          reflection_exempt: true,
+          reflection_exempt_reason: 'Synthetic regression task for workflow endpoint verification',
+        },
+      })
+      taskId = demoTask.id
+      createdTaskId = demoTask.id
+    }
+
+    const result = await runWorkflow(template, agentId, teamId, {
+      ...body,
+      reviewer,
+      teamId,
+      taskId,
+      objective: body.objective ?? 'Canonical PR review workflow regression run',
+      title: body.title ?? 'PR review demo run',
+      urgency: body.urgency ?? 'normal',
+      nextOwner: body.nextOwner ?? reviewer,
+      summary: body.summary ?? 'Regression demo completed via /workflows/pr-review-demo',
+      prUrl: body.prUrl ?? 'https://github.com/reflectt/reflectt-node/pull/0',
+    })
+
+    const run = result.runId ? getAgentRun(result.runId) : null
+    const events = result.runId ? listAgentEvents({ runId: result.runId, limit: 30 }) : []
+
+    return {
+      success: result.success,
+      workflow: 'pr-review-demo',
+      template: template.id,
+      taskId,
+      createdTaskId,
+      run,
+      result,
+      eventCount: events.length,
+      events,
+      regression: {
+        endpoint: '/workflows/pr-review-demo',
+        createdTask: Boolean(createdTaskId),
+        completed: run?.status === 'completed',
+      },
+    }
+  })
+
+  // ── Agent Messaging (Host-native) ─────────────────────────────────────
+  // Local agent-to-agent messaging. Replaces gateway for same-Host agents.
+
+  const { sendAgentMessage, listAgentMessages, listSentMessages, markMessagesRead, getUnreadCount, listChannelMessages } = await import('./agent-messaging.js')
+
+  // Send message
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/messages/send', async (request, reply) => {
+    const { agentId } = request.params
+    const body = request.body as { to?: string; channel?: string; content?: string; metadata?: Record<string, unknown> }
+    if (!body?.to) return reply.code(400).send({ error: 'to (recipient agent) is required' })
+    if (!body?.content) return reply.code(400).send({ error: 'content is required' })
+    const msg = sendAgentMessage({
+      fromAgent: agentId,
+      toAgent: body.to,
+      channel: body.channel,
+      content: body.content,
+      metadata: body.metadata,
+    })
+    // Emit event for SSE subscribers
+    eventBus.emit({
+      id: `amsg-evt-${Date.now()}`,
+      type: 'message_posted' as const,
+      timestamp: Date.now(),
+      data: { messageId: msg.id, from: agentId, to: body.to, channel: msg.channel },
+    })
+    return reply.code(201).send(msg)
+  })
+
+  // Inbox
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/messages', async (request) => {
+    const { agentId } = request.params
+    const query = request.query as { channel?: string; unread?: string; since?: string; limit?: string }
+    return {
+      messages: listAgentMessages({
+        agentId,
+        channel: query.channel,
+        unreadOnly: query.unread === 'true',
+        since: query.since ? parseInt(query.since, 10) : undefined,
+        limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      }),
+      unreadCount: getUnreadCount(agentId),
+    }
+  })
+
+  // Sent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/messages/sent', async (request) => {
+    const { agentId } = request.params
+    const query = request.query as { limit?: string }
+    return { messages: listSentMessages(agentId, query.limit ? parseInt(query.limit, 10) : undefined) }
+  })
+
+  // Mark read
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/messages/read', async (request) => {
+    const { agentId } = request.params
+    const body = request.body as { messageIds?: string[] } ?? {}
+    const marked = markMessagesRead(agentId, body.messageIds)
+    return { marked }
+  })
+
+  // Channel messages
+  app.get('/messages/channel/:channel', async (request) => {
+    const { channel } = request.params as { channel: string }
+    const query = request.query as { since?: string; limit?: string }
+    return {
+      messages: listChannelMessages(channel, {
+        since: query.since ? parseInt(query.since, 10) : undefined,
+        limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      }),
+    }  })
+  // ── Run Retention / Archive ────────────────────────────────────────────
+
+  const { applyRunRetention, getRetentionStats } = await import('./agent-runs.js')
+
+  // Schedule daily run retention archival using the configured TTL
+  const runRetentionIntervalMs = 24 * 60 * 60 * 1000 // 24 hours
+  const runRetentionTimer = setInterval(() => {
+    try {
+      applyRunRetention({ policy: { maxAgeDays: serverConfig.runRetentionDays } })
+    } catch { /* non-fatal */ }
+  }, runRetentionIntervalMs)
+  runRetentionTimer.unref()
+  // Run once at startup to archive any stale runs immediately
+  try { applyRunRetention({ policy: { maxAgeDays: serverConfig.runRetentionDays } }) } catch { /* non-fatal */ }
+
+  // Schedule daily webhook payload purge — removes stored payloads older than 90 days.
+  // ── Stale candidate reconciler scheduler ──
+  // Runs at startup (after 90s) + every 4 hours. Dry-run unless REFLECTT_AUTO_RECONCILE_CANDIDATES=true.
+  ;(async () => {
+    function doStaleCandidateSweep() {
+      try {
+        const result = runStaleCandidateReconcileSweep({
+          dryRun: process.env.REFLECTT_AUTO_RECONCILE_CANDIDATES !== 'true',
+          actor: 'stale-candidate-reconciler-scheduler',
+        })
+        if (result.eligible > 0 || result.closed > 0) {
+          const mode = result.dryRun ? '[dry-run]' : '[live]'
+          console.log(
+            `[stale-candidate-reconciler] ${mode} swept=${result.swept} eligible=${result.eligible} ` +
+            `closed=${result.closed} blocked=${result.blocked} (${result.durationMs}ms)`,
+          )
+        }
+      } catch (err) {
+        console.warn('[stale-candidate-reconciler] Sweep error:', err)
+      }
+    }
+    const scStartupTimer = setTimeout(doStaleCandidateSweep, 90_000)
+    scStartupTimer.unref()
+    const scTimer = setInterval(doStaleCandidateSweep, 4 * 60 * 60 * 1000)
+    scTimer.unref()
+  })().catch(() => { /* never fail startup */ })
+
+  // Dynamic import mirrors the best-effort pattern from the inbound webhook handler (PR #926 caveat resolved).
+  // ── PR-link reconciler: stamp canonical refs on validating tasks with merged PRs ──
+  // Runs at startup + every 30 minutes. Best-effort, never blocks startup.
+  ;(async () => {
+    const PR_RECONCILE_INTERVAL_MS = 30 * 60 * 1000 // 30 min
+
+    function doReconcileSweep() {
+      try {
+        const result = runPrLinkReconcileSweep({
+          getValidatingTasks: () => taskManager.listTasks({ status: 'validating' }),
+          patchTaskMetadata: (taskId, patch) => taskManager.patchTaskMetadata(taskId, patch),
+        })
+        if (result.stamped > 0) {
+          console.log(`[pr-link-reconciler] Swept ${result.swept} validating tasks: ${result.stamped} stamped, ${result.errors} errors (${result.durationMs}ms)`)
+        }
+      } catch (err) {
+        console.warn('[pr-link-reconciler] Sweep error:', err)
+      }
+    }
+
+    // Startup pass after 60s (let server settle first)
+    const startupTimer = setTimeout(doReconcileSweep, 60_000)
+    startupTimer.unref()
+
+    // Recurring sweep
+    const reconcileTimer = setInterval(doReconcileSweep, PR_RECONCILE_INTERVAL_MS)
+    reconcileTimer.unref()
+  })().catch(() => { /* never fail startup */ })
+
+  const WEBHOOK_PAYLOAD_RETENTION_DAYS = 90
+  ;(async () => {
+    try {
+      const { purgeOldPayloads } = await import('./webhook-storage.js')
+      // Run at startup
+      try { purgeOldPayloads(WEBHOOK_PAYLOAD_RETENTION_DAYS) } catch { /* non-fatal */ }
+      // Then daily
+      const webhookPurgeTimer = setInterval(() => {
+        try { purgeOldPayloads(WEBHOOK_PAYLOAD_RETENTION_DAYS) } catch { /* non-fatal */ }
+      }, 24 * 60 * 60 * 1000)
+      webhookPurgeTimer.unref()
+    } catch { /* webhook-storage not available — skip */ }
+  })().catch(() => { /* outer non-fatal */ })
+
+  // GET /runs/retention/stats — preview what retention policy would do
+  app.get('/runs/retention/stats', async (request) => {
+    const query = request.query as { maxAgeDays?: string; maxCompletedRuns?: string }
+    return getRetentionStats({
+      maxAgeDays: query.maxAgeDays ? parseInt(query.maxAgeDays, 10) : undefined,
+      maxCompletedRuns: query.maxCompletedRuns ? parseInt(query.maxCompletedRuns, 10) : undefined,
+    })
+  })
+
+  // POST /runs/retention/apply — apply retention policy
+  app.post('/runs/retention/apply', async (request) => {
+    const body = request.body as {
+      maxAgeDays?: number
+      maxCompletedRuns?: number
+      deleteArchived?: boolean
+      agentId?: string
+      dryRun?: boolean
+    } ?? {}
+    return applyRunRetention({
+      policy: {
+        maxAgeDays: body.maxAgeDays,
+        maxCompletedRuns: body.maxCompletedRuns,
+        deleteArchived: body.deleteArchived,
+      },
+      agentId: body.agentId,
+      dryRun: body.dryRun,
+    })  })
+  // ── Presence Narrator ──────────────────────────────────────────────────
+  // Posts first-person status narrations to chat every 5 min (±60s jitter)
+  // for agents with active doing tasks, following echo's constraint pack.
+  const { startPresenceNarrator } = await import('./presence-narrator.js')
+  const { getAgentRoles } = await import('./assignment.js')
+  const narratorAgentIds = getAgentRoles().map(r => r.name).filter(Boolean)
+  const stopNarrator = startPresenceNarrator(narratorAgentIds, taskManager)
+  app.addHook('onClose', async () => { stopNarrator() })
+
+  // ── Artifact Store (Host-native) ──────────────────────────────────────
+  const { storeArtifact, getArtifact, readArtifactContent, listArtifacts, deleteArtifact, getStorageUsage } = await import('./artifact-store.js')
+
+  // Upload artifact
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/artifacts', async (request, reply) => {
+    const { agentId } = request.params
+    const body = request.body as { name?: string; content?: string; mimeType?: string; runId?: string; taskId?: string; metadata?: Record<string, unknown>; encoding?: string }
+    if (!body?.name) return reply.code(400).send({ error: 'name is required' })
+    if (!body?.content) return reply.code(400).send({ error: 'content is required' })
+    const contentBuf = body.encoding === 'base64' ? Buffer.from(body.content, 'base64') : Buffer.from(body.content)
+    const art = storeArtifact({ agentId, name: body.name, content: contentBuf, mimeType: body.mimeType, runId: body.runId, taskId: body.taskId, metadata: body.metadata })
+    return reply.code(201).send(art)
+  })
+
+  // List artifacts
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/artifacts', async (request) => {
+    const { agentId } = request.params
+    const query = request.query as { runId?: string; taskId?: string; limit?: string }
+    return {
+      artifacts: listArtifacts({ agentId, runId: query.runId, taskId: query.taskId, limit: query.limit ? parseInt(query.limit, 10) : undefined }),
+      usage: getStorageUsage(agentId),
+    }
+  })
+
+  // Get artifact metadata
+  app.get('/artifacts/:artifactId', async (request, reply) => {
+    const { artifactId } = request.params as { artifactId: string }
+    const art = getArtifact(artifactId)
+    if (!art) return reply.code(404).send({ error: 'Artifact not found' })
+    return art
+  })
+
+  // Download artifact content
+  app.get('/artifacts/:artifactId/content', async (request, reply) => {
+    const { artifactId } = request.params as { artifactId: string }
+    const content = readArtifactContent(artifactId)
+    if (!content) return reply.code(404).send({ error: 'Artifact not found or file missing' })
+    const art = getArtifact(artifactId)!
+    return reply.type(art.mimeType).send(content)
+  })
+
+  // Delete artifact
+  app.delete('/artifacts/:artifactId', async (request, reply) => {
+    const { artifactId } = request.params as { artifactId: string }
+    const deleted = deleteArtifact(artifactId)
+    if (!deleted) return reply.code(404).send({ error: 'Artifact not found' })
+    return { deleted: true }
+  })
+
+  // Storage usage
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/storage', async (request) => {
+    const { agentId } = request.params
+    return getStorageUsage(agentId)
+  })
+
+  // ── Webhook Storage ──────────────────────────────────────────────────
+  const { storeWebhookPayload, getWebhookPayload, listWebhookPayloads, markPayloadProcessed, getUnprocessedCount, purgeOldPayloads } = await import('./webhook-storage.js')
+
+  // Ingest webhook payload
+  app.post('/webhooks/ingest', async (request, reply) => {
+    const body = request.body as { source?: string; eventType?: string; agentId?: string; body?: Record<string, unknown> }
+    if (!body?.source) return reply.code(400).send({ error: 'source is required' })
+    if (!body?.eventType) return reply.code(400).send({ error: 'eventType is required' })
+    if (!body?.body) return reply.code(400).send({ error: 'body (payload) is required' })
+    const headers: Record<string, string> = {}
+    for (const [k, v] of Object.entries(request.headers)) {
+      if (typeof v === 'string') headers[k] = v
+    }
+    const payload = storeWebhookPayload({ source: body.source, eventType: body.eventType, agentId: body.agentId, body: body.body, headers })
+    return reply.code(201).send(payload)
+  })
+
+  // List payloads
+  app.get('/webhooks/payloads', async (request) => {
+    const query = request.query as { source?: string; agentId?: string; unprocessed?: string; since?: string; limit?: string }
+    return {
+      payloads: listWebhookPayloads({
+        source: query.source,
+        agentId: query.agentId,
+        unprocessedOnly: query.unprocessed === 'true',
+        since: query.since ? parseInt(query.since, 10) : undefined,
+        limit: query.limit ? parseInt(query.limit, 10) : undefined,
+      }),
+      unprocessedCount: getUnprocessedCount({ source: query.source, agentId: query.agentId }),
+    }
+  })
+
+  // Get single payload
+  app.get('/webhooks/payloads/:payloadId', async (request, reply) => {
+    const { payloadId } = request.params as { payloadId: string }
+    const payload = getWebhookPayload(payloadId)
+    if (!payload) return reply.code(404).send({ error: 'Payload not found' })
+    return payload
+  })
+
+  // Mark processed
+  app.post('/webhooks/payloads/:payloadId/process', async (request, reply) => {
+    const { payloadId } = request.params as { payloadId: string }
+    const marked = markPayloadProcessed(payloadId)
+    if (!marked) return reply.code(404).send({ error: 'Payload not found or already processed' })
+    return { processed: true }
+  })
+
+  // Purge old processed payloads
+  app.post('/webhooks/purge', async (request) => {
+    const body = request.body as { maxAgeDays?: number } ?? {}
+    const deleted = purgeOldPayloads(body.maxAgeDays ?? 30)
+    return { deleted }
+  })
+
+  // ── Trust Events ────────────────────────────────────────────────────────
+
+  const { listTrustEvents } = await import('./trust-events.js')
+
+  // GET /trust-events — list trust-collapse signals (diagnostic)
+  app.get('/trust-events', async (request) => {
+    const query = request.query as { agentId?: string; eventType?: string; since?: string; limit?: string }
+    return listTrustEvents({
+      agentId: query.agentId,
+      eventType: query.eventType as any,
+      since: query.since ? parseInt(query.since, 10) : undefined,
+      limit: query.limit ? parseInt(query.limit, 10) : 50,
+    })
+  })
+
+  // ── Approval Routing ────────────────────────────────────────────────────
+
+  const {
+    listPendingApprovals,
+    listApprovalQueue,
+    submitApprovalDecision,
+  } = await import('./agent-runs.js')
+
+  // List pending approvals (review_requested events needing action)
+  app.get('/approvals/pending', async (request) => {
+    const query = request.query as { agentId?: string; limit?: string }
+    return listPendingApprovals({
+      agentId: query.agentId,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+    })
+  })
+
+  // Dedicated approval queue — unified view of everything needing human decision.
+  // Answers: what needs decision, who owns it, when it expires, what happens if ignored.
+  app.get('/approval-queue', async (request) => {
+    const query = request.query as {
+      agentId?: string
+      category?: string
+      includeExpired?: string
+      limit?: string
+    }
+    const items = listApprovalQueue({
+      agentId: query.agentId,
+      category: query.category === 'review' || query.category === 'agent_action' ? query.category : undefined,
+      includeExpired: query.includeExpired === 'true',
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+    })
+
+    // Also surface agent-interface runs awaiting approval — they appear in the same decision card
+    const pendingRuns = listPendingRuns()
+    const agentInterfaceItems = pendingRuns.map(run => ({
+      id: run.id,
+      category: 'agent_action' as const,
+      agentId: 'agent-interface',
+      runId: run.id,
+      title: `Agent action: ${(run.input as any).title ?? run.kind}`,
+      description: `${run.kind} — ${(run.input as any).repo ?? ''}: ${(run.input as any).title ?? ''}`.trim(),
+      urgency: 'normal',
+      owner: 'human',
+      expiresAt: run.createdAt + 10 * 60 * 1000,
+      autoAction: 'reject',
+      createdAt: run.createdAt,
+      isExpired: Date.now() > run.createdAt + 10 * 60 * 1000,
+      event: { id: run.id, event_type: 'approval_requested', payload: run.input },
+    }))
+
+    // Filter out agent-to-agent reviews — humans don't need to see these on the canvas.
+    // Only show items where the reviewer is a human (not a known agent).
+    const KNOWN_AGENTS_APPROVAL = new Set([
+      'link', 'kai', 'pixel', 'sage', 'scout', 'echo',
+      'rhythm', 'spark', 'swift', 'kotlin', 'harmony',
+      'artdirector', 'uipolish', 'coo', 'cos', 'pm', 'qa',
+      'shield', 'kindling', 'quill', 'funnel', 'attribution',
+      'bookkeeper', 'legal-counsel', 'evi-scout',
+    ])
+
+    // Check if ?humanOnly=true (default true for canvas, false for dashboard)
+    const humanOnly = (request.query as Record<string, string>).humanOnly !== 'false'
+
+    const filteredItems = humanOnly
+      ? items.filter(item => {
+          // agentId on the event IS the reviewer for review_requested events
+          const reviewerAgent = (item.agentId ?? '').toLowerCase().trim()
+          if (reviewerAgent && KNOWN_AGENTS_APPROVAL.has(reviewerAgent)) return false
+          // Also check payload.reviewer if present
+          const payload = item.event?.payload as Record<string, unknown> | undefined
+          const payloadReviewer = (payload?.reviewer as string ?? '').toLowerCase().trim()
+          if (payloadReviewer && KNOWN_AGENTS_APPROVAL.has(payloadReviewer)) return false
+          return true
+        })
+      : items
+
+    const allItems = [...filteredItems, ...agentInterfaceItems]
+    return {
+      items: allItems,
+      count: allItems.length,
+      hasExpired: allItems.some(i => i.isExpired),
+    }
+  })
+
+  // Submit agent-action approval (approve_requested events)
+  app.post<{ Params: { approvalId: string } }>('/approval-queue/:approvalId/decide', async (request, reply) => {
+    const { approvalId } = request.params
+    const body = request.body as { decision?: string; actor?: string; comment?: string; rationale?: { choice: string; considered: string[]; constraint: string } }
+    if (!body?.decision || !['approve', 'reject', 'defer'].includes(body.decision)) {
+      return reply.code(400).send({ error: 'decision must be "approve", "reject", or "defer"' })
+    }
+    if (!body?.actor) {
+      return reply.code(400).send({ error: 'actor is required' })
+    }
+    try {
+      // Auto-supply minimal rationale if omitted — humans approving via UI won't know to send it
+      const rationale = body.rationale ?? {
+        choice: `${body.decision === 'approve' ? 'Approved' : 'Rejected'} by ${body.actor}`,
+        considered: ['approve', 'reject'],
+        constraint: 'Human decision via approval queue',
+      }
+      const result = submitApprovalDecision({
+        eventId: approvalId,
+        decision: body.decision as 'approve' | 'reject',
+        reviewer: body.actor,
+        comment: body.comment,
+        rationale,
+      })
+
+      // Emit canvas_input event so Presence Layer updates
+      eventBus.emit({
+        id: `aq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_input' as const,
+        timestamp: Date.now(),
+        data: {
+          action: 'decision',
+          approvalId,
+          decision: body.decision,
+          actor: body.actor,
+        },
+      })
+
+      return result
+    } catch (err: any) {
+      return reply.code(err.message.includes('not found') ? 404 : 400).send({ error: err.message })
+    }
+  })
+
+  // Submit approval decision
+  app.post<{ Params: { eventId: string } }>('/approvals/:eventId/decide', async (request, reply) => {
+    const { eventId } = request.params
+    const body = request.body as {
+      decision?: string
+      reviewer?: string
+      comment?: string
+      rationale?: { choice?: string; considered?: string[]; constraint?: string }
+    }
+    if (!body?.decision || !['approve', 'reject'].includes(body.decision)) {
+      return reply.code(400).send({ error: 'decision must be "approve" or "reject"' })
+    }
+    if (!body?.reviewer) {
+      return reply.code(400).send({ error: 'reviewer is required' })
+    }
+    try {
+      const result = submitApprovalDecision({
+        eventId,
+        decision: body.decision as 'approve' | 'reject',
+        reviewer: body.reviewer,
+        comment: body.comment,
+        rationale: body.rationale as any,
+      })
+      return result
+    } catch (err: any) {
+      return reply.code(err.message.includes('not found') ? 404 : 400).send({ error: err.message })
+    }
+  })
+
+  // POST /run-approvals/:eventId/decide — iOS lock screen action buttons + agent-interface approval bridge
+  // Accepts approve/reject decisions from mobile clients directly.
+  // Also handles agent-interface run approvals — if eventId matches a pending agent-interface run,
+  // routes to approveRun/rejectRun instead of the legacy event system.
+  app.post<{ Params: { eventId: string } }>('/run-approvals/:eventId/decide', async (request, reply) => {
+    const { eventId } = request.params
+    const body = request.body as {
+      decision?: string
+      actor?: string
+      reason?: string
+      rationale?: { choice?: string; considered?: string[]; constraint?: string }
+    }
+    if (!body?.decision || !['approve', 'reject'].includes(body.decision)) {
+      return reply.code(400).send({ error: 'decision must be "approve" or "reject"' })
+    }
+    if (!body?.actor) {
+      return reply.code(400).send({ error: 'actor is required' })
+    }
+
+    // Check if this is an agent-interface run approval (eventId = runId)
+    const agentInterfaceRun = getRun(eventId)
+    if (agentInterfaceRun) {
+      if (agentInterfaceRun.status !== 'awaiting_approval') {
+        return reply.code(409).send({ error: `Run is ${agentInterfaceRun.status}, not awaiting_approval` })
+      }
+      const ok = body.decision === 'approve' ? approveRun(eventId) : rejectRun(eventId)
+      if (!ok) return reply.code(409).send({ error: 'No pending approval for this run' })
+      // Emit canvas_input so Presence Layer reflects the decision
+      eventBus.emit({
+        id: `ai-decide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_input' as const,
+        timestamp: Date.now(),
+        data: { action: 'decision', approvalId: eventId, decision: body.decision, actor: body.actor },
+      })
+      return { success: true, runId: eventId, decision: body.decision }
+    }
+
+    try {
+      const rationale = body.rationale ?? {
+        choice: body.decision === 'approve' ? 'Approved' : 'Rejected',
+        considered: ['approve', 'reject'],
+        constraint: `Mobile decision by ${body.actor}`,
+      }
+      const result = submitApprovalDecision({
+        eventId,
+        decision: body.decision as 'approve' | 'reject',
+        reviewer: body.actor,
+        comment: body.reason,
+        rationale: rationale as any,
+      })
+      // Emit canvas_input so Presence Layer reflects the decision
+      eventBus.emit({
+        id: `ra-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_input' as const,
+        timestamp: Date.now(),
+        data: {
+          action: 'decision',
+          approvalId: eventId,
+          decision: body.decision,
+          actor: body.actor,
+        },
+      })
+      return result
+    } catch (err: any) {
+      return reply.code(err.message.includes('not found') ? 404 : 400).send({ error: err.message })
+    }
+  })
+
+  // ── Canvas Input ──────────────────────────────────────────────────────
+  // Human → agent control seam for the Presence Layer.
+  // Payload is intentionally small per COO spec: action + target + actor.
+
+  const CANVAS_INPUT_ACTIONS = ['decision', 'interrupt', 'pause', 'resume', 'mute', 'unmute', 'surface_tap', 'presence_dot_tap'] as const
+  type CanvasInputAction = typeof CANVAS_INPUT_ACTIONS[number]
+
+  const SURFACE_TAP_ZONES = ['floor_trigger', 'presence_dot', 'decision_card'] as const
+
+  // canvas_input.v1 schema per design/interface-os-v0-multimodal-input.html
+  // Also accepts legacy field `type` as alias for `action` (render-protocol uses `type`)
+  const CanvasInputSchema = z.object({
+    // `action` is canonical; `type` accepted as alias for canvas_input.v1 compatibility
+    action: z.enum(CANVAS_INPUT_ACTIONS).optional(),
+    type: z.enum(CANVAS_INPUT_ACTIONS).optional(),
+    schema: z.literal('canvas_input.v1').optional(),
+    zone: z.enum(SURFACE_TAP_ZONES).optional(),  // surface_tap zone
+    targetRunId: z.string().optional(),            // which run to act on
+    decisionId: z.string().optional(),             // for decision actions
+    choice: z.enum(['approve', 'deny', 'defer']).optional(),  // for decision actions
+    actor: z.string().optional(),                  // who made this input (optional for surface events)
+    comment: z.string().optional(),               // optional rationale
+  }).refine(d => d.action || d.type, { message: 'action or type is required' })
+
+  app.post('/canvas/input', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const result = CanvasInputSchema.safeParse(body)
+    if (!result.success) {
+      reply.code(422)
+      return {
+        error: `Invalid canvas input: ${result.error.issues.map(i => i.message).join(', ')}`,
+        hint: 'Required: action or type (decision|interrupt|pause|resume|mute|unmute|surface_tap|presence_dot_tap). Optional: actor, zone, targetRunId, decisionId, choice, comment.',
+      }
+    }
+
+    const input = result.data
+    const now = Date.now()
+
+    // Normalize: accept `type` as alias for `action` (canvas_input.v1 compat)
+    const action: CanvasInputAction = (input.action ?? input.type) as CanvasInputAction
+
+    // Route surface signals — surface_tap and presence_dot_tap
+    // These are UI receptivity signals from the canvas surface, not agent-control actions.
+    if (action === 'surface_tap' || action === 'presence_dot_tap') {
+      eventBus.emit({
+        id: `cinput-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        type: 'canvas_input' as const,
+        timestamp: now,
+        data: {
+          action,
+          zone: input.zone ?? null,
+          actor: input.actor ?? 'human',
+          timestamp: now,
+        },
+      })
+      return { success: true, action, zone: input.zone ?? null, timestamp: now }
+    }
+
+    // Route by action type
+    if (action === 'decision') {
+      if (!input.decisionId || !input.choice) {
+        reply.code(422)
+        return { error: 'Decision action requires decisionId and choice (approve|deny|defer)' }
+      }
+
+      // Emit canvas_input event for SSE subscribers
+      eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
+        action,
+        decisionId: input.decisionId,
+        choice: input.choice,
+        actor: input.actor,
+        comment: input.comment,
+        timestamp: now,
+      } })
+
+      return {
+        success: true,
+        action: 'decision',
+        decisionId: input.decisionId,
+        choice: input.choice,
+        actor: input.actor,
+        timestamp: now,
+      }
+    }
+
+    if (action === 'interrupt' || action === 'pause') {
+      // Update active run if specified
+      const runId = input.targetRunId
+      if (runId) {
+        try {
+          updateAgentRun(runId, {
+            status: action === 'interrupt' ? 'cancelled' : 'blocked',
+          })
+        } catch { /* run may not exist — still emit event */ }
+      }
+
+      eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
+        action,
+        targetRunId: runId || null,
+        actor: input.actor,
+        timestamp: now,
+      } })
+
+      return {
+        success: true,
+        action,
+        targetRunId: runId || null,
+        actor: input.actor,
+        timestamp: now,
+      }
+    }
+
+    if (action === 'resume') {
+      const runId = input.targetRunId
+      if (runId) {
+        try {
+          updateAgentRun(runId, { status: 'working' })
+        } catch { /* run may not exist */ }
+      }
+
+      eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
+        action: 'resume',
+        targetRunId: runId || null,
+        actor: input.actor,
+        timestamp: now,
+      } })
+
+      return { success: true, action: 'resume', targetRunId: runId || null, actor: input.actor, timestamp: now }
+    }
+
+    // Mute/unmute — emit event only, no state change needed
+    eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
+      action,
+      actor: input.actor,
+      timestamp: now,
+    } })
+
+    return { success: true, action, actor: input.actor, timestamp: now }
+  })
+
+  // GET /canvas/input/schema — discovery endpoint
+  app.get('/canvas/input/schema', async () => ({
+    actions: CANVAS_INPUT_ACTIONS,
+    schema: {
+      action: 'decision | interrupt | pause | resume | mute | unmute',
+      targetRunId: 'optional — which run to act on',
+      decisionId: 'required for decision action — approval event ID',
+      choice: 'required for decision — approve | deny | defer',
+      actor: 'required — who made this input',
+      comment: 'optional — rationale',
+    },
+  }))
+
+  // ── Email / SMS relay ──────────────────────────────────────────────────
+
+  async function cloudRelay(
+    path: string,
+    body: Record<string, unknown>,
+    reply: { code: (n: number) => typeof reply; send: (b: unknown) => void },
+  ): Promise<unknown> {
+    const cloudUrl = process.env.REFLECTT_CLOUD_URL
+    const hostToken = process.env.REFLECTT_HOST_TOKEN
+    if (!cloudUrl || !hostToken) {
+      reply.code(503)
+      return { error: 'Not connected to cloud. Configure REFLECTT_CLOUD_URL and REFLECTT_HOST_TOKEN.' }
+    }
+    try {
+      const res = await fetch(`${cloudUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${hostToken}`,
+        },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        reply.code(res.status)
+        return data
+      }
+      return data
+    } catch (err: any) {
+      reply.code(502)
+      return { error: `Cloud relay failed: ${err.message}` }
+    }
+  }
+
+  // Send email via cloud relay
+  app.post('/email/send', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const from = typeof body.from === 'string' ? body.from.trim() : ''
+    const to = body.to
+    const subject = typeof body.subject === 'string' ? body.subject.trim() : ''
+    if (!from) return reply.code(400).send({ error: 'from is required' })
+    if (!to) return reply.code(400).send({ error: 'to is required' })
+    if (!subject) return reply.code(400).send({ error: 'subject is required' })
+    if (!body.html && !body.text) return reply.code(400).send({ error: 'html or text body is required' })
+
+    // Use host-relay endpoint — authenticates with host credential, uses host's own teamId server-side
+    const hostId = process.env.REFLECTT_HOST_ID
+    const relayPath = hostId ? `/api/hosts/${encodeURIComponent(hostId)}/relay/email` : '/api/hosts/relay/email'
+    return cloudRelay(relayPath, {
+      from,
+      to,
+      subject,
+      html: body.html,
+      text: body.text,
+      replyTo: body.replyTo,
+      cc: body.cc,
+      bcc: body.bcc,
+      agent: body.agentId || body.agent || 'unknown',
+    }, reply)
+  })
+
+  // Retrieve raw inbound email payload by ID (alias for /webhooks/payloads/:id filtered to email sources)
+  app.get<{ Params: { emailId: string } }>('/email/inbound/:emailId', async (request, reply) => {
+    const { emailId } = request.params
+    const payload = getWebhookPayload(emailId)
+    if (!payload) return reply.code(404).send({ error: 'Inbound email payload not found' })
+    if (!['resend', 'email', 'sendgrid', 'mailgun'].includes(payload.source)) {
+      return reply.code(404).send({ error: 'Inbound email payload not found' })
+    }
+    return payload
+  })
+
+  // Send SMS via cloud relay
+  app.post('/sms/send', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const to = typeof body.to === 'string' ? body.to.trim() : ''
+    const msgBody = typeof body.body === 'string' ? body.body.trim() : ''
+    if (!to) return reply.code(400).send({ error: 'to is required (phone number)' })
+    if (!msgBody) return reply.code(400).send({ error: 'body is required' })
+
+    const hostIdSms = process.env.REFLECTT_HOST_ID
+    const smsRelayPath = hostIdSms ? `/api/hosts/${encodeURIComponent(hostIdSms)}/relay/sms` : '/api/hosts/relay/sms'
+    return cloudRelay(smsRelayPath, {
+      to,
+      body: msgBody,
+      from: body.from,
+      agent: body.agentId || body.agent || 'unknown',
+    }, reply)
+  })
+
+  // ── Agent Config ──────────────────────────────────────────────────────
+  // Per-agent model preference, cost cap, and settings.
+  // This is the policy anchor for cost enforcement.
+
+  const { getAgentConfig, listAgentConfigs, setAgentConfig, deleteAgentConfig, checkCostCap } = await import('./agent-config.js')
+
+  // GET /agents/:agentId/config — get config for an agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/config', async (request) => {
+    const config = getAgentConfig(request.params.agentId)
+    return config ?? { agentId: request.params.agentId, configured: false }
+  })
+
+  // PUT /agents/:agentId/config — upsert config for an agent
+  app.put<{ Params: { agentId: string } }>('/agents/:agentId/config', async (request, reply) => {
+    const body = request.body as Record<string, unknown> ?? {}
+    try {
+      const config = setAgentConfig(request.params.agentId, {
+        teamId: typeof body.teamId === 'string' ? body.teamId : undefined,
+        model: body.model !== undefined ? (body.model as string | null) : undefined,
+        fallbackModel: body.fallbackModel !== undefined ? (body.fallbackModel as string | null) : undefined,
+        costCapDaily: body.costCapDaily !== undefined ? (body.costCapDaily as number | null) : undefined,
+        costCapMonthly: body.costCapMonthly !== undefined ? (body.costCapMonthly as number | null) : undefined,
+        maxTokensPerCall: body.maxTokensPerCall !== undefined ? (body.maxTokensPerCall as number | null) : undefined,
+        settings: body.settings !== undefined ? (body.settings as Record<string, unknown>) : undefined,
+      })
+      return config
+    } catch (err: any) {
+      reply.code(400)
+      return { error: err.message }
+    }
+  })
+
+  // DELETE /agents/:agentId/config — remove config for an agent
+  app.delete<{ Params: { agentId: string } }>('/agents/:agentId/config', async (request, reply) => {
+    const deleted = deleteAgentConfig(request.params.agentId)
+    if (!deleted) { reply.code(404); return { error: 'Config not found' } }
+    return { success: true }
+  })
+
+  // GET /agent-configs — list all agent configs
+  app.get('/agent-configs', async (request) => {
+    const query = request.query as { teamId?: string }
+    return { configs: listAgentConfigs({ teamId: query.teamId }) }
+  })
+
+  // GET /agents/:agentId/cost-check — runtime cost enforcement check
+  // Used by the runtime before making model calls.
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/cost-check', async (request) => {
+    const query = request.query as { dailySpend?: string; monthlySpend?: string }
+    const dailySpend = query.dailySpend ? parseFloat(query.dailySpend) : 0
+    const monthlySpend = query.monthlySpend ? parseFloat(query.monthlySpend) : 0
+    return checkCostCap(request.params.agentId, dailySpend, monthlySpend)
+  })
+
+  // ── Cost-Policy Enforcement Middleware ──────────────────────────────────
+
+  const {
+    enforcePolicy,
+    recordUsage,
+    getDailySpend,
+    getMonthlySpend,
+    purgeUsageLog,
+    ensureUsageLogTable,
+  } = await import('./cost-enforcement.js')
+
+  ensureUsageLogTable()
+
+  // POST /agents/:agentId/enforce-cost — runtime enforcement before model calls
+  app.post<{ Params: { agentId: string } }>('/agents/:agentId/enforce-cost', async (request, reply) => {
+    const result = enforcePolicy(request.params.agentId)
+    const status = result.action === 'deny' ? 403 : 200
+    return reply.code(status).send(result)
+  })
+
+  // GET /agents/:agentId/spend — current daily + monthly spend
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/spend', async (request) => {
+    const { agentId } = request.params
+    return {
+      agentId,
+      dailySpend: getDailySpend(agentId),
+      monthlySpend: getMonthlySpend(agentId),
+    }
+  })
+
+  // POST /usage/record — record a usage event
+  // Writes to BOTH usage_log (cost-enforcement) AND model_usage (usage-tracking → cloud sync).
+  // Previously only wrote to usage_log, causing all models (gpt-5.4, etc.) to appear as $0
+  // in the cloud usage dashboard which reads from model_usage via syncUsage().
+  app.post('/usage/record', async (request, reply) => {
+    const body = request.body as {
+      agentId?: string; model?: string
+      inputTokens?: number; outputTokens?: number
+      cost?: number
+    }
+    if (!body?.agentId) return reply.code(400).send({ error: 'agentId is required' })
+    if (!body?.model) return reply.code(400).send({ error: 'model is required' })
+    if (typeof body.cost !== 'number') return reply.code(400).send({ error: 'cost is required (number)' })
+
+    const now = Date.now()
+    const inputTokens = body.inputTokens ?? 0
+    const outputTokens = body.outputTokens ?? 0
+    const cost = body.cost
+
+    // Write to cost-enforcement usage_log (existing path — enforces caps)
+    recordUsage({
+      agentId: body.agentId,
+      model: body.model,
+      inputTokens,
+      outputTokens,
+      cost,
+      timestamp: now,
+    })
+
+    // Bridge to model_usage (usage-tracking) so syncUsage() picks it up for cloud dashboard.
+    // Best-effort: never block the response if this fails.
+    try {
+      recordUsageTracking({
+        agent: body.agentId as string,
+        model: body.model as string,
+        provider: 'unknown',
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        estimated_cost_usd: cost,
+        category: 'other' as const,
+        timestamp: now,
+      })
+    } catch { /* non-fatal: cost-enforcement path already succeeded */ }
+
+    return reply.code(201).send({ ok: true })
+  })
+
+  // POST /usage/purge — purge old usage records
+  app.post('/usage/purge', async (request) => {
+    const body = request.body as { maxAgeDays?: number } | null
+    const deleted = purgeUsageLog(body?.maxAgeDays ?? 90)
+    return { deleted }
+  })
+
+  // ── Agent Memories ─────────────────────────────────────────────────────
+
+  const {
+    setMemory,
+    getMemory,
+    listMemories,
+    deleteMemory,
+    deleteMemoryById,
+    purgeExpiredMemories,
+    countMemories,
+  } = await import('./agent-memories.js')
+
+  // Set (create or update) a memory
+  app.put<{ Params: { agentId: string } }>('/agents/:agentId/memories', async (request, reply) => {
+    const { agentId } = request.params
+    const body = request.body as {
+      key?: string
+      content?: string
+      namespace?: string
+      tags?: string[]
+      expiresAt?: number | null
+    }
+    if (!body?.key) return reply.code(400).send({ error: 'key is required' })
+    if (body.content === undefined || body.content === null) return reply.code(400).send({ error: 'content is required' })
+    try {
+      const memory = setMemory({
+        agentId,
+        namespace: body.namespace,
+        key: body.key,
+        content: body.content,
+        tags: body.tags,
+        expiresAt: body.expiresAt,
+      })
+      return reply.code(200).send(memory)
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    }
+  })
+
+  // Get a specific memory by key
+  app.get<{ Params: { agentId: string; key: string } }>('/agents/:agentId/memories/:key', async (request, reply) => {
+    const { agentId, key } = request.params
+    const query = request.query as { namespace?: string }
+    const memory = getMemory(agentId, key, query.namespace)
+    if (!memory) return reply.code(404).send({ error: 'Memory not found' })
+    return memory
+  })
+
+  // List memories for an agent
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/memories', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as {
+      namespace?: string
+      tag?: string
+      search?: string
+      limit?: string
+    }
+    return listMemories({
+      agentId,
+      namespace: query.namespace,
+      tag: query.tag,
+      search: query.search,
+      limit: query.limit ? parseInt(query.limit, 10) : undefined,
+    })
+  })
+
+  // Delete a memory by key
+  app.delete<{ Params: { agentId: string; key: string } }>('/agents/:agentId/memories/:key', async (request, reply) => {
+    const { agentId, key } = request.params
+    const query = request.query as { namespace?: string }
+    const deleted = deleteMemory(agentId, key, query.namespace)
+    if (!deleted) return reply.code(404).send({ error: 'Memory not found' })
+    return { deleted: true }
+  })
+
+  // Count memories
+  app.get<{ Params: { agentId: string } }>('/agents/:agentId/memories/count', async (request, reply) => {
+    const { agentId } = request.params
+    const query = request.query as { namespace?: string }
+    return { count: countMemories(agentId, query.namespace) }
+  })
+
+  // Purge expired memories (housekeeping)
+  app.post('/agents/memories/purge', async (_request, reply) => {
+    const purged = purgeExpiredMemories()
+    return { purged }
+  })
 
   return app
 }

@@ -447,7 +447,7 @@ async function checkPortAvailable(port = 4445): Promise<PreflightResult> {
   }
 }
 
-async function checkCloudReachable(cloudUrl = 'https://app.reflectt.ai'): Promise<PreflightResult> {
+async function checkCloudReachable(cloudUrl = 'https://api.reflectt.ai'): Promise<PreflightResult> {
   const start = Date.now()
   const check = CHECKS.find(c => c.id === 'cloud-reachable')!
   const timeout = 10_000
@@ -532,7 +532,7 @@ async function checkAuthValid(opts: {
 }): Promise<PreflightResult> {
   const start = Date.now()
   const check = CHECKS.find(c => c.id === 'auth-valid')!
-  const cloudUrl = opts.cloudUrl || 'https://app.reflectt.ai'
+  const cloudUrl = opts.cloudUrl || 'https://api.reflectt.ai'
 
   if (!opts.joinToken && !opts.apiKey) {
     return {
@@ -957,6 +957,14 @@ export async function runPreflight(opts: PreflightOptions = {}): Promise<Preflig
       total_duration_ms: results.reduce((sum, r) => sum + r.durationMs, 0),
       pid: process.pid,
     }).catch(() => {}) // best-effort, never block preflight
+
+    // workspace_ready co-fires with host_preflight_passed: a passing preflight means
+    // the node is running and the workspace is reachable. workspace_ready has no other
+    // automatic trigger in the codebase — without this, the funnel step is never reached.
+    emitActivationEvent('workspace_ready', trackingId, {
+      source: 'preflight_passed',
+      pid: process.pid,
+    }).catch(() => {})
   } else {
     emitActivationEvent('host_preflight_failed', trackingId, {
       checks_run: results.length,

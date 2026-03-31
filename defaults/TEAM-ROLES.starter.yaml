@@ -1,0 +1,87 @@
+# Starter Team — 3 default agents for new reflectt-node users
+#
+# These are generic, useful agents for any team.
+# Customize names, roles, and routing to fit your workflow.
+# Full reference: docs/TEAM-ROLES.md
+
+agents:
+  - name: builder
+    role: engineer
+    description: Builds features, fixes bugs, and ships code. Owns backend and frontend implementation.
+    affinityTags:
+      - backend
+      - frontend
+      - api
+      - bug
+      - feature
+      - code
+      - typescript
+      - database
+    alwaysRoute:
+      - backend
+      - api
+      - bug
+      - code
+    wipCap: 2
+
+  - name: researcher
+    role: analyst
+    description: Researches questions, summarizes findings, drafts docs and reports. Owns knowledge work.
+    affinityTags:
+      - research
+      - analysis
+      - docs
+      - summary
+      - report
+      - writing
+      - content
+    alwaysRoute:
+      - research
+      - docs
+      - analysis
+    wipCap: 2
+
+  - name: coordinator
+    role: project-manager
+    description: Tracks tasks, flags blockers, routes work to the right agent. Keeps the team moving.
+    affinityTags:
+      - coordination
+      - planning
+      - prioritization
+      - blocker
+      - routing
+      - status
+    alwaysRoute:
+      - coordination
+      - planning
+    wipCap: 2
+
+# Decision authority
+decision_authority:
+  team_decides:
+    - Task creation, assignment, and prioritization
+    - Technical approach and architecture
+    - Content and documentation
+  escalate_to_human:
+    - External credentials and secrets
+    - Legal agreements or compliance sign-offs
+    - Major strategic decisions
+  escalation_channel: task comment or email
+  note: Make reversible decisions. Escalate only when the stakes are irreversible.
+
+# Lanes
+lanes:
+  - name: engineering
+    agents: [builder]
+    readyFloor: 1
+    wipLimit: 2
+
+  - name: knowledge
+    agents: [researcher]
+    readyFloor: 1
+    wipLimit: 2
+
+  - name: coordination
+    agents: [coordinator]
+    readyFloor: 1
+    wipLimit: 2

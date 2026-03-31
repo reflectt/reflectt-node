@@ -153,6 +153,17 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
     }
   }
 
+  // Skip default roster when TEAM_INTENT is present — let the bootstrap agent
+  // create the team from the user's intent instead of loading our default agents.
+  if (process.env.TEAM_INTENT) {
+    // Only create the 'main' bootstrap agent role
+    const bootstrapRoles: AgentRole[] = [{ name: 'main', role: 'bootstrap', description: 'Bootstrap agent — reads TEAM_INTENT and creates the team.', affinityTags: [], wipCap: 1 }]
+    loadedRoles = bootstrapRoles
+    loadedFromPath = 'TEAM_INTENT-bootstrap'
+    console.log(`[Assignment] TEAM_INTENT detected — skipping default roster. Only bootstrap agent 'main' loaded.`)
+    return { roles: bootstrapRoles, source: 'TEAM_INTENT-bootstrap' }
+  }
+
   // Try defaults shipped with repo
   try {
     const defaultsPath = new URL('../defaults/TEAM-ROLES.yaml', import.meta.url)
@@ -503,17 +514,88 @@ export function suggestAssignee(
   return { suggested, scores }
 }
 
-// Suggest best reviewer for a task (load-balanced)
+// ── Domain reviewer routing ──────────────────────────────────────────────────
+// Loaded from defaults/reviewer-routing.yaml (bundled) or REFLECTT_HOME/reviewer-routing.yaml (user override)
+
+interface ReviewerRoutingDomain {
+  name: string
+  keywords: string[]
+  primary: string
+  fallback: string
+}
+
+interface ReviewerRoutingConfig {
+  version: number
+  domains: ReviewerRoutingDomain[]
+  catch_all: string
+}
+
+let _reviewerRouting: ReviewerRoutingConfig | null = null
+
+function loadReviewerRouting(): ReviewerRoutingConfig {
+  if (_reviewerRouting) return _reviewerRouting
+  // User override takes precedence over bundled defaults
+  const paths = [
+    join(REFLECTT_HOME, 'reviewer-routing.yaml'),
+    join(REFLECTT_HOME, 'reviewer-routing.yml'),
+    new URL('../defaults/reviewer-routing.yaml', import.meta.url).pathname,
+  ]
+  for (const p of paths) {
+    try {
+      const raw = readFileSync(p, 'utf8')
+      _reviewerRouting = parseYaml(raw) as ReviewerRoutingConfig
+      return _reviewerRouting
+    } catch { /* try next */ }
+  }
+  // Minimal fallback if file missing
+  _reviewerRouting = { version: 1, domains: [], catch_all: 'kai' }
+  return _reviewerRouting
+}
+
+/** Returns [primary, fallback] for the first matching domain, or null if no match */
+function matchDomainChain(task: { title: string; tags?: string[] }): [string, string] | null {
+  const routing = loadReviewerRouting()
+  const haystack = [
+    task.title.toLowerCase(),
+    ...(task.tags ?? []).map(t => t.toLowerCase()),
+  ].join(' ')
+  for (const domain of routing.domains) {
+    if (domain.keywords.some(kw => haystack.includes(kw.toLowerCase()))) {
+      return [domain.primary, domain.fallback]
+    }
+  }
+  return null
+}
+
+// Suggest best reviewer for a task (domain-chain first, then load-balanced)
 export function suggestReviewer(
   task: { title: string; assignee?: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> },
   allTasks: TaskForScoring[],
 ): { suggested: string | null; scores: Array<{ agent: string; score: number; validatingLoad: number; role: string }> } {
+  const assigneeLower = (task.assignee || '').toLowerCase()
+
   const roles = getAgentRoles().filter(r => agentEligibleForTask(r, task))
 
   // Exclude the assignee from reviewer candidates
   const candidates = roles.filter(r => 
-    r.name.toLowerCase() !== (task.assignee || '').toLowerCase()
+    r.name.toLowerCase() !== assigneeLower
   )
+
+  // Domain-chain routing: deterministic primary → fallback, but only among eligible candidates
+  // (agentEligibleForTask must pass first — this preserves design-lane guardrails)
+  const chain = matchDomainChain(task)
+  if (chain) {
+    const [primary, fallback] = chain
+    const primaryCandidate = candidates.find(r => r.name.toLowerCase() === primary.toLowerCase())
+    if (primaryCandidate) {
+      return { suggested: primaryCandidate.name, scores: [{ agent: primaryCandidate.name, score: 1, validatingLoad: 0, role: 'domain-primary' }] }
+    }
+    const fallbackCandidate = candidates.find(r => r.name.toLowerCase() === fallback.toLowerCase())
+    if (fallbackCandidate) {
+      return { suggested: fallbackCandidate.name, scores: [{ agent: fallbackCandidate.name, score: 0.9, validatingLoad: 0, role: 'domain-fallback' }] }
+    }
+    // Domain chain agents not eligible or both are assignee — fall through to load-balanced scoring
+  }
 
   if (candidates.length === 0) {
     return { suggested: null, scores: [] }

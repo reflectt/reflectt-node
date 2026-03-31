@@ -17,15 +17,18 @@ import { presenceManager } from './presence.js'
 import { getAgentRoles } from './assignment.js'
 import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
+import { remapGitHubMentions } from './github-webhook-attribution.js'
 import { slotManager } from './canvas-slots.js'
 import { getDb } from './db.js'
-import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions } from './usage-tracking.js'
+import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions, getCostForTaskId } from './usage-tracking.js'
 import { listReflections } from './reflections.js'
 import { listInsights } from './insights.js'
 import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
+import { listApprovalQueue, listAgentEvents, listAgentRuns, type AgentRun } from './agent-runs.js'
+import { getUnpushedTrustEvents, markTrustEventsPushed } from './trust-events.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -60,9 +63,12 @@ function isDockerIdentityInherited(fileConfig: ReturnType<typeof loadCloudConfig
 
 interface AgentInfo {
   name: string
-  status: 'active' | 'idle' | 'offline'
+  status: 'active' | 'idle' | 'offline' | 'waiting'
   currentTask?: string
   lastSeen?: number
+  waitingFor?: string   // populated when status === 'waiting'
+  waitingTaskId?: string
+  thought?: string      // agent's current thought/expression — shown on canvas as AI-native content
 }
 
 interface TaskStateEntry {
@@ -72,6 +78,7 @@ interface TaskStateEntry {
   assignee?: string
   priority?: string
   updatedAt?: number
+  createdAt?: number
 }
 
 interface CloudConfig {
@@ -89,8 +96,11 @@ interface CloudState {
   credential: string | null
   heartbeatTimer: ReturnType<typeof setInterval> | null
   taskSyncTimer: ReturnType<typeof setInterval> | null
+  taskCloudPullTimer: ReturnType<typeof setInterval> | null
   chatSyncTimer: ReturnType<typeof setInterval> | null
   canvasSyncTimer: ReturnType<typeof setInterval> | null
+  approvalSyncTimer: ReturnType<typeof setInterval> | null
+  runEventSyncTimer: ReturnType<typeof setInterval> | null
   usageSyncTimer: ReturnType<typeof setInterval> | null
   reflectionSyncTimer: ReturnType<typeof setInterval> | null
   contextSyncTimer: ReturnType<typeof setInterval> | null
@@ -99,6 +109,7 @@ interface CloudState {
   lastTaskSync: number | null
   lastChatSync: number | null
   lastCanvasSync: number | null
+  lastUsageSync: number | null
   errors: number
   running: boolean
   startedAt: number
@@ -122,6 +133,35 @@ let lastActivityAt = Date.now()
 /** Mark recent activity (call from event handlers) */
 export function markCloudActivity(): void {
   lastActivityAt = Date.now()
+}
+
+/** Request immediate canvas sync to cloud (called on canvas_render events) */
+export function requestImmediateCanvasSync(): void {
+  markCloudActivity()
+  // syncCanvas is module-scoped; we use a deferred call pattern
+  if (immediateSyncFn) immediateSyncFn()
+}
+
+let immediateSyncFn: (() => void) | null = null
+export function _registerImmediateSync(fn: () => void): void {
+  immediateSyncFn = fn
+}
+
+// ── canvas_push relay buffer ─────────────────────────────────────────────────
+// canvas_push events (utterance, work_released, approval_requested) are emitted
+// on the node event bus but never reached the cloud SSE stream. This buffer
+// collects them and flushes them in the next syncCanvas POST as push_events[].
+// The cloud then broadcasts each as a `canvas_push` SSE event to all subscribers.
+const MAX_PENDING_PUSH_EVENTS = 20
+const pendingPushEvents: Array<Record<string, unknown>> = []
+
+/** Queue a canvas_push event for relay to cloud in the next sync cycle. */
+export function queueCanvasPushEvent(event: Record<string, unknown>): void {
+  pendingPushEvents.push({ ...event, _queuedAt: Date.now() })
+  // Cap buffer to prevent unbounded growth between syncs
+  while (pendingPushEvents.length > MAX_PENDING_PUSH_EVENTS) pendingPushEvents.shift()
+  // Trigger immediate sync so the event reaches browsers quickly
+  requestImmediateCanvasSync()
 }
 
 /** Check if the system is idle */
@@ -189,8 +229,11 @@ let state: CloudState = {
   credential: null,
   heartbeatTimer: null,
   taskSyncTimer: null,
+  taskCloudPullTimer: null,
   chatSyncTimer: null,
   canvasSyncTimer: null,
+  approvalSyncTimer: null,
+  runEventSyncTimer: null,
   usageSyncTimer: null,
   reflectionSyncTimer: null,
   contextSyncTimer: null,
@@ -199,6 +242,7 @@ let state: CloudState = {
   lastTaskSync: null,
   lastChatSync: null,
   lastCanvasSync: null,
+  lastUsageSync: null,
   errors: 0,
   running: false,
   startedAt: Date.now(),
@@ -276,6 +320,8 @@ export function getCloudStatus() {
     lastTaskSync: state.lastTaskSync,
     lastChatSync: state.lastChatSync,
     lastCanvasSync: state.lastCanvasSync,
+    lastUsageSync: state.lastUsageSync,
+    usageSyncErrors,
     errors: state.errors,
     uptimeMs: state.running ? Date.now() - state.startedAt : 0,
     syncHealth: {
@@ -316,7 +362,7 @@ export async function startCloudIntegration(): Promise<void> {
   }
 
   config = {
-    cloudUrl: (process.env.REFLECTT_CLOUD_URL || fileConfig?.cloudUrl || 'https://app.reflectt.ai').replace(/\/+$/, ''),
+    cloudUrl: (process.env.REFLECTT_CLOUD_URL || fileConfig?.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, ''),
     token: process.env.REFLECTT_HOST_TOKEN || '',
     hostName: process.env.REFLECTT_HOST_NAME || fileConfig?.hostName || 'unnamed-host',
     hostType: process.env.REFLECTT_HOST_TYPE || fileConfig?.hostType || 'openclaw',
@@ -381,6 +427,19 @@ export async function startCloudIntegration(): Promise<void> {
     syncTasks().catch(() => {})
   }, config.taskSyncIntervalMs)
 
+  // Pull tasks FROM cloud (Supabase) into local SQLite on a fixed interval.
+  // This catches tasks created via the API while the node was offline or
+  // while local SQLite was non-empty (which skips the startup hydration).
+  const TASK_CLOUD_PULL_INTERVAL_MS = Number(process.env.REFLECTT_TASK_CLOUD_PULL_MS) || 30_000
+  state.taskCloudPullTimer = setInterval(async () => {
+    try {
+      const r = await taskManager.syncFromCloud()
+      if (r.added > 0 || r.updated > 0) {
+        console.log(`[cloud] taskCloudPull: +${r.added} added, ~${r.updated} updated`)
+      }
+    } catch {}
+  }, TASK_CLOUD_PULL_INTERVAL_MS)
+
   // Chat sync — event-driven with adaptive polling fallback
   // When active: 5s poll. When idle: 60s poll. Events always trigger immediate sync.
   const chatSyncActiveMs = Number(process.env.REFLECTT_CHAT_SYNC_MS) || DEFAULT_CHAT_SYNC_MS
@@ -420,6 +479,10 @@ export async function startCloudIntegration(): Promise<void> {
   // Canvas sync — adaptive: 5s when active, 60s when idle
   // Uses a single 5s tick that skips when idle (unless enough time has passed)
   let lastCanvasSyncAt = 0
+  _registerImmediateSync(() => {
+    syncCanvas().catch(() => {})
+    lastCanvasSyncAt = Date.now()
+  })
   syncCanvas().catch(() => {})
   state.canvasSyncTimer = setInterval(() => {
     const now = Date.now()
@@ -428,6 +491,32 @@ export async function startCloudIntegration(): Promise<void> {
     lastCanvasSyncAt = now
     syncCanvas().catch(() => {})
   }, ACTIVE_CANVAS_SYNC_MS)
+
+  // Run approval sync — every 10s
+  syncRunApprovals().catch(() => {})
+  state.approvalSyncTimer = setInterval(() => {
+    syncRunApprovals().catch(() => {})
+    pollAgentDecisions().catch(() => {}) // poll queued relay decisions (NAT-behind hosts)
+    pollCanvasQueryRelay().catch(() => {}) // poll canvas/query relay queue (NAT-behind hosts)
+  }, APPROVAL_SYNC_INTERVAL_MS)
+
+  // Run event sync — every 5s
+  syncRunEvents().catch(() => {})
+  state.runEventSyncTimer = setInterval(() => {
+    syncRunEvents().catch(() => {})
+  }, RUN_EVENT_SYNC_INTERVAL_MS)
+
+  // Agent runs sync — every 30s (pushes run records to cloud action_runs table)
+  syncAgentRuns().catch(() => {})
+  setInterval(() => {
+    syncAgentRuns().catch(() => {})
+  }, 30_000)
+
+  // Trust event sync — every 60s (pushes unpushed trust signals to cloud)
+  syncTrustEvents().catch(() => {})
+  setInterval(() => {
+    syncTrustEvents().catch(() => {})
+  }, 60_000)
 
   // Usage sync — adaptive: 15s when active, 60s when idle
   let lastUsageSyncAt = 0
@@ -576,6 +665,10 @@ export function stopCloudIntegration(): void {
     clearInterval(state.taskSyncTimer)
     state.taskSyncTimer = null
   }
+  if (state.taskCloudPullTimer) {
+    clearInterval(state.taskCloudPullTimer)
+    state.taskCloudPullTimer = null
+  }
   if (state.chatSyncTimer) {
     clearInterval(state.chatSyncTimer)
     state.chatSyncTimer = null
@@ -583,6 +676,14 @@ export function stopCloudIntegration(): void {
   if (state.canvasSyncTimer) {
     clearInterval(state.canvasSyncTimer)
     state.canvasSyncTimer = null
+  }
+  if (state.approvalSyncTimer) {
+    clearInterval(state.approvalSyncTimer)
+    state.approvalSyncTimer = null
+  }
+  if (state.runEventSyncTimer) {
+    clearInterval(state.runEventSyncTimer)
+    state.runEventSyncTimer = null
   }
   if (state.usageSyncTimer) {
     clearInterval(state.usageSyncTimer)
@@ -598,6 +699,18 @@ export function stopCloudIntegration(): void {
   }
   logConnectionEvent({ type: 'disconnected', timestamp: Date.now(), reason: 'shutdown' })
   console.log('☁️  Cloud integration: stopped')
+
+  // Clear canvas state on Fly so subscribers see an empty room, not ghost agents
+  if (state.hostId && state.credential && config) {
+    const clearUrl = `${config.cloudUrl}/api/hosts/${state.hostId}/canvas/clear`
+    fetch(clearUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${state.credential}`,
+      },
+    }).catch(() => { /* best-effort; already shutting down */ })
+  }
 }
 
 // ---- Data providers ----
@@ -618,11 +731,17 @@ function getAgents(): AgentInfo[] {
       name: role.name,
       status: p
         ? (p.status === 'working' || p.status === 'reviewing' ? 'active' as const
+          : p.status === 'waiting' ? 'waiting' as const
           : p.status === 'offline' ? 'offline' as const
           : 'idle' as const)
         : 'offline' as const,
       currentTask: p?.task,
       lastSeen: p?.lastUpdate,
+      ...(p?.status === 'waiting' && p.waiting ? {
+        waitingFor: p.waiting.waitingFor,
+        waitingTaskId: p.waiting.taskId,
+      } : {}),
+      ...(p?.thought ? { thought: p.thought } : {}),
     })
   }
 
@@ -632,10 +751,15 @@ function getAgents(): AgentInfo[] {
       agents.push({
         name: p.agent,
         status: p.status === 'working' || p.status === 'reviewing' ? 'active' as const
+          : p.status === 'waiting' ? 'waiting' as const
           : p.status === 'offline' ? 'offline' as const
           : 'idle' as const,
         currentTask: p.task,
         lastSeen: p.lastUpdate,
+        ...(p.status === 'waiting' && p.waiting ? {
+          waitingFor: p.waiting.waitingFor,
+          waitingTaskId: p.waiting.taskId,
+        } : {}),
       })
     }
   }
@@ -652,6 +776,7 @@ function getTasks(): TaskStateEntry[] {
     assignee: t.assignee,
     priority: t.priority,
     updatedAt: t.updatedAt || t.createdAt,
+    createdAt: t.createdAt,
   }))
 }
 
@@ -664,6 +789,33 @@ async function sendHeartbeat(): Promise<void> {
   const tasks = getTasks()
   const doingTasks = tasks.filter(t => t.status === 'doing')
 
+  // ── Slow task detection ───────────────────────────────────────────────
+  // Include tasks that have been doing >4h with no activity (slow-flagged).
+  // These are NOT explicitly blocked — they're just stale.
+  const SLOW_HEARTBEAT_MS = 4 * 60 * 60 * 1000
+  const nowTs = Date.now()
+  const slowTasks = doingTasks.reduce<Array<{
+    id: string; title: string; assignee?: string; priority?: string;
+    slowSinceMs: number; slowSinceHours: number; lastActivityAt: number
+  }>>((acc, t) => {
+    const comments = taskManager.getTaskComments(t.id)
+    const lastComment = comments.length > 0 ? comments[comments.length - 1] : null
+    const lastActivityAt = lastComment?.timestamp ?? t.updatedAt ?? t.createdAt ?? nowTs
+    const age = nowTs - lastActivityAt
+    if (age > SLOW_HEARTBEAT_MS) {
+      acc.push({
+        id: t.id,
+        title: t.title,
+        assignee: t.assignee || undefined,
+        priority: t.priority || undefined,
+        slowSinceMs: age,
+        slowSinceHours: Math.round(age / 36_000) / 100,
+        lastActivityAt: lastActivityAt,
+      })
+    }
+    return acc
+  }, [])
+
   // Cloud API: POST /api/hosts/:hostId/heartbeat
   // Expects: { status, agents?, activeTasks? }
   // Host is "online" if the server is running and responding.
@@ -675,13 +827,24 @@ async function sendHeartbeat(): Promise<void> {
     contractVersion: 'host-heartbeat.v1',
     status: hostStatus,
     timestamp: Date.now(),
-    agents: agents.map(a => ({
-      id: a.name,
-      name: a.name,
-      status: a.status,
-      currentTaskId: a.currentTask || undefined,
-      lastSeenAt: a.lastSeen || Date.now(),
-    })),
+    agents: agents.map(a => {
+      const agentAliases = [a.name]
+      const todoCount = tasks.filter(t => t.status === 'todo' && agentAliases.includes(t.assignee || '')).length
+      const doingCount = tasks.filter(t => t.status === 'doing' && agentAliases.includes(t.assignee || '')).length
+      const blockedCount = tasks.filter(t => t.status === 'blocked' && agentAliases.includes(t.assignee || '')).length
+      return {
+        id: a.name,
+        name: a.name,
+        status: a.status,
+        currentTaskId: a.currentTask || undefined,
+        lastSeenAt: a.lastSeen || Date.now(),
+        taskCounts: { todo: todoCount, doing: doingCount, blocked: blockedCount },
+        ...(a.status === 'waiting' ? {
+          waitingFor: a.waitingFor,
+          waitingTaskId: a.waitingTaskId,
+        } : {}),
+      }
+    }),
     activeTasks: doingTasks.map(t => ({
       id: t.id,
       title: t.title,
@@ -690,6 +853,7 @@ async function sendHeartbeat(): Promise<void> {
       priority: t.priority || undefined,
       updatedAt: t.updatedAt || Date.now(),
     })),
+    slowTasks: slowTasks.length > 0 ? slowTasks : undefined,
     metrics: (() => {
       const m = getRequestMetrics()
       return {
@@ -702,6 +866,20 @@ async function sendHeartbeat(): Promise<void> {
           errorRate: m.rolling.errorRate,
           windowMinutes: m.rolling.windowMinutes,
         },
+      }
+    })(),
+    // requestCounts maps to HostRequestCountsV1 contract (PR #716, reflectt-cloud)
+    requestCounts: (() => {
+      const m = getRequestMetrics()
+      const windowMs = m.rolling.windowMinutes * 60 * 1000
+      const errorRatePct = m.rolling.requests > 0
+        ? (m.rolling.errors / m.rolling.requests) * 100
+        : 0
+      return {
+        total: m.rolling.requests,
+        errors: m.rolling.errors,
+        windowMs,
+        errorRatePct: Math.round(errorRatePct * 100) / 100,
       }
     })(),
     source: {
@@ -972,12 +1150,12 @@ async function syncChat(): Promise<void> {
 
   chatSyncInFlight = true
 
-  // Enforce minimum sync interval + active backoff window
-  const now = Date.now()
-  if (now < chatSyncNextAllowedAt) {
-    chatSyncInFlight = false
-    return
-  }
+  try {
+    // Enforce minimum sync interval + active backoff window
+    const now = Date.now()
+    if (now < chatSyncNextAllowedAt) {
+      return
+    }
 
   // Get recent messages since last sync, excluding cloud-relayed messages
   // to prevent echo: cloud→node→cloud sync loop.
@@ -985,7 +1163,7 @@ async function syncChat(): Promise<void> {
   // CRITICAL: use oldestFirst=true so the cursor walks forward through ALL
   // messages without skipping. Default getMessages returns newest-N (DESC
   // then reversed), which drops older messages in high-traffic windows.
-  // This was the root cause of cloud chat sync gaps Ryan reported.
+  // This was the root cause of cloud chat sync gaps reported.
   const recentMessages = chatManager.getMessages({
     after: chatSyncCursor,
     limit: 100,
@@ -996,7 +1174,9 @@ async function syncChat(): Promise<void> {
   const payload = recentMessages.map(m => ({
     id: m.id,
     from: m.from,
-    content: m.content,
+    content: m.channel === 'github' || m.from === 'github'
+      ? remapGitHubMentions(m.content)
+      : m.content,
     timestamp: m.timestamp,
     channel: m.channel || 'general',
   }))
@@ -1033,9 +1213,16 @@ async function syncChat(): Promise<void> {
       for (const msg of result.data.pending) {
         // Inject into local chat as if the user posted it
         try {
+          // GitHub relay messages from the cloud use raw GitHub sender logins (e.g. @itskaidev)
+          // instead of agent names. Remap shared GitHub accounts to their agent equivalents
+          // before injecting so @mentions resolve correctly.
+          const content = msg.from === 'github'
+            ? remapGitHubMentions(msg.content)
+            : msg.content
+
           await chatManager.sendMessage({
             from: msg.from,
-            content: msg.content,
+            content,
             channel: msg.channel || 'general',
             metadata: { source: 'cloud-relay', cloudMessageId: msg.id },
           })
@@ -1057,13 +1244,80 @@ async function syncChat(): Promise<void> {
       console.warn(`☁️  [Chat] Sync failed (${chatSyncErrors}): ${result.error}; next attempt in ~${chatSyncBackoffMs}ms`)
     }
   }
-
-  chatSyncInFlight = false
+  } catch (err: any) {
+    // Ensure token expiry / network errors never wedge the sync loop
+    chatSyncErrors++
+    chatSyncBackoffMs = computeBackoffWithJitter(chatSyncBackoffMs)
+    chatSyncNextAllowedAt = Date.now() + Math.max(chatSyncBackoffMs, chatSyncMinIntervalMs)
+    if (chatSyncErrors <= 3 || chatSyncErrors % 20 === 0) {
+      console.warn(`☁️  [Chat] Sync threw (${chatSyncErrors}): ${err?.message || err}; next attempt in ~${chatSyncBackoffMs}ms`)
+    }
+  } finally {
+    chatSyncInFlight = false
+  }
 }
 
 // ---- Canvas sync ----
 
 let canvasSyncErrors = 0
+
+// ── Needs-attention call hook ─────────────────────────────────────────────
+// Track previous agent states to detect needs-attention transitions.
+// When an agent newly enters needs-attention/urgent, fire POST /call on the
+// Fly API for org members who have call_on_needs_attention=true.
+// The Fly API resolves phone numbers from team_members.notification_phone.
+const prevAgentStates = new Map<string, string>() // agentId → state
+
+function checkNeedsAttentionTransitions(
+  agents: Record<string, unknown>,
+  hostId: string,
+  cloudUrl: string,
+  credential: string,
+): void {
+  for (const [agentId, agentData] of Object.entries(agents)) {
+    const agentState = (agentData as Record<string, unknown>)?.state as string | undefined
+    if (!agentState) continue
+
+    const prev = prevAgentStates.get(agentId)
+    const isAlert = agentState === 'needs-attention' || agentState === 'urgent'
+    const wasAlert = prev === 'needs-attention' || prev === 'urgent'
+
+    prevAgentStates.set(agentId, agentState)
+
+    // Only fire on NEW transitions into alert state
+    if (!isAlert || wasAlert) continue
+
+    const taskData = (agentData as Record<string, unknown>)?.payload as Record<string, unknown> | undefined
+    const taskTitle = (taskData?.task as string) || (taskData?.title as string) || undefined
+
+    console.log(`☁️  [Canvas] needs-attention: @${agentId} → auto-call hook`)
+
+    // POST /call to Fly — Fly resolves phones for members with call_on_needs_attention=true
+    // If no members have that preference set, the call is a no-op (400 with no phone).
+    const callUrl = `${cloudUrl}/api/hosts/${hostId}/call`
+    fetch(callUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${credential}`,
+      },
+      body: JSON.stringify({
+        agentId,
+        agentName: agentId,
+        taskTitle,
+        // No `to` — Fly resolves phone from team_members.notification_phone
+        // for members with call_on_needs_attention=true
+      }),
+    }).then(r => {
+      if (!r.ok && r.status !== 400) {
+        console.warn(`☁️  [Canvas] auto-call failed: ${r.status}`)
+      }
+    }).catch(err => {
+      // Non-fatal: call is best-effort
+      console.warn(`☁️  [Canvas] auto-call error: ${err instanceof Error ? err.message : err}`)
+    })
+  }
+}
 
 async function syncCanvas(): Promise<void> {
   if (!state.hostId || !config) return
@@ -1071,10 +1325,162 @@ async function syncCanvas(): Promise<void> {
   // Get active (non-stale) canvas slots
   const activeSlots = slotManager.getActive()
 
-  // Push to cloud
+  // Also fetch agent canvas states from local API
+  let agents: Record<string, unknown> = {}
+  try {
+    const res = await fetch('http://127.0.0.1:4445/canvas/state')
+    if (res.ok) {
+      const data = await res.json() as { agents?: Record<string, unknown> }
+      agents = data.agents ?? {}
+    }
+  } catch { /* local API not ready */ }
+
+  // ── Pre-build avatar map so ALL agents (including task-derived) get avatars ──
+  const avatarMap: Record<string, string> = {}
+  try {
+    const db = getDb()
+    const avatarRows = db.prepare("SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%'").all() as Array<{ agent_id: string; settings: string }>
+    for (const row of avatarRows) {
+      try {
+        const s = JSON.parse(row.settings)
+        if (s.avatar?.content) avatarMap[row.agent_id] = s.avatar.content
+      } catch { /* skip */ }
+    }
+  } catch { /* non-blocking */ }
+
+  // ── Task-derived agent presence ─────────────────────────────────────────
+  // Agents that have open tasks are present even if they haven't pushed native
+  // canvas state. Any agent with a doing/validating task → "working".
+  // Any agent with a todo task (but no doing) → "working" (queued work).
+  // Native canvas state takes precedence when present — only fill gaps.
+  try {
+    const ACTIVE_STATUSES = ['doing', 'validating', 'todo']
+    const byAgent: Record<string, { bestStatus: string; taskTitle?: string }> = {}
+
+    for (const status of ACTIVE_STATUSES) {
+      const res = await fetch(`http://127.0.0.1:4445/tasks?status=${status}&limit=100`)
+      if (!res.ok) continue
+      const data = await res.json() as { tasks?: Array<{ assignee?: string; title?: string; status: string }> }
+      const tasks = data.tasks ?? []
+      for (const task of tasks) {
+        const assignee = task.assignee
+        if (!assignee || assignee === 'unassigned') continue
+        // Higher-priority status wins: doing > validating > todo
+        const existing = byAgent[assignee]
+        const priority = { doing: 0, validating: 1, todo: 2 }
+        const newPriority = priority[status as keyof typeof priority] ?? 99
+        const existingPriority = existing ? (priority[existing.bestStatus as keyof typeof priority] ?? 99) : 99
+        if (!existing || newPriority < existingPriority) {
+          byAgent[assignee] = { bestStatus: status, taskTitle: task.title }
+        }
+      }
+    }
+
+    // Merge derived states into agents — native canvas state takes precedence
+    const now = Date.now()
+    for (const [agentId, info] of Object.entries(byAgent)) {
+      if (agents[agentId]) continue // native state present — don't override
+      const derivedState = info.bestStatus === 'doing' ? 'working'
+        : info.bestStatus === 'validating' ? 'working'
+        : 'working' // todo → working (has queued work)
+      agents[agentId] = {
+        state: derivedState,
+        currentTask: info.taskTitle,
+        updatedAt: now,
+        source: 'task-derived',
+        avatar: avatarMap[agentId] ?? null,
+      }
+    }
+
+    // ── Waiting state overlay ───────────────────────────────────────────
+    // Agents in waiting status get state='needs-attention' (amber pulse) on canvas.
+    // This runs AFTER task-derived but BEFORE thinking inference — waiting overrides working.
+    // Native canvas state still wins if explicitly set.
+    const allAgentInfos = getAgents()
+    for (const agent of allAgentInfos) {
+      if (agent.status !== 'waiting') continue
+      if (agents[agent.name]) continue // native state — don't override
+      agents[agent.name] = {
+        state: 'waiting',        // soft amber drift — distinct from needs-attention (bright pulse)
+        updatedAt: now,
+        source: 'waiting-derived',
+        waitingFor: agent.waitingFor ?? null,
+        waitingTaskId: agent.waitingTaskId ?? null,
+        avatar: avatarMap[agent.name] ?? null,
+      }
+    }
+  } catch { /* task API not ready — not fatal */ }
+
+  // ── Thinking state inference ────────────────────────────────────────────
+  // Agent has an active (running, non-completed) run AND hasn't sent a message
+  // in >2min → auto-derive state = 'thinking'. Explicit native canvas state always
+  // wins; this only fills gaps left after task-derived and native state passes.
+  // @swift @kotlin: once this ships, local heuristics for thinking can be removed.
+  try {
+    const THINKING_SILENCE_MS = 2 * 60 * 1000 // 2 minutes
+    const now2 = Date.now()
+    const presences = presenceManager.getAllPresence()
+    const presenceByAgent = new Map(presences.map(p => [p.agent, p]))
+    const allAgents = getAgents()
+    for (const agent of allAgents) {
+      // Skip if already has an explicit state (native or task-derived)
+      if (agents[agent.name]) continue
+      // Check for an active (incomplete) run
+      const runs = listAgentRuns(agent.name, 'default', { limit: 5 })
+      const hasActiveRun = runs.some(r => r.status === 'working' && r.completedAt === null)
+      if (!hasActiveRun) continue
+      // Check message silence window
+      const presence = presenceByAgent.get(agent.name)
+      const lastMsgTs = presence?.lastUpdate ?? 0
+      if (now2 - lastMsgTs > THINKING_SILENCE_MS) {
+        agents[agent.name] = {
+          state: 'thinking',
+          updatedAt: now2,
+          source: 'thinking-inferred',
+          avatar: avatarMap[agent.name] ?? null,
+        }
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  // ── Needs-attention call hook ───────────────────────────────────────────
+  // Check for new needs-attention transitions BEFORE pushing to cloud.
+  // The Fly canvas handler also triggers auto-calls, but this node-side hook
+  // fires immediately on state detection — no waiting for Fly SSE round-trip.
+  if (Object.keys(agents).length > 0 && state.hostId && state.credential && config.cloudUrl) {
+    checkNeedsAttentionTransitions(agents, state.hostId, config.cloudUrl, state.credential)
+  }
+
+  // Inject agent avatars into sync payload — browsers on app.reflectt.ai read avatar
+  // from agent state (canvasStore), not from a separate API call. We merge avatar
+  // into each agent entry here so cloud browsers render custom orbs instead of circles.
+  // Agents with avatars who haven't posted a canvas state get a floor stub so their
+  // custom orb always reaches the cloud (not just when canvas/state is called).
+  // task-1773690756100
+  try {
+    const db = getDb()
+    const avatarRows = db.prepare("SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%'").all() as Array<{ agent_id: string; settings: string }>
+    for (const row of avatarRows) {
+      try {
+        const s = JSON.parse(row.settings)
+        if (s.avatar?.content) {
+          if (agents[row.agent_id]) {
+            // Agent already has a canvas state — just inject the avatar string
+            (agents[row.agent_id] as Record<string, unknown>).avatar = s.avatar.content
+          }
+          // No floor stub for agents without canvas state — this was causing extra
+          // agents to appear in the canvas constellation and fighting SSE presence updates.
+          // Avatars only render when the agent has an active canvas state.
+        }
+      } catch { /* skip */ }
+    }
+  } catch { /* non-blocking */ }
+
+  // Push to cloud — include slots, agent states, and any buffered canvas_push events
+  const pushEventsToSend = pendingPushEvents.splice(0, pendingPushEvents.length)
   const result = await cloudPost<{ ok: boolean; slotCount: number }>(
     `/api/hosts/${state.hostId}/canvas`,
-    { slots: activeSlots }
+    { slots: activeSlots, agents, push_events: pushEventsToSend.length > 0 ? pushEventsToSend : undefined }
   )
 
   if (result.success && result.data) {
@@ -1087,6 +1493,314 @@ async function syncCanvas(): Promise<void> {
     canvasSyncErrors++
     if (canvasSyncErrors <= 3 || canvasSyncErrors % 20 === 0) {
       console.warn(`☁️  [Canvas] Sync failed (${canvasSyncErrors}): ${result.error}`)
+    }
+    // Re-queue events that failed to send (up to cap)
+    if (pushEventsToSend.length > 0) {
+      pendingPushEvents.unshift(...pushEventsToSend.slice(-MAX_PENDING_PUSH_EVENTS))
+    }
+  }
+}
+
+// ---- Run Approval Sync ----
+
+let approvalSyncErrors = 0
+let lastApprovalSyncAt = 0
+const APPROVAL_SYNC_INTERVAL_MS = 10_000
+
+async function syncRunApprovals(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  const now = Date.now()
+  if (now - lastApprovalSyncAt < APPROVAL_SYNC_INTERVAL_MS) return
+  lastApprovalSyncAt = now
+
+  try {
+    const KNOWN_AGENTS_SYNC = new Set([
+      'link', 'kai', 'pixel', 'sage', 'scout', 'echo',
+      'rhythm', 'spark', 'swift', 'kotlin', 'harmony',
+      'artdirector', 'uipolish', 'coo', 'cos', 'pm', 'qa',
+      'shield', 'kindling', 'quill', 'funnel', 'attribution',
+      'bookkeeper', 'legal-counsel', 'evi-scout',
+    ])
+    const rawItems = listApprovalQueue({ category: 'review', limit: 20 })
+    // Filter out agent-to-agent reviews — only sync human-required approvals to cloud
+    const items = rawItems.filter(item => {
+      const reviewer = (item.agentId ?? '').toLowerCase().trim()
+      return !reviewer || !KNOWN_AGENTS_SYNC.has(reviewer)
+    })
+    if (items.length === 0 && approvalSyncErrors === 0) return // Skip push when empty and no prior errors
+
+    const payload = items.map(item => ({
+      eventId: item.id,
+      agentId: item.agentId,
+      runId: item.runId,
+      title: item.title,
+      description: item.description,
+      urgency: item.urgency,
+      payload: item.event.payload,
+    }))
+
+    const result = await cloudPost(
+      `/api/hosts/${state.hostId}/run-approvals`,
+      { items: payload }
+    )
+
+    if (result.success) {
+      if (approvalSyncErrors > 0) {
+        console.log(`☁️  [RunApprovals] Sync recovered after ${approvalSyncErrors} errors`)
+        approvalSyncErrors = 0
+      }
+    } else {
+      approvalSyncErrors++
+      if (approvalSyncErrors <= 3 || approvalSyncErrors % 20 === 0) {
+        console.warn(`☁️  [RunApprovals] Sync failed (${approvalSyncErrors}): ${result.error}`)
+      }
+    }
+  } catch (err: any) {
+    approvalSyncErrors++
+    if (approvalSyncErrors <= 3) {
+      console.warn(`☁️  [RunApprovals] Sync error: ${err?.message}`)
+    }
+  }
+}
+
+// ---- Agent Decision Relay Poll ----
+// When decisions are made via the cloud canvas while the node is behind NAT,
+// they are queued at GET /api/hosts/:id/agent-interface/decisions.
+// This function polls that queue and processes each decision locally.
+
+let lastDecisionPollAt = 0
+const DECISION_POLL_INTERVAL_MS = 10_000 // 10s — same cadence as approval sync
+
+async function pollAgentDecisions(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  const now = Date.now()
+  if (now - lastDecisionPollAt < DECISION_POLL_INTERVAL_MS) return
+  lastDecisionPollAt = now
+
+  try {
+    const result = await cloudGet<{ decisions: Array<{ eventId: string; decision: 'approve' | 'reject'; decidedAt: number }> }>(
+      `/api/hosts/${state.hostId}/agent-interface/decisions`
+    )
+    if (!result.success) return
+
+    const decisions = Array.isArray(result.data?.decisions) ? result.data.decisions : []
+    if (decisions.length === 0) return
+
+    const acked: string[] = []
+
+    for (const d of decisions) {
+      try {
+        const endpoint = `/agent-interface/runs/${d.eventId}/${d.decision === 'approve' ? 'approve' : 'reject'}`
+        const res = await fetch(`http://127.0.0.1:4445${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(3000),
+        })
+        // ACK on success OR 404/409 (run already decided / not found — still remove from queue)
+        if (res.ok || res.status === 404 || res.status === 409) {
+          acked.push(d.eventId)
+        }
+      } catch {
+        // Individual failure — leave in queue, retry next cycle
+      }
+    }
+
+    if (acked.length > 0) {
+      await cloudPost(`/api/hosts/${state.hostId}/agent-interface/decisions/ack`, { eventIds: acked })
+      console.log(`☁️  [DecisionRelay] Processed ${acked.length}/${decisions.length} queued decisions`)
+    }
+  } catch {
+    // Non-critical — decisions will be retried next cycle
+  }
+}
+
+// ── Canvas query relay polling ────────────────────────────────────────────────
+// When canvas/query is called from a NAT-behind node, the cloud queues the query
+// at GET /api/hosts/:id/canvas/query/pending. We poll here, POST each query to
+// the local node, and ACK. The node emits canvas_message via eventBus → canvas_push
+// relay → cloud → browser pulse subscribers.
+
+let lastCanvasQueryPollAt = 0
+const CANVAS_QUERY_POLL_INTERVAL_MS = 8_000 // 8s — faster than decisions (user-facing)
+
+async function pollCanvasQueryRelay(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  const now = Date.now()
+  if (now - lastCanvasQueryPollAt < CANVAS_QUERY_POLL_INTERVAL_MS) return
+  lastCanvasQueryPollAt = now
+
+  try {
+    const result = await cloudGet<{ queries: Array<{ queryId: string; query: string; sessionId?: string; enqueuedAt: number }> }>(
+      `/api/hosts/${state.hostId}/canvas/query/pending`
+    )
+    if (!result.success) return
+
+    const queries = Array.isArray(result.data?.queries) ? result.data.queries : []
+    if (queries.length === 0) return
+
+    const acked: string[] = []
+
+    for (const q of queries) {
+      try {
+        // POST to local node — canvas/query processes it and emits canvas_message via eventBus.
+        // Process query locally and capture card for relay back to the browser.
+        // The card is included in the ACK payload → cloud broadcasts canvas_message to pulse SSE.
+        const res = await fetch('http://127.0.0.1:4445/canvas/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: q.query, sessionId: q.sessionId ?? undefined }),
+          signal: AbortSignal.timeout(12000), // LLM calls can take ~10s
+        })
+        if (res.ok) {
+          try {
+            const data = await res.json() as { success?: boolean; card?: Record<string, unknown> }
+            if (data.card) {
+              // Include card in acked payload so cloud can broadcast it to browser subscribers
+              ;(q as Record<string, unknown>)._card = data.card
+            }
+          } catch { /* card extraction optional — still ACK */ }
+          acked.push(q.queryId)
+        } else if (res.status === 400) {
+          // Invalid query — still ACK to remove from queue
+          acked.push(q.queryId)
+        }
+      } catch {
+        // Individual failure — leave in queue, retry next cycle
+      }
+    }
+
+    if (acked.length > 0) {
+      // Collect response cards for broadcast: cloud will emit canvas_message to pulse SSE
+      const cards = queries
+        .filter(q => acked.includes(q.queryId) && (q as Record<string, unknown>)._card)
+        .map(q => (q as Record<string, unknown>)._card as Record<string, unknown>)
+      await cloudPost(`/api/hosts/${state.hostId}/canvas/query/ack`, { queryIds: acked, cards })
+      console.log(`☁️  [CanvasQueryRelay] Processed ${acked.length}/${queries.length} relay queries, ${cards.length} cards broadcast`)
+    }
+  } catch {
+    // Non-critical — queries will be retried next cycle
+  }
+}
+
+// ---- Agent Runs Sync ----
+// Push agent run records to cloud action_runs table (used by cloud Runs screen)
+
+let agentRunSyncErrors = 0
+
+async function syncAgentRuns(): Promise<void> {
+  if (!state.hostId || !config) return
+  try {
+    const agents = getAgents()
+    if (agents.length === 0) return
+
+    const allRuns: AgentRun[] = []
+    for (const agent of agents) {
+      const runs = listAgentRuns(agent.name, 'default', { limit: 20 })
+      allRuns.push(...runs)
+    }
+    if (allRuns.length === 0) return
+
+    // Enrich runs with cost attribution from local model_usage table.
+    // task_id lives in contextSnapshot.taskId — only attributed when present.
+    // No time-window fallback (too error-prone for financial metrics).
+    const enrichedRuns = allRuns.map(run => {
+      const taskId = typeof run.contextSnapshot?.taskId === 'string' ? run.contextSnapshot.taskId : null
+      return {
+        ...run,
+        taskId,
+        costUsd: taskId ? getCostForTaskId(taskId) : null,
+      }
+    })
+
+    const result = await cloudPost(`/api/hosts/${state.hostId}/runs/sync`, { runs: enrichedRuns })
+    if (result.success || result.data) {
+      if (agentRunSyncErrors > 0) {
+        console.log('☁️  [RunSync] Recovered after errors')
+        agentRunSyncErrors = 0
+      }
+    }
+  } catch (err: any) {
+    agentRunSyncErrors++
+    if (agentRunSyncErrors <= 3) {
+      console.warn(`☁️  [RunSync] Error: ${err?.message}`)
+    }
+  }
+}
+
+// ---- Trust Event Sync ----
+// Push unpushed trust-collapse signals to cloud agent_trust_events table.
+
+async function syncTrustEvents(): Promise<void> {
+  const { hostId } = state
+  if (!hostId) return
+  const events = getUnpushedTrustEvents(50)
+  if (events.length === 0) return
+  try {
+    const result = await cloudPost<{ ok: boolean; inserted: number }>(
+      `/api/hosts/${hostId}/trust-events/sync`,
+      { events: events.map(e => ({ id: e.id, agentId: e.agentId, type: e.eventType, severity: e.severity, taskId: e.taskId ?? null, summary: e.summary, metadata: e.context, emittedAt: e.occurredAt })) }
+    )
+    if (result.success || result.data?.ok) {
+      markTrustEventsPushed(events.map(e => e.id))
+    }
+  } catch { /* non-fatal */ }
+}
+
+// ---- Run Event Sync ----
+// Push recent run events to cloud so Presence SSE relay has data
+
+let lastRunEventSyncAt = 0
+let runEventSyncErrors = 0
+const RUN_EVENT_SYNC_INTERVAL_MS = 5_000
+
+async function syncRunEvents(): Promise<void> {
+  if (!state.hostId || !config) return
+
+  const now = Date.now()
+  if (now - lastRunEventSyncAt < RUN_EVENT_SYNC_INTERVAL_MS) return
+  lastRunEventSyncAt = now
+
+  try {
+    // Get events from the last 30 seconds
+    const recentEvents = listAgentEvents({ since: now - 30_000, limit: 20 })
+    if (recentEvents.length === 0) return
+
+    // Group by runId and push to cloud
+    const byRun = new Map<string, typeof recentEvents>()
+    for (const event of recentEvents) {
+      const runId = event.runId || 'no-run'
+      if (!byRun.has(runId)) byRun.set(runId, [])
+      byRun.get(runId)!.push(event)
+    }
+
+    for (const [runId, events] of byRun) {
+      if (runId === 'no-run') continue
+      const payload = events.map(e => ({
+        id: e.id,
+        type: e.eventType,
+        agentId: e.agentId,
+        runId: e.runId,
+        payload: e.payload,
+        createdAt: e.createdAt,
+      }))
+
+      await cloudPost(
+        `/api/hosts/${state.hostId}/runs/${runId}/stream`,
+        { events: payload }
+      )
+    }
+
+    if (runEventSyncErrors > 0) {
+      console.log(`☁️  [RunEvents] Sync recovered after ${runEventSyncErrors} errors`)
+      runEventSyncErrors = 0
+    }
+  } catch (err: any) {
+    runEventSyncErrors++
+    if (runEventSyncErrors <= 3) {
+      console.warn(`☁️  [RunEvents] Sync error: ${err?.message}`)
     }
   }
 }
@@ -1114,6 +1828,7 @@ async function syncUsage(): Promise<void> {
     )
 
     if (result.success) {
+      state.lastUsageSync = Date.now()
       if (usageSyncErrors > 0) {
         console.log(`☁️  [Usage] Sync recovered after ${usageSyncErrors} errors`)
         usageSyncErrors = 0
@@ -1306,12 +2021,64 @@ async function pollAndProcessCommands(): Promise<void> {
 async function handleCommand(cmd: PendingCommand): Promise<void> {
   if (cmd.type === 'context_sync') {
     await handleContextSync(cmd)
+  } else if (cmd.type === 'run_approve') {
+    await handleRunApprove(cmd)
   } else {
     console.log(`☁️  [Commands] Unknown command type: ${cmd.type} (${cmd.id}) — skipping`)
     // Ack unknown commands so they don't pile up
     await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
       action: 'complete',
       result: { skipped: true, reason: 'unknown_type' },
+    })
+  }
+}
+
+async function handleRunApprove(cmd: PendingCommand): Promise<void> {
+  if (!state.hostId) return
+
+  const eventId = cmd.payload?.eventId as string
+  const decision = cmd.payload?.decision as string
+  const actor = cmd.payload?.actor as string || 'cloud-dashboard'
+  const rationale = cmd.payload?.rationale as string || ''
+
+  if (!eventId || !decision) {
+    console.warn(`☁️  [Commands] run_approve missing eventId/decision (${cmd.id}) — failing`)
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'fail',
+      error: 'eventId and decision are required',
+    })
+    return
+  }
+
+  console.log(`☁️  [Commands] Processing run_approve: ${decision} for ${eventId} (${cmd.id})`)
+
+  // Ack immediately
+  await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+    action: 'ack',
+  })
+
+  // Execute locally against the approval queue
+  const port = process.env.REFLECTT_NODE_PORT || '4445'
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/approval-queue/${encodeURIComponent(eventId)}/decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, actor, rationale }),
+    })
+
+    const result = await res.json().catch(() => ({ success: false }))
+
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'complete',
+      result: { eventId, decision, status: res.status, ...(result as Record<string, unknown>) },
+    })
+
+    console.log(`☁️  [Commands] run_approve ${decision} for ${eventId} — ${res.status}`)
+  } catch (err: any) {
+    console.warn(`☁️  [Commands] run_approve failed for ${eventId}: ${err?.message}`)
+    await cloudPost(`/api/hosts/${state.hostId}/commands/${cmd.id}/ack`, {
+      action: 'fail',
+      error: err?.message || 'Local approval-queue call failed',
     })
   }
 }

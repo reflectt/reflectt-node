@@ -1,5 +1,9 @@
 {
-  "includePrefixes": ["public/", "src/", "templates/"],
+  "includePrefixes": [
+    "public/",
+    "src/",
+    "templates/"
+  ],
   "excludePrefixes": [
     "src/__tests__/",
     "tests/",
@@ -8,19 +12,66 @@
     "process/"
   ],
   "banned": [
-    { "pattern": "\\bRyan\\b", "flags": "g", "reason": "Internal proper noun" },
-    { "pattern": "\\bKai\\b", "flags": "g", "reason": "Internal proper noun" },
-    { "pattern": "\\bSage\\b", "flags": "g", "reason": "Internal proper noun" },
-    { "pattern": "\\bPixel\\b", "flags": "g", "reason": "Internal proper noun" },
-    { "pattern": "\\bLink\\b", "flags": "g", "reason": "Internal proper noun (may be false-positive; use allowlist)" },
-    { "pattern": "\\bEcho\\b", "flags": "g", "reason": "Internal proper noun" },
-    { "pattern": "\\bRhythm\\b", "flags": "g", "reason": "Internal proper noun" },
-    { "pattern": "\\bScout\\b", "flags": "g", "reason": "Internal proper noun" },
-    { "pattern": "\\bSpark\\b", "flags": "g", "reason": "Internal proper noun" },
-    { "pattern": "\\bHarmony\\b", "flags": "g", "reason": "Internal proper noun" },
-
-    { "pattern": "reflectt\\.ai", "flags": "g", "reason": "Hard-coded domain; ensure intended / configurable" },
-    { "pattern": "app\\.reflectt\\.ai", "flags": "g", "reason": "Hard-coded domain; ensure intended / configurable" }
+    {
+      "pattern": "\\bRyan\\b",
+      "flags": "g",
+      "reason": "Internal proper noun"
+    },
+    {
+      "pattern": "\\bKai\\b",
+      "flags": "g",
+      "reason": "Internal proper noun"
+    },
+    {
+      "pattern": "\\bSage\\b",
+      "flags": "g",
+      "reason": "Internal proper noun"
+    },
+    {
+      "pattern": "\\bPixel\\b",
+      "flags": "g",
+      "reason": "Internal proper noun"
+    },
+    {
+      "pattern": "\\bLink\\b",
+      "flags": "g",
+      "reason": "Internal proper noun (may be false-positive; use allowlist)"
+    },
+    {
+      "pattern": "\\bEcho\\b",
+      "flags": "g",
+      "reason": "Internal proper noun"
+    },
+    {
+      "pattern": "\\bRhythm\\b",
+      "flags": "g",
+      "reason": "Internal proper noun"
+    },
+    {
+      "pattern": "\\bScout\\b",
+      "flags": "g",
+      "reason": "Internal proper noun"
+    },
+    {
+      "pattern": "\\bSpark\\b",
+      "flags": "g",
+      "reason": "Internal proper noun"
+    },
+    {
+      "pattern": "\\bHarmony\\b",
+      "flags": "g",
+      "reason": "Internal proper noun"
+    },
+    {
+      "pattern": "reflectt\\.ai",
+      "flags": "g",
+      "reason": "Hard-coded domain; ensure intended / configurable"
+    },
+    {
+      "pattern": "app\\.reflectt\\.ai",
+      "flags": "g",
+      "reason": "Hard-coded domain; ensure intended / configurable"
+    }
   ],
   "allow": [
     {
@@ -42,6 +93,36 @@
       "pathPattern": "^src/server\\.ts$",
       "pattern": "app\\.reflectt\\.ai",
       "reason": "Public-facing URL in /health openclaw.docs field for unconfigured nodes"
+    },
+    {
+      "pathPattern": "^src/email-sms-send.test.ts$",
+      "pattern": "reflectt.ai",
+      "reason": "Agent email domain in integration tests \u2014 from address is agent@reflectt.ai, intentional and matches relay config"
+    },
+    {
+      "pathPattern": "^src/cloud\\.ts$",
+      "pattern": "(?:api\\.)?reflectt\\.ai",
+      "reason": "Default cloud API URL \u2014 configurable via REFLECTT_CLOUD_URL env var"
+    },
+    {
+      "pathPattern": "^src/preflight\\.ts$",
+      "pattern": "(?:api\\.|app\\.)?reflectt\\.ai",
+      "reason": "Cloud reachability check + user-facing setup guidance"
+    },
+    {
+      "pathPattern": "^src/doctor\\.ts$",
+      "pattern": "(?:api\\.)?reflectt\\.ai",
+      "reason": "Doctor output \u2014 public cloud URL for user guidance"
+    },
+    {
+      "pathPattern": "^src/server\\.ts$",
+      "pattern": "reflectt\\.ai/docs",
+      "reason": "Canvas query onboarding CTA docs link \u2014 intentional public-facing URL"
+    },
+    {
+      "pathPattern": "^src/server\\.ts$",
+      "pattern": "building reflectt\\.ai",
+      "reason": "Canvas query LLM prompt context \u2014 intentional product description string"
     }
   ]
 }

@@ -31,7 +31,18 @@ reflectt start
 
 Open **[http://localhost:4445/dashboard](http://localhost:4445/dashboard)** — a starter team and first task are already there.
 
+> **Developing locally?** Clone the repo and run `npm run dev` — no build step needed, auto-restarts on file changes.
+
 > Just want to try it first? `npx reflectt-node` starts immediately, no install required.
+
+> **Using yarn?** `yarn global add reflectt-node` works, but run `yarn global bin` and add it to your `$PATH` if you get `reflectt: command not found`.
+
+> **Have OpenClaw?** ⚡ `curl -fsSL https://www.reflectt.ai/install.sh | bash` — automated install, build, and health-check. Requires OpenClaw pre-installed.
+
+**More docs:**
+- Full guide: [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md)
+- Copy/paste bootstrap: [docs/bootstrap-first-5-minutes.md](docs/bootstrap-first-5-minutes.md)
+- Install flow reference: [docs/INSTALL-FLOW.md](docs/INSTALL-FLOW.md)
 
 ---
 
@@ -99,6 +110,33 @@ Get your token at [app.reflectt.ai](https://app.reflectt.ai). Your node syncs to
 
 ---
 
+## Quick start — team in 2 minutes
+
+The fastest way to get a team running with 3 default agents (builder, researcher, coordinator):
+
+```bash
+# 1. Get the files
+git clone https://github.com/reflectt/reflectt-node.git && cd reflectt-node
+
+# 2. Set your LLM API key
+cp .env.starter .env
+echo "ANTHROPIC_API_KEY=your_key_here" >> .env   # or OPENAI_API_KEY
+
+# 3. Start
+docker compose -f docker-compose.starter.yml up -d
+```
+
+That's it. Open [http://localhost:4445](http://localhost:4445) — your team is running.
+
+**Connect to app.reflectt.ai for presence + cloud sync:**
+1. Sign up at [app.reflectt.ai](https://app.reflectt.ai) → Connect a host → copy your join token
+2. `docker exec reflectt-starter reflectt host connect --join-token <TOKEN>`
+3. Your team appears in presence within 60 seconds
+
+Customize the team by editing `defaults/TEAM-ROLES.starter.yaml` and restarting.
+
+---
+
 ## Docker
 
 ```bash
@@ -107,6 +145,31 @@ docker run -d --name reflectt-node \
   -v reflectt-data:/data \
   ghcr.io/reflectt/reflectt-node:latest
 ```
+
+### Docker Compose — one-command team setup
+
+Get a full team in presence in under 2 minutes:
+
+```bash
+# 1. Copy the env template and add your LLM key
+cp .env.starter .env
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env
+
+# 2. Start
+docker compose -f docker-compose.starter.yml up -d
+
+# 3. Open http://localhost:4445/dashboard
+#    → 3 starter agents already in presence
+```
+
+To connect to [app.reflectt.ai](https://app.reflectt.ai) for cloud presence:
+
+```bash
+# After signing up, get your join token and run:
+docker exec reflectt-starter reflectt host connect --join-token <TOKEN>
+```
+
+That's it — your team appears in the presence view within ~30 seconds.
 
 ---
 
@@ -130,3 +193,67 @@ curl http://localhost:4445/capabilities                  # full API reference
 ## License
 
 Apache-2.0 · [reflectt.ai](https://reflectt.ai)
+
+## Canvas Rich Push
+
+Agents push rich content to canvas layers:
+
+```
+POST /canvas/push
+{
+  "type": "rich",
+  "layer": "stage|overlay|background",
+  "position": { "x": 0, "y": 0 },
+  "size": { "width": 400, "height": 300 },
+  "content": { "format": "markdown|svg|image|code", "data": "..." },
+  "ttl": 30000
+}
+```
+
+Layers: `background` (orbs/presence) → `stage` (agent content) → `overlay` (HUD/attention).
+
+## Canvas Takeover Mode
+
+An agent claims full-screen takeover:
+
+```
+POST /canvas/takeover {"agentId": "link", "duration": 60000, "reason": "demo"}
+```
+
+Auto-releases after duration. Orbs fade to ambient during takeover.
+
+## Activity Stream
+
+Canvas event history via SSE:
+
+```
+GET /canvas/activity-stream
+```
+
+Event types: `canvas_connected`, `canvas_message`, `agent_joined`, `agent_left`, `canvas_opened`, `rich_push`, `takeover`, `render_complete`. Ring buffer: last 100 events in-memory.
+
+## Notification Inbox
+
+Per-agent notification feed:
+
+- `GET /notifications/inbox?agentId=:id&unread=true`
+- `POST /notifications/mark-read`
+- `GET /notifications/unread-count?agentId=:id`
+
+## Agent State Machine
+
+States: `idle` → `working` → `thinking` → `working` → `idle`, or `blocked`/`handoff`.
+
+**Stall Detector**: fires intervention when agent exceeds `stall_threshold_ms` in `thinking`/`working`.
+
+**Intervention Engine**: routes to `escalate` | `retry` | `defer` | `abort` handlers.
+
+## Task Criteria Verified
+
+Tasks with `done_criteria` require `criteria_verified=true` to move `todo→validating`:
+
+```bash
+curl -X PATCH /tasks/:id -d '{"status": "validating", "criteria_verified": true}'
+```
+
+See `docs/README.md` for full API reference.

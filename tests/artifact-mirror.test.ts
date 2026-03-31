@@ -57,11 +57,13 @@ describe('Artifact Mirror', () => {
     expect(result.error).toContain('Not a process/')
   })
 
-  it('returns error for non-existent source', async () => {
+  it('skips gracefully for non-existent source (no error — expected in prod)', async () => {
     const mod = await import('../src/artifact-mirror.js')
     const result = await mod.mirrorArtifacts('process/does-not-exist')
     expect(result.mirrored).toBe(false)
-    expect(result.error).toContain('not found')
+    // No error field when source simply not found — this is expected in prod installs
+    // where process/TASK-*.md files live only in dev workspaces.
+    expect(result.error).toBeUndefined()
   })
 })
 

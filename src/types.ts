@@ -48,7 +48,7 @@ export interface Task {
   scheduledFor?: number | null  // epoch ms — when work should start (null clears)
 }
 
-export type TaskHistoryEventType = 'created' | 'assigned' | 'status_changed' | 'commented' | 'lane_transition'
+export type TaskHistoryEventType = 'created' | 'assigned' | 'status_changed' | 'commented' | 'lane_transition' | 'deleted'
 
 export interface TaskComment {
   id: string
@@ -126,6 +126,7 @@ export interface ServerConfig {
   port: number
   host: string
   corsEnabled: boolean
+  runRetentionDays: number
 }
 
 export interface ChatRoom {

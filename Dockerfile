@@ -18,6 +18,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY tsconfig.json ./
+COPY tools/ tools/
 COPY src/ src/
 
 RUN npm run build
@@ -36,6 +37,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY --from=build /app/dist/ dist/
+# Copy pre-baked commit.txt for version reporting (run npm run build locally first)
+COPY commit.txt* ./
 
 # Runtime assets (dashboard UI, role defaults, CLI templates)
 COPY public/ public/

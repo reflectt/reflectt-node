@@ -5,6 +5,7 @@
 import { getDb, safeJsonStringify, safeJsonParse } from './db.js'
 import { eventBus } from './events.js'
 import type { Reflection } from './reflections.js'
+import { autoTagInsightIfUncategorized } from './insight-auto-tagger.js'
 
 
 // ── Constants ──
@@ -641,6 +642,11 @@ function createInsight(key: InsightClusterKey, clusterKeyStr: string, reflection
     now, now,
   )
 
+  // Auto-tag: if family defaulted to 'uncategorized', attempt keyword-rule reclassification.
+  if (key.failure_family === 'uncategorized') {
+    autoTagInsightIfUncategorized(id, title, clusterKeyStr)
+  }
+
   if (shouldPromote) {
     eventBus.emit({
       id: `evt-insight-promoted-${id}`,
@@ -1126,6 +1132,12 @@ export interface LoopSummaryEntry {
   addressed: boolean
   created_at: number
   updated_at: number
+  /** Host that owns this insight. Agents on other hosts use host_api_url to resolve it. */
+  host_id: string
+  /** Base API URL for the owning host (e.g. http://mac-daddy.local:4445).
+   *  Cross-host agents fetch `{host_api_url}/insights/{insight_id}` to resolve.
+   *  Set via REFLECTT_HOST_API_URL env var; falls back to localhost:{PORT}. */
+  host_api_url: string
 }
 
 export interface LoopSummaryOpts {
@@ -1147,6 +1159,13 @@ export function getLoopSummary(opts: LoopSummaryOpts = {}): {
   filters: { limit: number; min_score: number; exclude_addressed: boolean }
 } {
   const db = getDb()
+
+  // Host identity for cross-host resolution.
+  // REFLECTT_HOST_API_URL lets operators advertise the externally reachable URL
+  // (e.g. "http://mac-daddy.local:4445"); falls back to localhost:{PORT}.
+  const hostId = process.env.REFLECTT_HOST_ID || process.env.HOSTNAME || 'unknown'
+  const port = parseInt(process.env.PORT || '4445', 10)
+  const hostApiUrl = (process.env.REFLECTT_HOST_API_URL || `http://localhost:${port}`).replace(/\/$/, '')
   const limit = Math.min(opts.limit ?? 20, 100)
   const minScore = opts.min_score ?? 0
   const excludeAddressed = opts.exclude_addressed ?? false
@@ -1210,6 +1229,8 @@ export function getLoopSummary(opts: LoopSummaryOpts = {}): {
       addressed,
       created_at: insight.created_at,
       updated_at: insight.updated_at,
+      host_id: hostId,
+      host_api_url: hostApiUrl,
     }
   })
 

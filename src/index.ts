@@ -6,8 +6,10 @@
  * 
  * Entry point
  */
+import { initSentry, flushSentry, captureException } from './sentry.js'
 import { createServer } from './server.js'
 import { serverConfig, isDev, openclawConfig, DATA_DIR, REFLECTT_HOME } from './config.js'
+import { execSync } from 'node:child_process'
 import { acquirePidLock, releasePidLock, getPidPath } from './pidlock.js'
 import { startCloudIntegration, stopCloudIntegration, isCloudConfigured, watchConfigForCloudChanges, stopConfigWatcher } from './cloud.js'
 import { stopConfigWatch } from './assignment.js'
@@ -46,7 +48,13 @@ function checkBuildFreshness(): void {
 
     if (newestSrc > distMtime + 1000) { // 1s tolerance
       const ageSec = Math.round((newestSrc - distMtime) / 1000)
-      console.warn(`⚠️  Build may be stale: src/ is ${ageSec}s newer than dist/. Run \`npm run build\` to recompile.`)
+      console.warn('')
+      console.warn('╔══════════════════════════════════════════════════════════════╗')
+      console.warn(`║  ⚠️  BUILD STALE: src/ is ${ageSec}s newer than dist/`)
+      console.warn('║  Run: npm run build')
+      console.warn('║  The running server may not reflect your latest code changes.')
+      console.warn('╚══════════════════════════════════════════════════════════════╝')
+      console.warn('')
     }
   } catch {
     // Non-fatal — skip check if anything goes wrong
@@ -173,6 +181,9 @@ function checkDockerBootstrap(): void {
 async function main() {
   console.log('🚀 Starting reflectt-node...')
 
+  // Initialize Sentry error tracking (no-op if SENTRY_DSN not set)
+  initSentry()
+
   // Build-freshness check (non-blocking)
   checkBuildFreshness()
 
@@ -185,7 +196,7 @@ async function main() {
     const { getBuildInfo } = await import('./buildInfo.js')
     const build = getBuildInfo()
     const branch = build.gitBranch || ''
-    const isMainBranch = branch === 'main' || branch === 'master' || branch === ''
+    const isMainBranch = branch === 'main' || branch === 'master' || branch === '' || branch === 'unknown'
     const isProdDb = DATA_DIR === join(homedir(), '.reflectt', 'data')
     const allowOverride = process.env.REFLECTT_ALLOW_BRANCH_DB === '1'
 
@@ -207,6 +218,18 @@ async function main() {
   // Docker bootstrap guidance (non-blocking)
   checkDockerBootstrap()
 
+  // ── CLI --port flag: overrides PORT env var and config ───────────────
+  // Usage: reflectt --port 4446
+  // task-1773529415342-eput9xcq1
+  const cliPortArg = process.argv.indexOf('--port')
+  if (cliPortArg !== -1 && process.argv[cliPortArg + 1]) {
+    const cliPort = parseInt(process.argv[cliPortArg + 1]!, 10)
+    if (!isNaN(cliPort) && cliPort > 0 && cliPort < 65536) {
+      serverConfig.port = cliPort
+      console.log(`ℹ Port override via --port flag: ${cliPort}`)
+    }
+  }
+
   // Dev-mode port guard: prevent dev servers from hijacking production port
   const PRODUCTION_PORT = 4445
   if (isDev && serverConfig.port === PRODUCTION_PORT) {
@@ -226,6 +249,23 @@ async function main() {
   if (lockResult.portConflictPids.length > 0) {
     console.log(`   Resolved ${lockResult.portConflictPids.length} port conflict(s)`)
   }
+
+  // Crash hard on unhandled errors so supervisors (launchd/systemd) can restart cleanly
+  // Prevents the "listener died but process tree lives" zombie state.
+  let shuttingDown = false
+  const fatal = (label: string, err: any) => {
+    try {
+      console.error(`\n🚨 [FATAL] ${label}:`, err)
+      captureException(err instanceof Error ? err : new Error(String(err)), { fatal: true, label })
+    } catch {}
+    try {
+      releasePidLock(pidPath)
+    } catch {}
+    // Flush Sentry before exit so the error is captured
+    flushSentry(1000).catch(() => {}).finally(() => process.exit(1))
+  }
+  process.on('uncaughtException', err => fatal('uncaughtException', err))
+  process.on('unhandledRejection', err => fatal('unhandledRejection', err))
 
   try {
     // Initialize SQLite database (WAL mode, auto-migration from JSONL)
@@ -248,11 +288,72 @@ async function main() {
 
     const app = await createServer()
 
-    
-    await app.listen({
-      port: serverConfig.port,
-      host: serverConfig.host,
-    })
+    // ── Port auto-detect — SIGNAL-ROUTING / activation fix ───────────
+    // If the requested port (default 4445) is occupied by a non-reflectt process
+    // that the pidlock couldn't kill, try 4446–4455 sequentially.
+    // First available port wins. Logs which port was selected and what owns the conflict.
+    // task-1773529415342-eput9xcq1
+    const PORT_FALLBACK_START = 4446
+    const PORT_FALLBACK_END   = 4455
+
+    let boundPort = serverConfig.port
+    let bindError: Error | null = null
+
+    const tryListen = (port: number): Promise<void> =>
+      app.listen({ port, host: serverConfig.host }) as unknown as Promise<void>
+
+    try {
+      await tryListen(serverConfig.port)
+    } catch (err: any) {
+      if (err?.code !== 'EADDRINUSE') throw err   // not a port conflict — propagate
+
+      // Describe what owns the conflicted port
+      let ownerInfo = ''
+      try {
+        ownerInfo = execSync(`lsof -i :${serverConfig.port} 2>/dev/null | tail -n +2 | head -3`, { encoding: 'utf8', timeout: 3000 }).trim()
+      } catch { /* lsof unavailable */ }
+
+      console.warn(`\n⚠  Port ${serverConfig.port} is in use.${ownerInfo ? `\n   Occupied by:\n   ${ownerInfo.replace(/\n/g, '\n   ')}` : ''}`)
+      console.warn(`   Scanning fallback ports ${PORT_FALLBACK_START}–${PORT_FALLBACK_END}...`)
+
+      bindError = err
+      for (let port = PORT_FALLBACK_START; port <= PORT_FALLBACK_END; port++) {
+        try {
+          await tryListen(port)
+          boundPort = port
+          bindError = null
+          console.log(`✅ Bound to fallback port ${port} (${serverConfig.port} was occupied)`)
+          // Persist selected port so downstream code (cloud registration, logs) uses it
+          serverConfig.port = port
+          break
+        } catch (fallbackErr: any) {
+          if (fallbackErr?.code !== 'EADDRINUSE') throw fallbackErr
+          console.warn(`   Port ${port} also occupied, trying next...`)
+        }
+      }
+
+      if (bindError) {
+        console.error(`\n🚫 All ports ${serverConfig.port}–${PORT_FALLBACK_END} are occupied.`)
+        console.error(`   Free a port and restart, or use --port <n> to specify an available port.\n`)
+        process.exit(1)
+      }
+    }
+
+    // If the underlying HTTP server closes unexpectedly, crash so the supervisor restarts us.
+    // NOTE: shutdown() sets shuttingDown=true so intentional closes don't trigger fatal exit.
+    try {
+      const srv: any = (app as any).server
+      if (srv && typeof srv.on === 'function') {
+        srv.on('close', () => {
+          if (shuttingDown) return
+          fatal('http_server_close', new Error('HTTP listener closed unexpectedly'))
+        })
+        srv.on('error', (err: any) => {
+          if (shuttingDown) return
+          fatal('http_server_error', err)
+        })
+      }
+    } catch {}
 
     const baseUrl = `http://${serverConfig.host}:${serverConfig.port}`
 
@@ -354,7 +455,16 @@ async function main() {
       const allTasks = taskManager.listTasks({})
       const agentsDir = join(DATA_DIR, 'agents')
       const hasAgents = existsSync(agentsDir) && readdirSync(agentsDir).filter(f => !f.startsWith('.')).length > 0
-      if (allTasks.length === 0 && !hasAgents) {
+      // Also check if TEAM-ROLES.yaml exists — if it does, bootstrap already ran
+      const teamRolesPath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
+      const hasTeamRoles = existsSync(teamRolesPath)
+      // Durable first-boot marker — survives restarts even if tasks/agents dirs are empty
+      const firstBootMarker = join(DATA_DIR, '.first-boot-done')
+      const hasBootstrapped = existsSync(firstBootMarker)
+      if (hasBootstrapped) {
+        console.log('[Boot] Restart detected — skipping first-boot (marker exists)')
+      }
+      if (allTasks.length === 0 && !hasAgents && !hasTeamRoles && !hasBootstrapped) {
         const teamIntent = process.env.TEAM_INTENT || ''
 
         if (teamIntent) {
@@ -394,8 +504,8 @@ async function main() {
                 '2. Call `GET /bootstrap/team` to get the team schema and examples',
                 '3. Design a team that fulfills the user\'s intent',
                 '4. Save it via `PUT /config/team-roles` with the YAML config',
-                '5. Post an intro message to #general explaining the team you built',
-                '6. Create initial tasks for each agent',
+                '5. Post an intro message to #general explaining the team you built. Also call `POST /canvas/speak` with your intro text so it plays aloud with Kokoro TTS.',
+                '6. Tell each generated agent (via their task or a #general message) to introduce themselves in #general with their name, role, and what they will focus on.',
                 '',
                 '## The User Said:',
                 '',
@@ -425,11 +535,11 @@ async function main() {
               '',
               '### Steps:',
               '1. Read `TEAM_INTENT.md` for the full intent',
-              '2. Call `GET /bootstrap/team` for the TEAM-ROLES.yaml schema',
+              '2. Call `POST /bootstrap/team` (body: { useCase: "custom" }) to get the TEAM-ROLES.yaml schema',
               '3. Design agents that match what the user needs',
               '4. Save the team config via `PUT /config/team-roles`',
-              '5. Post an intro to #general: "Hi! I\'m [name], your team lead. Here\'s the team I\'ve set up..."',
-              '6. Create starter tasks for each agent',
+              '5. Post an intro to #general: "Hi! I\'m [name], your team lead. Here\'s the team I\'ve set up..." AND call `POST /canvas/speak` with your intro text so it plays aloud on the canvas with Kokoro TTS.',
+              '6. Create starter tasks for each agent AND tell each one to introduce themselves in #general with their name, role, and what they will focus on.',
               '',
               'The user should see a working team with named agents when they check the dashboard.',
             ].join('\n'),
@@ -438,11 +548,17 @@ async function main() {
             done_criteria: [
               'TEAM-ROLES.yaml saved with agents matching user intent',
               'Intro message posted to #general',
+              'Intro spoken aloud via POST /canvas/speak',
+              'Each generated agent has introduced themselves in #general',
               'At least one task created per agent',
             ],
             metadata: { source: 'first-boot-intent', reflection_exempt: true, reflection_exempt_reason: 'Auto-created bootstrap task' },
           })
           console.log('   Created bootstrap task for main agent')
+
+          // Write durable first-boot marker so restarts don't re-fire
+          writeFileSync(firstBootMarker, `first-boot-intent:${Date.now()}`, 'utf-8')
+          console.log(`   Wrote first-boot marker: ${firstBootMarker}`)
         } else {
           // ── Default bootstrap: no intent, create starter team ──
           console.log('🌱 First boot detected — seeding starter team…')
@@ -476,6 +592,10 @@ async function main() {
             metadata: { source: 'first-boot', reflection_exempt: true, reflection_exempt_reason: 'Auto-created welcome task' },
           })
           console.log('   Created welcome task')
+
+          // Write durable first-boot marker so restarts don't re-fire
+          writeFileSync(firstBootMarker, `first-boot-default:${Date.now()}`, 'utf-8')
+          console.log(`   Wrote first-boot marker: ${firstBootMarker}`)
         }
       }
       // Print clear next-steps for first-time users
@@ -508,19 +628,53 @@ async function main() {
       const { getAgentRoles } = await import('./assignment.js')
       const { chatManager } = await import('./chat.js')
       const { presenceManager } = await import('./presence.js')
+      const { getDb } = await import('./db.js')
       const agents = getAgentRoles()
       if (agents.length > 0) {
-        // Seed presence so idle-nudge system has agents to evaluate
-        for (const agent of agents) {
-          presenceManager.updatePresence(agent.name, 'idle')
+        // Rate-limit restart broadcasts: suppress if same host fired within 15 minutes.
+        // Prevents cadence degradation on rapid restarts (e.g., crash-loop, deploy churn).
+        // First broadcast always goes through; window resets after RESTART_BROADCAST_COOLDOWN_MS.
+        // task-1773516754378-6pyxtkuzt / SIGNAL-ROUTING Change 1
+        const RESTART_BROADCAST_COOLDOWN_MS = 15 * 60 * 1000 // 15 minutes
+        const db = getDb()
+        const recentBroadcast = db.prepare(
+          "SELECT 1 FROM chat_messages WHERE \"from\" = 'system' AND content LIKE '%Server restarted%' AND timestamp > ? LIMIT 1",
+        ).get(Date.now() - RESTART_BROADCAST_COOLDOWN_MS)
+        if (recentBroadcast) {
+          console.log('🔔 Auto-wake: restart broadcast suppressed (rate-limit: 1 per 15 min)')
+        } else {
+          // Seed presence so idle-nudge system has agents to evaluate
+          for (const agent of agents) {
+            presenceManager.updatePresence(agent.name, 'idle')
+          }
+
+          // Read node identity for the broadcast
+          // Use readFileSync (same approach as BUILD_VERSION in server.ts) — dynamic import
+          // fails when running from dist/ because the relative path doesn't resolve.
+          let version = 'unknown'
+          try {
+            const pkgPath = join(process.cwd(), 'package.json')
+            const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+            version = pkg.version || 'unknown'
+          } catch { /* non-blocking */ }
+          let nodeName = process.env.REFLECTT_HOST_NAME || 'unknown'
+          try {
+            const cfgPath = join(REFLECTT_HOME, 'config.json')
+            if (existsSync(cfgPath)) {
+              const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'))
+              nodeName = cfg?.cloud?.hostName || nodeName
+            }
+          } catch { /* non-blocking */ }
+
+          const ts = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+          const mentions = agents.map(a => `@${a.name}`).join(' ')
+          await chatManager.sendMessage({
+            from: 'system',
+            content: `${mentions} Server restarted. Resume your work.\n📍 ${nodeName} · v${version} · ${ts}`,
+            channel: 'ops',
+          })
+          console.log(`🔔 Auto-wake: seeded presence + pinged ${agents.length} agents (${nodeName} v${version})`)
         }
-        const mentions = agents.map(a => `@${a.name}`).join(' ')
-        await chatManager.sendMessage({
-          from: 'system',
-          content: `${mentions} Server restarted. Resume your work.`,
-          channel: 'general',
-        })
-        console.log(`🔔 Auto-wake: seeded presence + pinged ${agents.length} agents`)
       }
     } catch (err) {
       console.warn(`⚠️  Auto-wake failed: ${(err as Error)?.message || err}`)
@@ -528,12 +682,19 @@ async function main() {
 
     // Graceful shutdown
     const shutdown = async (signal: string) => {
+      shuttingDown = true
       console.log(`\n${signal} received, shutting down...`)
       stopConfigWatch()
       stopConfigWatcher()
       stopCloudIntegration()
       stopTeamConfigLinter()
+      // Close any active browser sessions
+      try {
+        const { closeAllSessions } = await import('./capabilities/browser.js')
+        await closeAllSessions()
+      } catch { /* non-blocking */ }
       closeDb()
+      await flushSentry(2000)
       releasePidLock(pidPath)
       await app.close()
       process.exit(0)

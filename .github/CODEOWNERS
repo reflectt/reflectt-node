@@ -5,37 +5,36 @@
 # When a PR touches files in a zone, the listed owner(s) are auto-requested for review.
 #
 # Owners use GitHub usernames. Team agents map via their GitHub accounts.
-# Default path ownership is delegated away from Kai so he only gets pulled into
-# escalations/release cuts.
+# All routine PRs route to itskai-dev. Ryan is not in the review rotation.
 
 # ---- Global fallback ----
-*                           @ryancampbell
+*                           @itskai-dev
 
 # ---- Core server ----
-src/server.ts               @ryancampbell
-src/index.ts                @ryancampbell
-src/config.ts               @ryancampbell
+src/server.ts               @itskai-dev
+src/index.ts                @itskai-dev
+src/config.ts               @itskai-dev
 
 # ---- Cloud integration ----
-src/cloud.ts                @ryancampbell
+src/cloud.ts                @itskai-dev
 
 # ---- CLI ----
-src/cli.ts                  @ryancampbell
+src/cli.ts                  @itskai-dev
 
 # ---- Task engine ----
-src/tasks.ts                @ryancampbell
+src/tasks.ts                @itskai-dev
 
 # ---- Presence + chat ----
-src/presence.ts             @ryancampbell
-src/chat.ts                 @ryancampbell
+src/presence.ts             @itskai-dev
+src/chat.ts                 @itskai-dev
 
 # ---- API docs contract ----
-public/docs.md              @ryancampbell
+public/docs.md              @itskai-dev
 
 # ---- CI / workflows ----
-.github/                    @ryancampbell
+.github/                    @itskai-dev
 .github/workflows/release*.yml @itskai-dev
 .github/workflows/hotfix*.yml  @itskai-dev
 
 # ---- Tests ----
-tests/                      @ryancampbell
+tests/                      @itskai-dev

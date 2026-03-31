@@ -23,6 +23,16 @@ export type EventType =
   | 'presence_updated'
   | 'reflection_created'
   | 'insight_created'
+  | 'canvas_input'
+  | 'canvas_render'
+  | 'canvas_burst'      // dramatic state transition burst (thought_manifest, urgency_spike, tension_release…)
+  | 'canvas_spark'      // agent-to-agent arc (collaboration, handoff, decision)
+  | 'canvas_milestone'  // completion moment — task done, PR merged, streak broken
+  | 'canvas_expression' // Reality Mixer — agent fires multi-channel expression (voice+visual+haptic+sound+text)
+  | 'canvas_message'   // typed visual card — response to human query (tasks/info/revenue/onboarding)
+  | 'canvas_push'      // agent self-initiates canvas event without human query (utterance/work_released/handoff)
+  | 'canvas_artifact'  // proof artifact drifts through canvas on task/PR completion (commit/pr/test/run/approval)
+  | 'canvas_takeover'  // agent claims/releases full-screen takeover — orbs fade, agent content is the canvas
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -33,6 +43,16 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'presence_updated',
   'reflection_created',
   'insight_created',
+  'canvas_input',
+  'canvas_render',
+  'canvas_burst',
+  'canvas_spark',
+  'canvas_milestone',
+  'canvas_expression',
+  'canvas_message',
+  'canvas_push',
+  'canvas_artifact',
+  'canvas_takeover',
 ])
 
 export interface Event {
@@ -183,7 +203,9 @@ class EventBus {
   }
 
   /**
-   * Emit an event to all matching subscriptions (with batching)
+   * Emit an event to all matching subscriptions (with batching).
+   * Canvas events (canvas_render, canvas_burst, canvas_spark, canvas_milestone, canvas_expression)
+   * are flushed immediately — they drive live visual experiences and must feel instant.
    */
   emit(event: Event): void {
     // Add to log
@@ -202,6 +224,15 @@ class EventBus {
       } catch (err) {
         console.error(`[EventBus] Internal listener '${id}' error:`, err)
       }
+    }
+
+    // Canvas events bypass batching — flush immediately for sub-100ms render latency
+    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression', 'canvas_message', 'canvas_push', 'canvas_artifact'])
+    if (IMMEDIATE_TYPES.has(event.type)) {
+      if (this.batchTimer) { clearTimeout(this.batchTimer); this.batchTimer = null }
+      this.pendingEvents.push(event)
+      this.flushBatch()
+      return
     }
 
     // Add to pending batch
@@ -467,6 +498,7 @@ class EventBus {
         // Include events where the agent is involved
         return (
           data.agent === filters.agent ||
+          data.agentId === filters.agent ||
           data.from === filters.agent ||
           data.to === filters.agent ||
           data.assignee === filters.agent ||

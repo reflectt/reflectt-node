@@ -1,0 +1,61 @@
+# reflectt-node Starter — one-command team setup
+#
+# Usage:
+#   1. Copy .env.starter to .env and fill in your LLM API key
+#   2. docker compose -f docker-compose.starter.yml up -d
+#   3. Open app.reflectt.ai → sign up → connect your host with the join token
+#   4. Your team appears in presence within 2 minutes
+#
+# What you get:
+#   - reflectt-node backend (tasks, presence, chat, agent coordination)
+#   - 3 pre-configured starter agents (builder, researcher, coordinator)
+#   - First-boot seeding: agents appear in presence automatically
+#
+# Dashboard: http://localhost:4445
+
+services:
+  reflectt-node:
+    image: ghcr.io/reflectt/reflectt-node:latest
+    pull_policy: always
+    ports:
+      - "4445:4445"
+    volumes:
+      # Named volume — clean, independent instance per project
+      - reflectt-starter-data:/data
+      # Mount starter team config (3 default agents)
+      - ./defaults/TEAM-ROLES.starter.yaml:/app/defaults/TEAM-ROLES.yaml:ro
+    environment:
+      - PORT=4445
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+      - REFLECTT_HOME=/data
+
+      # ── LLM API key (required for agents to respond) ──
+      # Fill in .env with your key — only one is needed.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+
+      # ── Connect to app.reflectt.ai (optional — for cloud presence) ──
+      # After signup at app.reflectt.ai, get your join token and run:
+      #   docker exec reflectt-starter reflectt host connect --join-token <TOKEN>
+      # Or set these vars before starting:
+      - REFLECTT_CLOUD_URL=${REFLECTT_CLOUD_URL:-https://app.reflectt.ai}
+      - REFLECTT_HOST_ID=${REFLECTT_HOST_ID:-}
+      - REFLECTT_HOST_CREDENTIAL=${REFLECTT_HOST_CREDENTIAL:-}
+      - REFLECTT_HOST_NAME=${REFLECTT_HOST_NAME:-my-team}
+
+      # ── First-boot seeding ──
+      # Set to 0 to skip starter team creation (e.g. if you have existing data)
+      - REFLECTT_SEED_STARTER=${REFLECTT_SEED_STARTER:-1}
+
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4445/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    container_name: reflectt-starter
+
+volumes:
+  reflectt-starter-data:

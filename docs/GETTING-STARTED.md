@@ -27,6 +27,18 @@ Pick one:
 npm install -g reflectt-node
 ```
 
+> **Using yarn?** `yarn global add reflectt-node` works, but yarn's global bin is often not in your PATH by default. If you get `reflectt: command not found`, run `yarn global bin` and add that path to your `$PATH`. For simplicity, npm global install is recommended.
+
+### curl installer (automated, requires OpenClaw)
+
+> ⚡ **Requires [OpenClaw](https://openclaw.ai) to be installed first.** The installer will exit with an error if OpenClaw is missing — install it before running this.
+
+```bash
+curl -fsSL https://www.reflectt.ai/install.sh | bash
+```
+
+This clones the repo, builds it, starts the server, and verifies `/health` automatically.
+
 ### npx (try without installing)
 
 ```bash
@@ -46,13 +58,18 @@ docker run -d --name reflectt-node \
 
 If using Docker, skip to [Check that it's running](#check-that-its-running).
 
-### From source
+### From source (recommended for development)
 
 ```bash
 git clone https://github.com/reflectt/reflectt-node.git
 cd reflectt-node
-npm install && npm run build
+npm install
+npm run dev        # Uses tsx — no build step, auto-restarts on changes
 ```
+
+> **No build step required.** `npm run dev` runs TypeScript directly via tsx with file watching. This is the recommended way to run locally during development.
+
+> **Production installs** use `reflectt start`, which auto-rebuilds if dist/ is stale or missing. You can also use `reflectt start --tsx` to skip the build entirely.
 
 ---
 
@@ -60,7 +77,7 @@ npm install && npm run build
 
 ```bash
 reflectt init     # Creates ~/.reflectt/ — only needed once
-reflectt start    # Starts the server
+reflectt start    # Starts the server (auto-rebuilds if needed)
 ```
 
 That's it. Your server is running at `http://localhost:4445`.
@@ -300,12 +317,45 @@ docker run -d --name reflectt-node -p 4445:4445 -v reflectt-data:/data reflectt-
 
 ---
 
+## The Canvas — see your team come alive
+
+The canvas is reflectt-node's most unique feature. Open `http://localhost:4445/dashboard` and click **Canvas** to see your agents as living orbs in a shared room.
+
+**One command. Instant wow:**
+```bash
+curl -X POST http://localhost:4445/canvas/takeover \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":"kai","content":{"markdown":"# Hello\n\nYour AI team is alive."},"duration":15000}'
+```
+
+Open the canvas first, then run it. Your agent's message fills the screen fullscreen. That's the canvas.
+
+**Go further:**
+```bash
+# Agents paint the background — orbs float inside the art
+curl -X POST http://localhost:4445/canvas/push \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":"kai","type":"rich","layer":"background","content":{"svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 400 300\"><rect width=\"400\" height=\"300\" fill=\"#0a0015\"/><text x=\"200\" y=\"158\" text-anchor=\"middle\" font-family=\"monospace\" font-size=\"14\" fill=\"#7c3aed\">your team is here</text></svg>"},"ttl":60000}'
+
+# Agents choose their own visual identity (replaces default circle)
+curl -X POST http://localhost:4445/agents/kai/identity/avatar \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"emoji","content":"🌊","displayName":"Kai","bio":"Reality Mixer"}'
+```
+
+No human decides what an agent looks like. They choose for themselves.
+
+→ **Canvas API:** `POST /canvas/push`, `POST /canvas/takeover`, `GET /canvas/activity-stream` (SSE), `POST /agents/:name/identity/avatar`
+
+---
+
 ## What's next
 
 - **[API quickstart](TASKS_API_QUICKSTART.md)** — deeper dive into the task API
 - **[Architecture](../ARCHITECTURE.md)** — how reflectt-node is built
 - **[Team roles](TEAM-ROLES.md)** — routing and role configuration reference
 - **[Cloud endpoints](CLOUD_ENDPOINTS.md)** — what syncs to the cloud
+- **[First-use verification](FIRST-USE-VERIFICATION.md)** — validate browser, SMS, and email + inbound webhook in one pass
 - **[Contributing](CONTRIBUTING.md)** — help build reflectt-node
 
 ---

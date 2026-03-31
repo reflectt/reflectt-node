@@ -27,6 +27,7 @@ interface EndpointGroup {
 interface RollingBucket {
   requests: number
   errors: number
+  serverErrors: number // Only 5xx
   /** Start of this bucket (ms since epoch) */
   startedAt: number
 }
@@ -71,11 +72,12 @@ const recentErrors: ErrorEntry[] = []
 const errorBuckets: Map<string, { group: string; status: number; count: number; lastSeen: number }> = new Map()
 let totalRequests = 0
 let totalErrors = 0
+let totalServerErrors = 0 // Only 5xx errors count toward error rate
 const startedAt = Date.now()
 
 // Rolling window state
 const rollingBuckets: RollingBucket[] = []
-let currentBucket: RollingBucket = { requests: 0, errors: 0, startedAt: Date.now() }
+let currentBucket: RollingBucket = { requests: 0, errors: 0, serverErrors: 0, startedAt: Date.now() }
 
 // ── Core ───────────────────────────────────────────────────────────────────
 
@@ -93,7 +95,7 @@ function rotateBuckets(now: number): void {
     if (rollingBuckets.length > MAX_BUCKETS) {
       rollingBuckets.shift()
     }
-    currentBucket = { requests: 0, errors: 0, startedAt: now }
+    currentBucket = { requests: 0, errors: 0, serverErrors: 0, startedAt: now }
   }
 }
 
@@ -111,6 +113,7 @@ export function trackRequest(method: string, url: string, statusCode: number, us
   currentBucket.requests++
 
   if (statusCode >= 400) {
+    // Track all errors (4xx and 5xx) for debugging
     totalErrors++
     errorCounts[group] = (errorCounts[group] || 0) + 1
     currentBucket.errors++
@@ -123,6 +126,12 @@ export function trackRequest(method: string, url: string, statusCode: number, us
       existing.lastSeen = now
     } else {
       errorBuckets.set(bucketKey, { group, status: statusCode, count: 1, lastSeen: now })
+    }
+
+    // Track 5xx as true errors for error rate (validation 4xx are expected rejections)
+    if (statusCode >= 500) {
+      totalServerErrors++
+      currentBucket.serverErrors++
     }
 
     // Capture recent errors (both 4xx and 5xx, skip 404s to avoid noise)
@@ -169,16 +178,19 @@ function getRollingMetrics(): { requests: number; errors: number; errorRate: num
 
   let requests = currentBucket.requests
   let errors = currentBucket.errors
+  let serverErrors = currentBucket.serverErrors
   const windowStart = now - (MAX_BUCKETS * BUCKET_DURATION_MS)
 
   for (const bucket of rollingBuckets) {
     if (bucket.startedAt >= windowStart) {
       requests += bucket.requests
       errors += bucket.errors
+      serverErrors += bucket.serverErrors
     }
   }
 
-  const errorRate = requests > 0 ? Math.round((errors / requests) * 10000) / 100 : 0
+  // Use server errors (5xx) for error rate - validation 4xx are expected rejections
+  const errorRate = requests > 0 ? Math.round((serverErrors / requests) * 10000) / 100 : 0
   return {
     requests,
     errors,
@@ -190,6 +202,7 @@ function getRollingMetrics(): { requests: number; errors: number; errorRate: num
 export function getRequestMetrics(): {
   total: number
   errors: number
+  serverErrors: number
   uptimeMs: number
   byGroup: Record<string, { requests: number; errors: number }>
   recentErrors: ErrorEntry[]
@@ -226,6 +239,7 @@ export function getRequestMetrics(): {
   return {
     total: totalRequests,
     errors: totalErrors,
+    serverErrors: totalServerErrors,
     uptimeMs,
     byGroup,
     recentErrors: [...recentErrors].reverse(), // Most recent first
@@ -239,10 +253,11 @@ export function getRequestMetrics(): {
 export function resetRequestMetrics(): void {
   totalRequests = 0
   totalErrors = 0
+  totalServerErrors = 0
   for (const key of Object.keys(requestCounts)) delete requestCounts[key]
   for (const key of Object.keys(errorCounts)) delete errorCounts[key]
   recentErrors.length = 0
   errorBuckets.clear()
   rollingBuckets.length = 0
-  currentBucket = { requests: 0, errors: 0, startedAt: Date.now() }
+  currentBucket = { requests: 0, errors: 0, serverErrors: 0, startedAt: Date.now() }
 }

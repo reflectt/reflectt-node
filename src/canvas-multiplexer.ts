@@ -152,8 +152,37 @@ export function getCanvasSubscriberCount(): number {
 /**
  * Process a render event: validate → store in slot manager → broadcast.
  * Returns validation result (callers can check .valid).
+ * 
+ * Special handling for "rich" content type: agent expressions (thoughts, reactions)
+ * are ephemeral and broadcast immediately as canvas_push, not stored in slots.
  */
 export function processRender(event: SlotEvent): ValidationResult & { slot?: ReturnType<typeof slotManager.get> } {
+  // Rich content = agent expressions (thoughts, reactions) - broadcast immediately, no slot storage
+  if (event.content_type === 'rich') {
+    const validation = { valid: true, errors: [], warnings: [] }
+    
+    // Broadcast as canvas_push event for immediate rendering
+    for (const sub of subscribers) {
+      try {
+        // Wrap in canvas_push format for frontend
+        const p = event.payload as unknown as Record<string, unknown>
+        const pushEvent = {
+          type: 'canvas_push',
+          expression: p?.expression || 'thought',
+          agentId: p?.agentId,
+          agentColor: p?.agentColor,
+          content: p?.content || {},
+          text: p?.text || ((p?.content as Record<string, unknown>)?.markdown as string) || '',
+          ttl: p?.ttl || 20000,
+        }
+        sub(pushEvent as any, undefined)
+      } catch (err) {
+        console.error('[Canvas] Rich content subscriber error:', err)
+      }
+    }
+    return validation
+  }
+
   const validation = validateSlotEvent(event)
 
   if (!validation.valid) {

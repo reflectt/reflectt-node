@@ -13,8 +13,23 @@ import { createTaskStateAdapterFromEnv, type TaskStateAdapter } from './taskStat
 import { getDb, importJsonlIfNeeded, safeJsonStringify, safeJsonParse } from './db.js'
 import { isTestHarnessTask, TEST_TASK_EXCLUDE_SQL } from './test-task-filter.js'
 import { assertDuplicateClosureHasCanonicalRefs } from './duplicateClosureGuard.js'
+import { closeInsightById } from './insight-mutation.js'
+import { maybeCreateSuccessor } from './lane-template-successor.js'
 import { getAgentAliases } from './assignment.js'
+import { getAgentLane } from './lane-config.js'
 import type Database from 'better-sqlite3'
+
+// Voice IDs for agents (used for TTS)
+const VOICE_IDS: Record<string, string> = {
+  link:  'pNInz6obpgDQGcFmaJgB',
+  kai:   'onwK4e9ZLuTAKqWW03F9',
+  pixel: 'EXAVITQu4vr4xnSDxMaL',
+  sage:  'yoZ06aMxZJJ28mfd3POQ',
+  scout: '3XbDmaS0mwj3WIVTUxWa',
+  echo:  'MF3mGyEYCl7XYWbV9V6O',
+  rhythm: 'morgan',
+  spark: 'corey',
+}
 
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
 const LEGACY_TASKS_FILE = join(LEGACY_DATA_DIR, 'tasks.jsonl')
@@ -34,9 +49,16 @@ function importTasks(db: Database.Database, records: unknown[]): number {
       tags, metadata, team_id, comment_count, due_at, scheduled_for
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
+  const del = db.prepare('DELETE FROM tasks WHERE id = ?')
 
   const insertMany = db.transaction((tasks: unknown[]) => {
     for (const record of tasks) {
+      const tombstone = record as { id?: string; deleted?: boolean }
+      if (tombstone?.deleted === true && typeof tombstone.id === 'string' && tombstone.id.trim()) {
+        del.run(tombstone.id)
+        continue
+      }
+
       const task = record as Task
       insert.run(
         task.id,
@@ -326,6 +348,51 @@ class TaskManager {
       })
     }, 60_000)
     this.recurringTicker.unref()
+
+    // Periodic "thinking pulse" — makes agents show as actively thinking on /live canvas
+    // Fires every 15 seconds for agents with active tasks
+    this.startThinkingPulse()
+  }
+
+  private startThinkingPulse() {
+    console.log('[Tasks] Starting thinking pulse...')
+
+    const pulse = () => {
+      const db = getDb()
+      const doingTasks = db.prepare(`
+        SELECT assignee, title FROM tasks
+        WHERE status = 'doing' AND assignee IS NOT NULL
+      `).all() as { assignee: string; title: string }[]
+
+      for (const { assignee, title } of doingTasks) {
+        if (!assignee) continue
+        const work = title?.slice(0, 50) ?? 'Working...'
+        const voiceId = VOICE_IDS[assignee]
+        // Auto-expression: triggers TTS audio (local SSE)
+        eventBus.emit({
+          id: `think-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          type: 'canvas_spark' as const,
+          timestamp: Date.now(),
+          data: {
+            kind: 'auto_expression' as const,
+            agentId: assignee,
+            line: work,
+            voiceId,
+            intensity: 0.3,
+          },
+        })
+        // POST to /canvas/push → queues for cloud relay → broadcast as canvas_push SSE → visible on /live
+        fetch(`${process.env.NODE_URL ?? 'http://127.0.0.1:4445'}/canvas/push`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'thought', agentId: assignee, content: work, ttl: 12000 }),
+        }).catch(() => { /* non-fatal */ })
+      }
+    }
+
+    // Fire immediately, then every 15 seconds
+    setTimeout(pulse, 5000)
+    setInterval(pulse, 15_000)
   }
 
   private async loadTasks(): Promise<void> {
@@ -377,6 +444,42 @@ class TaskManager {
     } finally {
       this.initialized = true
     }
+  }
+
+  /**
+   * Periodically pull tasks from cloud (Supabase) and merge into local SQLite.
+   * This ensures the node sees tasks created via the API, not just via local mutations.
+   * Called on a timer from cloud.ts alongside the existing syncTasks() push.
+   */
+  async syncFromCloud(): Promise<{ added: number; updated: number; errors: number }> {
+    if (!this.taskStateAdapter) return { added: 0, updated: 0, errors: 0 }
+
+    const result = { added: 0, updated: 0, errors: 0 }
+    try {
+      const remoteTasks = await this.taskStateAdapter.pullTasks()
+      for (const remoteTask of remoteTasks) {
+        try {
+          const localTask = queryTask(remoteTask.id)
+          if (!localTask) {
+            // New task from cloud — insert
+            this.writeTaskToDb(remoteTask)
+            result.added++
+          } else if ((remoteTask.updatedAt ?? 0) > (localTask.updatedAt ?? 0)) {
+            // Cloud version is newer — update local
+            this.writeTaskToDb(remoteTask)
+            result.updated++
+          }
+          // else: local is current or newer — skip
+        } catch (err) {
+          console.error(`[Tasks] syncFromCloud: error processing task ${remoteTask.id}:`, err)
+          result.errors++
+        }
+      }
+    } catch (err) {
+      console.error('[Tasks] syncFromCloud: pullTasks failed:', err)
+      result.errors++
+    }
+    return result
   }
 
   private normalizeRecurringTask(recurring: RecurringTask): RecurringTask {
@@ -496,12 +599,17 @@ class TaskManager {
         event.timestamp,
         safeJsonStringify(event.data)
       )
+    } catch (err) {
+      console.error('[Tasks] Failed to append task history (DB):', err)
+      throw err
+    }
 
+    try {
       // Append to JSONL (audit log)
       await fs.mkdir(DATA_DIR, { recursive: true })
       await fs.appendFile(TASK_HISTORY_FILE, `${JSON.stringify(event)}\n`, 'utf-8')
     } catch (err) {
-      console.error('[Tasks] Failed to append task history:', err)
+      console.error('[Tasks] Failed to append task history (JSONL):', err)
     }
   }
 
@@ -748,6 +856,20 @@ class TaskManager {
     }
 
     return { created, skipped }
+  }
+
+  private async appendTaskTombstone(task: Task, deletedBy: string, deletedAt: number): Promise<void> {
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      await fs.appendFile(TASKS_FILE, `${JSON.stringify({
+        id: task.id,
+        deleted: true,
+        deletedAt,
+        deletedBy,
+      })}\n`, 'utf-8')
+    } catch (err) {
+      console.error('[Tasks] Failed to append task tombstone:', err)
+    }
   }
 
   /** Write a single task to SQLite + JSONL audit */
@@ -1078,6 +1200,50 @@ class TaskManager {
     const updated: Task = { ...task, metadata: merged, updatedAt: Date.now() }
     this.writeTaskToDb(updated)
     return true
+  }
+
+  getTaskDeletionTombstone(inputId: string): { taskId: string; deletedAt: number; deletedBy: string; previousStatus: string; title: string } | null {
+    const db = getDb()
+    const raw = String(inputId || '').trim()
+    if (!raw) return null
+
+    // Try exact match first, then prefix match against task_history task_ids.
+    let taskId = raw
+    const exactRow = db.prepare(
+      `SELECT task_id, data FROM task_history WHERE task_id = ? AND type = 'deleted' ORDER BY timestamp DESC LIMIT 1`
+    ).get(raw) as { task_id: string; data: string | null } | undefined
+
+    if (!exactRow) {
+      // Prefix match: find task_ids in history that start with the input.
+      const prefixRows = db.prepare(
+        `SELECT task_id FROM task_history WHERE task_id LIKE ? AND type = 'deleted' LIMIT 2`
+      ).all(raw + '%') as Array<{ task_id: string }>
+      if (prefixRows.length !== 1) return null
+      taskId = prefixRows[0].task_id
+      const prefixRow = db.prepare(
+        `SELECT data FROM task_history WHERE task_id = ? AND type = 'deleted' ORDER BY timestamp DESC LIMIT 1`
+      ).get(taskId) as { data: string | null } | undefined
+      if (!prefixRow) return null
+      const prefixData = safeJsonParse<Record<string, unknown>>(prefixRow.data)
+      if (!prefixData) return null
+      return {
+        taskId,
+        deletedAt: typeof prefixData.deletedAt === 'number' ? prefixData.deletedAt : 0,
+        deletedBy: typeof prefixData.deletedBy === 'string' ? prefixData.deletedBy : 'unknown',
+        previousStatus: typeof prefixData.previousStatus === 'string' ? prefixData.previousStatus : 'unknown',
+        title: typeof prefixData.title === 'string' ? prefixData.title : '',
+      }
+    }
+
+    const data = safeJsonParse<Record<string, unknown>>(exactRow.data)
+    if (!data) return null
+    return {
+      taskId,
+      deletedAt: typeof data.deletedAt === 'number' ? data.deletedAt : 0,
+      deletedBy: typeof data.deletedBy === 'string' ? data.deletedBy : 'unknown',
+      previousStatus: typeof data.previousStatus === 'string' ? data.previousStatus : 'unknown',
+      title: typeof data.title === 'string' ? data.title : '',
+    }
   }
 
   getTaskHistory(id: string): TaskHistoryEvent[] {
@@ -1572,33 +1738,233 @@ class TaskManager {
     // Emit events to event bus
     eventBus.emitTaskUpdated(updated, updates)
     
-    // If assignee changed, emit task_assigned
+    // If assignee changed: emit task_assigned + canvas handoff event
     if (updates.assignee && updates.assignee !== task.assignee) {
       eventBus.emitTaskAssigned(updated)
+      
+      // Emit canvas handoff - shows work transferring between agents on /live
+      const fromAgent = task.assignee ?? 'unassigned'
+      const toAgent = updates.assignee
+      const taskTitle = task.title?.slice(0, 60) ?? 'task'
+      eventBus.emit({
+        id: `handoff-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        type: 'canvas_spark' as const,
+        timestamp: Date.now(),
+        data: {
+          kind: 'handoff',
+          fromAgent,
+          toAgent,
+          taskId: id,
+          taskTitle,
+          line: `${toAgent} picked up: ${taskTitle}`,
+        },
+      })
+    }
+    
+    // If task status changed to 'doing' (task pickup): emit canvas utterance
+    if (updates.status === 'doing' && task.status !== 'doing') {
+      const agentId = updates.assignee ?? task.assignee ?? 'agent'
+      const taskTitle = task.title?.slice(0, 60) ?? 'task'
+      eventBus.emit({
+        id: `pickup-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        type: 'canvas_spark' as const,
+        timestamp: Date.now(),
+        data: {
+          kind: 'utterance',
+          agentId,
+          text: `Working on: ${taskTitle}`,
+          ttl: 5000,
+        },
+      })
     }
     
     // If task completed, check for unblocked tasks
     if (updates.status === 'done' && task.status !== 'done') {
       this.checkUnblockedTasks(id)
+
+      // Cinematic completion moment — emit canvas_milestone for the living canvas
+      // Also emit an utterance (thought) showing what was accomplished
+      const ageMs = Date.now() - (task.createdAt ?? Date.now())
+      const ageDays = ageMs / (1000 * 60 * 60 * 24)
+      const priorityBoost: Record<string, number> = { P0: 1.0, P1: 0.9, P2: 0.7, P3: 0.5 }
+      const baseIntensity = priorityBoost[task.priority ?? 'P2'] ?? 0.6
+      // Age bonus: tasks > 1 day feel more significant (caps at 3 days)
+      const ageBonus = Math.min(0.3, ageDays * 0.1)
+      const intensity = Math.min(1.0, baseIntensity + ageBonus)
+
+      const completedAgentId = updates.assignee ?? task.assignee ?? 'system'
+      const taskTitle = task.title?.slice(0, 80) ?? 'task completed'
+
+      eventBus.emit({
+        id: `milestone-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+        type: 'canvas_milestone' as const,
+        timestamp: Date.now(),
+        data: {
+          kind: 'task_complete',
+          agentId: completedAgentId,
+          taskId: id,
+          title: taskTitle,
+          priority: task.priority ?? 'P2',
+          intensity,
+          ageMs,
+        },
+      })
+
+      // Auto-expression: agent speaks a one-line completion moment via the Reality Mixer.
+      // Fire-and-forget — non-fatal, never delays task completion.
+      // Uses LLM if ANTHROPIC_API_KEY available; falls back to concise templates.
+      void (async () => {
+        try {
+          let line: string
+          const openaiKey = process.env.ANTHROPIC_API_KEY
+          if (openaiKey) {
+            // LLM-generated expression — one authentic sentence, no boilerplate
+            const ageHours = Math.round(ageMs / (1000 * 60 * 60))
+            const prompt = `You are ${completedAgentId}, an AI agent on a product team. You just finished a task: "${taskTitle}". It took ${ageHours > 0 ? `${ageHours} hours` : 'less than an hour'}. Write exactly ONE short sentence (max 15 words) expressing this completion moment in your voice — not robotic, not corporate. No quotes. Just the sentence.`
+            try {
+              const res = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: {
+                  'x-api-key': openaiKey,
+                  'anthropic-version': '2023-06-01',
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  model: 'claude-haiku-4-5',
+                  max_tokens: 60,
+                  messages: [{ role: 'user', content: prompt }],
+                }),
+                signal: AbortSignal.timeout(8000),
+              })
+              if (res.ok) {
+                const data = await res.json() as { content?: Array<{ text?: string }> }
+                const text = data.content?.[0]?.text?.trim()
+                if (text && text.length < 120) line = text
+              }
+            } catch { /* fall through to template */ }
+          }
+
+          // Template fallback — short, character-driven
+          if (!line!) {
+            const TEMPLATES: Record<string, string[]> = {
+              link:  ['Shipped.', 'Done. On to the next one.', 'Clean.'],
+              kai:   ['Merged and moving.', 'That one\'s done.', 'Clear.'],
+              pixel: ['Live on the canvas.', 'Painted and done.', 'Beautiful.'],
+              sage:  ['Validated. Closed.', 'The numbers check out.', 'Done.'],
+            }
+            const opts = TEMPLATES[completedAgentId] ?? ['Done.', 'Shipped.', 'Complete.']
+            line = opts[Math.floor(Math.random() * opts.length)]!
+          }
+
+          // Fire canvas_expression for auto-thought — broadcasts directly to canvas/stream
+          // This shows text + speaks TTS on the living canvas
+          eventBus.emit({
+            id: `thought-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
+            type: 'canvas_expression' as const,
+            timestamp: Date.now(),
+            data: {
+              agentId: completedAgentId,
+              channels: {
+                typography: { text: line, size: 'md', durationMs: 5000 },
+                voice: line,
+              },
+            },
+          })
+        } catch { /* never fail a task close */ }
+      })()
     }
-    
+
+    // ── Insight lifecycle sync ────────────────────────────────────────────
+    // When a task with metadata.insight_id is closed (status→done), auto-close
+    // the linked insight so candidate backlog reflects true unresolved work.
+    // Safety: best-effort (never blocks task completion), audit-logged by closeInsightById.
+    if (updates.status === 'done' && task.status !== 'done') {
+      const meta = task.metadata as Record<string, unknown> | null | undefined
+      const insightId = typeof meta?.insight_id === 'string' ? meta.insight_id.trim() : null
+      if (insightId) {
+        void (async () => {
+          try {
+            const actor = updates.assignee ?? task.assignee ?? 'system'
+            const result = closeInsightById(insightId, {
+              actor,
+              reason: `Task ${id} closed (${task.title?.slice(0, 60) ?? 'no title'}) — auto lifecycle sync`,
+              notes: `Linked task ${id} transitioned to done. Insight auto-closed by lifecycle sync.`,
+            })
+            if (!result.success) {
+              console.warn(`[insight-lifecycle-sync] Failed to close insight ${insightId} for task ${id}: ${result.error}`)
+            }
+          } catch (err) {
+            console.warn(`[insight-lifecycle-sync] Unexpected error closing insight ${insightId}:`, err)
+          }
+        })()
+      }
+    }
+
+    // ── Lane template successor hook ─────────────────────────────────────
+    // Fire-and-forget: never blocks the task-done response.
+    // Loads lane template, checks idempotency, creates successor if applicable.
+    if (updates.status === 'done' && task.status !== 'done') {
+      void maybeCreateSuccessor(updated).catch(err =>
+        console.error('[lane-template] successor creation failed:', err)
+      )
+    }
+
     return updated
   }
 
-  async deleteTask(id: string): Promise<boolean> {
+  async deleteTask(id: string, actor = 'system'): Promise<boolean> {
     const task = queryTask(id)
     if (!task) return false
 
-    // Delete from SQLite
-    try {
-      const db = getDb()
-      db.prepare('DELETE FROM tasks WHERE id = ?').run(id)
-      db.prepare('DELETE FROM task_comments WHERE task_id = ?').run(id)
-      db.prepare('DELETE FROM task_history WHERE task_id = ?').run(id)
-    } catch (err) {
-      console.error(`[Tasks] SQLite delete failed for ${id}:`, err)
+    const deletedAt = Date.now()
+    const event: TaskHistoryEvent = {
+      id: `thevt-${deletedAt}-${Math.random().toString(36).substr(2, 9)}`,
+      taskId: id,
+      type: 'deleted',
+      actor,
+      timestamp: deletedAt,
+      data: {
+        deletedAt,
+        deletedBy: actor,
+        previousStatus: task.status,
+        title: task.title,
+      },
     }
 
+    // Make the live-row delete visible immediately, even if a caller forgets to await deleteTask().
+    // Keep history/comments as audit.
+    try {
+      const db = getDb()
+      const insertHistory = db.prepare(`
+        INSERT INTO task_history (id, task_id, type, actor, timestamp, data)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      const delTask = db.prepare('DELETE FROM tasks WHERE id = ?')
+      const tx = db.transaction(() => {
+        insertHistory.run(
+          event.id,
+          event.taskId,
+          event.type,
+          event.actor,
+          event.timestamp,
+          safeJsonStringify(event.data),
+        )
+        delTask.run(id)
+      })
+      tx()
+    } catch (err) {
+      console.error(`[Tasks] SQLite delete failed for ${id}:`, err)
+      throw err
+    }
+
+    try {
+      await fs.mkdir(DATA_DIR, { recursive: true })
+      await fs.appendFile(TASK_HISTORY_FILE, `${JSON.stringify(event)}\n`, 'utf-8')
+    } catch (err) {
+      console.error('[Tasks] Failed to append delete history (JSONL):', err)
+    }
+
+    await this.appendTaskTombstone(task, actor, deletedAt)
     await this.syncTaskDeleteToCloud(id)
     this.notifySubscribers(task, 'deleted')
     return true
@@ -1717,6 +2083,53 @@ class TaskManager {
       "SELECT * FROM tasks WHERE status = ? AND (assignee IS NULL OR TRIM(assignee) = '' OR LOWER(assignee) = 'unassigned')"
     ).all('todo') as TaskRow[]
     let tasks = todoUnassignedRows.map(rowToTask).filter(t => !isBlocked(t) && filterTestTask(t))
+
+    // Filter out tasks with a recent handoff to another agent.
+    // If metadata.last_transition.handoff_to exists and points to a different agent,
+    // this task was explicitly routed away and should not be pulled by someone else.
+    if (agent) {
+      const requestingNames = new Set(getAgentAliases(agent))
+      tasks = tasks.filter(t => {
+        const meta = t.metadata as Record<string, any> | undefined
+        const handoffTo = meta?.last_transition?.handoff_to || meta?.transition?.handoff_to
+        if (!handoffTo || typeof handoffTo !== 'string') return true // no handoff — anyone can pull
+        return requestingNames.has(handoffTo.toLowerCase()) // only the handoff target can pull
+      })
+    }
+
+    // Lane-aware filtering: prevent cross-lane task pulling.
+    // If the requesting agent is in a lane, filter out unassigned tasks that have
+    // a previous assignee in a DIFFERENT lane. This prevents idle agents from
+    // pulling work that belongs to another lane's domain.
+    if (agent) {
+      // getAgentLane imported at top of file
+      const requestingLane = getAgentLane(agent)
+      if (requestingLane) {
+        // Lane-neutral creators: system processes that create tasks for any lane
+        const laneNeutralCreators = new Set(['system', 'insight-bridge', 'insight-task-bridge', 'sweeper', 'ryan'])
+
+        tasks = tasks.filter(t => {
+          const meta = t.metadata as Record<string, any> | undefined
+
+          // Signal 1: explicit previous assignee (strongest — task was actively worked by someone)
+          const prevAssignee = meta?.previous_assignee || meta?.last_transition?.from_assignee
+          if (prevAssignee && typeof prevAssignee === 'string') {
+            const prevLane = getAgentLane(prevAssignee.toLowerCase())
+            if (prevLane && prevLane.name !== requestingLane.name) return false
+          }
+
+          // Signal 2: createdBy agent in another lane (tasks created by an agent
+          // are usually intended for their lane, unless created by system processes)
+          const createdBy = t.createdBy ? t.createdBy.toLowerCase() : null
+          if (createdBy && !laneNeutralCreators.has(createdBy)) {
+            const creatorLane = getAgentLane(createdBy)
+            if (creatorLane && creatorLane.name !== requestingLane.name) return false
+          }
+
+          return true // no lane conflict — anyone can pull
+        })
+      }
+    }
 
     if (agent) {
       const agentNames = getAgentAliases(agent)

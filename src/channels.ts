@@ -17,6 +17,7 @@ export const DEFAULT_CHAT_CHANNELS = CHANNEL_DEFINITIONS.map(channel => channel.
 
 export const DEFAULT_INBOX_SUBSCRIPTIONS = [
   'general',
+  'canvas',
   'decisions',
   'shipping',
   'reviews',

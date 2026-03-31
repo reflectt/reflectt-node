@@ -122,6 +122,15 @@ const ESCALATION_COOLDOWN_MS = 4 * 60 * 60 * 1000 // 4 hours
 const ARTIFACT_GRACE_MS = 24 * 60 * 60 * 1000 // 24 hours
 
 /**
+ * Post-merge reviewer nudge: when PR is confirmed merged but reviewer hasn't acted,
+ * post a comment to nudge. Distinct from the SLA escalation alert.
+ */
+const POST_MERGE_NUDGE_MS = 2 * 60 * 60 * 1000 // 2h after PR merged with no reviewer activity
+
+/** Post-merge auto-close: PR merged + 24h stale — close regardless of review state */
+const POST_MERGE_AUTOCLOSE_MS = 24 * 60 * 60 * 1000 // 24h
+
+/**
  * @deprecated Use formatDuration(ms) from format-duration.ts instead.
  * Kept temporarily for reference; all call sites now use formatDuration().
  */
@@ -526,6 +535,41 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
 
     if (ageSinceActivity >= VALIDATING_CRITICAL_MS && effective?.level !== 'critical') {
       const prUrl = extractPrUrl(meta)
+
+      // ── PR-merged auto-close guard ────────────────────────────────────
+      // Before firing a reminder, check if the linked PR is already merged.
+      // If merged, auto-close the task instead of sending a stale alert.
+      if (prUrl) {
+        const liveState = checkLivePrState(prUrl)
+        if (liveState.state === 'merged') {
+          logDryRun('pr_merged_autoclose', `${task.id} — PR ${prUrl} is merged, auto-closing instead of escalating`)
+          try {
+            await taskManager.updateTask(task.id, {
+              status: 'done',
+              metadata: {
+                ...meta,
+                auto_closed: true,
+                auto_closed_at: now,
+                auto_close_reason: 'sweeper_pr_merged',
+                pr_merged: true,
+                sweeper_escalation_level: undefined,
+                sweeper_escalated_at: undefined,
+                sweeper_escalation_count: undefined,
+              },
+            } as any)
+            autoClosedIds.add(task.id)
+            chatManager.sendMessage({
+              from: 'system',
+              channel: 'task-notifications',
+              content: `✅ Auto-closed "${task.title}" (${task.id}) — linked PR is merged. @${task.assignee || 'unassigned'} no action needed.`,
+            }).catch(() => {})
+          } catch (err) {
+            logDryRun('pr_merged_autoclose_failed', `${task.id} — ${String(err)}`)
+          }
+          continue
+        }
+      }
+
       const newCount = persistedCount + 1
       violations.push({
         taskId: task.id,
@@ -547,6 +591,70 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
       logDryRun('validating_critical', `${task.id} — ${ageMinutes}m — reviewer:${task.reviewer} assignee:${task.assignee} count:${newCount}`)
     } else if (ageSinceActivity >= VALIDATING_SLA_MS && !effective) {
       const prUrl = extractPrUrl(meta)
+
+      // ── Post-merge reviewer SLA: nudge or auto-close ─────────────────
+      // When PR is confirmed merged, we don't need to escalate — we need
+      // the reviewer to sign off (or we auto-close after 24h).
+      //
+      // Tier A (2h): PR merged + no reviewer activity → nudge comment, skip SLA alert
+      // Tier B (24h): PR merged + stale → auto-close (done work shouldn't wait forever)
+      if (prUrl) {
+        const liveState = checkLivePrState(prUrl)
+        if (liveState.state === 'merged') {
+          // Tier B: 24h+ since last activity — auto-close regardless of review state
+          if (ageSinceActivity >= POST_MERGE_AUTOCLOSE_MS) {
+            logDryRun('pr_merged_autoclose_24h', `${task.id} — PR merged, 24h stale, auto-closing`)
+            try {
+              const reviewApproved = meta.reviewer_approved === true || meta.review_state === 'approved'
+              await taskManager.updateTask(task.id, {
+                status: 'done',
+                metadata: {
+                  ...meta,
+                  auto_closed: true,
+                  auto_closed_at: now,
+                  auto_close_reason: reviewApproved ? 'sweeper_pr_merged_review_approved' : 'sweeper_pr_merged_24h_stale',
+                  pr_merged: true,
+                  sweeper_escalation_level: undefined,
+                  sweeper_escalated_at: undefined,
+                  sweeper_escalation_count: undefined,
+                },
+              } as any)
+              autoClosedIds.add(task.id)
+              await taskManager.addTaskComment(task.id, 'sweeper',
+                `[auto-close] PR is merged and task has been in validating for ${Math.round(ageSinceActivity / 3_600_000 * 10) / 10}h without reviewer action. Closing as done. Reviewer: @${task.reviewer || 'unassigned'} — if this was premature, reopen.`
+              )
+              chatManager.sendMessage({
+                from: 'system',
+                channel: 'task-notifications',
+                content: `✅ Auto-closed "${task.title}" (${task.id}) — PR merged + 24h stale. @${task.reviewer || 'unassigned'} reopen if needed.`,
+              }).catch(() => {})
+            } catch (err) {
+              logDryRun('pr_merged_autoclose_failed', `${task.id} — ${String(err)}`)
+            }
+            continue
+          }
+
+          // Tier A: 2h+ since last activity — post reviewer nudge (once)
+          if (ageSinceActivity >= POST_MERGE_NUDGE_MS && meta.post_merge_nudge_sent !== true) {
+            logDryRun('pr_merged_reviewer_nudge', `${task.id} — PR merged, nudging reviewer @${task.reviewer}`)
+            try {
+              taskManager.patchTaskMetadata(task.id, { post_merge_nudge_sent: true, post_merge_nudge_at: now })
+              await taskManager.addTaskComment(task.id, 'sweeper',
+                `[reviewer-nudge] PR is confirmed merged but no reviewer activity in ${Math.round(ageSinceActivity / 60_000)}m. @${task.reviewer || 'unassigned'} — please review and close, or approve so this can auto-close. Will auto-close at 24h if no action.`
+              )
+              chatManager.sendMessage({
+                from: 'system',
+                channel: 'task-notifications',
+                content: `📬 Reviewer nudge: "${task.title}" (${task.id}) PR is merged — @${task.reviewer || 'unassigned'} please review and close.`,
+              }).catch(() => {})
+            } catch (err) {
+              logDryRun('pr_merged_nudge_failed', `${task.id} — ${String(err)}`)
+            }
+          }
+          continue // don't fire SLA alert — PR is merged, work is done
+        }
+      }
+
       const newCount = persistedCount + 1
       violations.push({
         taskId: task.id,
@@ -777,6 +885,25 @@ export function hasRequiredArtifacts(meta: Record<string, unknown>): boolean {
 
 async function escalateViolations(violations: SweepViolation[]): Promise<void> {
   if (violations.length === 0) return
+
+  // ── Race-guard: drop violations for tasks that have since closed or been approved ──
+  // Between sweep snapshot and dispatch, a task may have transitioned to done/cancelled
+  // or received reviewer approval. Sending pings for closed/approved tasks wastes agent
+  // cycles and erodes trust in review notifications.
+  const liveViolations = violations.filter(v => {
+    const lookup = taskManager.resolveTaskId(v.taskId)
+    if (!lookup.task) return false // task deleted — suppress
+    const { status, metadata } = lookup.task
+    if (status === 'done' || status === 'cancelled') return false // already closed
+    const meta = (metadata || {}) as Record<string, unknown>
+    if (meta.reviewer_approved === true || meta.review_state === 'approved') return false // already approved
+    return true
+  })
+  if (liveViolations.length === 0) {
+    logDryRun('sweeper_digest_suppressed_race', `all ${violations.length} violation(s) stale at dispatch time`)
+    return
+  }
+  violations = liveViolations
 
   // Digest-level dedupe: don't re-emit the same digest repeatedly while unchanged.
   // Scope: process-local/in-memory only. The suppression window survives repeated
@@ -1071,6 +1198,46 @@ export function startSweeper(): void {
     ;(async () => {
       const result = await sweepValidatingQueue()
       escalateViolations(result.violations)
+
+      // Slow-task detection + trust signal (distinct from explicit blocked)
+      // Slow = doing >4h no activity. Blocked = explicit status change.
+      // Host enforces this — no @kai escalation, just flag in task comment.
+      try {
+        const SLOW_THRESHOLD_MS = 4 * 60 * 60 * 1000 // 4h without any activity
+        const TRUST_SIGNAL_THRESHOLD_MS = 60 * 60 * 1000 // 1h for trust signal (more sensitive)
+        const now = Date.now()
+        const doingTasks = taskManager.listTasks({ status: 'doing' })
+        const { emitTrustEvent } = await import('./trust-events.js')
+        for (const task of doingTasks) {
+          const comments = taskManager.getTaskComments(task.id)
+          const lastComment = comments.length > 0 ? comments[comments.length - 1] : null
+          const lastTs = lastComment?.timestamp ?? task.updatedAt ?? task.createdAt
+          const age = now - lastTs
+
+          // Trust signal: 1h silence
+          if (age > TRUST_SIGNAL_THRESHOLD_MS) {
+            emitTrustEvent({
+              agentId: task.assignee || 'unknown',
+              eventType: 'stale_status_claim',
+              taskId: task.id,
+              summary: `Task "${task.title}" in doing for ${Math.round(age / 60_000)}m without update`,
+              context: { taskId: task.id, taskTitle: task.title, assignee: task.assignee, staleMs: age, lastCommentAt: lastTs },
+            })
+          }
+
+          // Slow flag: 4h — post a comment to the task (not an escalation)
+          if (age > SLOW_THRESHOLD_MS) {
+            const alreadyFlagged = comments.some(c =>
+              c.author === 'sweeper' && typeof c.content === 'string' && c.content.includes('[slow-flag]')
+            )
+            if (!alreadyFlagged) {
+              await taskManager.addTaskComment(task.id, 'sweeper',
+                `[slow-flag] Task has been in doing for ${Math.round(age / 3_600_000 * 10) / 10}h without activity. Not blocked (no explicit status change) — just slow. Check GET /tasks/slow-blocked for full picture.`
+              )
+            }
+          }
+        }
+      } catch { /* non-fatal */ }
 
       // Todo hoarding sweep (runs alongside validating sweep)
       try {

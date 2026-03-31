@@ -24,6 +24,23 @@ export const TODO_CAP = 3
 /** Agent must be idle for this long (no doing tasks + no activity) before unassign */
 export const IDLE_THRESHOLD_MS = 30 * 60 * 1000 // 30 minutes
 
+/**
+ * Startup grace period: skip auto-unassignment for this long after server start.
+ *
+ * Root cause of the "gateway restart clears assignees" bug:
+ * After a server/gateway restart, all agents are temporarily disconnected.
+ * The hoarding sweep uses task.updatedAt for idle detection — if tasks were
+ * last updated >30m ago, agents appear idle immediately on startup. The sweep
+ * then mass-unassigns their overflow todos before agents can reconnect.
+ *
+ * Fix: suppress Rule A (auto-unassign) during the grace period so agents have
+ * time to reconnect and resume work. Rule B (orphan tagging) still runs.
+ */
+export const STARTUP_GRACE_MS = 10 * 60 * 1000 // 10 minutes
+
+/** Timestamp when this module was first loaded (proxy for server start) */
+const moduleLoadedAt = Date.now()
+
 /** Priority ordering (lower index = higher priority, kept first) */
 const PRIORITY_ORDER = ['P0', 'P1', 'P2', 'P3']
 
@@ -78,10 +95,22 @@ function getAgentLastActivity(agent: string, allTasks: Task[]): number {
 /**
  * Run the hoarding sweep. Returns actions taken (or would be taken in dry-run).
  */
-export async function sweepTodoHoarding(opts: { dryRun?: boolean } = {}): Promise<HoardingSweepResult> {
-  const { dryRun = false } = opts
-  const now = Date.now()
+export async function sweepTodoHoarding(opts: {
+  dryRun?: boolean
+  /** @internal test-only: override Date.now() */
+  _nowOverride?: number
+  /** @internal test-only: override moduleLoadedAt */
+  _moduleLoadedAtOverride?: number
+} = {}): Promise<HoardingSweepResult> {
+  const { dryRun = false, _nowOverride, _moduleLoadedAtOverride } = opts
+  const now = _nowOverride ?? Date.now()
+  const effectiveModuleLoadedAt = _moduleLoadedAtOverride ?? moduleLoadedAt
   const allTasks = taskManager.listTasks() as Task[]
+
+  // Startup grace period: suppress auto-unassignment (Rule A) while agents reconnect.
+  // Rule B (orphan detection) is read-only and safe to run immediately.
+  const uptimeMs = now - effectiveModuleLoadedAt
+  const inGracePeriod = uptimeMs < STARTUP_GRACE_MS
 
   // Group by assignee
   const byAssignee = new Map<string, { todo: Task[]; doing: Task[] }>()
@@ -116,6 +145,8 @@ export async function sweepTodoHoarding(opts: { dryRun?: boolean } = {}): Promis
     }
 
     // Rule A: auto-unassign overflow
+    // Skip during startup grace period — agents may not have reconnected yet
+    if (inGracePeriod) continue
     // Skip agents actively doing work
     if (doing.length > 0) continue
     // Skip agents with todo at or below cap

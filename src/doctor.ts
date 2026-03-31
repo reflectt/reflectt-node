@@ -123,7 +123,7 @@ export async function collectDoctorReport(input: {
   if (freshInstall) {
     hints.push('Server is not running. Start it with: reflectt start')
     hints.push('First time? Run: reflectt init && reflectt start')
-    hints.push('Connect to cloud: https://app.reflectt.ai')
+    hints.push('Connect to cloud: https://api.reflectt.ai')
     hints.push('Dashboard: http://127.0.0.1:4445/dashboard (after starting)')
   } else if (setupMode) {
     hints.push('Your node is running! Next: add a model key to start using AI features.')
@@ -171,7 +171,7 @@ export function formatDoctorHuman(report: DoctorReport): string {
     lines.push('  reflectt doctor        # Re-run diagnostics')
     lines.push('')
     lines.push('Connect to cloud:')
-    lines.push('  https://app.reflectt.ai')
+    lines.push('  https://api.reflectt.ai')
     lines.push('')
     lines.push('Once running, your dashboard will be at:')
     lines.push(`  ${report.baseUrl}/dashboard`)

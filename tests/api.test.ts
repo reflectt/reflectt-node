@@ -181,6 +181,20 @@ describe('Health', () => {
     expect(Array.isArray(body.assignmentRoleNames)).toBe(true)
   })
 
+  it('GET /health/team includes host-local scope metadata', async () => {
+    const { status, body } = await req('GET', '/health/team')
+    expect(status).toBe(200)
+    expect(body.scope).toBeDefined()
+    expect(body.scope.kind).toBe('host-local')
+    expect(typeof body.scope.hostName).toBe('string')
+    expect(body.scope.hostName.length).toBeGreaterThan(0)
+    expect(typeof body.scope.label).toBe('string')
+    expect(body.scope.label).toContain(body.scope.hostName)
+    expect(typeof body.scope.message).toBe('string')
+    expect(body.scope.message).toContain('host-local')
+    expect(body.scope.orgHealthUrl === null || typeof body.scope.orgHealthUrl === 'string').toBe(true)
+  })
+
   it('GET /health/team includes active task title + PR link for each agent when available', async () => {
     const prLink = 'https://github.com/reflectt/reflectt-node/pull/59'
     const agentName = `health-agent-${Date.now()}`
@@ -738,14 +752,82 @@ describe('Task CRUD', () => {
     expect(status).toBe(200)
     expect(body.success).toBe(true)
 
-    // Verify deleted
-    const { body: body2 } = await req('GET', `/tasks/${taskId}`)
-    expect(body2.error).toBe('Task not found')
+    // Verify deleted — now returns 410 Gone with tombstone, not 404
+    const { body: body2, status: status2 } = await req('GET', `/tasks/${taskId}`)
+    expect(status2).toBe(410)
+    expect(body2.code).toBe('TASK_DELETED')
+  })
+
+  it('DELETE /tasks/:id writes deleted history + tombstone audit records', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: delete tombstone audit',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Delete audit persists'],
+      eta: '1h',
+    })
+
+    const deleteTaskId = created.task.id
+
+    const del = await req('DELETE', `/tasks/${deleteTaskId}`)
+    expect(del.status).toBe(200)
+    expect(del.body.success).toBe(true)
+
+    const db = getDb()
+    const deletedEvents = db.prepare(`
+      SELECT * FROM task_history WHERE task_id = ? AND type = 'deleted' ORDER BY timestamp DESC
+    `).all(deleteTaskId) as Array<{ actor: string; data: string | null }>
+
+    expect(deletedEvents.length).toBeGreaterThan(0)
+    expect(deletedEvents[0].actor).toBe('system')
+    expect(JSON.parse(deletedEvents[0].data || '{}')).toMatchObject({
+      deletedBy: 'system',
+      previousStatus: 'todo',
+      title: 'TEST: delete tombstone audit',
+    })
+
+    const historyAudit = await fs.readFile(join(DATA_DIR, 'tasks.history.jsonl'), 'utf-8')
+    expect(historyAudit).toContain(`"taskId":"${deleteTaskId}"`)
+    expect(historyAudit).toContain('"type":"deleted"')
+
+    const taskAudit = await fs.readFile(join(DATA_DIR, 'tasks.jsonl'), 'utf-8')
+    expect(taskAudit).toContain(`"id":"${deleteTaskId}"`)
+    expect(taskAudit).toContain('"deleted":true')
+    expect(taskAudit).toContain('"deletedBy":"system"')
   })
 
   it('GET /tasks/:id returns error for nonexistent', async () => {
     const { body } = await req('GET', '/tasks/nonexistent-id')
     expect(body.error).toBe('Task not found')
+  })
+
+  it('GET /tasks/:id returns 410 Gone with tombstone after task is deleted', async () => {
+    const { body: created } = await req('POST', '/tasks', {
+      title: 'TEST: 410 tombstone check',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      priority: 'P2',
+      done_criteria: ['Verify 410 on deleted task'],
+      eta: '1h',
+    })
+
+    const taskId = created.task.id
+
+    const del = await req('DELETE', `/tasks/${taskId}`)
+    expect(del.status).toBe(200)
+
+    const get = await req('GET', `/tasks/${taskId}`)
+    expect(get.status).toBe(410)
+    expect(get.body.code).toBe('TASK_DELETED')
+    expect(get.body.tombstone).toMatchObject({
+      taskId,
+      deletedBy: 'system',
+      previousStatus: 'todo',
+      title: 'TEST: 410 tombstone check',
+    })
+    expect(get.body.tombstone.deletedAt).toBeGreaterThan(0)
   })
 })
 
@@ -2152,6 +2234,85 @@ describe('Review State Tracking Metadata', () => {
   })
 })
 
+describe('Cancelled task review-metadata cleanup', () => {
+  let taskId: string
+
+  beforeAll(async () => {
+    const { body } = await req('POST', '/tasks', {
+      title: 'TEST: cancelled task clears stale review metadata',
+      createdBy: 'test-runner',
+      assignee: 'test-agent',
+      reviewer: 'test-reviewer',
+      priority: 'P2',
+      done_criteria: ['Cancelled task should not look like waiting-on-author'],
+      eta: '1h',
+    })
+    taskId = body.task.id
+    await advanceTo(taskId, 'doing')
+
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'validating',
+      metadata: {
+        artifact_path: 'process/test-cancelled-review-cleanup.md',
+        qa_bundle: validQaBundle({
+          summary: 'test cancelled review cleanup bundle',
+          artifact_links: ['test://artifact'],
+          review_packet: {
+            task_id: taskId,
+            pr_url: 'https://github.com/reflectt/reflectt-node/pull/99998',
+            commit: 'cafebabe',
+            changed_files: ['src/server.ts'],
+            artifact_path: 'process/test-cancelled-review-cleanup.md',
+            caveats: 'none',
+          },
+        }),
+        review_handoff: {
+          task_id: taskId,
+          repo: 'reflectt/reflectt-node',
+          pr_url: 'https://github.com/reflectt/reflectt-node/pull/99998',
+          commit_sha: 'cafebabe',
+          artifact_path: 'process/test-cancelled-review-cleanup.md',
+          known_caveats: 'none',
+        },
+      },
+    })
+
+    await req('POST', `/tasks/${taskId}/review`, {
+      reviewer: 'test-reviewer',
+      decision: 'reject',
+      comment: 'Needs changes',
+    })
+
+    await req('PATCH', `/tasks/${taskId}`, {
+      status: 'doing',
+      metadata: { transition: { type: 'claim', reason: 'addressing review feedback' }, eta: '~1h' },
+    })
+  })
+
+  afterAll(async () => {
+    await req('DELETE', `/tasks/${taskId}`)
+  })
+
+  it('clears stale review metadata when task is cancelled and unassigned', async () => {
+    const { status, body } = await req('PATCH', `/tasks/${taskId}`, {
+      status: 'cancelled',
+      assignee: 'unassigned',
+      metadata: {
+        cancel_reason: 'superseded',
+      },
+    })
+
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.task.status).toBe('cancelled')
+    expect(body.task.assignee).toBe('unassigned')
+    expect(body.task.metadata.review_state).toBeUndefined()
+    expect(body.task.metadata.reviewer_decision).toBeUndefined()
+    expect(body.task.metadata.reviewer_approved).toBeUndefined()
+    expect(body.task.metadata.review_last_activity_at).toBeUndefined()
+  })
+})
+
 describe('Chat Messages', () => {
   let authorMessageId: string
 
@@ -2528,6 +2689,13 @@ describe('Idle Nudge lane-state transitions', () => {
   it('nudges queue-clear agents to pull /tasks/next after warn threshold', async () => {
     const agent = 'lane-queue-clear-nudge'
     await cleanupAgentTasks(agent)
+    // Seed a pullable todo task so the queue-empty gate doesn't suppress the nudge
+    await req('POST', '/tasks', {
+      title: 'TEST: pullable task for queue-clear nudge',
+      assignee: agent, reviewer: 'test-reviewer', priority: 'P2',
+      createdBy: 'test-runner', eta: '1h', done_criteria: ['nudge fires correctly'],
+      status: 'todo',
+    })
     await req('POST', `/presence/${agent}`, { status: 'working' })
 
     const tickNowMs = Date.now() + (50 * 60_000) // > warnMin (45m)
@@ -3960,9 +4128,7 @@ describe('Approval Queue', () => {
     const { status, body } = await req('GET', '/approval-queue')
     expect(status).toBe(200)
     expect(body).toHaveProperty('items')
-    expect(body).toHaveProperty('total')
-    expect(body).toHaveProperty('highConfidenceCount')
-    expect(body).toHaveProperty('needsReviewCount')
+    expect(body).toHaveProperty('count')
     expect(Array.isArray(body.items)).toBe(true)
   })
 

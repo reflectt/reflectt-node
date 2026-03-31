@@ -24,6 +24,7 @@ import type { Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
 import { recordSystemLoopTick } from './system-loop-state.js'
 import { isWaitingOnAuthor } from './review-state.js'
+import { getDb } from './db.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -91,6 +92,13 @@ export interface BoardHealthWorkerConfig {
   reviewSlaThresholdMin: number
   /** Fallback reviewer when no active agent is available (default: 'ryan') */
   reviewEscalationTarget: string
+  /**
+   * Post-restart quiet window in milliseconds (default: 5 min).
+   * Ready-queue alerts are suppressed for this duration after process start
+   * to give the continuity loop time to replenish queues before watchdog fires.
+   * Set to 0 in tests that need immediate breach detection.
+   */
+  restartQuietWindowMs: number
 }
 
 const DEFAULT_CONFIG: BoardHealthWorkerConfig = {
@@ -108,14 +116,37 @@ const DEFAULT_CONFIG: BoardHealthWorkerConfig = {
   inactiveAgentThresholdMin: 1440,   // 24 hours
   reviewSlaThresholdMin: 480,        // 8 hours
   reviewEscalationTarget: 'ryan',
+  restartQuietWindowMs: 5 * 60_000, // 5 minutes — suppress post-restart thundering herd
 }
 
 // ── Worker ─────────────────────────────────────────────────────────────────
 
+const KV_DIGEST_KEY = 'board_health_last_digest_at'
+
+/** Read persisted lastDigestAt from the kv table (survives process restarts). */
+export function readPersistedDigestAt(): number {
+  try {
+    const row = getDb().prepare('SELECT value FROM kv WHERE key = ?').get(KV_DIGEST_KEY) as { value: string } | undefined
+    const parsed = row ? parseInt(row.value, 10) : 0
+    return isNaN(parsed) ? 0 : parsed
+  } catch {
+    return 0
+  }
+}
+
+/** Persist lastDigestAt so it survives process restarts. */
+export function writePersistedDigestAt(ts: number): void {
+  try {
+    getDb().prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(KV_DIGEST_KEY, String(ts))
+  } catch {
+    // Non-fatal — fall back to in-memory only
+  }
+}
+
 export class BoardHealthWorker {
   private config: BoardHealthWorkerConfig
   private auditLog: PolicyAction[] = []
-  private lastDigestAt = 0
+  private lastDigestAt = readPersistedDigestAt()
   private lastTickAt = 0
   private tickCount = 0
   private timer: ReturnType<typeof setInterval> | null = null
@@ -141,6 +172,16 @@ export class BoardHealthWorker {
       clearInterval(this.timer)
       this.timer = null
     }
+  }
+
+  /**
+   * Reset the quiet window — suppresses ready-queue alerts for
+   * `restartQuietWindowMs` from now. Call when a gateway restart or
+   * reconnection is detected so agents have time to re-establish presence
+   * before idle alerts fire.
+   */
+  resetQuietWindow(): void {
+    this.lastQuietReset = Date.now()
   }
 
   updateConfig(patch: Partial<BoardHealthWorkerConfig>): void {
@@ -278,11 +319,17 @@ export class BoardHealthWorker {
     }
 
     // 4. Emit digest if interval elapsed
+    // Re-read persisted value each tick in case another process updated it.
+    if (!dryRun) {
+      const persisted = readPersistedDigestAt()
+      if (persisted > this.lastDigestAt) this.lastDigestAt = persisted
+    }
     let digest: BoardHealthDigest | null = null
     if (force || now - this.lastDigestAt >= this.config.digestIntervalMs) {
       digest = await this.emitDigest(now, actions, dryRun)
       if (!dryRun) {
         this.lastDigestAt = now
+        writePersistedDigestAt(now)
       }
     }
 
@@ -383,6 +430,9 @@ export class BoardHealthWorker {
     return candidates.filter(task => {
       // Verify task still exists (guards against stale cache)
       if (!verifyTaskExists(task.id)) return false
+      // Skip externally-blocked tasks — they are waiting on a human dependency
+      // (e.g. API credentials, Apple Developer enrollment) and are NOT abandoned.
+      if (task.metadata?.blocked_external === true) return false
       const lastActivity = this.getTaskLastActivityAt(task)
       if (!lastActivity) {
         // If no activity at all, check createdAt with validation
@@ -457,6 +507,21 @@ export class BoardHealthWorker {
   /** Track when each agent's queue first went empty (for idle escalation) */
   private idleQueueSince: Record<string, number> = {}
 
+  /**
+   * Quiet-window anchor — used to enforce a post-restart quiet window.
+   * For the first `restartQuietWindowMs` after this timestamp, ready-queue
+   * alerts are suppressed so agents have time to reconnect and replenish queues.
+   *
+   * Initially set to process start (node restart). Also reset by
+   * `resetQuietWindow()` when an external event (e.g. gateway restart)
+   * warrants a fresh suppression window.
+   *
+   * Tests that need immediate breach detection should set restartQuietWindowMs: 0
+   * in the constructor config.
+   */
+  private readonly startedAt = Date.now()
+  private lastQuietReset = Date.now()
+
   private async checkReadyQueueFloor(now: number, dryRun: boolean): Promise<PolicyAction[]> {
     const policy = policyManager.get()
     const rqf = policy.readyQueueFloor
@@ -501,7 +566,16 @@ export class BoardHealthWorker {
       const cooldownMs = (rqf.cooldownMin || 30) * 60_000
 
       // Ready-queue floor check (breach vs info)
-      if (belowFloor && now - lastAlert > cooldownMs) {
+      // Post-restart quiet window: suppress alerts for restartQuietWindowMs after startup.
+      // Prevents thundering-herd — all agents with no prior alert record (lastAlertAt=0)
+      // would otherwise fire simultaneously on the first post-restart sweep.
+      // restartQuietWindowMs can be set to 0 in tests for immediate breach detection.
+      // Quiet window: suppress alerts shortly after any restart (node start OR gateway reconnect).
+      // Uses the most recent of startedAt and lastQuietReset as the anchor.
+      const quietAnchor = Math.max(this.startedAt, this.lastQuietReset)
+      const inStartupQuiet = lastAlert === 0 && (now - quietAnchor) < this.config.restartQuietWindowMs
+
+      if (belowFloor && now - lastAlert > cooldownMs && !inStartupQuiet) {
         const deficit = rqf.minReady - readyCount
 
         // State fingerprint: suppress if identical to last alert
@@ -895,13 +969,25 @@ export class BoardHealthWorker {
       .filter(a => a.kind === 'suggest-close' && a.taskId)
       .map(a => a.taskId!)
 
+    // Partition blocked tasks: external (human-dependency) vs internal
+    const externallyBlocked = blockedTasks.filter(t => t.metadata?.blocked_external === true)
+    const internallyBlocked = blockedTasks.filter(t => t.metadata?.blocked_external !== true)
+
     const lines = [
       `📊 **Board Health Digest**`,
       ``,
-      `**Board:** ${todoTasks.length} todo · ${doingTasks.length} doing · ${validatingTasks.length} validating · ${blockedTasks.length} blocked`,
+      `**Board:** ${todoTasks.length} todo · ${doingTasks.length} doing · ${validatingTasks.length} validating · ${internallyBlocked.length} blocked · ${externallyBlocked.length} blocked-external`,
       `**Stale doing:** ${staleDoingCount} tasks (>${this.config.staleDoingThresholdMin}m threshold)`,
       `**Abandoned candidates:** ${suggestedCloseCount} tasks (>${Math.floor(this.config.suggestCloseThresholdMin / 60)}h threshold)`,
     ]
+
+    if (externallyBlocked.length > 0) {
+      lines.push(``, `**Externally blocked** (idle detection suppressed):`)
+      for (const t of externallyBlocked) {
+        const reason = t.metadata?.blocked_external_reason || 'no reason provided'
+        lines.push(`- ${t.id} — ${(t.title || '').slice(0, 60)} · *${reason}*`)
+      }
+    }
 
     if (recentActions.length > 0) {
       lines.push(``, `**Actions this cycle:** ${recentActions.length}`)

@@ -18,7 +18,7 @@ beforeAll(async () => {
   const createRes = await app.inject({
     method: 'POST', url: '/tasks',
     payload: {
-      title: 'Active task test',
+      title: 'TEST: Active task test for compact mode',
       description: 'Description for testing',
       assignee: AGENT,
       reviewer: 'ryan',

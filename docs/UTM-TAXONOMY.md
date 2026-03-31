@@ -73,8 +73,7 @@ https://github.com/reflectt/reflectt-node?utm_source=<source>&utm_medium=<medium
 | Channel | URL | Status |
 |---------|-----|--------|
 | Dev.to article | https://dev.to/seakai/how-we-coordinate-9-ai-agents-shipping-a-real-product-with-code-3227 | ✅ Live |
-| Discord (#general, reflectt guild) | posted 2026-03-09 by @kai | ✅ Live |
-| Dev.to article #2 | https://dev.to/seakai/the-3-failure-modes-we-hit-running-21-ai-agents-on-one-codebase-p09 | ✅ Live |
+| Discord (OpenClaw #show-and-tell) | pending channel ID | ⏳ Pending |
 | r/LocalLLaMA | pending credentials | ⏳ Pending |
 | r/MachineLearning | pending credentials | ⏳ Pending |
 

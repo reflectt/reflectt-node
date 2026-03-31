@@ -54,6 +54,110 @@ interface PendingNudge {
 const pendingNudges: PendingNudge[] = []
 const lastNudgeAt: Record<string, number> = {}
 
+// Dedup guards for tiered escalation (SIGNAL-ROUTING Change 2)
+// mention fires at most once per 24h per agent; escalate at most once per 48h.
+// task-1773525631162-cjxch4mrz
+const mentionLastAt: Record<string, number> = {}
+const escalateLastAt: Record<string, number> = {}
+const MENTION_DEDUP_MS = 24 * 60 * 60 * 1000
+const ESCALATE_DEDUP_MS = 48 * 60 * 60 * 1000
+
+export type ReflectionTier = 'none' | 'digest' | 'mention' | 'escalate' | 'immediate'
+
+/**
+ * 4-tier reflection reminder decision per SIGNAL-ROUTING Change 2 spec.
+ *
+ * | Overdue    | Tier      | Channel |
+ * |------------|-----------|---------|
+ * | < 14h      | none      | —       |
+ * | 14h–24h    | digest    | #ops (batched, no @mention) |
+ * | 24h–48h    | mention   | #ops with @mention, once per 24h |
+ * | 48h+       | escalate  | #ops with @kai, once per 48h |
+ * | post-task  | immediate | #general direct to agent |
+ */
+export function getReflectionTier(
+  agent: string,
+  lastReflectionAt: number,
+  justCompletedTask: boolean,
+  nowMs = Date.now(),
+): ReflectionTier {
+  if (justCompletedTask) return 'immediate'
+
+  const overdueMs = nowMs - lastReflectionAt
+  const overdueHours = overdueMs / (1000 * 60 * 60)
+
+  if (overdueHours < 14) return 'none'
+  if (overdueHours < 24) return 'digest'
+
+  if (overdueHours < 48) {
+    // mention: dedup to once per 24h
+    const lastMention = mentionLastAt[agent] ?? 0
+    if (nowMs - lastMention < MENTION_DEDUP_MS) return 'none'
+    mentionLastAt[agent] = nowMs // record on selection so dispatch doesn't double-set
+    return 'mention'
+  }
+
+  // escalate: dedup to once per 48h
+  const lastEscalate = escalateLastAt[agent] ?? 0
+  if (nowMs - lastEscalate < ESCALATE_DEDUP_MS) return 'none'
+  escalateLastAt[agent] = nowMs // record on selection
+  return 'escalate'
+}
+
+/** Exposed for tests — reset dedup state between test runs */
+export function _resetTierDedupForTest(): void {
+  for (const k of Object.keys(mentionLastAt)) delete mentionLastAt[k]
+  for (const k of Object.keys(escalateLastAt)) delete escalateLastAt[k]
+}
+
+/**
+ * Dispatch a reflection reminder based on the computed tier.
+ * digest → batchNag (existing batch-before-post gate, Change 4)
+ * mention/escalate → immediate routeMessage to #ops
+ * immediate → routeMessage to #general direct to agent
+ */
+export async function dispatchReflectionTier(
+  agent: string,
+  tier: ReflectionTier,
+  hoursSince: number,
+  lastReflectionAt: number,
+  config: ReflectionNudgeConfig,
+): Promise<void> {
+  const opsChannel = 'ops'
+  const now = Date.now()
+
+  switch (tier) {
+    case 'none':
+      return
+
+    case 'digest':
+      // Add to ops batch — batchNag handles flush (Change 4)
+      batchNag(opsChannel, `@${agent}: reflection ${hoursSince}h overdue — submit when you can`)
+      return
+
+    case 'mention': {
+      // mentionLastAt already set in getReflectionTier
+      const msg = `🪞 @${agent} reflection overdue ${hoursSince}h — submit when you have a moment. POST /reflections.`
+      await routeMessage({ from: 'system', content: msg, category: 'watchdog-alert', severity: 'warning', forceChannel: opsChannel }).catch(() => {})
+      return
+    }
+
+    case 'escalate': {
+      // escalateLastAt already set in getReflectionTier
+      const lastDate = lastReflectionAt > 0 ? new Date(lastReflectionAt).toISOString().slice(0, 10) : 'never'
+      const msg = `🚨 @kai @${agent} reflection overdue ${hoursSince}h. Last reflection: ${lastDate}. Needs attention.`
+      await routeMessage({ from: 'system', content: msg, category: 'watchdog-alert', severity: 'critical', forceChannel: opsChannel }).catch(() => {})
+      return
+    }
+
+    case 'immediate': {
+      const msg = `🪞 @${agent} task complete — good moment to reflect. POST /reflections.`
+      batchNag('ops', msg)
+      return
+    }
+  }
+}
+
 /** Running guard — prevents concurrent tick calls from firing duplicate nudges */
 let _tickRunning = false
 
@@ -239,21 +343,34 @@ async function _doTick(): Promise<{
     }
 
     if (shouldNudge) {
-      await sendIdleNudge(agent, hoursSinceDisplay, tracking?.tasks_done_since_reflection || 0, config)
-      lastNudgeAt[agent] = now
+      // Lane-aware suppression: skip nudge if agent has no unblocked todo tasks.
+      // Agents whose in-lane queue is genuinely empty cannot take new work —
+      // nudging them is a false positive (they're compliant, not idle).
+      const unblockedTodo = taskManager.listTasks({
+        status: 'todo',
+        assigneeIn: [agent],
+      }).filter(t => t.status === 'todo')
+      if (unblockedTodo.length === 0) continue
 
-      // Record nudge in DB
-      ensureReflectionTrackingTable()
-      const db = getDb()
-      db.prepare(`
-        INSERT INTO reflection_tracking (agent, last_nudge_at, tasks_done_since_reflection, updated_at)
-        VALUES (?, ?, 0, ?)
-        ON CONFLICT(agent) DO UPDATE SET
-          last_nudge_at = ?,
-          updated_at = ?
-      `).run(agent, now, now, now, now)
+      // 4-tier dispatch per SIGNAL-ROUTING Change 2
+      const tier = getReflectionTier(agent, lastReflection, false, now)
+      if (tier !== 'none') {
+        await dispatchReflectionTier(agent, tier, hoursSinceDisplay, lastReflection, config)
+        lastNudgeAt[agent] = now
 
-      idleNudges++
+        // Record nudge in DB
+        ensureReflectionTrackingTable()
+        const db = getDb()
+        db.prepare(`
+          INSERT INTO reflection_tracking (agent, last_nudge_at, tasks_done_since_reflection, updated_at)
+          VALUES (?, ?, 0, ?)
+          ON CONFLICT(agent) DO UPDATE SET
+            last_nudge_at = ?,
+            updated_at = ?
+        `).run(agent, now, now, now, now)
+
+        idleNudges++
+      }
     }
   }
 
@@ -322,43 +439,71 @@ export function getReflectionSLAs(): ReflectionSLA[] {
   })
 }
 
+// ── Batch-before-post gate (SIGNAL-ROUTING Change 4) ─────────────────────────
+// All per-agent nags (reflection reminders, idle alerts) go through batchNag()
+// before any channel post. A 5-minute batch window accumulates messages; the
+// flush posts a single Noise Budget Digest instead of N individual posts.
+//
+// Window duration controlled by WATCHDOG_BATCH_WINDOW_MS env var (default 5min).
+// Tests can set WATCHDOG_BATCH_WINDOW_MS to a small value (e.g. 50ms).
+//
+// task-1773525646527-rgpsta72u
+
+export function getBatchWindowMs(): number {
+  const envVal = process.env.WATCHDOG_BATCH_WINDOW_MS
+  if (envVal) return Number(envVal)
+  return 5 * 60 * 1000 // 5 minutes (production default)
+}
+
+// Exported for testing — allows tests to flush the batch manually
+export const _nagBatch: Map<string, string[]> = new Map() // channel → messages
+let _batchTimer: ReturnType<typeof setTimeout> | null = null
+
+export function _flushNagBatch(): void {
+  for (const [channel, messages] of _nagBatch.entries()) {
+    if (messages.length === 0) continue
+    const content = `📋 **Reflection & Idle Digest** (${messages.length} reminder${messages.length !== 1 ? 's' : ''}):\n${messages.map(m => `• ${m}`).join('\n')}`
+    routeMessage({
+      from: 'system',
+      content,
+      category: 'watchdog-alert',
+      severity: 'info',
+      forceChannel: channel,
+    }).catch(() => { /* non-fatal */ })
+  }
+  _nagBatch.clear()
+  _batchTimer = null
+}
+
+function batchNag(channel: string, message: string): void {
+  const existing = _nagBatch.get(channel)
+  if (existing) {
+    existing.push(message)
+  } else {
+    _nagBatch.set(channel, [message])
+  }
+
+  if (!_batchTimer) {
+    _batchTimer = setTimeout(_flushNagBatch, getBatchWindowMs())
+  }
+}
+
 // ── Nudge messages ──
 
 async function sendPostTaskNudge(agent: string, taskId: string, taskTitle: string, config: ReflectionNudgeConfig, taskStatus?: string): Promise<void> {
   const isBlocked = taskStatus === 'blocked'
   const msg = isBlocked
-    ? `🪞 Reflection nudge: @${agent}, "${taskTitle}" (${taskId}) is blocked. ` +
-      `Take 2 min to reflect — what's blocking you, what did you try, and what would unblock it? ` +
-      `Submit via POST /reflections with your observations.`
-    : `🪞 Reflection nudge: @${agent}, you just completed "${taskTitle}" (${taskId}). ` +
-      `Take 2 min to reflect — what went well, what was painful, and what would you change? ` +
-      `Submit via POST /reflections with your observations.`
+    ? `🪞 @${agent}: "${taskTitle}" (${taskId}) is blocked — reflect on what's blocking you`
+    : `🪞 @${agent}: completed "${taskTitle}" (${taskId}) — what went well, what was painful?`
 
-  try {
-    await routeMessage({
-      from: 'system',
-      content: msg,
-      category: 'watchdog-alert',
-      severity: 'info',
-      forceChannel: config.channel || 'general',
-    })
-  } catch { /* chat may not be available */ }
+  batchNag(config.channel || 'general', msg)
 }
 
 async function sendIdleNudge(agent: string, hoursSince: number, tasksDone: number, config: ReflectionNudgeConfig): Promise<void> {
-  const taskNote = tasksDone > 0 ? ` You've completed ${tasksDone} task(s) since your last reflection.` : ''
-  const msg = `🪞 Reflection due: @${agent}, it's been ${hoursSince}h since your last reflection.${taskNote} ` +
-    `Take a moment to capture what you've learned. Submit via POST /reflections.`
+  const taskNote = tasksDone > 0 ? ` (${tasksDone} task(s) done since last reflection)` : ''
+  const msg = `🪞 @${agent}: ${hoursSince}h since last reflection${taskNote} — capture what you've learned`
 
-  try {
-    await routeMessage({
-      from: 'system',
-      content: msg,
-      category: 'watchdog-alert',
-      severity: 'warning',
-      forceChannel: config.channel || 'general',
-    })
-  } catch { /* chat may not be available */ }
+  batchNag(config.channel || 'general', msg)
 }
 
 // ── Helpers ──

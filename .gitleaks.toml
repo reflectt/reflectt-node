@@ -38,6 +38,10 @@ regexes = [
   '''YOUR_\w+''',
   '''REPLACE_WITH_''',
   '''<your-\w+>''',
+  # Env var NAME references — not secret values, just var names in code
+  # Caught by generic API key detector; safe because only names, never values
+  '''process\.env\.ELEVEN_LABS_API_KEY''',
+  '''process\.env\.ELEVENLABS_API_KEY''',
 ]
 
 # Block common env dump patterns even if not caught by default rules

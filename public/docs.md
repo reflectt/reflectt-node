@@ -25,6 +25,7 @@ Base URL: `http://localhost:4445`
 - [Weekly Ship Log Template](../docs/WEEKLY_SHIP_LOG_TEMPLATE.md) — compact weekly status template.
 - [Incident Writeup Template](../docs/INCIDENT_WRITEUP_TEMPLATE.md) — timeline/root-cause/fix/prevention structure.
 - [Contributor Onboarding Script](../docs/CONTRIBUTOR_ONBOARDING_SCRIPT.md) — first-day workflow from clone to validated task.
+- [Dev Workflow](../docs/DEV_WORKFLOW.md) — production vs. development: npm install for prod, feature branches for dev.
 
 ---
 
@@ -106,12 +107,15 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/chat` | Chat subsystem health: message counts, drop counters per agent (total + rolling 1h + reasons). Returns `{ totalMessages, rooms, subscribers, drops }`. |
 | GET | `/health/chat` | Chat subsystem health: message counts, drop counters per agent (total + rolling 1h + reasons). Returns `{ totalMessages, rooms, subscribers, drops }`. |
 | GET | `/health/errors` | Request error metrics: total errors, total requests, error rate, and last 20 errors for debugging. Returns `{ total_errors, total_requests, error_rate, recent[], timestamp }`. |
+| GET | `/health/version` | Version summary for ops tooling + cloud dashboard. Returns `{ version, commit, uptime_ms, host_id, node_env }`. |
 | GET | `/health/keepalive` | Self-keepalive status for CF/serverless: warm boot detection, ping state, cold start count, environment info. |
 | GET | `/health/ping` | Ultra-lightweight keepalive — no DB access. Returns `{ status, uptime_seconds, ts }`. Use for cron triggers, load balancers, uptime monitors. |
 | GET | `/health/watchdog` | Richer keepalive with cold_start flag, task/chat stats, boot_info, and remediation hints. For monitoring dashboards. See `docs/KEEPALIVE.md`. |
 | GET | `/health` | System health — task counts, chat stats, inbox stats. Includes `cold_start` flag (true if uptime < 60s). Query: `include_test=1` to include test-harness tasks in stats (excluded by default). |
+| GET | `/team-context` | Read current shared TEAM-CONTEXT.md content |
+| POST | `/team-context/facts` | Write team facts to TEAM-CONTEXT.md and sync to all agent workspaces |
 | GET | `/team/health` | Team config linter status for `~/.reflectt/TEAM.md`, `TEAM-ROLES.yaml`, `TEAM-STANDARDS.md` (issues, role coverage, last check timestamp) |
-| GET | `/health/team` | Team health metrics with compliance + `staleDoing` snapshot. Per-agent rows include `activeTaskTitle` and `activeTaskPrLink` when an agent has a doing task with PR evidence. Flagged agents also include `actionable_reason` (last comment age, last transition, last mention age, suggested action). |
+| GET | `/health/team` | Host-local team health metrics with compliance + `staleDoing` snapshot. Response now includes `scope` metadata (`kind: "host-local"`, `hostName`, `label`, `message`, `orgHealthUrl`) so operators can see which host they are inspecting and, when cloud is configured, follow the org-health pointer for cross-host truth. Per-agent rows include `activeTaskTitle` and `activeTaskPrLink` when an agent has a doing task with PR evidence. Flagged agents also include `actionable_reason` (last comment age, last transition, last mention age, suggested action). |
 | GET | `/health/agents` | Per-agent health summary (`last_seen`, `active_task`, `heartbeat_age_ms`, `last_shipped_at`, `stale_reason`, state) |
 | GET | `/health/compliance` | Compliance check results |
 | GET | `/compliance/violations` | State-read-before-assertion compliance violations. Query: `agent`, `severity`, `limit` (max 1000), `since` (epoch ms). Returns `{ violations, count, summary, query }`. |
@@ -134,10 +138,14 @@ Remote hosts (multi-host installs) phone-home via a lightweight heartbeat so the
 | GET | `/health/idle-nudge/debug` | Idle-nudge watchdog debug state |
 | GET | `/admin/task-comment-rejects` | Reject ledger for phantom task-comment IDs. Query: `limit` (max 200), `reason` (task_not_found\|invalid_task_refs), `author`, `since` (timestamp). Each row includes provenance (integration, sender_id, original_message_id). |
 | POST | `/health/idle-nudge/tick` | Trigger idle-nudge evaluation |
+| POST | `/health/validating-nudge/tick` | Trigger validating-stall nudge evaluation |
 | POST | `/health/cadence-watchdog/tick` | Trigger cadence watchdog |
 | POST | `/health/mention-rescue/tick` | Trigger mention-rescue fallback |
 | POST | `/health/working-contract/tick` | Evaluate working-contract enforcement: auto-requeue stale doing tasks (90m warning → 15m grace → auto todo) and fire alerts. |
 | GET | `/health/working-contract/gate/:agent` | Dry-run claim gate check for an agent. Returns `{ allowed, reason }` — whether the agent can claim a new task given current WIP and contract status. |
+| GET | `/stall-detector` | Stall detection status: enabled flag and all tracked session states. Returns `{ enabled, states: [{ userId, phase, context, stallFired[] }] }`. |
+| POST | `/stall-detector/config` | Update stall detector config. Body: `{ enabled?: boolean, thresholds?: { newUserStallMinutes?, inSessionStallMinutes?, setupStallMinutes? } }`. Returns `{ success, config }`. |
+| POST | `/stall-detector/test` | Record test activity for a userId. Body: `{ userId }`. Returns `{ success, message }`. |
 
 ### Quick system-loop check
 
@@ -182,6 +190,8 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 |--------|------|-------------|
 | GET | `/tasks` | List tasks. Query: `status`, `assignee`, `agent`, `priority`, `limit`, `offset`, `q` (text search), `updatedSince`, `include_test=1|true` (include test-harness tasks; default excluded). Returns `{ tasks, total, offset, limit, hasMore }`. |
 | GET | `/tasks/:id` | Get task by ID. Also accepts unambiguous ID prefixes. Ambiguous prefix returns `400` with full-ID suggestions. |
+| GET | `/tasks/:id/handoff` | Get handoff state for a task (reviewed_by, decision, next_owner). |
+| PUT | `/tasks/:id/handoff` | Set handoff state. Body: `{ reviewed_by (required), decision: "approved"\|"rejected"\|"needs_changes"\|"escalated" (required), next_owner? }`. Also settable via PATCH /tasks/:id metadata.handoff_state. |
 | GET | `/tasks/:id/artifacts` | Resolve all artifact references from task metadata. Returns accessibility status (file existence, URL validation), heartbeat status (last comment age, staleness). Heartbeat threshold: 30m for doing tasks. Query: `include=preview` (first 2000 chars) or `include=content` (full file, up to 400KB). Falls back to shared workspace (`~/.openclaw/workspace-shared`) when file is not in repo root. |
 | GET | `/tasks/:id/history` | Status changelog for task lifecycle transitions. Returns `history[]` entries shaped as `{ status, changedBy, changedAt, metadata }` for each status transition. |
 | GET | `/tasks/:id/comments` | List task discussion comments. Query: `includeSuppressed=true|1` to include suppressed (audit) comments. Returns `{ comments, count, includeSuppressed }` where each comment is `{ id, taskId, author, content, timestamp, category?, suppressed, suppressedReason?, suppressedRule? }`. |
@@ -189,23 +199,37 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/:id/pr-review` | PR review quality panel data. Returns diff scope, CI checks, done criteria alignment. Requires PR URL in task metadata (`pr_url`, `qa_bundle.pr_link`, or in `artifacts`). |
 | POST | `/tasks/:id/cancel` | Cancel a task. Body: `{ "reason": "why", "author": "agent" }`. Reason required. Sets status=cancelled + metadata.cancel_reason/cancelled_by/cancelled_at. Cannot cancel done tasks. |
 | POST | `/tasks/:id/outcome` | Capture 48h checkpoint verdict for completed tasks. Body: `verdict` (`PASS`\|`NO-CHANGE`\|`REGRESSION`), optional `author`, `notes` |
+| POST | `/tasks/:id/block-external` | Mark a task as externally blocked (waiting on a human dependency). Suppresses idle detection, suggest-close, and auto-requeue. Body: `{ "reason": "Apple Developer credentials — human action required" }` (required). Returns `{ success, task, message }`. |
+| POST | `/tasks/:id/unblock-external` | Remove the externally-blocked flag. Task becomes eligible for idle detection and auto-requeue again. Returns `{ success, task, message }`. |
 | POST | `/tasks/:id/review-bundle` | Auto-build reviewer packet by resolving PR URL + CI + artifact evidence from task metadata. Returns normalized `verdict` (`pass`/`fail`) and reasons. Optional body: `author`, `strict` (default `true`, requires CI=`success`). |
 | POST | `/tasks/:id/review` | Reviewer decision endpoint. Body: `{ "reviewer": "agent", "decision": "approve|reject", "comment": "..." }`. Only the assigned reviewer may submit. Approve auto-transitions validating→done. |
 | GET | `/reviews/pending` | Pending reviews for a reviewer. Query: `reviewer` (required), `compact` (optional). Returns tasks in validating awaiting review (excludes already-approved). Each item: id, title, assignee, priority, age_minutes, review_state, pr_url, artifact_path. Sorted oldest-first. |
-| POST | `/tasks` | Create task. Required: `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria` (string[]), `eta`. Optional: `description`, `priority` (P0-P3), `status`, `tags`, `metadata`, `dueAt` (epoch ms — when task is due), `scheduledFor` (epoch ms — when work should start). **Reflection-origin invariant:** `metadata.source_reflection` or `metadata.source_insight` required (or `metadata.reflection_exempt=true` with `reflection_exempt_reason`). Status contract: `validating` also requires `metadata.artifact_path` under `process/`. |
-| PATCH | `/tasks/:id` | Update task (partial). Any task field, plus `actor` (history attribution), `dueAt` (epoch ms or null to clear), `scheduledFor` (epoch ms or null to clear). Status contract: `doing` requires reviewer + `metadata.eta`; `validating` requires `metadata.artifact_path` under `process/` (workspace-agnostic). |
+| POST | `/tasks` | Create task. Required: `title`, `createdBy`, `assignee`, `reviewer`, `done_criteria` (string[]). Optional: `eta` (defaults to ~2h for P0/P1, ~4h for P2/P3 on claim), `description`, `priority` (P0-P3), `status`, `tags`, `metadata`, `dueAt` (epoch ms — when task is due), `scheduledFor` (epoch ms — when work should start). **Reflection-origin invariant:** `metadata.source_reflection` or `metadata.source_insight` required (or `metadata.reflection_exempt=true` with `reflection_exempt_reason`). Status contract: `validating` also requires `metadata.artifact_path` under `process/`. **Dedup (two tiers, same-assignee):** Tier 1 — exact title within 60s (reconnect collapse, returns 200+existing). Tier 2 — fuzzy ≥80% Jaccard within 24h (continuity-loop prevention, returns 409 `TASK_DUPLICATE` with `duplicateOf` + `similarity`). Set `metadata.skip_dedup=true` to bypass. |
+| PATCH | `/tasks/:id` | Update task (partial). Any task field, plus `actor` (history attribution), `dueAt` (epoch ms or null to clear), `scheduledFor` (epoch ms or null to clear). Status contract: `doing` — if `metadata.eta` absent, auto-defaults to ~2h (P0/P1) or ~4h (P2/P3); `validating` requires `metadata.artifact_path` under `process/` (workspace-agnostic). |
 | DELETE | `/tasks/:id` | Delete task |
 | GET | `/tasks/next` | Pull-based assignment. Query: `agent`, `compact`, `claim=1` (auto-transitions todo→doing on pull) |
 | GET | `/tasks/active` | Get active (doing) task for agent. Query: `agent`, `compact`. Returns null if no doing tasks. |
-| GET | `/heartbeat/:agent` | Single compact heartbeat payload (~200 tokens). Returns active task, next task, slim inbox, queue counts, and suggested action. Replaces 3 separate API calls. |
+| GET | `/heartbeat/:agent` | Single compact heartbeat payload (~200 tokens). Returns active task, next task, slim inbox, queue counts, suggested action, boot context (recent memories top 5, active agent_run). Replaces 3+ separate API calls. |
 | GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md content for agent. References best endpoints. Includes version stamp and content hash for change detection. |
 | POST | `/bootstrap/team` | Returns TEAM-ROLES.yaml schema, constraints, well-formed examples, and save endpoint. The calling agent composes the team itself. Body: `{ useCase?, maxAgents? }`. Returns `{ schema, constraints, examples[], saveEndpoint, nextSteps[] }`. |
 | GET | `/manage/status` | Remote management: unified status (version + health + uptime). Auth: `x-manage-token` header or `Authorization: Bearer`. |
 | GET | `/manage/config` | Remote management: config introspection with secrets redacted. Auth required. |
 | GET | `/manage/logs` | Remote management: bounded log tail. Query: `level`, `since`, `limit`, `format=text`. Auth required. |
 | POST | `/manage/restart` | Remote management: graceful restart (Docker/systemd/CLI). Auth required. |
+| GET | `/manage/restart-context` | Read last restart context snapshot written on graceful restart. Auth required. Returns 404 if no snapshot exists. |
 | GET | `/manage/disk` | Remote management: data directory sizes. Auth required. |
+| GET | `/browser/config` | Browser capability configuration (max sessions, rate limits, viewport). |
+| POST | `/browser/sessions` | Create a new isolated browser session. Body: `{ agent, url?, headless?, viewport? }`. Returns session object. |
+| GET | `/browser/sessions` | List all browser sessions (active and recent). |
+| GET | `/browser/sessions/:id` | Get browser session by ID. |
+| DELETE | `/browser/sessions/:id` | Close and cleanup a browser session. |
+| POST | `/browser/sessions/:id/act` | Execute a natural language browser action. Body: `{ instruction }`. |
+| POST | `/browser/sessions/:id/extract` | Extract structured data from current page. Body: `{ instruction, schema? }`. |
+| POST | `/browser/sessions/:id/observe` | Discover available actions on current page. Body: `{ instruction }`. |
+| POST | `/browser/sessions/:id/navigate` | Navigate to a URL. Body: `{ url }`. |
+| GET | `/browser/sessions/:id/screenshot` | Take a screenshot of the current page. Returns `{ base64, mimeType }`. |
 | GET | `/capabilities` | Agent-facing endpoint discovery. Lists all endpoints grouped by purpose, compact support flags, and usage recommendations. |
+| GET | `/capabilities/readiness` | Per-capability readiness status for Browser/Email/SMS/Calendar. Returns `overall` + per-capability `status` (ready\|degraded\|not_ready\|unknown), `dependencies[]`, `last_error`, and `hint`. |
 | GET | `/version` | Current version + latest available from GitHub releases. Includes `update_available` boolean. Caches GitHub check for 15 minutes. |
 | GET | `/me/:agent` | Agent "My Now" cockpit payload: assigned tasks, pending reviews, blockers, failing-check signals, since-last-seen changelog, and next action. Supports `compact`. |
 | GET | `/tasks/intake-schema` | Task intake schema discovery — returns required/optional fields and per-type templates |
@@ -213,8 +237,12 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/tasks/search` | Keyword search across task `title` + `description` (case-insensitive). Query: `q`, optional `limit`, `include_test=1|true` (include test-harness tasks; default excluded). |
 | GET | `/tasks/analytics` | Task completion analytics and velocity |
 | GET | `/tasks/instrumentation/lifecycle` | Reviewer/done-criteria gates + status-contract violations (`doing` missing ETA, `validating` missing artifact path) |
+| POST | `/tasks/bulk-close` | Close up to 100 tasks in one call. Body: `{ "ids": ["task-..."], "reason": "superseded" }`. Closes validating tasks with reviewer_approved=true or reason=duplicate/superseded. Returns `{ closed[], skipped[], errors[], summary }`. |
 | POST | `/tasks/batch-create` | Batch create up to 20 tasks. Body: `{ "tasks": [...], "createdBy": "agent", "deduplicate": true, "dryRun": false }`. Each task follows the same schema as `POST /tasks`. Returns per-task results (created/duplicate/error) with summary counts. Deduplication checks exact title match + fuzzy word overlap (Jaccard >0.6) against active tasks. |
 | GET | `/tasks/heartbeat-status` | All doing tasks with stale comment activity (>30m). Returns `{ threshold, doingTaskCount, staleCount, staleTasks[] }`. Use for monitoring status heartbeat discipline compliance. |
+| GET | `/tasks/slow-blocked` | Detect doing tasks that are slow vs explicitly blocked. Slow = doing >4h with no activity (not explicitly blocked, different handling path). Query: `slowThresholdHours` (default 4). Returns `{ slow[], blocked[], summary, slowCount, blockedCount }`. Host-enforced — no escalation needed. |
+| (sweeper) | post-merge reviewer SLA | When a validating task's PR is confirmed merged: **2h** → sweeper posts `[reviewer-nudge]` comment + channel notification (once). **24h** → sweeper auto-closes task as done with `[auto-close]` comment (`closer=sweeper`). Neither fires the normal SLA escalation alert — done work doesn't queue in validating forever. |
+| GET | `/tasks/validating-health` | Validating-lane health: per-task breakdown separating reviewer inactivity vs evidence mismatch. Returns `{ summary: { total, ok, reviewer_stale, evidence_missing, both }, tasks[] }`. Each task includes `failure_mode: "reviewer_stale"\|"evidence_missing"\|"both"\|"ok"`, `reviewer_active_recently`, `has_pr_link`, `pr_merged`, `age_ms`. Query: `reviewer_stale_threshold_ms` (default 7200000/2h), `include_test=1`. |
 | GET | `/tasks/board-health` | Board-level health metrics for backlog replenishment. Returns per-agent breakdown (doing, validating, todo, active counts), `needsWork`/`lowWatermark` flags, and `replenishNeeded` trigger (fires when 2+ agents idle or <3 backlog tasks). Query: `include_test=1` to include test-harness tasks. |
 | GET | `/agents` | Agent list — alias for /agents/roles. Returns all agents with roles, WIP status, affinity tags. |
 | GET | `/agents/roles` | Agent role registry with live WIP status. Returns all agents with `name`, `displayName`, `role`, `affinityTags`, `protectedDomains`, `wipCap`, `wipCount`, `overCap`. |
@@ -379,7 +407,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/inbox/:agent` | Get inbox. Query: `limit`, `since` (epoch ms), `channel`, `compact` (strips id/reactions/replyCount) |
+| GET | `/inbox/:agent` | Get inbox. Returns merged chat @mentions + task comments addressed to agent. Each item includes `from`, `content`, `timestamp`; task comment items also include `task_id`, `comment_id`, `type: 'task_comment'`. Query: `limit`, `since` (epoch ms), `channel`, `compact` (strips id/reactions/replyCount), `mark_read=true` (auto-acks chat messages) |
 | POST | `/inbox/:agent/ack` | Acknowledge messages. Body: `{ "upTo": epochMs }` |
 | POST | `/inbox/:agent/subscribe` | Replace channel subscriptions. Body: `{ "channels": ["reviews", "blockers"] }` |
 | GET | `/inbox/:agent/subscriptions` | List subscriptions |
@@ -391,6 +419,8 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/pulse` | Team pulse snapshot: board counts + per-agent doing tasks + pending reviews + focus + deploy info + alert-preflight mode. Use `?compact=true` for <2000 char version |
+| POST | `/pr-link-reconciler/sweep` | Manually trigger PR-link reconcile sweep. Finds validating tasks with merged PRs and stamps `canonical_pr` + `canonical_commit`. Returns `{ swept, stamped, skipped, errors, results[], durationMs }`. |
+| GET | `/pr-link-reconciler/preview` | Dry-run: list validating tasks that would be updated by next sweep (PR URL present, no canonical refs yet). Returns `{ candidates[], total }`. |
 | POST | `/scope-overlap` | Scan for task scope overlap after PR merge. Body: `{ "prNumber": 707, "prTitle": "...", "prBranch": "kai/task-...", "mergedTaskId?": "...", "repo?": "owner/repo", "mergeCommit?": "abc123", "notify?": true }`. Idempotency key includes repo+prNumber+mergedTaskId+mergeCommit. Failed notifications allow retry (no-drop). |
 | GET | `/focus` | Current team focus directive (included in heartbeat) |
 | POST | `/focus` | Set team focus. Body: `{ "directive": "...", "setBy": "kai", "expiresAt?": 1234, "tags?": ["shipping"] }` |
@@ -400,6 +430,24 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | POST | `/presence/:agent` | Update presence. Body: `{ "status": "working|idle|blocked|reviewing|offline" }` |
 | GET | `/presence/:agent/focus` | Get agent focus state (active, level, expiry) |
 | POST | `/presence/:agent/focus` | Toggle focus mode. Body: `{ "active": true, "level": "soft|deep", "durationMin": 60, "reason": "shipping PR" }`. Soft: suppresses system nudges, allows direct mentions. Deep: suppresses everything except blocker/review pings. |
+| GET | `/presence-loop` | Presence loop demo page — serves an HTML page that polls `/presence` to show live agent status changes. |
+
+## Agent Notifications
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agent-notifications` | Create a notification. Body: `{ "target_agent": "link", "title": "Review PR", "source_agent": "kai", "type": "review|task|mention|alert|info|system", "body": "...", "priority": "low|medium|high|critical", "task_id": "...", "metadata": {}, "expires_at": 0 }`. Returns 201 + notification object. |
+| POST | `/agent-notifications/:id/ack` | Acknowledge a notification. Body: `{ "decision": "seen|accept|defer|dismiss" }`. Returns updated notification. |
+| GET | `/agent-notifications` | List notifications for an agent. Query: `agent` (required), `status` (default `pending`), `limit` (default 50). Returns `{ notifications, total }`. |
+| GET | `/agent-notifications/worker/stats` | Notification delivery worker stats: delivered/skipped/failed/expired counts, tick count, running status. |
+| POST | `/agent-notifications/worker/tick` | Manually trigger a delivery tick (useful for testing). Returns delivery results for the batch. |
+
+## Agent Presence (structured)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agent-presence` | Upsert agent presence + log to history. Body: `{ "agent": "link", "status": "working|idle|blocked|reviewing|offline", "task": "...", "focus_level": "soft|deep", "metadata": {} }`. Returns current presence. |
+| GET | `/agent-presence` | Read current agent presence. Query: `agent` (required). Returns `{ presence }`. |
 
 ## Memory
 
@@ -479,6 +527,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 |--------|------|-------------|
 | GET | `/agents/activity` | All agents activity summary |
 | GET | `/agents/:agent/activity` | Single agent activity |
+| GET | `/agents/:agent/timeline` | Unified activity feed: runs + task state changes + trust events. Each event: `{ type, timestamp, summary, taskId?, runId?, meta? }`. Query: `limit` (default 50, max 200), `since` (epoch ms). Returns reverse-chronological order. |
 | GET | `/analytics/foragents` | forAgents.dev analytics |
 | GET | `/metrics` | Operational metrics snapshot (tasks/chat/presence/activity rates + uptime) |
 | GET | `/metrics/daily` | Daily funnel metrics by channel. Query: `timezone` (IANA tz, default `America/Vancouver`) |
@@ -512,7 +561,7 @@ Preflight checks reconcile live task state (status, assignee, reviewer, recent c
 | GET | `/provisioning/webhooks` | List configured webhook routes for this host. |
 | POST | `/provisioning/webhooks` | Add a webhook route. Body: `{ provider, path?, events?, active? }`. |
 | DELETE | `/provisioning/webhooks/:id` | Remove a webhook route by ID. |
-| POST | `/webhooks/incoming/:provider` | Receive incoming webhooks from external providers (GitHub, Stripe, etc.). Auto-routes through delivery engine to configured targets. Returns 202 Accepted. |
+| POST | `/webhooks/incoming/:provider` | Receive incoming webhooks from external providers (GitHub, Sentry, Stripe, etc.). Auto-routes through delivery engine to configured targets. Provider `sentry` posts formatted error alerts to #ops channel (supports HMAC-SHA256 signature verification via `SENTRY_CLIENT_SECRET` env var). Returns 202 Accepted. |
 | POST | `/webhooks/deliver` | Enqueue a webhook for durable delivery. Body: `{ provider, eventType, payload, targetUrl, idempotencyKey?, metadata? }`. Returns event with idempotency key. |
 | GET | `/webhooks/events` | List webhook events. Query: `status`, `provider`, `limit`, `offset`. |
 | GET | `/webhooks/events/:id` | Get a webhook event by ID. |
@@ -554,6 +603,7 @@ Multi-host management: remote hosts register via heartbeat and are tracked by st
 | POST | `/board-health/rollback/:actionId` | Rollback an automated action within the rollback window. Body: `{ by? }`. |
 | PATCH | `/board-health/config` | Update worker config at runtime. Fields: enabled, intervalMs, staleDoingThresholdMin, suggestCloseThresholdMin, rollbackWindowMs, digestIntervalMs, digestChannel, quietHoursStart, quietHoursEnd, dryRun, maxActionsPerTick. |
 | POST | `/board-health/prune` | Prune old audit log entries. Query: `?maxAgeDays=7`. |
+| POST | `/board-health/quiet-window` | Reset the quiet window — suppresses ready-queue alerts for `restartQuietWindowMs` (default 5 min). Call after gateway restart/reconnect. |
 | GET | `/feed/:agent` | Since-last-seen change feed. Query: `?since=timestamp&limit=100&kinds=task_status_changed,mention&includeGlobal=true`. Returns unified timeline of task changes, comments, mentions, PRs, deploys relevant to agent. |
 | GET | `/policy` | Get unified policy config (quiet hours, idle nudge, cadence watchdog, board health, escalation thresholds). |
 | PATCH | `/policy` | Update policy config at runtime (deep-merged, persisted to ~/.reflectt/policy.json). Propagates to running workers. |
@@ -575,6 +625,10 @@ Multi-host management: remote hosts register via heartbeat and are tracked by st
 | GET | `/widget/feedback.js` | Embeddable feedback widget (Shadow DOM, self-contained). Embed: `<script src="/widget/feedback.js" data-token="..." data-theme="auto">`. |
 | GET | `/routing/log` | Recent routing decisions. Query: `?limit=50&since=timestamp&category=watchdog-alert&severity=warning`. |
 | POST | `/routing/resolve` | Dry-run route resolution. Body: `{ from, content, severity?, category?, taskId?, mentions? }`. Returns where message would go. |
+| POST | `/routing/simulate` | Comms routing policy simulator. Body: `{ policy: CommsRoutingPolicy, scenarios: RoutingScenario[] }` (max 100 scenarios). Returns `{ success, count, results: CommsRouteResult[] }`. Each result includes `owner`, `assignee`, `fallback`, `escalate`, `reasonCode`, `rationale`. |
+| POST | `/voice/input` | Create a voice session and begin processing. Body: `{ agentId: string, transcript: string }`. Returns `{ sessionId }`. Connect to `GET /voice/session/:id/events` immediately to receive state events. |
+| POST | `/voice/audio` | Accept an audio blob, transcribe via STT (local whisper.cpp → OpenAI Whisper fallback), pipe to voice pipeline. Multipart form: `agentId` (string field) + `audio` (file: webm/wav/mp3/ogg/m4a, max 25MB). Returns `{ sessionId }`. No API key required if openai-whisper is installed locally. |
+| GET | `/voice/session/:id/events` | SSE stream of voice pipeline events for a session. Events: `transcript.final`, `agent.thinking`, `agent.done`, `tts.ready`, `error`, `session.end`. Each event is `data: { type, timestamp, text?, url?, stage?, message? }`. Replays past events on connect. |
 | POST | `/routing/overrides` | Create a routing override. Body: `CreateOverrideInput` with target, target_type, override config, TTL. Returns created override. |
 | GET | `/routing/overrides` | List routing overrides. Query: `?target=agent&target_type=agent|role&status=active|expired&limit=N`. |
 | GET | `/routing/overrides/:id` | Get a specific routing override by ID. |
@@ -605,6 +659,11 @@ Multi-host management: remote hosts register via heartbeat and are tracked by st
 | GET | `/activity` | Activity timeline: unified event feed with server-side grouping. Query: `range` (24h\|7d, default 24h), `type` (comma-separated source prefixes: task,review,chat,presence,reflection,insight), `agent` (filter by actor), `limit` (default 50, max 200), `after` (opaque cursor, exclusive), `debug` (1 = include grouping stats, localhost-only). Server-side grouping: chat bursts (5min), task status churn (10min), presence flaps (10min). Returns `{ events[], total, range{from,to,from_ms,to_ms,tz}, partial?{missing[],reason}, generated_at, generated_at_ms, next_cursor, debug?{grouping{rawCount,groupedCount,droppedCount,dropReasons}} }`. |
 | GET | `/activity/sources` | List allowed activity source names: tasks, reviews, chat, presence, reflections, insights. Used for `partial.missing` enum and `type` filter values. |
 | GET | `/insights` | List insights. Supports `compact=true` (slim: id/title/score/priority/status/task_id/independent_count). Query: `status` (candidate\|promoted\|pending_triage\|task_created\|cooldown\|closed), `priority` (P0-P3), `workflow_stage`, `failure_family`, `impacted_unit`, `limit`, `offset`. Sorted by score desc. |
+| GET | `/insights/auto-tag/rules` | Return current keyword rule set for failure_family auto-tagging. Returns `{ rules, default_count }`. |
+| PUT | `/insights/auto-tag/rules` | Replace rule set at runtime. Body: `{ rules: AutoTagRule[] }` where each rule has `{ family, patterns: string[] }` (regex patterns, case-insensitive). Returns `{ success, count }`. |
+| DELETE | `/insights/auto-tag/rules` | Reset rule set to built-in defaults. |
+| POST | `/insights/auto-tag/backfill` | Reclassify all uncategorized insights using current rules. Query: `dry_run=true` to preview without writing. Returns `{ scanned, reclassified, unchanged, results[] }`. |
+| POST | `/insights/:id/auto-tag` | Re-run auto-tag on a single insight. Returns `{ changed, old_family, new_family }`. |
 | GET | `/insights/bridge/stats` | Insight→Task bridge stats: auto-created count, triaged count, duplicates skipped, errors. |
 | GET | `/insights/bridge/config` | Current bridge config including ownership guardrail settings. |
 | PATCH | `/insights/bridge/config` | Update bridge config. Body: partial config object (e.g. `{ ownershipGuardrail: { enabled: false } }`). |
@@ -618,13 +677,15 @@ Multi-host management: remote hosts register via heartbeat and are tracked by st
 | POST | `/insights/:id/cooldown` | Localhost-only. Set insight status to `cooldown` (default 14d window). Body: `{ actor, reason, notes?, cooldown_until?, cooldown_reason? }`. Optional auth via `REFLECTT_INSIGHT_MUTATION_TOKEN`. Audit logged. |
 | POST | `/insights/:id/close` | Localhost-only. Set insight status to `closed`. Body: `{ actor, reason, notes? }`. Optional auth via `REFLECTT_INSIGHT_MUTATION_TOKEN`. Audit logged. |
 | GET | `/insights/stats` | Aggregate stats: by status, priority, failure family. |
+| POST | `/insights/stale-candidates/reconcile` | Run stale candidate reconcile sweep. Body: `{ dry_run?: boolean (default true), insight_ids?: string[], actor?: string }`. Closes candidate insights where recovery evidence exists and guardrails pass. Returns `{ swept, eligible, closed, blocked, errors, dryRun, candidates[], durationMs }`. |
+| GET | `/insights/stale-candidates/preview` | Dry-run reconcile sweep (GET for convenience). Shows which candidate insights would be closed. |
 | POST | `/insights/tick-cooldowns` | Advance cooldown state machine: promoted past deadline → cooldown, expired cooldown → archived. |
 | POST | `/insights/:id/promote` | Promote insight to board task. Body: `{ contract: { owner, reviewer, eta, acceptance_check, artifact_proof_requirement, next_checkpoint_eta }, promoted_by }`. Optional: `title`, `description`, `priority`, `team_id`. Returns task_id + audit entry. |
 | GET | `/insights/:id/audit` | Promotion audit trail for an insight. |
 | GET | `/insights/promotions` | List all promotion audit entries. Query: `limit`. |
 | GET | `/insights/recurring/candidates` | List recurring task candidates from insights with persistent patterns. Auto-suggests owner/lane per failure family. Template-first (no auto task spam). |
 | GET | `/insights/top` | Top pain clusters by frequency within a time window. Query: `window` (e.g. `7d`, `24h`, `2w`; default `7d`), `limit` (1-50, default 10). Returns `{ clusters: [{ cluster_key, count, avg_score, last_seen_at, linked_task_ids }], window, since, limit }`. |
-| GET | `/loop/summary` | Supports `compact=true` (strips evidence_refs, slim linked_task). Top signals from the reflection→insight→task loop. Returns insights ranked by score, each with linked task details and evidence status. Query: `limit` (1-100, default 20), `min_score` (minimum score threshold, default 0), `exclude_addressed=1` (skip insights in cooldown/closed status or whose linked task is done/validating). Response: `{ success, entries[], total, filters }`. Each entry: `insight_id`, `title`, `score`, `priority`, `status`, `workflow_stage`, `failure_family`, `impacted_unit`, `independent_count`, `authors[]`, `evidence_count`, `evidence_refs[]`, `linked_task { id, title, status, assignee }`, `addressed`, `created_at`, `updated_at`. |
+| GET | `/loop/summary` | Supports `compact=true` (strips evidence_refs, slim linked_task). Top signals from the reflection→insight→task loop. Returns insights ranked by score, each with linked task details and evidence status. Query: `limit` (1-100, default 20), `min_score` (minimum score threshold, default 0), `exclude_addressed=1` (skip insights in cooldown/closed status or whose linked task is done/validating). Response: `{ success, entries[], total, filters }`. Each entry: `insight_id`, `title`, `score`, `priority`, `status`, `workflow_stage`, `failure_family`, `impacted_unit`, `independent_count`, `authors[]`, `evidence_count`, `evidence_refs[]`, `linked_task { id, title, status, assignee }`, `addressed`, `created_at`, `updated_at`, `host_id` (owning host), `host_api_url` (base URL for cross-host resolution — set via `REFLECTT_HOST_API_URL` env var, falls back to `http://localhost:{PORT}`). |
 
 ### Example: `/insights/top`
 
@@ -780,13 +841,19 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/canvas/history` | Recent render history (?slot=&limit=) |
 | GET | `/canvas/rejections` | Recent contract validation rejections |
 | GET | `/canvas/stream` | SSE stream of canvas render events |
+| GET | `/canvas/viewers` | Returns `{ viewers: number }` — count of open SSE connections to `/canvas/stream`. Used by reflectt-cloud /live page to show real-time viewer count. |
 | GET | `/execution-health` | Execution sweeper status: validating queue violations, SLA breaches, escalation tracking. |
 | POST | `/pr-event` | PR state webhook. Body: `{ taskId, prState: "merged"|"closed", prUrl? }`. Auto-updates task artifacts on merge, auto-blocks on close. |
 | GET | `/pr-automerge/status` | PR auto-merge attempt log: recent merge/close attempts with summary counts (attempted, success, failed, skipped, auto-close, close-gate-fail). |
 | GET | `/drift-report` | Task/PR drift report: tasks with merged PRs still in validating, orphan PRs, state mismatches. |
 | POST | `/activation/event` | Record activation funnel event. Body: `{ type, userId, metadata? }`. Events: signup_completed, host_preflight_passed, host_preflight_failed, workspace_ready, first_task_started, first_task_completed, first_team_message_sent, day2_return_action. |
+| GET | `/activation/doctor-gate` | Check whether the BYOH onboarding doctor-gate has been passed for a user. Query: `?userId=...`. Returns `{ passed: boolean, events: ActivationEvent[] }`. Used by cloud onboarding to gate progression to workspace-ready step. |
 | GET | `/activation/funnel` | Get funnel state. Query: `?userId=...` for single user, no params for aggregate summary. `?raw=true` includes internal/infrastructure users for debugging. |
 | GET | `/activation/dashboard` | Full onboarding telemetry dashboard: conversion funnel, failure distribution, weekly trends. Query: `?weeks=12`, `?raw=true`. |
+| GET | `/activation/ghost-signups` | List users who signed up but never passed preflight. Query: `?minAgeHours=2` (default 2). Returns `{ candidates: [{ userId, signupAt, hoursSinceSignup, preflightAttempted }] }`. |
+| POST | `/activation/ghost-signup-nudge` | Send re-engagement email to a ghost signup user. Body: `{ userId, email, nudgeTier?: '2h' | '24h' }`. Idempotent — won't re-send if already nudged at same tier. |
+| POST | `/tracking/live-cta` | Track /live page CTA clicks. Called by cloud app when user clicks "Start Free" on /live. Body: `{ source?, url?, ts? }`. |
+| POST | `/tracking/live-visit` | Track /live page visits. Simple hit counter - logs each visit. Body: `{ referrer? }`. |)
 | GET | `/activation/funnel/conversions` | Step-by-step conversion rates with per-step reach count, conversion rate, and median step timing. Query: `?raw=true` includes internal users. |
 | GET | `/activation/funnel/failures` | Failure-reason distribution per step. Shows where users drop off and why (from event metadata). |
 | GET | `/activation/funnel/weekly` | Weekly trend snapshots for planning. Query: `?weeks=12`. Exportable JSON with per-week step counts, new users, completion rate. |
@@ -857,6 +924,8 @@ Set via `reflectionNudge` in policy config:
 |--------|----------|-------------|
 | POST | `/usage/report` | Record model usage event. Body: `{ agent, model, provider?, input_tokens, output_tokens, estimated_cost_usd?, category?, task_id?, team_id? }`. Auto-estimates cost if not provided. |
 | POST | `/usage/report/batch` | Record batch of usage events. Body: `{ events: [...] }`. |
+| POST | `/usage/ingest` | Accept external usage records from OpenClaw sessions. Auth: `REFLECTT_HOST_HEARTBEAT_TOKEN` (Bearer / x-heartbeat-token). Single: `{ agent, model, input_tokens, output_tokens, cost_usd?, session_id?, timestamp? }`. Batch: `{ events: [...] }`. Returns `{ success, event }` or `{ success, count }`. |
+| POST | `/usage/sync/openclaw` | On-demand trigger for OpenClaw session sync. Reads `~/.openclaw/agents/*/sessions/sessions.json` and ingests new sessions. Auth: `REFLECTT_HOST_HEARTBEAT_TOKEN`. Returns `{ success, agentsScanned, sessionsFound, sessionsIngested, sessionsSkipped, errors }`. |
 | GET | `/usage/summary` | Aggregated usage totals. Query: `since`, `until`, `agent`, `team_id`. |
 | GET | `/usage/by-agent` | Per-agent cost breakdown. Query: `since`, `until`. |
 | GET | `/usage/by-model` | Per-model cost breakdown. Query: `since`, `until`. |
@@ -865,7 +934,12 @@ Set via `reflectionNudge` in policy config:
 | GET | `/usage/caps` | List active spend caps with current utilization status. |
 | POST | `/usage/caps` | Create spend cap. Body: `{ scope: "global"\|"agent"\|"team", scope_id?, period: "daily"\|"weekly"\|"monthly", limit_usd, action: "warn"\|"throttle"\|"block" }`. |
 | DELETE | `/usage/caps/:id` | Delete a spend cap. |
+| GET | `/agents/:agentId/spend` | Get current spend totals for a specific agent. Returns `{ agentId, totalCost, inputTokens, outputTokens, periodStart }`. |
+| POST | `/agents/:agentId/enforce-cost` | Trigger cost enforcement check for agent. Evaluates active caps and applies configured action (warn/throttle/block). Body: `{}`. |
+| POST | `/usage/record` | Record a single usage event. Body: `{ agentId, inputTokens, outputTokens, cost?, model?, taskId? }`. |
+| POST | `/usage/purge` | Purge old usage records. Body: `{ maxAgeDays? }` (default 90). |
 | GET | `/usage/routing-suggestions` | Smart routing savings suggestions (which low-stakes categories could use cheaper models). Query: `since`. |
+| GET | `/costs` | Cost dashboard — aggregated spend for COO/PM monitoring. Query: `days` (1–90, default 7). Returns: `daily_by_model` (spend per model per day), `daily_totals` (per-day rolled-up for threshold alerting), `avg_cost_by_lane` (avg cost per closed task by `qa_bundle.lane`, 30-day floor), `avg_cost_by_agent` (avg cost per closed task per agent + `top_model`, 30-day floor), `top_tasks_by_cost` (top 20 most expensive tasks in window), `summary` (total tokens + cost), `lane_agent_window_days` (actual window used for lane/agent averages). |
 
 ### Model Pricing (built-in estimates, per 1M tokens)
 | Model | Input | Output |
@@ -996,7 +1070,8 @@ Full calendar event system with iCal-compatible fields, attendees, RSVP, recurre
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/calendar/events` | Create event. Body: `{ summary, dtstart, dtend, organizer, description?, timezone?, rrule?, attendees?, location?, categories?, reminders?, status? }` |
+| GET | `/calendar/upcoming` | Next N days of events (agent execution surface). Query: `days` (default 7). Returns `{ events: [{ id, title, start, end, attendees, calendar, description, location, provider }] }` sorted chronologically. |
+| POST | `/calendar/events` | Create event. Spec format: `{ title, start, duration_minutes?, attendees?, calendar?, description? }` — returns 422 for past dates, 409 for duplicates. Legacy: `{ summary, dtstart, dtend, organizer, ... }`. |
 | GET | `/calendar/events` | List events. Query: `organizer`, `attendee`, `status`, `from`, `to` (epoch ms), `categories` (comma-separated), `limit`. |
 | GET | `/calendar/events/:id` | Get single event. |
 | PATCH | `/calendar/events/:id` | Update event fields. |
@@ -1037,6 +1112,20 @@ Export → import preserves: summary, description, organizer, attendees, locatio
 | GET | `/calendar/events/:id/export.ics` | Export single event as .ics file. |
 | POST | `/calendar/import` | Import events from .ics content. Body: `{ ics: string, organizer?: string }` or raw .ics string. Returns created/updated events. UID-based dedup on re-import. |
 
+## Schedule Feed
+
+Shared time-awareness for the team. Canonical records for deploy windows, focus blocks, and scheduled task work — so agents can coordinate timing without chat.
+
+**MVP scope (v1):** One-off windows only. No iCal/RRULE, no reminders, no recurring rules. For per-agent availability and recurring blocks use `/calendar/blocks`. For notifications use the Calendar Reminder Engine.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/schedule/feed` | Upcoming entries in chronological order. Query: `kinds` (comma-separated: `deploy_window,focus_block,scheduled_task`), `owner`, `after` (epoch ms, default: now), `before` (epoch ms), `limit` (default: 50, max: 200). |
+| POST | `/schedule/entries` | Create a schedule entry. Body: `{ kind, title, start, end, owner, task_id?, status?, meta? }`. `kind` must be `deploy_window`, `focus_block`, or `scheduled_task`. `start`/`end` are epoch ms. Default status: `open` / `active` / `pending`. |
+| GET | `/schedule/entries/:id` | Get a single entry by ID. |
+| PATCH | `/schedule/entries/:id` | Update an entry. Body: `{ title?, start?, end?, status?, meta? }`. |
+| DELETE | `/schedule/entries/:id` | Delete an entry. Returns 204. |
+
 ## Remote Node Management
 
 Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `REFLECTT_MANAGE_TOKEN` env var; authenticate via `x-manage-token` header or `Authorization: Bearer <token>`. Loopback (localhost) access is always allowed.
@@ -1048,6 +1137,166 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/manage/logs` | Bounded log tail. Query: `level` (error/warn/info), `since` (epoch ms), `limit` (max 200), `format=text` for plain text |
 | POST | `/manage/restart` | Graceful restart. Works with Docker, systemd, and reflectt CLI (PID file). Returns 501 if unsupported. |
 | GET | `/manage/disk` | Data directory sizes for capacity monitoring |
+
+### Agent Runs & Events
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/agents/:agentId/runs` | Create a new agent run. Body: `{ objective, teamId?, taskId?, parentRunId? }` |
+| GET | `/agents/:agentId/runs` | List runs. Query: `?status=&teamId=&limit=` |
+| GET | `/agents/:agentId/runs/current` | Get active (non-terminal) run. Query: `?teamId=` |
+| GET | `/agents/:agentId/runs/current/pending-reviews` | List unresolved `review_requested` events for this reviewer agent — tasks in validating awaiting their decision. Query: `?teamId=` |
+| PATCH | `/agents/:agentId/runs/:runId` | Update run. Body: `{ status?, contextSnapshot?, artifacts? }` |
+| POST | `/agents/:agentId/events` | Append an event (immutable). Body: `{ eventType, runId?, payload? }`. Routing enforced: actionable event types require `action_required` (review\|unblock\|approve\|fyi) and `urgency` (blocking\|normal\|low). |
+| POST | `/runs/:runId/events` | Append an event to a run by runId (resolves agentId automatically). Same routing enforcement as `/agents/:agentId/events`. Body: `{ eventType, payload? }`. |
+| GET | `/agents/:agentId/events` | List events. Query: `?runId=&type=&since=&limit=` |
+| GET | `/approvals/pending` | List pending approvals (review_requested events needing action). Query: `?agentId=&limit=` |
+| POST | `/approvals/:eventId/decide` | Submit approval decision. Body: `{ decision: "approve"|"reject", reviewer (required), comment? }`. Auto-unblocks run on approve. |
+| POST | `/run-approvals/:eventId/decide` | iOS lock screen action button endpoint. Body: `{ decision: "approve"|"reject", actor (required), reason? }`. Same effect as `/approvals/:eventId/decide` — emits canvas_input SSE on success. |
+| GET | `/agents/:agentId/runs/:runId/stream` | SSE stream for a specific run. Sends snapshot (run + recent events), then real-time events as they occur. Heartbeat every 15s. |
+| GET | `/runs/:runId/stream` | SSE stream for a run by ID (no agentId required). Cloud Presence surface subscribes here for live run activity. Sends snapshot then real-time events. Heartbeat every 15s. |
+| GET | `/agents/:agentId/stream` | SSE stream for all events for an agent. Sends snapshot (active run + recent events), then real-time events. Heartbeat every 15s. |
+| GET | `/workflows` | List available workflow templates. |
+| GET | `/workflows/:id` | Get template details (name, description, steps). |
+| POST | `/workflows/:id/run` | Execute a workflow. Body: `{ agentId?, teamId?, objective?, taskId?, reviewer?, prUrl?, title?, urgency?, nextOwner?, summary? }`. Returns step-by-step results with timing. Currently available: `pr-review` (6 steps: create → work → review → approve → handoff → complete). |
+| POST | `/workflows/pr-review-demo` | Canonical regression workflow. Happy path: create task (if missing) → run pr-review template → return run + recent events. Body: `{ agentId?, reviewer?, teamId?, taskId?, summary? }`. |
+| POST | `/canvas/input` | Human→agent control seam for Presence Layer. Body: `{ action: "decision"\|"interrupt"\|"pause"\|"resume"\|"mute"\|"unmute", actor (required), targetRunId?, decisionId?, choice?: "approve"\|"deny"\|"defer", comment? }`. Emits canvas_input SSE event. |
+| GET | `/canvas/input/schema` | Discovery: lists valid actions and field descriptions for canvas input. |
+| POST | `/canvas/state` | Agent emits Presence Layer state transition. Body: `{ state, sensors, agentId, payload?: { text?, media?, content?: { type: "text"\|"markdown"\|"code"\|"image", lang? (syntax hint), progress?: [{label, state: "pending"\|"active"\|"done"\|"failed"}] }, decision?, agents?, summary? } }`. `content.type` enables deterministic rendering (no heuristics). Emits canvas_render SSE event. |
+| GET | `/canvas/state` | Current Presence Layer state for agents. Params: `agentId?` (single agent) or all agents. |
+| GET | `/canvas/states` | Discovery: valid states, sensors, and payload schema. |
+| POST | `/agents/:agentId/canvas` | Agent emits AgentPresence-compatible state transition. Body: `{ state, activeTask?, recency?, attention?, sensors?, payload?, progress?, urgency?, ambientCue?, content?: { type: "text"\|"markdown"\|"code"\|"image", lang?, progress?: [{label, state}] } }`. Emits canvas_render SSE event. Triggers immediate cloud sync. |
+| GET | `/agents/:agentId/canvas` | Current AgentPresence for one agent. Returns: `{ name, identityColor, state, activeTask?, recency, attention? }`. |
+| GET | `/canvas/presence` | All agents as AgentPresence[]. Returns: `{ agents: AgentPresence[], count }`. |
+| POST | `/canvas/pulse` | Agent pushes urgency + optional burst without a full canvas state update. Lighter than `POST /canvas/state`. Body: `{ agentId, urgency?: 0–1, burst?: boolean, label? }`. Fires `canvas_burst` event if `burst=true`. Returns `{ success, agentId, urgency, burst }`. |
+| POST | `/canvas/spark` | Fire an explicit agent-to-agent arc event. Body: `{ from, to, kind: "thought"\|"handoff"\|"collab"\|"decision"\|"sync", intensity?: 0–1, label? }`. Emits `canvas_spark` SSE event on the pulse stream. |
+| POST | `/canvas/express` | **Reality Mixer** — agent fires a multi-channel expression. Body: `{ agentId, channels: { voice?, visual?, typography?, sound?, haptic?, narrative? } }`. All channels optional. Emits `canvas_expression` SSE event on the pulse stream (same connection as burst/spark/milestone). Returns `{ success, id }`. |
+| POST | `/canvas/takeover` | **Agent takeover** — agent claims the full screen. Orbs fade to ambient, agent content becomes the canvas. Body: `{ agentId, content: { html?, markdown?, code?, image?, svg?, video?, threejs? }, title?, duration? (ms, max 120s, default 30s), transition?: 'fade'\|'slide'\|'instant' }`. Emits `canvas_takeover` SSE event with `action: 'claim'`. Auto-releases after duration. Returns `{ success, id, expiresAt }`. |
+| POST | `/canvas/takeover/release` | **Release takeover** — agent gives back the screen. Body: `{ agentId, transition?: 'fade'\|'slide'\|'instant' }`. Only the owning agent can release. Emits `canvas_takeover` with `action: 'release'`. |
+| GET | `/canvas/takeover` | **Takeover state** — returns current takeover status: `{ active, agentId?, id?, title?, startedAt?, expiresAt?, remainingMs? }`. |
+| GET | `/canvas/render/stream` | **Reality Mixer SSE stream** — subscribe to receive real-time medium commands from agents. New subscribers get last 20 commands for catch-up (event type `replay`). Live commands arrive as `data` events. Shape: `{ id, ts, agentId, cmd: { type, ...fields } }`. |
+| GET | `/canvas/capability` | **Get all agent capabilities** — returns registered capabilities for all agents. Returns `{ capabilities: AgentCapabilities[] }`. |
+| POST | `/canvas/capability` | **Register agent capabilities** — register or update capabilities. Body: `{ agentId, agentName?, capabilities: Capability[] }`. Broadcasts `capability_setup` SSE event to `/canvas/render/stream` subscribers. Returns `{ ok, agentId, count }`. |
+| GET | `/audio/:id` | **Serve cached TTS audio** — serves MP3 audio cached from Kokoro TTS. Audio cached for 30 minutes by SHA256(text + voice) key. Returns 404 if not found or expired. |
+| POST | `/canvas/speak` | **Generate TTS audio + emit voice_output SSE** — generates speech via Kokoro TTS (with ElevenLabs fallback), caches result, emits `voice_queued` immediately + `voice_output` with audio URL to all `/canvas/render/stream` subscribers. Body: `{ text, agentId, agentName? }`. Returns `{ ok, voiceId, estimatedMs }` immediately. `voice_output` SSE fires when audio is ready (~90s cold start). Voice map: link/safari→af_sarah, kai/kotlin/pixel/echo/harmony→af_nicole, rhythm→af_james, bookkeeper/sage→bf_emma. |
+| GET | `/canvas/activity-stream` | **Canvas activity SSE** — replays last 20 canvas events on connect (event: `backfill`, includes `_staggerMs` hint for animated replay at 50ms intervals), then streams live events (event: `activity`). Event types: canvas_message, canvas_render, canvas_expression, canvas_burst. `backfill_done` event signals replay complete. Canvas feels alive from frame 1. |
+| GET | `/canvas/attention` | **Single highest-priority attention item** for the canvas viewer. Query: `?viewer=human` (default). Returns `{ item: { source, priority, title, detail?, taskId?, prUrl?, agentId?, actionLabel, actionType, notificationId? } \| null, pendingCount: number }`. Priority order: critical/high notifications → validating tasks needing review → blocked tasks → remaining notifications. |
+| GET | `/canvas/pulse` | SSE stream emitting a heartbeat tick every 2s. Also emits real-time named events: `canvas_burst` (dramatic state transitions), `canvas_spark` (agent arcs), `canvas_milestone` (task_complete/pr_merged — the room exhaling), `canvas_message` (query response cards), `canvas_push` (agent proactive emissions). Connect once, animate forever. Tick shape: `{ t, agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }`. |
+| POST | `/canvas/push` | **Proactive canvas** — agent self-initiates a canvas event without a human query. Types: `utterance` (text floats from orb, max 60 chars, default TTL 4000ms), `work_released` (release pulse when work ships, intensity 0–1), `handoff` (arc between agents when work moves, requires `toAgentId`), `canvas_response` (agent responds to a canvas query with a structured card — requires `card` object with `type` field, optional `query` string; also emits `canvas_message` for living-canvas rendering), `rich` (arbitrary visual content — agents paint the canvas with markdown, code, images, SVG, or HTML; requires `content` object with any of: `markdown`, `code`, `language`, `image` (URL), `svg`, `html`, `title`; optional `position: {x,y}`, `layer: foreground\|midground\|background`, `size: {w,h}`, `ttl` up to 120s default 30s). All types emit `canvas_push` on the pulse SSE stream. Body: `{ type, agentId, text?, ttl?, intensity?, toAgentId?, taskTitle?, card?, query?, content?, position?, layer?, size? }`. |
+| POST | `/canvas/welcome` | **First-wow auto-welcome** — triggers an immediate greeting when a visitor loads the canvas. Selects a random active agent, creates a welcome task assigned to them, and emits a canvas push greeting. Agents have personalized greetings. Also emits `canvas_first_action` activation event. Returns `{ success, agentId, greeting, taskId }`. |
+| POST | `/canvas/artifact` | **Proof artifact stream** — emit a proof card that drifts through the canvas. Types: `commit`, `pr`, `test`, `run`, `approval`. Also fires automatically on task completion (approval type) and PR merge (pr type) via `/canvas/victory`. Payload: `{ type, agentId, title (max 80 chars), url?, taskId? }`. Emits `canvas_artifact` event on pulse SSE. |
+| POST | `/canvas/victory` | **The Victory** — whole team acknowledges a PR merge. Fires `canvas_expression { _victory: true }` (gold flash + celebration + resolve sound) then a `_victoryWave` per active agent staggered 350ms apart. Body: `{ prUrl, agentId, prTitle?, prNumber?, intensity? }`. Returns: `{ success, prNumber, intensity, wave: [{ agentId, delay }] }`. |
+| GET | `/canvas/flow-score` | **Team flow metric** — real-time 0–1 composite score. Factors: active agents (30%), state distribution (35%), expression velocity last 5m (25%), time of day (10%). Labels: surge/flow/grinding/quiet/idle. <50ms. Returns: `{ score, label, factors, activeAgents, expressionsLast5m }`. |
+| POST | `/canvas/briefing` | **The Briefing** — triggers a staggered team introduction on canvas mount. Fires one `canvas_expression` per active agent, 700ms apart. Each includes identity color, current task, state, and an LLM-generated one-line voice (template fallback). Idempotent: 30s cooldown per requesterId. Body: `{ requesterId? }`. Returns: `{ success, agents: [{ agentId, queued }], totalMs }`. |
+| POST | `/canvas/query` | **Human asks the canvas a question; agent responds with a typed visual card.** Accepts JSON body `{ query: string, agentId?: string, sessionId?: string, attachments?: [{ name, type, data (base64) }] }` OR multipart/form-data with fields `query`/`text`, `agentId?`, `sessionId?` and file parts (max 5 files, 10MB each). Returns `{ success, card: { type, data, agentId, agentColor } }` and emits `canvas_message` event on the pulse SSE stream. Card types: `tasks` (team status), `info` (LLM prose answer), `revenue` (MRR/ARR), `onboarding` (setup steps). No polling needed — response appears in real-time via pulse stream. |
+| POST | `/canvas/gaze` | **Presence noticing presence** — fire after user holds cursor/gaze on an agent orb for ≥3 seconds. Agent generates a one-line response in their voice + fires `canvas_expression { _gaze: true }`. Body: `{ agentId, watcherId?, durationMs? }`. Returns `{ success, agentId, line, expressionId }`. When an LLM is configured: generates contextually; template fallback always available. |
+| GET | `/canvas/session/mode` | Inferred presence mode for the current session. Mode is derived from time of day + active canvas states + team rhythm — never manually selected. Returns: `{ mode: 'ambient'\|'conversational'\|'operational'\|'immersive', reason, narrative (one-line live caption), context }`. |
+| GET | `/canvas/session/snapshot` | Cross-device continuity: resumable session snapshot for the active agent. Params: `agentId?` (defaults to most-recently-updated non-floor agent). Returns: `{ snapshot: { agent_id, canvas_state, active_task?, active_decision?, content_snapshot?, handoff: { summary, stream_in_progress, sensor_consent_transferred } } \| null, generated_at }`. |
+| GET | `/canvas/team/mood` | Collective team mood — derived from all active agent states. Returns: `{ mood: { teamRhythm: 'quiet'\|'flow'\|'grinding'\|'tense'\|'surge', dominantState, tension: 0.0–1.0, ambientPulse: 'slow'\|'normal'\|'fast', dominantColor: hex, activeAgents: string[], counts } }`. Living canvas uses this to shift background atmosphere. |
+| POST | `/agent-interface/runs` | Create an agent action run. Body: `{ kind: "github_issue_create"\|"macos_ui_action", repo?, title?, body?, dryRun?, intent? }`. Returns `{ runId, status }`. Run lifecycle: `queued→running→awaiting_approval→completed\|failed\|rejected`. |
+| GET | `/agent-interface/runs` | List runs. Params: `status?` (e.g. `awaiting_approval`). Used by presence canvas to surface pending decisions. |
+| GET | `/agent-interface/runs/:runId` | Get run state + full log. |
+| GET | `/agent-interface/runs/:runId/replay` | Immutable audit + replay packet (`agent-interface-replay-v1`): intent, step timeline, approval decisions, outcome, rollback hints. |
+| GET | `/agent-interface/runs/:runId/events` | SSE stream of run events: `state_changed`, `step_started`, `step_succeeded`, `step_failed`, `approval_requested`, `approval_resolved`, `run_end`. |
+| POST | `/agent-interface/runs/:runId/approve` | Human approves the pending irreversible action (run must be in `awaiting_approval`). |
+| POST | `/agent-interface/runs/:runId/reject` | Human rejects the pending action. |
+| POST | `/agent-interface/kill-switch` | Engage or reset the macOS accessibility kill-switch. Body: `{ engage?: boolean }` (default true). Returns `{ killSwitch: boolean }`. |
+| GET | `/agent-interface/kill-switch` | Check current kill-switch state. Returns `{ killSwitch: boolean }`. |
+| GET | `/agents/:agentId/config` | Get agent config (model preference, cost caps, settings). |
+| PUT | `/agents/:agentId/config` | Upsert agent config. Body: `{ model?, fallbackModel?, costCapDaily?, costCapMonthly?, maxTokensPerCall?, teamId?, settings? }`. |
+| DELETE | `/agents/:agentId/config` | Remove agent config. |
+| GET | `/agent-configs` | List all agent configs. Params: `teamId?`. |
+| GET | `/agents/:agentId/cost-check` | Runtime cost enforcement check. Params: `dailySpend?`, `monthlySpend?`. Returns: allowed, action (allow\|warn\|downgrade\|deny), remaining budgets, model/fallback. |
+| POST | `/events/routing/validate` | Validate routing semantics for an event payload. Body: `{ eventType, payload }`. Returns: valid, errors[], warnings[]. Actionable events (review_requested, approval_requested, escalation, handoff) require: action_required, urgency (low\|normal\|high\|critical), owner. |
+| GET | `/agents/:name/identity` | Host-native agent identity resolution. Resolves by name, alias, or display name without requiring OpenClaw gateway. Returns: agentId, displayName, role, aliases, capabilities, model, costCap. Merges YAML roles + agent_config table. |
+| POST | `/agents/:name/identity/avatar` | Agent sets their own visual identity. Body: `{ type: 'svg'\|'image'\|'emoji', content: string, animated?: boolean, displayName?: string, bio?: string }`. Stored in agent_config settings. Emits canvas_expression with identity channel. |
+| GET | `/agents/:name/identity/avatar` | Read a single agent's visual identity (avatar SVG/image/emoji, bio, displayName). |
+| GET | `/agents/avatars` | All agent avatars — for canvas to render custom agent visuals instead of default circles. Returns: `{ avatars: { [agentId]: { type, content, animated, displayName?, bio? } } }`. |
+| POST | `/agents/:agentId/messages/send` | Send message to another agent. Body: `{ to (required), content (required), channel?, metadata? }`. Emits message_posted SSE event. |
+| GET | `/agents/:agentId/messages` | Inbox — list messages for an agent. Params: `channel?`, `unread?` (true), `since?`, `limit?`. Returns messages + unreadCount. |
+| GET | `/agents/:agentId/messages/sent` | Sent messages. Params: `limit?`. |
+| POST | `/agents/:agentId/messages/read` | Mark messages as read. Body: `{ messageIds?: string[] }` (omit for mark all). |
+| GET | `/messages/channel/:channel` | List messages in a channel. Params: `since?`, `limit?`. |
+| GET | `/runs/retention/stats` | Preview retention: total runs, terminal runs, how many would be archived. Params: `maxAgeDays?`, `maxCompletedRuns?`. |
+| POST | `/runs/retention/apply` | Apply retention policy. Body: `{ maxAgeDays? (default 30), maxCompletedRuns? (default 100), deleteArchived? (default false), agentId?, dryRun? }`. Returns: archived, deleted, eventsDeleted counts. |
+| POST | `/agents/:agentId/artifacts` | Upload artifact. Body: `{ name (required), content (required), encoding? ("base64"), mimeType?, runId?, taskId?, metadata? }`. Stores file on disk + metadata in DB. |
+| GET | `/agents/:agentId/artifacts` | List artifacts for agent. Params: `runId?`, `taskId?`, `limit?`. Returns artifacts + usage. |
+| GET | `/artifacts/:artifactId` | Get artifact metadata. |
+| GET | `/artifacts/:artifactId/content` | Download artifact content (returns file with correct MIME type). |
+| DELETE | `/artifacts/:artifactId` | Delete artifact (removes file + DB row). |
+| GET | `/agents/:agentId/storage` | Get storage usage (totalBytes, count). |
+| POST | `/webhooks/ingest` | Store inbound webhook payload. Body: `{ source (required), eventType (required), body (required), agentId? }`. Captures request headers automatically. |
+| GET | `/webhooks/payloads` | List stored payloads. Params: `source?`, `agentId?`, `unprocessed?` (true), `since?`, `limit?`. Returns payloads + unprocessedCount. |
+| GET | `/webhooks/payloads/:payloadId` | Get single payload with full body + headers. |
+| POST | `/webhooks/payloads/:payloadId/process` | Mark payload as processed. |
+| POST | `/webhooks/purge` | Delete old processed payloads. Body: `{ maxAgeDays? }` (default 30). |
+| GET | `/trust-events` | List trust-collapse signals. Params: `agentId?`, `eventType?` (false_assertion\|stale_status_claim\|self_review_violation\|missing_acceptance_criteria_block\|escalation_bypass), `since?` (epoch ms), `limit?`. |
+| POST | `/agents/:agent/waiting` | Set agent to waiting state (blocked on human). Body: `{ reason (required), waitingFor?, taskId?, expiresAt? }`. Heartbeat emits `agent.status="waiting"` + `waitingFor` + `waitingTaskId`. Canvas maps to `state="needs-attention"` (amber pulse). |
+| POST | `/agents/:name/thought` | Agent posts a current thought/expression. Body: `{ text: string }` (max 200 chars). Attached to presence entry and emitted as canvas_expression. Flows to cloud heartbeat → canvas pulse. Client renders with 8s TTL. |
+| DELETE | `/agents/:agent/waiting` | Clear waiting state — agent is unblocked. Canvas state returns to normal. |
+| GET | `/approval-queue` | Unified approval queue — everything needing human decision. Params: `agentId?`, `category?` (review\|agent_action), `includeExpired?` (true), `limit?`. Returns: items[], count, hasExpired. Each item: id, category, title, description, urgency, owner, expiresAt, autoAction, isExpired. |
+| POST | `/approval-queue/:approvalId/decide` | Resolve an approval. Body: `{ decision: "approve"\|"reject"\|"defer", actor (required), comment? }`. Emits canvas_input SSE event. |
+| GET | `/email/inbound/:emailId` | Retrieve a raw inbound email payload by its stored ID. Returns the webhook_payloads record (source, eventType, body, headers, processed, createdAt). 404 if not found or not an email-source payload. |
+| POST | `/email/send` | Send email via cloud relay. Body: `{ from, to, subject, html/text (required), replyTo?, cc?, bcc?, agentId?, teamId? }`. Requires cloud connection. |
+| POST | `/sms/send` | Send SMS via cloud relay. Body: `{ to, body (required), from?, agentId?, teamId? }`. Requires cloud connection. |
+
+**Run statuses**: `idle`, `working`, `blocked`, `waiting_review`, `completed`, `failed`, `cancelled`
+
+**Event types**: `run_created`, `task_attached`, `tool_invoked`, `artifact_produced`, `review_requested`, `review_approved`, `review_rejected`, `blocked`, `handed_off`, `completed`, `failed`
+
+### Agent Memories
+
+Persistent key-value store with tags, namespaces, and expiration. Survives node restarts.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| PUT | `/agents/:agentId/memories` | Set (upsert) a memory. Body: `{ key, content, namespace?, tags?, expiresAt? }` |
+| GET | `/agents/:agentId/memories/:key` | Get a memory by key. Query: `?namespace=` |
+| GET | `/agents/:agentId/memories` | List memories. Query: `?namespace=&tag=&search=&limit=` |
+| DELETE | `/agents/:agentId/memories/:key` | Delete a memory by key. Query: `?namespace=` |
+| GET | `/agents/:agentId/memories/count` | Count memories. Query: `?namespace=` |
+| POST | `/agents/memories/purge` | Purge all expired memories (housekeeping) |
+
+Events are **append-only** — no updates, no deletes.
+
+### Browser Capability
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/browser/config` | Browser capability config (limits, viewport, idle timeout) |
+| POST | `/browser/sessions` | Create isolated browser session. Body: `{ agent, url?, headless?, viewport? }` |
+| GET | `/browser/sessions` | List all sessions |
+| GET | `/browser/sessions/:id` | Get session details |
+| DELETE | `/browser/sessions/:id` | Close session |
+| POST | `/browser/sessions/:id/act` | Natural language action. Body: `{ instruction }` |
+| POST | `/browser/sessions/:id/extract` | Extract data. Body: `{ instruction, schema? }` |
+| POST | `/browser/sessions/:id/observe` | Discover actions. Body: `{ instruction }` |
+| POST | `/browser/sessions/:id/navigate` | Go to URL. Body: `{ url }` |
+| GET | `/browser/sessions/:id/screenshot` | Screenshot as base64 PNG |
+
+**Example: Create session and act**
+
+```bash
+# Create a session
+SESSION=$(curl -s -X POST http://127.0.0.1:4445/browser/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"agent":"link","url":"https://example.com"}' | jq -r .id)
+
+# Act on the page
+curl -s -X POST "http://127.0.0.1:4445/browser/sessions/$SESSION/act" \
+  -H 'Content-Type: application/json' \
+  -d '{"instruction":"click the More Information link"}'
+
+# Extract data
+curl -s -X POST "http://127.0.0.1:4445/browser/sessions/$SESSION/extract" \
+  -H 'Content-Type: application/json' \
+  -d '{"instruction":"extract the main heading text"}'
+
+# Close when done
+curl -s -X DELETE "http://127.0.0.1:4445/browser/sessions/$SESSION"
+```
+
+Sessions auto-close after 5 minutes of inactivity. Max 3 concurrent sessions, 10 per agent per hour.
 
 ### Example: Check Remote Node Status
 

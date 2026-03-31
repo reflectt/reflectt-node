@@ -11,6 +11,10 @@ data/
 
 # Task artifacts
 process/*
+!process/TASK-jc5b2ygux.md
+!process/TASK-7xyi88v7x.md
+!process/TASK-hoy64vgsq.md
+!process/agent-interface-mvp-execution-v1.md
 # Allow committing specific task artifacts needed for review/proof
 !process/TASK-47sxe374r.md
 !process/TASK-iwphjvsrl.md
@@ -22,3 +26,31 @@ process/*
 !process/TASK-sy2gt0tpz-db-wipe-retro.md
 !process/TASK-z89zs36bl-silence-detection-protocol.md
 !process/TASK-qzvjlfy31.md
+!process/TASK-7bgji53a0.md
+!process/TASK-cost-dashboard.md
+!process/TASK-jw9nvau8i.md
+!process/TASK-ga9x9tlsl.md
+!process/TASK-mtgo59je4.md
+!process/TASK-mrodk0u52.md
+!process/TASK-m0nh8zpok.md
+!process/TASK-2vt45xvi1.md
+!process/TASK-c7bc2e1np.md
+!process/TASK-5mlkqadzh.md
+!process/TASK-3z83jzley.md
+!process/CANVAS-STATE-CONTRACT-v1.md
+!process/TEAM-HEALTH-2026-03-14.md
+
+# Build artifacts
+commit.txt
+!process/TASK-bxedz440z.md
+!process/TASK-4e82b7vnc.md
+!process/TASK-r33yx9ise.md
+!process/TASK-366619.md
+!process/TASK-3oa9jb4yb.md
+!process/TASK-htyujlgw7.md
+!process/TASK-v7nnptqvt.md
+!process/TASK-jq03lf57k.md
+!process/TASK-8e9iqpuln.md
+!process/TASK-qx123gfr4.md
+reflectt.db
+!process/TASK-8c63wc19v.md

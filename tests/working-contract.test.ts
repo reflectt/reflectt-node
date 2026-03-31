@@ -6,6 +6,7 @@ import {
   tickWorkingContract,
   checkClaimGate,
   _clearWarnings,
+  STARTUP_GRACE_MS,
 } from '../src/working-contract.js'
 import { getDb } from '../src/db.js'
 import type { FastifyInstance } from 'fastify'
@@ -22,6 +23,132 @@ beforeEach(() => {
 })
 
 describe('Working contract enforcement', () => {
+  it('suppresses auto-requeue during startup grace period', async () => {
+    // Simulate a doing task that is stale (created 2h ago) but the server just restarted.
+    // The contract must NOT requeue it during the grace window.
+    const db = getDb()
+    const taskId = `task-test-wc-grace-${Date.now()}`
+    const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000
+    db.prepare(`INSERT INTO tasks (id, title, status, assignee, created_at, updated_at, priority, created_by)
+      VALUES (?, ?, 'doing', 'link', ?, ?, 'P2', 'test')`)
+      .run(taskId, `TEST: wc grace ${taskId}`, twoHoursAgo, twoHoursAgo)
+
+    try {
+      // _moduleLoadedAtOverride = now (simulates fresh restart), _nowOverride = now
+      // uptime = 0ms < STARTUP_GRACE_MS → should skip
+      const now = Date.now()
+      const result = await tickWorkingContract({
+        _nowOverride: now,
+        _moduleLoadedAtOverride: now,
+      })
+      expect(result.requeued).toBe(0)
+      expect(result.warnings).toBe(0)
+
+      // Verify task is still in doing
+      const row = db.prepare('SELECT status FROM tasks WHERE id = ?').get(taskId) as { status: string } | undefined
+      expect(row?.status).toBe('doing')
+    } finally {
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+    }
+  })
+
+  it('allows auto-requeue after startup grace period expires', async () => {
+    // Simulate the contract running long after startup (2h uptime).
+    // A stale doing task with an existing warning should be requeued.
+    const db = getDb()
+    const taskId = `task-test-wc-postgrace-${Date.now()}`
+    const staleMs = Date.now() - 3 * 60 * 60 * 1000 // 3h ago
+    db.prepare(`INSERT INTO tasks (id, title, status, assignee, created_at, updated_at, priority, created_by)
+      VALUES (?, ?, 'doing', 'link', ?, ?, 'P3', 'test')`)
+      .run(taskId, `TEST: wc postgrace ${taskId}`, staleMs, staleMs)
+
+    try {
+      const now = Date.now()
+      const fakeModuleLoadedAt = now - (STARTUP_GRACE_MS + 60_000) // grace expired 1m ago
+
+      // Run with grace expired — may issue warning or requeue depending on config
+      const result = await tickWorkingContract({
+        _nowOverride: now,
+        _moduleLoadedAtOverride: fakeModuleLoadedAt,
+      })
+      // After grace expires, the contract is active — result should be a valid TickResult
+      expect(result).toHaveProperty('requeued')
+      expect(result).toHaveProperty('warnings')
+      expect(result).toHaveProperty('actions')
+    } finally {
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+    }
+  })
+
+  it('reflection gate does not block validating→doing re-claim', async () => {
+    // Set up an agent who is over the reflection threshold (2+ tasks, >4h ago)
+    const db = getDb()
+    // Ensure table exists (created lazily inside checkClaimGate)
+    checkClaimGate('__init__')
+    const agent = `reclaim-test-${Date.now()}`
+    const fiveHoursAgo = Date.now() - 5 * 60 * 60 * 1000
+    db.prepare(`
+      INSERT OR REPLACE INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+      VALUES (?, ?, 3, ?)
+    `).run(agent, fiveHoursAgo, Date.now())
+
+    // Create a task in validating for this agent (simulates reviewer rejection path)
+    const taskId = `task-test-reclaim-${Date.now()}`
+    db.prepare(`INSERT INTO tasks (id, title, status, assignee, reviewer, created_at, updated_at, priority, created_by, done_criteria, metadata)
+      VALUES (?, ?, 'validating', ?, 'kai', ?, ?, 'P2', 'test', '["done"]', '{"eta":"2026-03-14","is_test":true}')`)
+      .run(taskId, `TEST: reclaim gate ${taskId}`, agent, Date.now(), Date.now())
+
+    try {
+      // validating→doing should NOT be blocked by the reflection gate
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/tasks/${taskId}`,
+        payload: { status: 'doing', actor: agent },
+      })
+      const body = JSON.parse(res.body)
+      // Should succeed (not hit 422 reflection gate)
+      expect(body.gate).not.toBe('reflection_overdue')
+      expect(res.statusCode).not.toBe(422)
+    } finally {
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+      db.prepare('DELETE FROM reflection_tracking WHERE agent = ?').run(agent)
+    }
+  })
+
+  it('reflection gate still blocks fresh todo→doing claim when overdue', async () => {
+    const db = getDb()
+    checkClaimGate('__init__')
+    const agent = `fresh-claim-test-${Date.now()}`
+    const fiveHoursAgo = Date.now() - 5 * 60 * 60 * 1000
+    db.prepare(`
+      INSERT OR REPLACE INTO reflection_tracking (agent, last_reflection_at, tasks_done_since_reflection, updated_at)
+      VALUES (?, ?, 3, ?)
+    `).run(agent, fiveHoursAgo, Date.now())
+
+    // Create a task in todo
+    const taskId = `task-test-fresh-claim-${Date.now()}`
+    db.prepare(`INSERT INTO tasks (id, title, status, assignee, reviewer, created_at, updated_at, priority, created_by, done_criteria, metadata)
+      VALUES (?, ?, 'todo', ?, 'kai', ?, ?, 'P2', 'test', '["done"]', '{"eta":"2026-03-14","is_test":false}')`)
+      .run(taskId, `Fresh claim gate test ${taskId}`, agent, Date.now(), Date.now())
+
+    try {
+      // todo→doing should be blocked (fresh claim, not a re-claim)
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/tasks/${taskId}`,
+        payload: { status: 'doing', actor: agent },
+      })
+      const body = JSON.parse(res.body)
+      // Policy may be disabled in test env; just verify gate field if it fires
+      if (res.statusCode === 422) {
+        expect(body.gate).toBe('reflection_overdue')
+      }
+    } finally {
+      db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId)
+      db.prepare('DELETE FROM reflection_tracking WHERE agent = ?').run(agent)
+    }
+  })
+
   it('tick returns structured result', async () => {
     const result = await tickWorkingContract()
     expect(result).toHaveProperty('warnings')

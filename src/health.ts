@@ -12,6 +12,7 @@
  */
 
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { hostname } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { presenceManager } from './presence.js'
 import { chatManager } from './chat.js'
@@ -19,9 +20,11 @@ import { taskManager } from './tasks.js'
 import { routeMessage } from './messageRouter.js'
 import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
+import { getAgentLane } from './lane-config.js'
 import { getDb } from './db.js'
 import { policyManager } from './policy.js'
 import { recordSystemLoopTick } from './system-loop-state.js'
+import { isCloudConfigured } from './cloud.js'
 
 /**
  * Validate a task timestamp is within reasonable bounds.
@@ -64,6 +67,7 @@ export interface StaleDoingTask {
 
 export interface TeamHealthMetrics {
   timestamp: number
+  scope: TeamHealthScope
   agents: AgentHealthStatus[]
   blockers: BlockerAlert[]
   overlaps: OverlapAlert[]
@@ -75,6 +79,14 @@ export interface TeamHealthMetrics {
     count: number
     tasks: StaleDoingTask[]
   }
+}
+
+export interface TeamHealthScope {
+  kind: 'host-local'
+  hostName: string
+  label: string
+  message: string
+  orgHealthUrl: string | null
 }
 
 export type ActiveLane = 'doing' | 'blocked' | 'validating' | 'queue-clear' | 'offline'
@@ -103,6 +115,23 @@ export function computeActiveLane(
   if (lastSeenMs !== undefined && lastSeenMs > 0 && (now - lastSeenMs) >= offlineThresholdMs) return 'offline'
 
   return 'queue-clear'
+}
+
+export function getTeamHealthScope(): TeamHealthScope {
+  const hostName = process.env.REFLECTT_HOST_NAME || hostname()
+  const cloudConfigured = isCloudConfigured()
+  const cloudBaseUrl = (process.env.REFLECTT_CLOUD_URL || 'https://app.reflectt.ai').replace(/\/+$/, '')
+  const orgHealthUrl = cloudConfigured ? `${cloudBaseUrl}/org-health` : null
+
+  return {
+    kind: 'host-local',
+    hostName,
+    label: `Host-local health (${hostName})`,
+    message: orgHealthUrl
+      ? `This /health/team snapshot is host-local for ${hostName}. Use Reflectt Cloud org-health for cross-host truth.`
+      : `This /health/team snapshot is host-local for ${hostName}. Cross-host org-health lives in Reflectt Cloud when configured.`,
+    orgHealthUrl,
+  }
 }
 
 export interface AgentHealthSummaryRow {
@@ -249,8 +278,12 @@ export type IdleNudgeDecision = {
     | 'presence-task-mismatch'
     | 'recent-task-comment'
     | 'task-focus-window'
+    | 'queue-empty-suppressed'
+    | 'blocked-external-suppressed'
     | 'queue-clear'
+    | 'queue-clear-restart-window'
     | 'eligible'
+    | 'eligible-restart-window'
   lane: IdleNudgeLaneState
   renderedMessage: string | null
   at: number
@@ -281,6 +314,26 @@ class TeamHealthMonitor {
   private readonly leadCadenceMaxMin = 60
   private readonly blockedEscalationMin = 20
   private readonly trioSilenceMaxMin = 60
+
+  // ── Restart window tracker — SIGNAL-ROUTING Change 3 ─────────────────
+  // Idle escalations are downgraded (no @owner tag) during restart bursts.
+  // Uses same chat_messages DB pattern as Change 1 restart rate-limit.
+  // task-1773528961567-b3leu2g27
+  private readonly RESTART_WINDOW_MS = 30 * 60 * 1000   // 30-minute window
+  private readonly RESTART_BURST_THRESHOLD = 2            // ≥2 restarts = in-window
+
+  private isInRestartWindow(): boolean {
+    try {
+      const db = getDb()
+      const cutoff = Date.now() - this.RESTART_WINDOW_MS
+      const row = db.prepare(
+        "SELECT COUNT(*) as cnt FROM chat_messages WHERE \"from\" = 'system' AND content LIKE '%Server restarted%' AND timestamp > ?",
+      ).get(cutoff) as { cnt: number } | undefined
+      return (row?.cnt ?? 0) >= this.RESTART_BURST_THRESHOLD
+    } catch {
+      return false // safe default: don't suppress if DB unavailable
+    }
+  }
 
   // System idle nudge settings (configurable via env)
   private readonly idleNudgeEnabled = process.env.IDLE_NUDGE_ENABLED !== 'false'
@@ -359,6 +412,7 @@ class TeamHealthMonitor {
 
     return {
       timestamp: now,
+      scope: getTeamHealthScope(),
       agents,
       blockers,
       overlaps,
@@ -1746,7 +1800,7 @@ class TeamHealthMonitor {
 
       // ── Thread-level idempotency ─────────────────────────────────────
       // Build a thread key that groups mentions by channel + thread + mentioned agents.
-      // This prevents duplicate rescues when Ryan sends multiple messages in the
+      // This prevents duplicate rescues when a human sends multiple messages in the
       // same thread mentioning the same agents.
       const threadKey = this.buildMentionThreadKey(mention as unknown as Record<string, unknown>)
 
@@ -1973,17 +2027,61 @@ class TeamHealthMonitor {
         continue
       }
 
+      // Explicit blocked_external gate: agent has a task waiting on a human dependency.
+      // This is a hard signal — suppress all idle nudges regardless of queue state.
+      // Fires even if getNextTask() would return a task (a new task doesn't unblock the dependency).
+      const hasBlockedExternal = tasks.some(
+        (t: any) => (t.assignee || '').toLowerCase() === agent && (t.metadata as any)?.blocked_external === true
+      )
+      if (hasBlockedExternal) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'blocked-external-suppressed', renderedMessage: null })
+        continue
+      }
+
       // Engagement nudge: if agent is idle and has no active doing lane, prompt them to pull/claim work.
       if (lane.laneReason === 'no-active-lane') {
+        // Queue-empty gate (COO-endorsed spec): suppress idle nudge when the agent-scoped
+        // ready queue returns nothing. Uses same logic as GET /tasks/next?agent=<id> —
+        // respects WIP limits, lane matching, assignment, and blocked-by rules.
+        // An agent with nothing pullable is compliant, not idle.
+        //
+        // Lane-scoped check: getNextTask already applies lane-aware filtering, so for
+        // artdirector (design lane) it will only return design-lane tasks. If the design
+        // queue is empty, suppress — even if other lanes have work available.
+        // This prevents false idle escalations for lane-specific agents (e.g. artdirector,
+        // support) who cannot pull cross-lane tasks.
+        const agentLane = getAgentLane(agent)
+        const nextAvailable = taskManager.getNextTask(agent)
+        // Lane-scoped queue-empty check: if the agent has a lane, verify the next
+        // available task is actually in their lane. getNextTask can return directly-assigned
+        // tasks from any lane; we should only escalate if artdirector has design work available.
+        const isLaneEmpty = !nextAvailable || (
+          agentLane !== null && nextAvailable.metadata !== undefined && (() => {
+            const taskLane = (nextAvailable.metadata as Record<string, unknown> | null)?.lane
+            // If task has an explicit lane and it's different from agent's lane, treat as empty
+            return typeof taskLane === 'string' && taskLane !== agentLane.name
+          })()
+        )
+        if (isLaneEmpty) {
+          decisions.push({ ...baseDecision, decision: 'none', reason: 'queue-empty-suppressed', renderedMessage: null })
+          continue
+        }
+
         const signature = `queue-clear:${agent}`
         if (state && state.lastSignature === signature && state.unchangedNudgeCount >= 2) {
           decisions.push({ ...baseDecision, decision: 'none', reason: 'max-repeat-reached', renderedMessage: null })
           continue
         }
 
-        const intro = tier === 1
-          ? `@${agent} system reminder: you appear idle for ${inactivityMin}m and have no active task. Pull work now.`
-          : `@${agent} @owner system escalation: ${inactivityMin}m idle and no active task. Pull work now.`
+        // Restart-window gate: downgrade escalation during burst restarts (SIGNAL-ROUTING Change 3)
+        // ≥2 restarts in 30min → strip @owner/@kai mentions, label as possibly false-positive
+        const inRestartWindow = this.isInRestartWindow()
+
+        const intro = inRestartWindow
+          ? `@${agent} [idle-info, restart-window-active — may be false-positive] idle for ${inactivityMin}m with no active task.`
+          : tier === 1
+            ? `@${agent} system reminder: you appear idle for ${inactivityMin}m and have no active task. Pull work now.`
+            : `@${agent} @owner system escalation: ${inactivityMin}m idle and no active task. Pull work now.`
 
         const template = [
           `1) Pull: GET /tasks/next?agent=${agent}`,
@@ -1991,12 +2089,14 @@ class TeamHealthMonitor {
           '3) Post: /tasks/<id>/comments with 1) shipped 2) blocker 3) next+ETA',
         ].join('\n')
 
-        const renderedMessage = `${intro}\n${template}`
+        const renderedMessage = inRestartWindow
+          ? intro  // no action template during restart window — informational only
+          : `${intro}\n${template}`
 
         decisions.push({
           ...baseDecision,
-          decision: tier === 1 ? 'warn' : 'escalate',
-          reason: 'queue-clear',
+          decision: inRestartWindow ? 'warn' : (tier === 1 ? 'warn' : 'escalate'),
+          reason: inRestartWindow ? 'queue-clear-restart-window' : 'queue-clear',
           renderedMessage,
         })
 
@@ -2008,8 +2108,9 @@ class TeamHealthMonitor {
           from: 'system',
           content: renderedMessage,
           category: 'watchdog-alert',
-          severity: tier === 2 ? 'warning' : 'info',
-          mentions: tier === 2 ? [agent, 'kai'] : [agent],
+          // During restart window: downgrade to info, no @owner escalation
+          severity: (!inRestartWindow && tier === 2) ? 'warning' : 'info',
+          mentions: inRestartWindow ? [agent] : (tier === 2 ? [agent, 'kai'] : [agent]),
         })
 
         const unchangedNudgeCount = state && state.lastSignature === signature
@@ -2063,16 +2164,21 @@ class TeamHealthMonitor {
         continue
       }
 
+      // Restart-window gate: downgrade escalation during burst restarts (SIGNAL-ROUTING Change 3)
+      const inRestartWindow = this.isInRestartWindow()
+
       // ETA-only escalation: after 2 repeated status updates without artifacts,
       // require artifact link or explicit blocker, else flag for reassignment
       const etaOnlyCount = this.countRecentEtaOnlyUpdates(messages, agent, taskId)
       const needsArtifact = etaOnlyCount >= 2
 
-      const intro = needsArtifact
-        ? `@${agent} @owner escalation: ${etaOnlyCount} status updates on ${taskId} with no artifact or blocker. Post artifact link or explicit blocker now, or task will be flagged for reassignment.`
-        : tier === 1
-          ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
-          : `@${agent} @owner system escalation: ${inactivityMin}m idle. Post required status format now.`
+      const intro = inRestartWindow
+        ? `@${agent} [idle-info, restart-window-active — may be false-positive] idle for ${inactivityMin}m on ${taskId}.`
+        : needsArtifact
+          ? `@${agent} @owner escalation: ${etaOnlyCount} status updates on ${taskId} with no artifact or blocker. Post artifact link or explicit blocker now, or task will be flagged for reassignment.`
+          : tier === 1
+            ? `@${agent} system reminder: you appear idle for ${inactivityMin}m. Post a quick status update now.`
+            : `@${agent} @owner system escalation: ${inactivityMin}m idle. Post required status format now.`
 
       const template = needsArtifact
         ? [
@@ -2087,12 +2193,14 @@ class TeamHealthMonitor {
             '3) Next: <next deliverable + ETA>',
           ].join('\n')
 
-      const renderedMessage = `${intro}\n${template}`
+      const renderedMessage = inRestartWindow
+        ? intro  // informational only during restart window
+        : `${intro}\n${template}`
 
       decisions.push({
         ...baseDecision,
-        decision: tier === 1 ? 'warn' : 'escalate',
-        reason: 'eligible',
+        decision: inRestartWindow ? 'warn' : (tier === 1 ? 'warn' : 'escalate'),
+        reason: inRestartWindow ? 'eligible-restart-window' : 'eligible',
         renderedMessage,
       })
 
@@ -2104,9 +2212,10 @@ class TeamHealthMonitor {
         from: 'system',
         content: renderedMessage,
         category: 'watchdog-alert',
-        severity: tier === 2 ? 'warning' : 'info',
+        severity: (!inRestartWindow && tier === 2) ? 'warning' : 'info',
         taskId: taskId || undefined,
-        mentions: tier === 2 ? [agent, 'kai'] : [agent],
+        // During restart window: strip @owner/@kai — informational only
+        mentions: inRestartWindow ? [agent] : (tier === 2 ? [agent, 'kai'] : [agent]),
       })
 
       const unchangedNudgeCount = state && state.lastSignature === signature
@@ -2303,6 +2412,102 @@ class TeamHealthMonitor {
       p95ResponseTime: Math.round(p95ResponseTime),
       errorRate: Math.round(errorRate * 10000) / 100, // percentage
     }
+  }
+
+  /**
+   * Validating-stall nudge tick.
+   *
+   * Fires a single direct message to the reviewer when:
+   *   - Task has been in validating for > nudgeThresholdMs (default 30m)
+   *   - No formal review decision exists (review_state !== approved/rejected, reviewer_approved !== true)
+   *   - metadata.validating_nudge_sent_at is not already set (one nudge per task lifetime)
+   *
+   * Sends as a DM to the reviewer agent (not broadcast). Sets metadata.validating_nudge_sent_at.
+   */
+  async runValidatingNudgeTick(
+    now = Date.now(),
+    options?: { dryRun?: boolean; nudgeThresholdMs?: number },
+  ): Promise<{ nudged: string[]; skipped: string[] }> {
+    const dryRun = options?.dryRun === true
+    const nudgeThresholdMs = options?.nudgeThresholdMs ?? 30 * 60 * 1000 // 30m default
+
+    recordSystemLoopTick('validating_nudge', now)
+
+    const nudged: string[] = []
+    const skipped: string[] = []
+
+    const validatingTasks = taskManager.listTasks({ status: 'validating' })
+    for (const task of validatingTasks) {
+      const meta = (task.metadata ?? {}) as Record<string, unknown>
+
+      // Skip if nudge already sent for this task
+      if (meta.validating_nudge_sent_at) {
+        skipped.push(`${task.id}:already_nudged`)
+        continue
+      }
+
+      // Skip if no reviewer assigned
+      const reviewer = task.reviewer
+      if (!reviewer) {
+        skipped.push(`${task.id}:no_reviewer`)
+        continue
+      }
+
+      // Skip if formal review decision already exists
+      const reviewState = meta.review_state as string | undefined
+      if (reviewState === 'approved' || reviewState === 'rejected' || meta.reviewer_approved === true) {
+        skipped.push(`${task.id}:review_decided`)
+        continue
+      }
+
+      // Skip if isWaitingOnAuthor (reviewer already acted)
+      const reviewerDecision = meta.reviewer_decision as Record<string, unknown> | undefined
+      if (reviewerDecision && typeof reviewerDecision === 'object') {
+        skipped.push(`${task.id}:waiting_on_author`)
+        continue
+      }
+
+      // Check age since task entered validating
+      const enteredAt = (meta.entered_validating_at as number) || task.updatedAt || task.createdAt || now
+      const ageMs = now - enteredAt
+      if (ageMs < nudgeThresholdMs) {
+        skipped.push(`${task.id}:too_young(${Math.round(ageMs / 60_000)}m)`)
+        continue
+      }
+
+      const ageMin = Math.round(ageMs / 60_000)
+      const content = `[reviewer-nudge] **${task.title}** (${task.id}) has been in validating for ${ageMin}m with no formal review decision.\n\nFormal review needed: \`POST /tasks/${task.id}/review\` with \`{ decision: "approve"|"reject", reviewer: "${reviewer}", comment: "..." }\``
+
+      if (!dryRun) {
+        try {
+          // DM the reviewer directly (bypasses channel noise budget)
+          await chatManager.sendMessage({
+            from: 'system',
+            to: reviewer,
+            channel: 'task-notifications',
+            content,
+            metadata: {
+              kind: 'validating_nudge',
+              taskId: task.id,
+              reviewer,
+              bypass_budget: true,
+            },
+          })
+
+          // Stamp the task so we don't re-nudge
+          taskManager.patchTaskMetadata(task.id, { validating_nudge_sent_at: now })
+        } catch (err) {
+          console.warn(`[validating-nudge] failed to nudge reviewer ${reviewer} for ${task.id}:`, (err as Error).message)
+          skipped.push(`${task.id}:send_error`)
+          continue
+        }
+      }
+
+      nudged.push(`${task.id}→${reviewer}(${ageMin}m)`)
+      console.log(`[validating-nudge] ${dryRun ? '[dry-run] ' : ''}nudged @${reviewer} for ${task.id} (${ageMin}m in validating)`)
+    }
+
+    return { nudged, skipped }
   }
 }
 

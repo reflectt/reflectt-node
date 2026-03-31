@@ -25,6 +25,41 @@ const INBOX_STATES_AUDIT_FILE = join(DATA_DIR, 'inbox.states.jsonl')
 const LEGACY_INBOX_STATES_AUDIT_FILE = join(LEGACY_DATA_DIR, 'inbox.states.jsonl')
 const LEGACY_INBOX_DIR = join(LEGACY_DATA_DIR, 'inbox')
 
+// ── Delivery dedup guard ─────────────────────────────────────────────────────
+// Tracks when a message was last delivered to an agent's inbox.
+// Prevents runaway re-processing loops: if an agent receives an item but doesn't
+// ACK it, the same item is suppressed for DELIVERY_TTL_MS before re-surfacing.
+// This acts as a circuit breaker without breaking legitimate re-delivery.
+const DELIVERY_TTL_MS = 10 * 60 * 1000 // 10 minutes
+
+// key: `${agent}:${messageId}` → last-delivered timestamp
+const deliveryTimestamps = new Map<string, number>()
+
+/** Record that messageId was delivered to agent right now. */
+function recordDelivered(agent: string, messageId: string): void {
+  deliveryTimestamps.set(`${agent}:${messageId}`, Date.now())
+}
+
+/** True if messageId was recently delivered to agent and not yet eligible for re-delivery. */
+function isRecentlyDelivered(agent: string, messageId: string): boolean {
+  const key = `${agent}:${messageId}`
+  const last = deliveryTimestamps.get(key)
+  return last !== undefined && Date.now() - last < DELIVERY_TTL_MS
+}
+
+/** Clear delivery record on ACK so re-delivery can happen if needed later. */
+export function clearDeliveryRecord(agent: string, messageId: string): void {
+  deliveryTimestamps.delete(`${agent}:${messageId}`)
+}
+
+/** Sweep expired delivery records (call periodically to prevent unbounded growth). */
+export function sweepDeliveryRecords(): void {
+  const cutoff = Date.now() - DELIVERY_TTL_MS
+  for (const [key, ts] of deliveryTimestamps) {
+    if (ts < cutoff) deliveryTimestamps.delete(key)
+  }
+}
+
 function normalizeInboxState(input: Partial<InboxState> & { agent: string }): InboxState {
   return {
     agent: input.agent,
@@ -342,6 +377,13 @@ class InboxManager {
       if (message.timestamp <= cutoffTimestamp) {
         continue
       }
+
+      // Skip recently-delivered messages (delivery dedup guard).
+      // Prevents runaway re-processing loops when agents don't ACK inbox items.
+      // Items resurface after DELIVERY_TTL_MS (10 min) for legitimate re-delivery.
+      if (isRecentlyDelivered(agent, message.id)) {
+        continue
+      }
       
       // Calculate priority
       const result = this.calculatePriority(message, agent, state)
@@ -354,12 +396,13 @@ class InboxManager {
         continue
       }
       
-      // Add to inbox
+      // Add to inbox and stamp delivery time (dedup guard)
       inbox.push({
         ...message,
         priority: result.priority,
         reason: result.reason as any,
       })
+      recordDelivered(agent, message.id)
     }
     
     // Sort by priority (high first), then timestamp (newest first)
