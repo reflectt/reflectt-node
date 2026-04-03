@@ -1314,7 +1314,7 @@ dogfood
   .description('Run end-to-end cloud enrollment chain verification')
   .requiredOption('--team-id <id>', 'Cloud team id to target')
   .requiredOption('--token <jwt>', 'Bearer token for cloud API auth (team admin/owner)')
-  .option('--cloud-url <url>', 'Cloud API base URL', process.env.REFLECTT_CLOUD_URL || 'https://app.reflectt.ai')
+  .option('--cloud-url <url>', 'Cloud API base URL', process.env.REFLECTT_CLOUD_URL || 'https://api.reflectt.ai')
   .option('--dashboard-url <url>', 'Dashboard base URL', process.env.REFLECTT_APP_URL || 'https://app.reflectt.ai')
   .option('--host-name <name>', 'Host name to register', `dogfood-${process.pid}`)
   .option('--capability <value...>', 'Host capabilities', ['openclaw', 'dogfood-smoke'])
@@ -1425,7 +1425,7 @@ program
   .description('One-shot setup: init + connect to cloud + start server. Fastest way to get running.')
   .option('--join-token <token>', 'Cloud host join token (get one at app.reflectt.ai)')
   .option('--api-key <key>', 'Team API key')
-  .option('--cloud-url <url>', 'Cloud API base URL', 'https://app.reflectt.ai')
+  .option('--cloud-url <url>', 'Cloud API base URL', 'https://api.reflectt.ai')
   .option('--name <hostName>', 'Host display name', hostname())
   .option('--type <hostType>', 'Host type', 'openclaw')
   .action(async (options) => {
@@ -1472,7 +1472,7 @@ program
 
       // Step 2: Connect
       console.log('☁️  Step 2/3: Connecting to Reflectt Cloud...')
-      const cloudUrl = String(options.cloudUrl || 'https://app.reflectt.ai').replace(/\/+$/, '')
+      const cloudUrl = String(options.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, '')
 
       // Try to reconnect existing host first (preserves hostId across re-enrollments)
       const existingHost = await tryReconnectExistingHost(cloudUrl)
@@ -1557,7 +1557,7 @@ host
   .description('Enroll this reflectt-node host with Reflectt Cloud')
   .option('--join-token <token>', 'Cloud host join token (from dashboard)')
   .option('--api-key <key>', 'Team API key for agent-friendly enrollment (no browser needed)')
-  .option('--cloud-url <url>', 'Cloud API base URL', 'https://app.reflectt.ai')
+  .option('--cloud-url <url>', 'Cloud API base URL', 'https://api.reflectt.ai')
   .option('--name <hostName>', 'Host display name', hostname())
   .option('--type <hostType>', 'Host type', 'openclaw')
   .option('--auth-token <jwt>', 'Temporary user JWT for environments where claim endpoint is JWT-gated')
@@ -1578,7 +1578,7 @@ host
 
       ensureReflecttHome()
       const config = loadConfig()
-      const cloudUrl = String(options.cloudUrl || 'https://app.reflectt.ai').replace(/\/+$/, '')
+      const cloudUrl = String(options.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, '')
 
       // Guard against destructive overwrite.
       const decision = hostConnectGuard({ existingCloud: config.cloud, force: Boolean(options.force) })
