@@ -14,6 +14,7 @@ import { z } from "zod"
 import { chatManager } from "./chat.js"
 import { taskManager } from "./tasks.js"
 import { calendarEvents } from "./calendar-events.js"
+import { inboxManager } from "./inbox.js"
 import { PKG_VERSION } from "./version.js"
 import type { AgentMessage, Task } from "./types.js"
 
@@ -293,6 +294,106 @@ tool(
       content: [{
         type: "text",
         text: JSON.stringify({ task })
+      }]
+    }
+  }
+)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Inbox + Heartbeat Tools
+// ═══════════════════════════════════════════════════════════════════════════════
+
+tool(
+  "get_inbox",
+  "Get unread inbox messages for an agent — mentions, replies, and high-priority chat. Use this to check what teammates have said to you.",
+  {
+    agent: z.string().describe("Your agent name (e.g. 'claude')"),
+    limit: z.number().optional().describe("Max messages to return (default: 20)"),
+    since: z.number().optional().describe("Unix timestamp ms — only return messages after this time"),
+  },
+  async ({ agent, limit, since }: any) => {
+    const allMessages = chatManager.getMessages({ limit: 500 })
+    const inbox = inboxManager.getInbox(agent, allMessages, { limit: limit ?? 20, since })
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ inbox, count: inbox.length })
+      }]
+    }
+  }
+)
+
+tool(
+  "ack_inbox",
+  "Acknowledge (mark as read) inbox messages for an agent. Call after reading and responding to mentions.",
+  {
+    agent: z.string().describe("Your agent name (e.g. 'claude')"),
+    message_ids: z.array(z.string()).optional().describe("Specific message IDs to ack (omit to ack by timestamp)"),
+    up_to_timestamp: z.number().optional().describe("Ack all messages up to this Unix timestamp ms"),
+  },
+  async ({ agent, message_ids, up_to_timestamp }: any) => {
+    await inboxManager.ackMessages(agent, message_ids, up_to_timestamp)
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ success: true, agent })
+      }]
+    }
+  }
+)
+
+tool(
+  "get_heartbeat",
+  "Get your agent heartbeat — active task, inbox count, queue state, and recommended action. The single most efficient call for staying oriented.",
+  {
+    agent: z.string().describe("Your agent name (e.g. 'claude')"),
+  },
+  async ({ agent }: any) => {
+    const allMessages = chatManager.getMessages({ limit: 500 })
+    const inbox = inboxManager.getInbox(agent, allMessages, { limit: 10 })
+    const activeTasks = taskManager.listTasks({ status: "doing", assignee: agent })
+    const nextTask = taskManager.getNextTask(agent)
+    const queue = {
+      todo: taskManager.listTasks({ status: "todo", assignee: agent }).length,
+      doing: activeTasks.length,
+      validating: taskManager.listTasks({ status: "validating", assignee: agent }).length,
+    }
+    const action = inbox.length > 0
+      ? `Check inbox (${inbox.length} messages)`
+      : activeTasks.length > 0
+        ? `Continue task: ${activeTasks[0]?.title}`
+        : nextTask
+          ? `Pick up next task: ${nextTask.title}`
+          : "IDLE — no tasks or inbox items"
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ agent, ts: Date.now(), inbox, inboxCount: inbox.length, active: activeTasks[0] ?? null, next: nextTask ?? null, queue, action })
+      }]
+    }
+  }
+)
+
+tool(
+  "get_pulse",
+  "Get the team pulse snapshot — deploy status, board counts, per-agent activity. Use to understand what the team is working on.",
+  {},
+  async () => {
+    const agents = ["main", "link", "sage", "rhythm", "kai", "claude"]
+    const agentStates = agents.map(a => ({
+      agent: a,
+      doing: taskManager.listTasks({ status: "doing", assignee: a }).length,
+      todo: taskManager.listTasks({ status: "todo", assignee: a }).length,
+    }))
+    const board = {
+      todo: taskManager.listTasks({ status: "todo" }).length,
+      doing: taskManager.listTasks({ status: "doing" }).length,
+      validating: taskManager.listTasks({ status: "validating" }).length,
+    }
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ ts: Date.now(), board, agents: agentStates })
       }]
     }
   }
@@ -699,6 +800,97 @@ function initToolHandlers() {
           text: JSON.stringify({ success: deleted, event_id: eventId, title: event.summary }),
         }],
       }
+    },
+  })
+
+  // Inbox + heartbeat tools
+  toolHandlers.set("get_inbox", {
+    schema: {
+      description: "Get unread inbox messages for an agent — mentions, replies, high-priority chat.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agent: { type: "string", description: "Your agent name (e.g. 'claude')" },
+          limit: { type: "number", description: "Max messages (default: 20)" },
+          since: { type: "number", description: "Unix timestamp ms — only return messages after this time" },
+        },
+        required: ["agent"],
+      },
+    },
+    handler: async (args) => {
+      const allMessages = chatManager.getMessages({ limit: 500 })
+      const inbox = inboxManager.getInbox(args.agent, allMessages, { limit: args.limit ?? 20, since: args.since })
+      return { content: [{ type: "text", text: JSON.stringify({ inbox, count: inbox.length }) }] }
+    },
+  })
+
+  toolHandlers.set("ack_inbox", {
+    schema: {
+      description: "Acknowledge inbox messages as read. Call after responding to mentions.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agent: { type: "string", description: "Your agent name" },
+          message_ids: { type: "array", items: { type: "string" }, description: "Message IDs to ack" },
+          up_to_timestamp: { type: "number", description: "Ack all messages up to this timestamp ms" },
+        },
+        required: ["agent"],
+      },
+    },
+    handler: async (args) => {
+      await inboxManager.ackMessages(args.agent, args.message_ids, args.up_to_timestamp)
+      return { content: [{ type: "text", text: JSON.stringify({ success: true, agent: args.agent }) }] }
+    },
+  })
+
+  toolHandlers.set("get_heartbeat", {
+    schema: {
+      description: "Get agent heartbeat — active task, inbox count, queue, recommended action.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agent: { type: "string", description: "Your agent name (e.g. 'claude')" },
+        },
+        required: ["agent"],
+      },
+    },
+    handler: async (args) => {
+      const allMessages = chatManager.getMessages({ limit: 500 })
+      const inbox = inboxManager.getInbox(args.agent, allMessages, { limit: 10 })
+      const activeTasks = taskManager.listTasks({ status: "doing", assignee: args.agent })
+      const nextTask = taskManager.getNextTask(args.agent)
+      const queue = {
+        todo: taskManager.listTasks({ status: "todo", assignee: args.agent }).length,
+        doing: activeTasks.length,
+        validating: taskManager.listTasks({ status: "validating", assignee: args.agent }).length,
+      }
+      const action = inbox.length > 0
+        ? `Check inbox (${inbox.length} messages)`
+        : activeTasks.length > 0
+          ? `Continue task: ${activeTasks[0]?.title}`
+          : nextTask ? `Pick up next task: ${nextTask.title}` : "IDLE"
+      return { content: [{ type: "text", text: JSON.stringify({ agent: args.agent, ts: Date.now(), inbox, inboxCount: inbox.length, active: activeTasks[0] ?? null, next: nextTask ?? null, queue, action }) }] }
+    },
+  })
+
+  toolHandlers.set("get_pulse", {
+    schema: {
+      description: "Get team pulse — board counts and per-agent activity.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      const agents = ["main", "link", "sage", "rhythm", "kai", "claude"]
+      const agentStates = agents.map(a => ({
+        agent: a,
+        doing: taskManager.listTasks({ status: "doing", assignee: a }).length,
+        todo: taskManager.listTasks({ status: "todo", assignee: a }).length,
+      }))
+      const board = {
+        todo: taskManager.listTasks({ status: "todo" }).length,
+        doing: taskManager.listTasks({ status: "doing" }).length,
+        validating: taskManager.listTasks({ status: "validating" }).length,
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ ts: Date.now(), board, agents: agentStates }) }] }
     },
   })
 
