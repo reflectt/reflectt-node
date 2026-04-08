@@ -15,6 +15,7 @@ import { chatManager } from "./chat.js"
 import { taskManager } from "./tasks.js"
 import { calendarEvents } from "./calendar-events.js"
 import { inboxManager } from "./inbox.js"
+import { eventBus } from "./events.js"
 import { PKG_VERSION } from "./version.js"
 import type { AgentMessage, Task } from "./types.js"
 
@@ -442,6 +443,7 @@ export async function handleMCPRequest(req: Request): Promise<Response> {
 interface SSESession {
   controller: ReadableStreamDefaultController<Uint8Array>
   lastUsed: number
+  samplingCapable: boolean
 }
 
 const sseSessions = new Map<string, SSESession>()
@@ -899,6 +901,74 @@ function initToolHandlers() {
 
 initToolHandlers()
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// Sampling: server-initiated @claude mentions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CLAUDE_MENTION_RE = /@claude\b/i
+
+/**
+ * Push a sampling/createMessage request to all sampling-capable SSE sessions.
+ * Called when a message mentioning @claude arrives — lets Claude Code respond
+ * autonomously without the user having to manually trigger a turn.
+ */
+function pushClaudeSampling(triggerMessage: AgentMessage): void {
+  const capableSessions = Array.from(sseSessions.entries()).filter(
+    ([, s]) => s.samplingCapable && s.controller.desiredSize !== null
+  )
+
+  if (capableSessions.length === 0) return
+
+  // Build recent context (last 10 messages)
+  const recentMessages = chatManager.getMessages({ limit: 10 })
+  const contextText = recentMessages
+    .map(m => `[${m.from}${m.channel ? `/#${m.channel}` : ''}]: ${m.content}`)
+    .join('\n')
+
+  const userText =
+    `You are @claude, a member of the reflectt team. A teammate mentioned you in chat.\n\n` +
+    `Recent conversation:\n${contextText}\n\n` +
+    `New message from @${triggerMessage.from} in #${triggerMessage.channel ?? 'general'}:\n` +
+    `${triggerMessage.content}\n\n` +
+    `Respond using the send_message tool (from: "claude", room: "${triggerMessage.channel ?? 'general'}"). ` +
+    `Keep responses concise and on-point. Use other MCP tools (get_task, list_tasks, etc.) as needed.`
+
+  const request = {
+    jsonrpc: "2.0",
+    id: `smpl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    method: "sampling/createMessage",
+    params: {
+      messages: [{ role: "user", content: { type: "text", text: userText } }],
+      systemPrompt: "You are @claude, a software engineer on the reflectt team. You have access to team chat and tasks via MCP tools. Be concise, direct, and helpful.",
+      maxTokens: 4096,
+      includeContext: "thisServer",
+    },
+  }
+
+  const encoded = new TextEncoder().encode(`event: message\ndata: ${JSON.stringify(request)}\n\n`)
+
+  for (const [sessionId, session] of capableSessions) {
+    try {
+      session.controller.enqueue(encoded)
+      session.lastUsed = Date.now()
+      console.log(`[MCP] Pushed sampling/createMessage to session ${sessionId} (trigger: @${triggerMessage.from})`)
+    } catch {
+      sseSessions.delete(sessionId)
+    }
+  }
+}
+
+// Listen for message_posted events and trigger sampling when @claude is mentioned
+eventBus.on('mcp-claude-sampling', (event) => {
+  if (event.type !== 'message_posted') return
+  const message = event.data as AgentMessage
+  // Don't loop — ignore messages from claude itself or system
+  if (message.from === 'claude' || message.from === 'system') return
+  if (CLAUDE_MENTION_RE.test(message.content)) {
+    pushClaudeSampling(message)
+  }
+})
+
 function getToolsList(): any[] {
   return Array.from(toolHandlers.entries()).map(([name, { schema }]) => ({
     name,
@@ -915,10 +985,19 @@ async function callTool(name: string, args: any): Promise<any> {
   return handler.handler(args)
 }
 
-async function handleJsonRpcMessage(message: any): Promise<any> {
+async function handleJsonRpcMessage(message: any, sessionId?: string): Promise<any> {
   const { method, params, id } = message
 
   if (method === "initialize") {
+    // Track whether the client declared sampling capability
+    if (sessionId) {
+      const session = sseSessions.get(sessionId)
+      if (session) {
+        const clientCaps = params?.capabilities ?? {}
+        session.samplingCapable = Boolean(clientCaps.sampling)
+        console.log(`[MCP] Session ${sessionId} samplingCapable=${session.samplingCapable}`)
+      }
+    }
     return {
       jsonrpc: "2.0",
       id,
@@ -928,6 +1007,14 @@ async function handleJsonRpcMessage(message: any): Promise<any> {
         serverInfo: { name: "reflectt-node", version: PKG_VERSION },
       },
     }
+  }
+
+  // Sampling response from client (result or error in response to our sampling/createMessage request)
+  if (method === undefined && (message.result !== undefined || message.error !== undefined) && id !== undefined) {
+    // This is a JSON-RPC response to a server-initiated request (e.g. sampling/createMessage)
+    // Nothing to do — the model has already acted on the sampling request autonomously
+    console.log(`[MCP] Received sampling response for request ${id}`)
+    return null
   }
 
   if (method === "tools/list") {
@@ -972,6 +1059,7 @@ export async function handleSSERequest(req: Request): Promise<Response> {
   sseSessions.set(sessionId, {
     controller: controller!,
     lastUsed: Date.now(),
+    samplingCapable: false, // updated after initialize
   })
 
   return new Response(stream, {
@@ -1009,7 +1097,7 @@ export async function handleMessagesRequest(req: Request): Promise<Response> {
     const body = await req.json() as { method?: string; id?: string | number; params?: any }
     console.log(`[MCP] SSE message (${sessionId}):`, body.method || body.id)
 
-    const response = await handleJsonRpcMessage(body)
+    const response = await handleJsonRpcMessage(body, sessionId)
 
     if (response) {
       const sseMessage = `event: message\ndata: ${JSON.stringify(response)}\n\n`
