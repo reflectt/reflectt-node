@@ -398,6 +398,8 @@ function matchAnyPattern(ctx: { text: string; keywords: string[] }, patterns: st
  * - routingMode=opt-in: excluded unless task matches alwaysRoute
  * - neverRoute: excluded if any pattern matches
  * - neverRouteUnlessLane: ignore neverRoute when metadata.lane matches (explicit override)
+ * - lane boundary: opt-in agents cannot cross into lanes outside their alwaysRoute unless
+ *   the task lane explicitly matches their domain (neverRouteUnlessLane override)
  */
 function agentEligibleForTask(agent: AgentRole, task: { title: string; tags?: string[]; done_criteria?: string[]; metadata?: Record<string, unknown> }): boolean {
   const meta = getTaskMeta(task)
@@ -415,8 +417,13 @@ function agentEligibleForTask(agent: AgentRole, task: { title: string; tags?: st
     if (hit) return false
   }
 
-  // Opt-in routing
+  // Opt-in routing (lane boundary enforcement)
+  // If agent is opt-in, they are only eligible when the task text matches their alwaysRoute
+  // patterns OR when neverRouteUnlessLane grants an explicit cross-lane override.
+  // This prevents ops/specialist agents from being picked as fallback reviewers on
+  // dev/integration/prod tasks outside their lane.
   if (agent.routingMode === 'opt-in') {
+    if (ignoreNever) return true  // explicit cross-lane override granted
     const allow = agent.alwaysRoute ?? []
     const hit = matchAnyPattern(ctx, allow)
     return Boolean(hit)

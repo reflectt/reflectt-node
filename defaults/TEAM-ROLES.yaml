@@ -71,7 +71,8 @@ agents:
     wipCap: 1
   - name: sage
     role: ops
-    description: Process/ops strategist focused on reliability and execution quality.
+    description: Process/ops strategist focused on reliability and execution quality. Non-dev by directive — only reviews ops/ci/release work.
+    routingMode: opt-in
     affinityTags:
       - ci
       - deploy
