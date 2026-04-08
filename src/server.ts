@@ -23,7 +23,9 @@ import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots, startAuto
 // ── Build info (read once at startup) ──────────────────────────────────────
 const BUILD_VERSION = (() => {
   try {
-    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
+    // Use import.meta.url so this works regardless of cwd (e.g. launchctl, systemd)
+    const pkgPath = new URL('../package.json', import.meta.url)
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
     return pkg.version || '0.0.0'
   } catch { return '0.0.0' }
 })()
@@ -1915,6 +1917,9 @@ function validateOwnerApprovalPing(content: string, from: string, channel?: stri
 // Coordination channels where @mentions are expected for handoffs.
 // Messages without @mentions in these channels are likely dead handoffs.
 // task-1774579523544-kgi9nohd4
+const AUTO_ROUTE_COOLDOWN_MS = 10 * 60 * 1000 // 10 min per sender+channel
+const autoRouteCooldowns = new Map<string, number>() // `${from}:${channel}` → last warned ts
+
 const COORDINATION_CHANNELS = new Set([
   'general', 'shipping', 'reviews', 'blockers', 'problems', 'ops',
   'task-comments', 'task-notifications', 'decisions',
@@ -1935,6 +1940,13 @@ function buildNoMentionWarning(
   if (from === 'system' || from === 'dashboard') return {}
   const mentions = extractMentions(content)
   if (mentions.length > 0) return {}
+  // Cooldown: only warn once per sender+channel per AUTO_ROUTE_COOLDOWN_MS
+  // Prevents repeated status posts (e.g. "Standing by — non-dev lane.") from
+  // flooding every agent's inbox with ⚠️ auto-route noise.
+  const cooldownKey = `${from}:${channel}`
+  const lastWarned = autoRouteCooldowns.get(cooldownKey) ?? 0
+  if (Date.now() - lastWarned < AUTO_ROUTE_COOLDOWN_MS) return {}
+  autoRouteCooldowns.set(cooldownKey, Date.now())
   // No @mentions in a coordination channel — this is a dead handoff
   // Find the main agent (first in roster, or kai as fallback)
   const roster = presenceManager.getAllPresence()
