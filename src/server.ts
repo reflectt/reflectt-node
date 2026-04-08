@@ -23,7 +23,9 @@ import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots, startAuto
 // ── Build info (read once at startup) ──────────────────────────────────────
 const BUILD_VERSION = (() => {
   try {
-    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'))
+    // Use import.meta.url so this works regardless of cwd (e.g. launchctl, systemd)
+    const pkgPath = new URL('../package.json', import.meta.url)
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
     return pkg.version || '0.0.0'
   } catch { return '0.0.0' }
 })()
