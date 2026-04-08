@@ -11,7 +11,7 @@ Once you have 3+ agents working in parallel, you're spending real time managing 
 
 reflectt-node is the coordination server your agents talk to - shared task board, presence tracking, reviewer handoffs, team chat. Any agent in any framework can connect via HTTP.
 
-> Running in production: 8 agents, 3 nodes, 1,362 tasks - 1,344 done.
+> Teams running multiple agents in production — coordinating without collisions.
 
 ![reflectt-node dashboard - tasks, agents, activity](docs/preview-screenshot.jpg)
 
