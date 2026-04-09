@@ -9,14 +9,15 @@ const baseOpts = {
 }
 
 describe('capability readiness contract', () => {
-  it('returns report with all 4 capabilities', () => {
+  it('returns report with all 5 capabilities', () => {
     const report = getCapabilityReadiness(baseOpts)
     const names = report.capabilities.map(c => c.capability)
     expect(names).toContain('browser')
     expect(names).toContain('email')
     expect(names).toContain('sms')
     expect(names).toContain('calendar')
-    expect(report.capabilities).toHaveLength(4)
+    expect(names).toContain('models')
+    expect(report.capabilities).toHaveLength(5)
   })
 
   it('report has checked_at timestamp', () => {
@@ -103,7 +104,7 @@ describe('capability readiness contract', () => {
       { provider: 'resend', active: true },
       { provider: 'twilio', active: true },
     ]
-    const report = getCapabilityReadiness({ cloudConnected: true, cloudUrl: 'https://app.reflectt.ai', webhooks })
+    const report = getCapabilityReadiness({ cloudConnected: true, cloudUrl: 'https://app.reflectt.ai', webhooks, samplingProviders: ['claude'] })
     const nonBrowser = report.capabilities.filter(c => c.capability !== 'browser')
     for (const cap of nonBrowser) {
       expect(cap.status, `${cap.capability} should be ready`).toBe('ready')
