@@ -23,7 +23,7 @@ import { getDb } from './db.js'
 import { getUsageSummary, getUsageByAgent, getUsageByModel, listCaps, checkCaps, getRoutingSuggestions, getCostForTaskId } from './usage-tracking.js'
 import { listReflections } from './reflections.js'
 import { listInsights } from './insights.js'
-import { readFileSync, existsSync, watch, type FSWatcher } from 'fs'
+import { readFileSync, writeFileSync, existsSync, watch, type FSWatcher } from 'fs'
 import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
@@ -418,9 +418,14 @@ export async function startCloudIntegration(): Promise<void> {
   // Immediate first heartbeat
   sendHeartbeat().catch(() => {})
 
+  // Fetch capability context at startup and refresh periodically.
+  // Writes systemPromptHint to capability-context.md for agent injection.
+  syncCapabilityContext().catch(() => {})
+
   state.heartbeatTimer = setInterval(() => {
     sendHeartbeat().catch(() => {})
     pollAndProcessCommands().catch(() => {}) // Piggyback on heartbeat tick
+    syncCapabilityContext().catch(() => {})  // Refresh capability context (rate-limited internally)
   }, config.heartbeatIntervalMs)
 
   state.taskSyncTimer = setInterval(() => {
@@ -1977,6 +1982,48 @@ interface PendingCommand {
   type: string
   payload: Record<string, unknown>
   status: string
+}
+
+// ─── Capability context injection ─────────────────────────────────────────────
+
+/**
+ * Fetch capability context from cloud and write systemPromptHint to
+ * $REFLECTT_HOME/capability-context.md so load_agent can append it to
+ * every agent system prompt.
+ *
+ * Called at startup and refreshed every CAPABILITY_CONTEXT_REFRESH_MS.
+ * Fails silently — missing capability context degrades gracefully.
+ */
+const CAPABILITY_CONTEXT_REFRESH_MS = Number(process.env.REFLECTT_CAPABILITY_CONTEXT_REFRESH_MS) || 5 * 60_000
+const CAPABILITY_CONTEXT_FILE = join(REFLECTT_HOME, 'capability-context.md')
+let lastCapabilityContextFetchAt = 0
+
+async function syncCapabilityContext(): Promise<void> {
+  if (!state.hostId || !config || !state.running) return
+
+  const now = Date.now()
+  if (now - lastCapabilityContextFetchAt < CAPABILITY_CONTEXT_REFRESH_MS) return
+  lastCapabilityContextFetchAt = now
+
+  try {
+    const result = await cloudGet<{ systemPromptHint: string }>(`/api/hosts/${state.hostId}/capabilities/context`)
+    if (!result.success || !result.data?.systemPromptHint) return
+
+    const hint = result.data.systemPromptHint.trim()
+    if (!hint || hint === 'No capabilities are currently enabled for this team.') {
+      // No capabilities yet — remove stale file so agents don't get outdated context
+      if (existsSync(CAPABILITY_CONTEXT_FILE)) {
+        writeFileSync(CAPABILITY_CONTEXT_FILE, '')
+      }
+      return
+    }
+
+    writeFileSync(CAPABILITY_CONTEXT_FILE, `## Team capabilities\n\n${hint}\n`)
+    console.log(`[cloud] capability context updated (${hint.length} chars)`)
+  } catch (err: any) {
+    // Non-fatal: agents run without capability context if the fetch fails
+    console.warn(`[cloud] capability context fetch failed: ${err?.message || 'unknown error'}`)
+  }
 }
 
 async function pollAndProcessCommands(): Promise<void> {
