@@ -53,7 +53,7 @@ import { scanScopeOverlap, scanAndNotify } from './scopeOverlap.js'
 import { getDb } from './db.js'
 import type { AgentMessage, Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
-import { handleMCPRequest, handleSSERequest, handleMessagesRequest } from './mcp.js'
+import { handleMCPRequest, handleSSERequest, handleMessagesRequest, getActiveSamplingProviders } from './mcp.js'
 import { memoryManager } from './memory.js'
 import { buildContextInjection, getContextBudgets, getContextMemo, upsertContextMemo, type ContextLayer } from './context-budget.js'
 import { deriveScopeId } from './scope-routing.js'
@@ -14223,6 +14223,7 @@ If your heartbeat shows **no active task** and **no next task**:
       cloudConnected: provStatus.phase === 'ready',
       cloudUrl: provStatus.cloudUrl,
       webhooks: provStatus.webhooks as Array<{ provider: string; active: boolean }>,
+      samplingProviders: getActiveSamplingProviders(),
     })
   })
 

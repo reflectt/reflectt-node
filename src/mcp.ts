@@ -447,6 +447,18 @@ interface SSESession {
 }
 
 const sseSessions = new Map<string, SSESession>()
+
+/**
+ * Returns the names of model providers available via subscription-backed sampling sessions.
+ * A sampling-capable Claude Code session → 'claude' (Anthropic subscription).
+ * Used by capability-readiness to report subscription-backed model availability.
+ */
+export function getActiveSamplingProviders(): string[] {
+  const hasSampling = Array.from(sseSessions.values()).some(
+    s => s.samplingCapable && s.controller.desiredSize !== null
+  )
+  return hasSampling ? ['claude'] : []
+}
 const SESSION_TTL_MS = 5 * 60 * 1000
 
 function touchSession(sessionId: string) {

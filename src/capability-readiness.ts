@@ -187,18 +187,72 @@ function checkCalendarReadiness(): CapabilityReadiness {
   }
 }
 
+// ── Models ────────────────────────────────────────────────────────────────────
+
+const MODEL_ENV_KEYS: Array<{ key: string; label: string; path: 'api-key' | 'subscription' }> = [
+  { key: 'ANTHROPIC_API_KEY', label: 'Anthropic', path: 'api-key' },
+  { key: 'OPENAI_API_KEY', label: 'OpenAI', path: 'api-key' },
+  { key: 'GOOGLE_AI_API_KEY', label: 'Google AI', path: 'api-key' },
+  { key: 'MISTRAL_API_KEY', label: 'Mistral', path: 'api-key' },
+  { key: 'GROQ_API_KEY', label: 'Groq', path: 'api-key' },
+  { key: 'MINIMAX_API_KEY', label: 'MiniMax', path: 'api-key' },
+]
+
+/**
+ * Check which model providers are available on this node.
+ * Reports API keys set in the node environment (distinct from team_secrets in the cloud).
+ * Subscription-backed inference (Claude Code sampling) is reported separately
+ * via the `subscription_providers` dependency when a sampling session is active.
+ */
+export function checkModelsReadiness(opts: { samplingProviders?: string[] } = {}): CapabilityReadiness {
+  const deps: DependencyCheck[] = []
+
+  const presentKeys = MODEL_ENV_KEYS.filter(m => !!process.env[m.key])
+  const missingKeys = MODEL_ENV_KEYS.filter(m => !process.env[m.key])
+
+  // Report each present API key as a dependency
+  for (const m of presentKeys) {
+    deps.push({ name: m.key, status: 'ok', detail: `${m.label} API key set` })
+  }
+  for (const m of missingKeys) {
+    deps.push({ name: m.key, status: 'missing', detail: `${m.label} API key not set` })
+  }
+
+  // Report subscription-backed providers (e.g. Claude Code sampling session active)
+  const subscriptionProviders = opts.samplingProviders ?? []
+  if (subscriptionProviders.length > 0) {
+    deps.push({ name: 'subscription_providers', status: 'ok', detail: subscriptionProviders.join(', ') })
+  } else {
+    deps.push({ name: 'subscription_providers', status: 'missing', detail: 'No subscription-backed providers active (Claude Code or OpenClaw)' })
+  }
+
+  const hasAny = presentKeys.length > 0 || subscriptionProviders.length > 0
+  const status: ReadinessStatus = hasAny ? 'ready' : 'not_ready'
+
+  return {
+    capability: 'models',
+    status,
+    last_success_at: null,
+    last_error: hasAny ? null : 'No model providers configured on this node',
+    dependencies: deps,
+    hint: hasAny ? null : 'Set a model API key (e.g. ANTHROPIC_API_KEY) on this node, or connect Claude Code with a subscription.',
+  }
+}
+
 // ── Main readiness check ──────────────────────────────────────────────────────
 
 export function getCapabilityReadiness(opts: {
   cloudConnected: boolean
   cloudUrl: string
   webhooks: Array<{ provider: string; active: boolean }>
+  samplingProviders?: string[]
 }): ReadinessReport {
   const capabilities = [
     checkBrowserReadiness(),
     checkEmailReadiness(opts.cloudConnected, opts.cloudUrl, opts.webhooks),
     checkSmsReadiness(opts.cloudConnected, opts.cloudUrl, opts.webhooks),
     checkCalendarReadiness(),
+    checkModelsReadiness({ samplingProviders: opts.samplingProviders }),
   ]
 
   // Overall: ready if all ready, degraded if any degraded, not_ready if any not_ready
