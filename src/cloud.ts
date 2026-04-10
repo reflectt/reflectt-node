@@ -1998,6 +1998,22 @@ const CAPABILITY_CONTEXT_REFRESH_MS = Number(process.env.REFLECTT_CAPABILITY_CON
 const CAPABILITY_CONTEXT_FILE = join(REFLECTT_HOME, 'capability-context.md')
 let lastCapabilityContextFetchAt = 0
 
+/**
+ * Read the current capability context written by syncCapabilityContext().
+ * Returns the content (including the ## Team capabilities header) or null.
+ * Exported so server.ts can include it in the heartbeat response — the
+ * practical injection point for Claude Code agents in the packaged runtime.
+ */
+export function readCapabilityContext(): string | null {
+  try {
+    if (!existsSync(CAPABILITY_CONTEXT_FILE)) return null
+    const content = readFileSync(CAPABILITY_CONTEXT_FILE, 'utf-8').trim()
+    return content || null
+  } catch {
+    return null
+  }
+}
+
 async function syncCapabilityContext(): Promise<void> {
   if (!state.hostId || !config || !state.running) return
 
