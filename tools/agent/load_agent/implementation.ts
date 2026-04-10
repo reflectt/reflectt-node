@@ -1,4 +1,24 @@
 import { type ToolContext } from '@/lib/tools/helpers';
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+
+/**
+ * Read the capability context file written by syncCapabilityContext() in cloud.ts.
+ * Returns the content (including the ## Team capabilities header) or null if not present.
+ * This file is refreshed every 5 minutes and contains the enriched systemPromptHint
+ * with skill pack instructions for any ready provider (Supabase, GitHub, etc.).
+ */
+function readCapabilityContext(): string | null {
+  try {
+    const reflecttHome = process.env.REFLECTT_HOME || join(process.env.HOME || '~', '.reflectt');
+    const filePath = join(reflecttHome, 'capability-context.md');
+    if (!existsSync(filePath)) return null;
+    const content = readFileSync(filePath, 'utf-8').trim();
+    return content || null;
+  } catch {
+    return null;
+  }
+}
 
 interface LoadAgentInput {
   agent_name: string;
@@ -77,6 +97,14 @@ async function searchAgentInSpace(
             if (systemPrompt) {
               agent.system_prompt = systemPrompt;
             }
+
+            // Append capability context (written by cloud.ts syncCapabilityContext).
+            // Contains systemPromptHint with skill pack instructions for ready providers.
+            const capabilityContext = readCapabilityContext();
+            if (capabilityContext) {
+              agent.system_prompt = (agent.system_prompt || '').trimEnd() + '\n\n' + capabilityContext;
+            }
+
             return agent;
           }
         } catch {
