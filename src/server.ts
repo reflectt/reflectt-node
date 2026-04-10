@@ -180,7 +180,7 @@ import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIs
 import { validateIntent as macOSValidateIntent, isKillSwitchEngaged, engageKillSwitch, resetKillSwitch } from './macos-accessibility.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
-import { requestImmediateCanvasSync, queueCanvasPushEvent } from './cloud.js'
+import { requestImmediateCanvasSync, queueCanvasPushEvent, readCapabilityContext } from './cloud.js'
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
 import { startDeployMonitor, stopDeployMonitor } from './deploy-monitor.js'
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
@@ -13933,6 +13933,10 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     } catch { /* agent-runs not available */ }
 
+    // Capability context — written by syncCapabilityContext() in cloud.ts.
+    // Included in heartbeat so Claude Code agents receive it on every check-in.
+    const capabilityContext = readCapabilityContext()
+
     return {
       agent, ts: Date.now(),
       active: slim(activeTask), next: pauseStatus.paused ? null : slim(nextTask),
@@ -13944,6 +13948,7 @@ export async function createServer(): Promise<FastifyInstance> {
       ...(pauseStatus.paused ? { paused: true, pauseMessage: pauseStatus.message, resumesAt: pauseStatus.entry?.pausedUntil ?? null } : {}),
       ...(bootMemories.length > 0 ? { memories: bootMemories } : {}),
       ...(activeRun ? { run: activeRun } : {}),
+      ...(capabilityContext ? { capabilityContext } : {}),
       ...(() => {
         const p = presenceManager.getAllPresence().find(p => p.agent === agent)
         return p?.waiting ? { waiting: p.waiting } : {}
