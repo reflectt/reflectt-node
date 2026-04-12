@@ -30,14 +30,17 @@ export interface LaneConfig {
 // Matches the hardcoded lanes in server.ts /health/backlog.
 // These are the fallback when TEAM-ROLES.yaml has no `lanes:` section.
 
-export const DEFAULT_LANES: LaneConfig[] = [
-  { name: 'engineering', agents: ['link', 'pixel'],           readyFloor: 2, wipLimit: 2 },
-  { name: 'design',      agents: ['artdirector', 'uipolish'], readyFloor: 1, wipLimit: 2 },
-  { name: 'content',     agents: ['echo'],                    readyFloor: 2, wipLimit: 2 },
-  { name: 'operations',  agents: ['kai', 'sage'],             readyFloor: 1, wipLimit: 2 },
-  { name: 'research',    agents: ['scout'],                   readyFloor: 1, wipLimit: 2 },
-  { name: 'rhythm',      agents: ['rhythm'],                  readyFloor: 1, wipLimit: 2 },
-]
+// No hardcoded fallback lanes — lanes must come from TEAM-ROLES.yaml `lanes:` section.
+// If TEAM-ROLES.yaml has no lanes, all agents operate in a single default lane.
+export const DEFAULT_LANES: LaneConfig[] = []
+
+// ── Test-only lane override ─────────────────────────────────────────────────
+let testLanesOverride: LaneConfig[] | null = null
+
+/** Override lane config for tests. Call with null to reset. */
+export function setTestLanes(lanes: LaneConfig[] | null): void {
+  testLanesOverride = lanes
+}
 
 // ── Config paths ────────────────────────────────────────────────────────────
 
@@ -74,6 +77,8 @@ function parseLanesFromYaml(content: string): LaneConfig[] | null {
  */
 export function getLanesConfig(): LaneConfig[] {
   const isTest = Boolean(process.env.VITEST) || process.env.NODE_ENV === 'test'
+
+  if (isTest && testLanesOverride !== null) return testLanesOverride
 
   if (!isTest) {
     // Try user config files

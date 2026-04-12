@@ -120,7 +120,7 @@ export interface PolicyConfig {
   insightListener: {
     enabled: boolean
     autoCreateSeverities: string[]   // severities that auto-create tasks (default: ['critical', 'high'])
-    defaultReviewer: string
+    defaultReviewer: string | undefined
     defaultEta: string
     clusterCooldownMs: number        // cooldown between auto-creates for same cluster
   }
@@ -163,7 +163,7 @@ export const DEFAULT_POLICY: PolicyConfig = {
     suppressRecentMin: 20,
     shipCooldownMin: 30,
     activeTaskMaxAgeMin: 180,
-    excluded: ['ryan', 'diag', 'pm', 'coo', 'qa', 'shield', 'harmony', 'bookkeeper', 'legal-counsel'],
+    excluded: ['ryan', 'diag'],
   },
   cadenceWatchdog: {
     enabled: true,
@@ -225,7 +225,7 @@ export const DEFAULT_POLICY: PolicyConfig = {
   insightListener: {
     enabled: true,
     autoCreateSeverities: ['critical', 'high'],
-    defaultReviewer: 'sage',
+    defaultReviewer: undefined,
     defaultEta: '4h',
     clusterCooldownMs: 30 * 60_000,
   },

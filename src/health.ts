@@ -25,6 +25,7 @@ import { getDb } from './db.js'
 import { policyManager } from './policy.js'
 import { recordSystemLoopTick } from './system-loop-state.js'
 import { isCloudConfigured } from './cloud.js'
+import { getAgentRoles } from './assignment.js'
 
 /**
  * Validate a task timestamp is within reasonable bounds.
@@ -308,8 +309,9 @@ class TeamHealthMonitor {
   private lastSnapshotTime = 0
   private readonly SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
 
-  private readonly trioAgents = ['kai', 'link', 'pixel'] as const
-  private readonly workerAgents = ['link', 'pixel'] as const
+  private get trioAgents(): string[] { return getAgentRoles().map(r => r.name) }
+  private get workerAgents(): string[] { return getAgentRoles().filter(r => r.role !== 'lead' && r.role !== 'coordinator' && r.role !== 'chief-of-staff').map(r => r.name) }
+  private get escalationTargets(): string[] { return getAgentRoles().slice(0, 3).map(r => r.name) }
   private readonly workerCadenceMaxMin = 45
   private readonly leadCadenceMaxMin = 60
   private readonly blockedEscalationMin = 20
@@ -588,7 +590,9 @@ class TeamHealthMonitor {
     const incidents = await this.getComplianceIncidents(now, messages)
 
     const complianceAgents: ComplianceAgentStatus[] = this.trioAgents.map((agent) => {
-      const expectedCadenceMin = agent === 'kai' ? this.leadCadenceMaxMin : this.workerCadenceMaxMin
+      const agentRole = getAgentRoles().find(r => r.name === agent)?.role ?? ''
+      const isLead = agentRole === 'lead' || agentRole === 'coordinator' || agentRole === 'chief-of-staff'
+      const expectedCadenceMin = isLead ? this.leadCadenceMaxMin : this.workerCadenceMaxMin
       const lastValidStatusAt = this.findLastValidStatusAt(messages, agent)
       const lastValidStatusAgeMin = lastValidStatusAt
         ? Math.floor((now - lastValidStatusAt) / 1000 / 60)
@@ -624,17 +628,18 @@ class TeamHealthMonitor {
 
     const workerWorstAgeMin = Math.max(
       ...complianceAgents
-        .filter(a => this.workerAgents.includes(a.agent as typeof this.workerAgents[number]))
+        .filter(a => this.workerAgents.includes(a.agent))
         .map(a => a.lastValidStatusAgeMin),
       0,
     )
 
-    const leadAgeMin = complianceAgents.find(a => a.agent === 'kai')?.lastValidStatusAgeMin ?? 9999
+    const leadAgents = getAgentRoles().filter(r => r.role === 'lead' || r.role === 'coordinator' || r.role === 'chief-of-staff').map(r => r.name)
+    const leadAgeMin = complianceAgents.find(a => leadAgents.includes(a.agent))?.lastValidStatusAgeMin ?? 9999
 
     const blockerMessages = messages.filter(
       m => typeof m.content === 'string'
         && /\bblocker\s*:\s*(?!none|no|n\/a|na\b).+/i.test(m.content)
-        && this.trioAgents.includes((m.from || '').toLowerCase() as typeof this.trioAgents[number]),
+        && this.trioAgents.includes((m.from || '').toLowerCase()),
     )
     const oldestBlockerMin = blockerMessages.length > 0
       ? Math.max(...blockerMessages.map(m => Math.floor((now - (m.timestamp || now)) / 1000 / 60)))
@@ -880,7 +885,7 @@ class TeamHealthMonitor {
         taskId: null,
         type: 'trio-silence',
         minutesOver: trioSilenceMin - this.trioSilenceMaxMin,
-        escalateTo: ['kai', 'link', 'pixel'],
+        escalateTo: this.escalationTargets,
         openedAt: lastTrioGeneralUpdate + this.trioSilenceMaxMin * 60 * 1000,
       })
     }
@@ -968,7 +973,7 @@ class TeamHealthMonitor {
         taskId,
         type: 'trio-silence',
         minutesOver,
-        escalateTo: ['kai', 'link', 'pixel'],
+        escalateTo: this.escalationTargets,
         openedAt,
       }
     }
@@ -985,7 +990,7 @@ class TeamHealthMonitor {
         taskId,
         type: 'stale-working',
         minutesOver,
-        escalateTo: agent === 'pixel' ? ['kai', 'link'] : ['kai', 'pixel'],
+        escalateTo: this.escalationTargets.filter(a => a !== agent),
         openedAt,
       }
     }
@@ -1002,7 +1007,7 @@ class TeamHealthMonitor {
         taskId,
         type: 'blocked-overdue',
         minutesOver,
-        escalateTo: agent === 'pixel' ? ['kai', 'link'] : ['kai', 'pixel'],
+        escalateTo: this.escalationTargets.filter(a => a !== agent),
         openedAt,
       }
     }
@@ -1487,7 +1492,7 @@ class TeamHealthMonitor {
           alerts.push(content)
 
           if (!dryRun) {
-            await routeMessage({ from: 'system', content, category: 'escalation', severity: 'warning', mentions: ['kai', 'link', 'pixel'] })
+            await routeMessage({ from: 'system', content, category: 'escalation', severity: 'warning', mentions: this.escalationTargets })
             await this.logWatchdogIncident({
               type: 'trio_general_silence',
               at: now,
@@ -1577,7 +1582,7 @@ class TeamHealthMonitor {
       alerts.push(content)
 
       if (!dryRun) {
-        await routeMessage({ from: 'system', content, category: 'watchdog-alert', severity: 'info', taskId: task.id, mentions: [agent, 'kai', 'pixel'] })
+        await routeMessage({ from: 'system', content, category: 'watchdog-alert', severity: 'info', taskId: task.id, mentions: [agent, ...this.escalationTargets.filter(a => a !== agent).slice(0, 2)] })
         await this.logWatchdogIncident({
           type: 'stale_working',
           at: now,
@@ -2110,7 +2115,7 @@ class TeamHealthMonitor {
           category: 'watchdog-alert',
           // During restart window: downgrade to info, no @owner escalation
           severity: (!inRestartWindow && tier === 2) ? 'warning' : 'info',
-          mentions: inRestartWindow ? [agent] : (tier === 2 ? [agent, 'kai'] : [agent]),
+          mentions: inRestartWindow ? [agent] : (tier === 2 ? [agent, ...this.escalationTargets.filter(a => a !== agent).slice(0, 1)] : [agent]),
         })
 
         const unchangedNudgeCount = state && state.lastSignature === signature
@@ -2214,8 +2219,8 @@ class TeamHealthMonitor {
         category: 'watchdog-alert',
         severity: (!inRestartWindow && tier === 2) ? 'warning' : 'info',
         taskId: taskId || undefined,
-        // During restart window: strip @owner/@kai — informational only
-        mentions: inRestartWindow ? [agent] : (tier === 2 ? [agent, 'kai'] : [agent]),
+        // During restart window: strip @owner escalation — informational only
+        mentions: inRestartWindow ? [agent] : (tier === 2 ? [agent, ...this.escalationTargets.filter(a => a !== agent).slice(0, 1)] : [agent]),
       })
 
       const unchangedNudgeCount = state && state.lastSignature === signature

@@ -18,7 +18,7 @@ import { tickReflectionNudges } from './reflection-automation.js'
 import { routeMessage } from './messageRouter.js'
 import { getDb, safeJsonStringify, safeJsonParse } from './db.js'
 import { presenceManager } from './presence.js'
-import { getAgentRolesSource, getAgentRole } from './assignment.js'
+import { getAgentRolesSource, getAgentRole, getAgentRoles } from './assignment.js'
 import { runProductObservation } from './product-observation-source.js'
 
 // ── Types ──
@@ -119,7 +119,7 @@ function getConfig(): ContinuityConfig {
     minReady: (policy as any).continuityLoop?.minReady ?? rqf.minReady ?? 2,
     maxPromotePerCycle: (policy as any).continuityLoop?.maxPromotePerCycle ?? 2,
     cooldownMin: (policy as any).continuityLoop?.cooldownMin ?? 30,
-    defaultReviewer: (policy as any).continuityLoop?.defaultReviewer ?? 'sage',
+    defaultReviewer: (policy as any).continuityLoop?.defaultReviewer ?? getAgentRoles()[0]?.name,
     channel: (policy as any).continuityLoop?.channel ?? rqf.channel ?? 'general',
   }
 }

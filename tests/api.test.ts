@@ -495,7 +495,7 @@ describe('Mention Rescue', () => {
     const mentionAt = sent.body.message.timestamp as number
 
     const reply = await req('POST', '/chat/messages', {
-      from: 'kai',
+      from: 'link',
       channel: 'general',
       threadId,
       content: 'ack',

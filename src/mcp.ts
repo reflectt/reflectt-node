@@ -18,6 +18,7 @@ import { inboxManager } from "./inbox.js"
 import { eventBus } from "./events.js"
 import { PKG_VERSION } from "./version.js"
 import type { AgentMessage, Task } from "./types.js"
+import { getAgentRoles } from "./assignment.js"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MCP Server Setup
@@ -42,7 +43,7 @@ tool(
   "send_message",
   "Send a message to the team chat. Use this to communicate with other agents.",
   {
-    from: z.string().describe("Your agent name (e.g., 'kai', 'link', 'scout')"),
+    from: z.string().describe("Your agent name (e.g., 'main', 'builder', 'ops')"),
     content: z.string().describe("Message content"),
     to: z.string().optional().describe("Recipient agent name (optional, omit for broadcast)"),
     metadata: z.record(z.unknown()).optional().describe("Optional metadata"),
@@ -380,7 +381,7 @@ tool(
   "Get the team pulse snapshot — deploy status, board counts, per-agent activity. Use to understand what the team is working on.",
   {},
   async () => {
-    const agents = ["main", "link", "sage", "rhythm", "kai", "claude"]
+    const agents = getAgentRoles().map(r => r.name)
     const agentStates = agents.map(a => ({
       agent: a,
       doing: taskManager.listTasks({ status: "doing", assignee: a }).length,
@@ -893,7 +894,7 @@ function initToolHandlers() {
       inputSchema: { type: "object", properties: {} },
     },
     handler: async () => {
-      const agents = ["main", "link", "sage", "rhythm", "kai", "claude"]
+      const agents = getAgentRoles().map(r => r.name)
       const agentStates = agents.map(a => ({
         agent: a,
         doing: taskManager.listTasks({ status: "doing", assignee: a }).length,
