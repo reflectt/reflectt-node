@@ -1,0 +1,15 @@
+app = "reflectt-node"
+primary_region = "sjc"
+
+[build]
+
+[http_service]
+  internal_port = 4445
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "1gb"

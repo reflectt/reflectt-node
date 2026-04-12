@@ -11965,13 +11965,16 @@ export async function createServer(): Promise<FastifyInstance> {
     liveViewerCount++
     let viewersDirty = true
 
-    // Derive agents from task board — show ALL agents, not just canvas-state emitters
+    // Derive agents from task board — show ONLY registered agents (not stale assignees)
     const allTasks = taskManager.listTasks({})
     const agentStates: Record<string, any> = {}
+    const registeredAgents = new Set(getAgentRoles().map(r => r.name.toLowerCase()))
     for (const task of allTasks) {
       const assignee = task.assignee
       if (!assignee || assignee === 'unassigned') continue
       const agentId = assignee.toLowerCase()
+      // Skip agents not in registry — prevents ghost agents from stale task assignees
+      if (!registeredAgents.has(agentId)) continue
       const canvasEntry = canvasStateMap.get(agentId)
       const isDone = task.status === 'done' || task.status === 'cancelled'
       const isBlocked = task.status === 'blocked'
