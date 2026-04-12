@@ -698,7 +698,7 @@ function handleInbound(data: string, url: string, account: ReflecttAccount, ctx:
       delete safeCtx.sessionFile;
 
       // Create reply dispatcher
-      const agentName = agentId === "main" ? "kai" : agentId;
+      const agentName = agentId;
       const dispatcher = runtime.channel.reply.createReplyDispatcherWithTyping({
         deliver: async (payload: any) => {
           const text = payload.text || payload.content || "";
