@@ -211,6 +211,7 @@ export async function claimTask(taskId: string, agent: string): Promise<Task | n
     metadata: {
       ...(task.metadata || {}),
       eta: '~60m (auto-claimed)',
+      lane_override: true, // auto-claim bypasses lane validation — agents claim what the system assigns
     },
   })
 
