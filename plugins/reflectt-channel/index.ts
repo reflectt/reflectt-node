@@ -213,6 +213,11 @@ async function fetchRecentMessages(url: string): Promise<Array<Record<string, un
 }
 
 async function seedAgentActivity(url: string, log?: any) {
+  if (WATCHED_AGENTS.length === 0) {
+    log?.info?.(`[reflectt][watchdog] skipping seed: roster not yet loaded`);
+    return;
+  }
+
   const now = Date.now();
   for (const agent of WATCHED_AGENTS) {
     lastUpdateByAgent.set(agent, now);
@@ -259,6 +264,29 @@ async function hasActiveTask(url: string, agent: string, now = Date.now()): Prom
  * 2. POST system message to #general @mentioning all registered agents
  * 3. Dedup: skip if last notification was <60s ago (rapid reconnects)
  */
+async function notifyPresence(url: string, account: ReflecttAccount, ctx: any): Promise<void> {
+  // Immediately update presence so the host shows as online without waiting for heartbeat interval
+  // This is a fast-path: the periodic heartbeat keeps it fresh after this
+  if (!account.hostId) return;
+
+  try {
+    const body: Record<string, unknown> = {
+      hostId: account.hostId,
+      hostname: account.hostname || 'managed-gateway',
+      agents: WATCHED_AGENTS.length > 0 ? WATCHED_AGENTS : undefined,
+    };
+    await fetch(`${url}/hosts/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(5000),
+    });
+    ctx.log?.info?.(`[reflectt] Immediate presence heartbeat sent for ${account.hostId}`);
+  } catch (err) {
+    ctx.log?.warn?.(`[reflectt] Immediate presence heartbeat failed: ${err}`);
+  }
+}
+
 async function notifyGatewayRestart(url: string, log?: any): Promise<void> {
   const now = Date.now();
   if (now - lastRestartNotifyAt < RESTART_NOTIFY_DEDUP_MS) {
@@ -362,6 +390,11 @@ function connectSSE(url: string, account: ReflecttAccount, ctx: any) {
     // Re-seed agent activity after reconnect
     seedAgentActivity(url, ctx.log).catch((err) => {
       ctx.log?.warn?.(`[reflectt] post-reconnect seed failed: ${err}`);
+    });
+
+    // Immediately notify presence so the host shows as online without waiting for heartbeat interval
+    notifyPresence(url, account, ctx).catch((err) => {
+      ctx.log?.warn?.(`[reflectt] immediate presence heartbeat failed: ${err}`);
     });
 
     // Notify agents and activate quiet window on gateway (re)connect
