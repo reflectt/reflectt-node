@@ -68,7 +68,7 @@ export interface OutboundSmsResponse {
  * Send an outbound email through the team's configured Resend domain.
  *
  * Request body:
- *   - from: string — Team alias or shared inbox address (e.g. "kai@reflectt.ai")
+ *   - from: string — Team alias or shared inbox address (e.g. "team@example.com")
  *   - to: string | string[] — Recipient email(s)
  *   - subject: string — Email subject
  *   - html?: string — HTML body (one of html or text required)
