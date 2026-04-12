@@ -31,4 +31,14 @@ domains:
     primary: link
     fallback: kai
 
+  - name: growth
+    keywords: [growth, funnel, conversion, attribution, metrics, A/B, experiment, SEO, landing-page, acquisition, retention, churn, activation, onboarding]
+    primary: spark
+    fallback: echo
+
+  - name: content
+    keywords: [blog, documentation, article, whitepaper, case-study, byline, editorial]
+    primary: echo
+    fallback: quill
+
 catch_all: kai

@@ -123,6 +123,11 @@
       "pathPattern": "^src/server\\.ts$",
       "pattern": "building reflectt\\.ai",
       "reason": "Canvas query LLM prompt context \u2014 intentional product description string"
+    },
+    {
+      "pathPattern": "^src/cli\\.ts$",
+      "pattern": "(?:api\\.|app\\.)?reflectt\\.ai",
+      "reason": "CLI defaults and user-facing URLs \u2014 cloud-url defaults to api.reflectt.ai, dashboard/help text references app.reflectt.ai"
     }
   ]
 }

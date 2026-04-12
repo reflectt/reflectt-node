@@ -18971,6 +18971,7 @@ If your heartbeat shows **no active task** and **no next task**:
     path: string,
     body: Record<string, unknown>,
     reply: { code: (n: number) => typeof reply; send: (b: unknown) => void },
+    method: 'GET' | 'POST' = 'POST',
   ): Promise<unknown> {
     const cloudUrl = process.env.REFLECTT_CLOUD_URL
     const hostToken = process.env.REFLECTT_HOST_TOKEN
@@ -18979,14 +18980,15 @@ If your heartbeat shows **no active task** and **no next task**:
       return { error: 'Not connected to cloud. Configure REFLECTT_CLOUD_URL and REFLECTT_HOST_TOKEN.' }
     }
     try {
-      const res = await fetch(`${cloudUrl}${path}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${hostToken}`,
-        },
-        body: JSON.stringify(body),
-      })
+      const headers: Record<string, string> = { Authorization: `Bearer ${hostToken}` }
+      const options: RequestInit = {}
+      if (method === 'POST') {
+        options.method = 'POST'
+        headers['Content-Type'] = 'application/json'
+        options.body = JSON.stringify(body)
+      }
+      options.headers = headers
+      const res = await fetch(`${cloudUrl}${path}`, options)
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         reply.code(res.status)
@@ -19051,6 +19053,53 @@ If your heartbeat shows **no active task** and **no next task**:
       to,
       body: msgBody,
       from: body.from,
+      agent: body.agentId || body.agent || 'unknown',
+    }, reply)
+  })
+
+  // ── Managed Browser Sessions (cloud relay via host credential) ─────────
+  // Proxies to the cloud API's managed browser session stack using host auth.
+  // Allows agents to use cloud-stored auth profiles (e.g., @ReflecttAI X session)
+  // without needing Supabase JWT — uses host credential auth instead.
+
+  // GET /browser/managed/sessions — list managed sessions
+  app.get('/browser/managed/sessions', async (request, reply) => {
+    const query = request.query as Record<string, string>
+    const hostId = process.env.REFLECTT_HOST_ID
+    const relayPath = hostId
+      ? `/api/hosts/${encodeURIComponent(hostId)}/relay/browser/sessions`
+      : '/api/hosts/relay/browser/sessions'
+    const params = new URLSearchParams()
+    if (query.status) params.set('status', query.status)
+    if (query.limit) params.set('limit', query.limit)
+    if (query.offset) params.set('offset', query.offset)
+    const qs = params.toString()
+    return cloudRelay(`${relayPath}${qs ? `?${qs}` : ''}`, {}, reply, 'GET')
+  })
+
+  // POST /browser/managed/sessions — create a managed session
+  app.post('/browser/managed/sessions', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const hostId = process.env.REFLECTT_HOST_ID
+    const relayPath = hostId
+      ? `/api/hosts/${encodeURIComponent(hostId)}/relay/browser/sessions`
+      : '/api/hosts/relay/browser/sessions'
+    return cloudRelay(relayPath, {
+      ...body,
+      agent: body.agentId || body.agent || 'unknown',
+    }, reply)
+  })
+
+  // POST /browser/managed/sessions/:sessionId/runs — execute actions in a managed session
+  app.post<{ Params: { sessionId: string } }>('/browser/managed/sessions/:sessionId/runs', async (request, reply) => {
+    const { sessionId } = request.params
+    const body = request.body as Record<string, unknown>
+    const hostId = process.env.REFLECTT_HOST_ID
+    const relayPath = hostId
+      ? `/api/hosts/${encodeURIComponent(hostId)}/relay/browser/sessions/${encodeURIComponent(sessionId)}/runs`
+      : `/api/hosts/relay/browser/sessions/${encodeURIComponent(sessionId)}/runs`
+    return cloudRelay(relayPath, {
+      ...body,
       agent: body.agentId || body.agent || 'unknown',
     }, reply)
   })
