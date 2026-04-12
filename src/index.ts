@@ -583,8 +583,8 @@ async function main() {
               'When done, move this task to `done`. Your first task cycle is complete!',
             ].join('\n'),
             priority: 'P2',
-            assignee: 'builder',
-            reviewer: 'ops',
+            assignee: 'main',
+            reviewer: 'main',
             done_criteria: [
               'Dashboard loads and shows this task',
               'At least one agent connected via OpenClaw',
