@@ -120,7 +120,7 @@ export interface PolicyConfig {
   insightListener: {
     enabled: boolean
     autoCreateSeverities: string[]   // severities that auto-create tasks (default: ['critical', 'high'])
-    defaultReviewer: string
+    defaultReviewer: string | undefined
     defaultEta: string
     clusterCooldownMs: number        // cooldown between auto-creates for same cluster
   }

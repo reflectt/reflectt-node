@@ -620,16 +620,16 @@ function resolveReviewer(
       .find(s => !authors.includes(s.agent) && s.agent !== assignee)
     if (nonAuthorReviewer) return nonAuthorReviewer.agent
     // Hard fallback: default reviewer if not an author
-    if (!authors.includes(config.defaultReviewer) && config.defaultReviewer !== assignee) {
+    if (config.defaultReviewer && !authors.includes(config.defaultReviewer) && config.defaultReviewer !== assignee) {
       return config.defaultReviewer
     }
     // Last resort: any agent not the assignee
     const roleNames = getAgentRoles().map(r => r.name)
     const anyone = roleNames.find(r => r !== assignee && !authors.includes(r))
-    return anyone || config.defaultReviewer
+    return anyone || config.defaultReviewer || getAgentRoles()[0]?.name || ''
   }
 
-  return suggestion.suggested || config.defaultReviewer
+  return suggestion.suggested || config.defaultReviewer || getAgentRoles()[0]?.name || ''
 }
 
 function buildTaskDescription(insight: Insight): string {

@@ -131,12 +131,12 @@ export function computeTeamPulse(now = Date.now()): TeamPulseSnapshot {
   const totalDoing = agentStatuses.reduce((sum, a) => sum + a.doingCount, 0)
   const totalTodo = agentStatuses.reduce((sum, a) => sum + a.todoCount, 0)
   const totalRecentShips = agentStatuses.reduce((sum, a) => sum + a.recentShips, 0)
-  const activeAgents = agentStatuses.filter(a => a.status === 'active').length
+  const activeAgentCount = agentStatuses.filter(a => a.status === 'active').length
 
   let teamStatus: TeamPulseSnapshot['teamStatus'] = 'healthy'
   if (totalDoing === 0 && totalTodo === 0) {
     teamStatus = 'stalled'
-  } else if (activeAgents < config.minActiveThreshold) {
+  } else if (activeAgentCount < config.minActiveThreshold) {
     teamStatus = 'slow'
   }
 
