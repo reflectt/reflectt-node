@@ -36,34 +36,17 @@ const CONFIG_PATHS = [
   join(REFLECTT_HOME, 'TEAM-ROLES.yml'),
 ]
 
-// ── Built-in fallback (matches defaults/TEAM-ROLES.yaml) ──
-// These are generic starter agents. Users should customize TEAM-ROLES.yaml
-// with their actual team members.
+// ── Built-in fallback ──
+// Fresh nodes (no TEAM-ROLES.yaml on disk) start with only the 'main'
+// bootstrap agent. The founding agent reads TEAM_INTENT and writes the
+// real team roster via PUT /config/team-roles. No default roster ever.
 const BUILTIN_ROLES: AgentRole[] = [
   {
-    name: 'agent-1',
-    role: 'builder',
-    description: 'Example builder agent. Replace with your team\'s agents.',
-    affinityTags: ['backend', 'api', 'integration'],
-    wipCap: 2,
-  },
-  {
-    name: 'agent-2',
-    role: 'designer',
-    description: 'Example designer agent. Replace with your team\'s agents.',
-    affinityTags: ['design', 'ui', 'brand'],
-    // If you want design-only routing, encode it in TEAM-ROLES.yaml via:
-    // routingMode: opt-in
-    // alwaysRoute: [design, ui, ux, copy, brand, marketing, ...]
-    // neverRoute + neverRouteUnlessLane
-    wipCap: 2,
-  },
-  {
-    name: 'agent-3',
-    role: 'ops',
-    description: 'Example ops agent. Replace with your team\'s agents.',
-    affinityTags: ['infra', 'ci', 'monitoring'],
-    wipCap: 3,
+    name: 'main',
+    role: 'bootstrap',
+    description: 'Bootstrap agent — reads TEAM_INTENT and creates the team via PUT /config/team-roles.',
+    affinityTags: [],
+    wipCap: 1,
   },
 ]
 
@@ -164,20 +147,7 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
     return { roles: bootstrapRoles, source: 'TEAM_INTENT-bootstrap' }
   }
 
-  // Try defaults shipped with repo
-  try {
-    const defaultsPath = new URL('../defaults/TEAM-ROLES.yaml', import.meta.url)
-    const content = readFileSync(defaultsPath, 'utf-8')
-    const roles = parseRolesYaml(content)
-    if (roles.length > 0) {
-      loadedRoles = roles
-      loadedFromPath = 'defaults/TEAM-ROLES.yaml'
-      console.log(`[Assignment] Using ${roles.length} default agent roles. Customize: cp defaults/TEAM-ROLES.yaml ${REFLECTT_HOME}/TEAM-ROLES.yaml`)
-      return { roles, source: 'defaults/TEAM-ROLES.yaml' }
-    }
-  } catch { /* ignore */ }
-
-  // Fall back to test override or built-in
+  // Fall back to test override or built-in (only 'main' bootstrap agent)
   const fallbackRoles = testRolesOverride || BUILTIN_ROLES
   const source = testRolesOverride ? 'test-override' : 'builtin'
   loadedRoles = fallbackRoles
