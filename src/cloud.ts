@@ -1520,13 +1520,7 @@ async function syncRunApprovals(): Promise<void> {
   lastApprovalSyncAt = now
 
   try {
-    const KNOWN_AGENTS_SYNC = new Set([
-      'link', 'kai', 'pixel', 'sage', 'scout', 'echo',
-      'rhythm', 'spark', 'swift', 'kotlin', 'harmony',
-      'artdirector', 'uipolish', 'coo', 'cos', 'pm', 'qa',
-      'shield', 'kindling', 'quill', 'funnel', 'attribution',
-      'bookkeeper', 'legal-counsel', 'evi-scout',
-    ])
+    const KNOWN_AGENTS_SYNC = new Set(getAgentRoles().map(r => r.name))
     const rawItems = listApprovalQueue({ category: 'review', limit: 20 })
     // Filter out agent-to-agent reviews — only sync human-required approvals to cloud
     const items = rawItems.filter(item => {

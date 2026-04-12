@@ -1150,8 +1150,10 @@ function inferTaskWorkDomain(task: Task): 'ops' | 'content' | 'design' | 'qa' | 
 
 function isEchoOutOfLaneTask(task: Task): boolean {
   const assignee = (task.assignee || '').trim().toLowerCase()
-  if (assignee !== 'echo') return false
-  const role = getAgentRole('echo')
+  // Check if the agent has a 'voice' or 'content' role (the "echo" role pattern)
+  const agentRoleObj = getAgentRole(assignee)
+  if (!agentRoleObj || (agentRoleObj.role !== 'voice' && agentRoleObj.role !== 'content' && agentRoleObj.role !== 'writer')) return false
+  const role = agentRoleObj
   if (!role) return false
 
   const domain = inferTaskWorkDomain(task)
@@ -1951,9 +1953,9 @@ function buildNoMentionWarning(
   // Find the main agent (first in roster, or kai as fallback)
   const roster = presenceManager.getAllPresence()
   const mainAgent = roster.find(r => (r as any).role === 'coordinator')?.agent
-    || roster.find(r => r.agent === 'kai')?.agent
     || roster[0]?.agent
-    || 'kai'
+    || getAgentRoles()[0]?.name
+    || null
   return {
     warning: `No @mention in #${channel} — this message won't trigger action from any agent. Consider adding @${mainAgent} or the relevant owner. Auto-routing visibility to @${mainAgent}.`,
     autoRouted: mainAgent,
@@ -2518,11 +2520,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const validatingTasks = taskManager.listTasks({ status: 'validating' })
     const cutoff = Date.now() - APPROVAL_CARD_TTL_MS
     // Known agent names — agent-to-agent reviews should not produce canvas approval cards
-    const KNOWN_AGENTS_RESTORE = new Set([
-      'link', 'kai', 'pixel', 'sage', 'scout', 'echo', 'rhythm', 'swift', 'kotlin',
-      'harmony', 'cos', 'artdirector', 'shield', 'spark', 'coo', 'pm', 'qa', 'kindling',
-      'uipolish', 'evi-scout',
-    ])
+    const KNOWN_AGENTS_RESTORE = new Set(getAgentRoles().map(r => r.name))
     for (const task of validatingTasks) {
       const meta = (task.metadata ?? {}) as Record<string, unknown>
       // Skip if already decided
@@ -2885,7 +2883,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     // Select an agent to send the intervention (use lastAgent from context, or default)
-    const agentName = event.context?.lastAgent || 'rhythm'
+    const agentName = event.context?.lastAgent || getAgentRoles()[0]?.name || 'system'
     const message = result.message || 'Hey! Just checking in — want to pick up where you left off?'
 
     // Post to #general as the intervening agent
@@ -7059,7 +7057,7 @@ export async function createServer(): Promise<FastifyInstance> {
       const doingScore = Math.min(doingMs / (60 * 60 * 1000), 0.3)     // 1h doing → +0.3
       const intensity = Math.min(Math.max(ageScore * 0.7 + doingScore + 0.15, 0.15), 1.0)
 
-      const assigneeId = updated.assignee ?? task.assignee ?? 'link'
+      const assigneeId = updated.assignee ?? task.assignee ?? getAgentRoles()[0]?.name ?? 'system'
       const MILESTONE_COLORS: Record<string, string> = {
         link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
         sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
@@ -7162,13 +7160,13 @@ export async function createServer(): Promise<FastifyInstance> {
       example: {
         title: 'Bug: dashboard login — 500 error when SSO callback missing state param',
         type: 'bug',
-        assignee: 'link',
-        reviewer: 'kai',
+        assignee: '<builder-agent>',
+        reviewer: '<lead-agent>',
         done_criteria: ['SSO callback handles missing state param gracefully (redirect to /auth with error)', 'No 500 in production logs for this code path'],
         eta: '~2h',
         priority: 'P1',
-        createdBy: 'kai',
-        metadata: { source: 'internal-dogfooding-feb-16' },
+        createdBy: '<lead-agent>',
+        metadata: { source: 'internal-dogfooding' },
       },
     },
     feature: {
@@ -7179,12 +7177,12 @@ export async function createServer(): Promise<FastifyInstance> {
       example: {
         title: 'Feature: host activity feed — show last 10 events per host on dashboard',
         type: 'feature',
-        assignee: 'link',
-        reviewer: 'kai',
+        assignee: '<builder-agent>',
+        reviewer: '<lead-agent>',
         done_criteria: ['Dashboard shows last 10 activity events per host', 'Events include heartbeats, claims, syncs with timestamps'],
         eta: '~4h',
         priority: 'P2',
-        createdBy: 'kai',
+        createdBy: '<lead-agent>',
       },
     },
     process: {
@@ -7195,12 +7193,12 @@ export async function createServer(): Promise<FastifyInstance> {
       example: {
         title: 'Process: enforce task intake schema — reject vague tasks at creation',
         type: 'process',
-        assignee: 'link',
-        reviewer: 'kai',
+        assignee: '<builder-agent>',
+        reviewer: '<lead-agent>',
         done_criteria: ['Task creation rejects without required fields', 'Templates available per type'],
         eta: '~2h',
         priority: 'P2',
-        createdBy: 'kai',
+        createdBy: '<lead-agent>',
       },
     },
     docs: {
@@ -7211,12 +7209,12 @@ export async function createServer(): Promise<FastifyInstance> {
       example: {
         title: 'Docs: enrollment handshake — document connect flow for agents',
         type: 'docs',
-        assignee: 'sage',
-        reviewer: 'kai',
-        done_criteria: ['Connect flow documented with steps and code examples', 'Published at docs.reflectt.ai'],
+        assignee: '<ops-agent>',
+        reviewer: '<lead-agent>',
+        done_criteria: ['Connect flow documented with steps and code examples'],
         eta: '~2h',
         priority: 'P3',
-        createdBy: 'kai',
+        createdBy: '<lead-agent>',
       },
     },
     chore: {
@@ -7227,12 +7225,12 @@ export async function createServer(): Promise<FastifyInstance> {
       example: {
         title: 'Chore: clean up stale branches — 15+ unmerged branches from last sprint',
         type: 'chore',
-        assignee: 'link',
-        reviewer: 'kai',
+        assignee: '<builder-agent>',
+        reviewer: '<lead-agent>',
         done_criteria: ['All branches older than 2 weeks merged or deleted'],
         eta: '~1h',
         priority: 'P4',
-        createdBy: 'kai',
+        createdBy: '<lead-agent>',
       },
     },
   }
@@ -7455,13 +7453,13 @@ export async function createServer(): Promise<FastifyInstance> {
             rest.reviewer = reviewerSuggestion.suggested
             reviewerAutoAssigned = true
           } else {
-            // No suggestion available — fall back to kai
-            rest.reviewer = 'kai'
-            reviewerAutoAssigned = true
+            // No suggestion available — fall back to first known agent
+            rest.reviewer = getAgentRoles()[0]?.name
+            reviewerAutoAssigned = rest.reviewer !== undefined
           }
         } catch {
-          rest.reviewer = 'kai'
-          reviewerAutoAssigned = true
+          rest.reviewer = getAgentRoles()[0]?.name
+          reviewerAutoAssigned = rest.reviewer !== undefined
         }
       }
 
@@ -9590,7 +9588,7 @@ export async function createServer(): Promise<FastifyInstance> {
           ...existingHandoffMeta,
           notifiedAt: Date.now(),
           notifiedForStatus: nextStatus,
-          notifiedTo: 'link',
+          notifiedTo: getAgentRoles()[0]?.name,
           sourceTaskId: lookup.resolvedId,
           artifactPath: designHandoffArtifactPath,
         }
@@ -9693,7 +9691,7 @@ export async function createServer(): Promise<FastifyInstance> {
             kind: 'design_implementation_handoff',
             sourceTaskId: task.id,
             artifactPath: designHandoffArtifactPath,
-            to: 'link',
+            to: getAgentRoles()[0]?.name,
           },
         }).catch(() => {})
       }
@@ -9788,10 +9786,7 @@ export async function createServer(): Promise<FastifyInstance> {
       // Only emit for human reviewers — agent-to-agent reviews should NOT appear on canvas.
       // If the reviewer is a known agent name, skip the card entirely.
       if (parsed.status === 'validating' && existing.status !== 'validating') {
-        const KNOWN_AGENT_IDS = new Set([
-          'link', 'kai', 'pixel', 'sage', 'scout', 'echo',
-          'rhythm', 'spark', 'swift', 'kotlin', 'harmony',
-        ])
+        const KNOWN_AGENT_IDS = new Set(getAgentRoles().map(r => r.name))
         const reviewerId = (task.reviewer ?? '').toLowerCase().trim()
         const isAgentReviewer = KNOWN_AGENT_IDS.has(reviewerId)
 
@@ -10578,7 +10573,21 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // Hot-reload the team config
       const { loadAgentRoles } = await import('./assignment.js')
+      const prevAgentNames = new Set(getAgentRoles().map(r => r.name))
       const reloaded = loadAgentRoles()
+
+      // Broadcast new agents to canvas so they appear immediately (with idle orb)
+      const now = Date.now()
+      for (const role of reloaded.roles) {
+        if (!prevAgentNames.has(role.name)) {
+          eventBus.emit({
+            id: `team-reload-${now}-${role.name}`,
+            type: 'canvas_render' as const,
+            timestamp: now,
+            data: { agentId: role.name, state: 'idle', sensors: null, payload: { justJoined: true } },
+          })
+        }
+      }
 
       return {
         success: true,
@@ -11409,7 +11418,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // Seed capability map with platform integrations for all known agents
   const { seedCapabilityMap } = await import('./canvas-interactive.js')
   const allTasks = taskManager.listTasks({})
-  const agentNames = [...new Set([...allTasks.map((t: any) => t.assignee).filter(Boolean), 'kai'])]
+  const agentNames = [...new Set([...allTasks.map((t: any) => t.assignee).filter(Boolean), ...getAgentRoles().map(r => r.name)])]
   const agents = agentNames.map((name: string) => ({ name }))
   seedCapabilityMap(agents)
   console.log(`[capabilities] seeded ${agents.length} agents with platform capabilities`)
@@ -12271,7 +12280,7 @@ export async function createServer(): Promise<FastifyInstance> {
       description: triage.description,
       status: 'todo',
       assignee: triage.assignee,
-      reviewer: 'kai',
+      reviewer: getAgentRoles()[0]?.name,
       done_criteria: ['Triage feedback converted to actionable task'],
       createdBy: triageAgent,
       priority: triage.priority as Task['priority'],
@@ -14612,7 +14621,7 @@ If your heartbeat shows **no active task** and **no next task**:
         assignee: data.assignee,
         reviewer: data.reviewer,
         done_criteria: doneCriteria,
-        createdBy: data.createdBy || 'scout',
+        createdBy: data.createdBy || 'system',
         priority: data.priority,
         tags,
         metadata: {
@@ -18204,7 +18213,7 @@ If your heartbeat shows **no active task** and **no next task**:
       reviewer?: string; prUrl?: string; title?: string; urgency?: string
       nextOwner?: string; summary?: string
     } ?? {}
-    const agentId = body.agentId ?? 'link'
+    const agentId = body.agentId ?? getAgentRoles()[0]?.name ?? 'system'
     const teamId = body.teamId ?? 'default'
     const result = await runWorkflow(template, agentId, teamId, body)
     return result
@@ -18232,8 +18241,9 @@ If your heartbeat shows **no active task** and **no next task**:
       return { error: 'Workflow template "pr-review" is not registered' }
     }
 
-    const agentId = body.agentId ?? 'link'
-    const reviewer = body.reviewer ?? 'kai'
+    const roles = getAgentRoles()
+    const agentId = body.agentId ?? roles[0]?.name ?? 'system'
+    const reviewer = body.reviewer ?? roles[1]?.name ?? roles[0]?.name ?? 'system'
     const teamId = body.teamId ?? 'default'
 
     let taskId = body.taskId
@@ -18667,13 +18677,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
     // Filter out agent-to-agent reviews — humans don't need to see these on the canvas.
     // Only show items where the reviewer is a human (not a known agent).
-    const KNOWN_AGENTS_APPROVAL = new Set([
-      'link', 'kai', 'pixel', 'sage', 'scout', 'echo',
-      'rhythm', 'spark', 'swift', 'kotlin', 'harmony',
-      'artdirector', 'uipolish', 'coo', 'cos', 'pm', 'qa',
-      'shield', 'kindling', 'quill', 'funnel', 'attribution',
-      'bookkeeper', 'legal-counsel', 'evi-scout',
-    ])
+    const KNOWN_AGENTS_APPROVAL = new Set(getAgentRoles().map(r => r.name))
 
     // Check if ?humanOnly=true (default true for canvas, false for dashboard)
     const humanOnly = (request.query as Record<string, string>).humanOnly !== 'false'

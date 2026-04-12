@@ -7,6 +7,7 @@ import type { eventBus as eventBusInstance } from './events.js'
 import { taskManager } from './tasks.js'
 import { emitActivationEvent } from './activationEvents.js'
 import type { CanvasStateEntry } from './canvas-routes.js'
+import { getAgentRoles } from './assignment.js'
 
 interface CanvasPushDeps {
   eventBus: typeof eventBusInstance
@@ -226,7 +227,7 @@ export async function canvasPushRoutes(
         description: `Auto-welcome: ${greeting}\n\nThis task was created automatically when a visitor loaded the canvas for the first time.`,
         status: 'doing',
         assignee: agentId,
-        reviewer: 'kai',
+        reviewer: getAgentRoles()[0]?.name,
         priority: 'P2',
         createdBy: 'canvas-welcome',
         metadata: { lane: 'onboarding', bootstrap: true, first_wow: true },

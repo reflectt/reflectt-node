@@ -45,7 +45,7 @@ export interface AssignmentDecision {
 export interface BridgeConfig {
   enabled: boolean
   autoCreateSeverities: string[]
-  defaultReviewer: string
+  defaultReviewer: string | undefined
   defaultEtaDays: number
   assignableAgents: string[]
   ownershipGuardrail: OwnershipGuardrailConfig
@@ -84,7 +84,7 @@ let stats: BridgeStats = {
 let config: BridgeConfig = {
   enabled: true,
   autoCreateSeverities: ['high', 'critical'],
-  defaultReviewer: 'sage',
+  defaultReviewer: undefined,
   defaultEtaDays: 3,
   assignableAgents: [],
   ownershipGuardrail: {

@@ -135,7 +135,7 @@ export const prReviewWorkflow: WorkflowTemplate = {
           payload: {
             action_required: 'review',
             urgency: ctx.params.urgency as string ?? 'normal',
-            owner: ctx.params.reviewer as string ?? 'kai',
+            owner: ctx.params.reviewer as string ?? ctx.agentId,
             pr_url: ctx.params.prUrl as string,
             title: ctx.params.title as string ?? 'Review requested',
             rationale: {
@@ -158,7 +158,7 @@ export const prReviewWorkflow: WorkflowTemplate = {
           runId: ctx.runId,
           eventType: 'review_approved',
           payload: {
-            reviewer: ctx.params.reviewer as string ?? 'kai',
+            reviewer: ctx.params.reviewer as string ?? ctx.agentId,
             comment: 'LGTM',
             rationale: {
               choice: (ctx.params.approvalRationale as string) ?? 'Changes reviewed and approved — meets acceptance criteria.',

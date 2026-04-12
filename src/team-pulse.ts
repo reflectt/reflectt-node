@@ -12,6 +12,7 @@
 import { taskManager } from './tasks.js'
 import { chatManager } from './chat.js'
 import { routeMessage } from './messageRouter.js'
+import { getAgentRoles } from './assignment.js'
 
 // ── Types ──
 
@@ -58,7 +59,7 @@ let config: TeamPulseConfig = {
   channel: 'ops',
   activeHoursStart: 8,
   activeHoursEnd: 22,
-  agents: ['link', 'sage', 'kai', 'pixel', 'echo', 'scout', 'harmony'],
+  agents: [], // populated dynamically from getAgentRoles() at pulse time
   minActiveThreshold: 2,
 }
 
@@ -86,7 +87,8 @@ export function computeTeamPulse(now = Date.now()): TeamPulseSnapshot {
   const windowMs = config.intervalMin * 60_000
   const since = now - windowMs
 
-  const agentStatuses: AgentPulseStatus[] = config.agents.map(agent => {
+  const activeAgents = config.agents.length > 0 ? config.agents : getAgentRoles().map(r => r.name)
+  const agentStatuses: AgentPulseStatus[] = activeAgents.map(agent => {
     const doingTasks = taskManager.listTasks({ status: 'doing', assignee: agent })
     const todoTasks = taskManager.listTasks({ status: 'todo', assignee: agent })
 
