@@ -13858,7 +13858,22 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const doingTasks = taskManager.listTasks({ status: 'doing', assigneeIn: getAgentAliases(agent) })
     const activeTask = doingTasks[0] || null
-    const nextTask = activeTask ? null : (taskManager.getNextTask(agent) || null)
+    // Auto-claim: if agent has no active work and has a suggested next task, claim it now.
+    // This ensures idle agents automatically pick up queued work without requiring
+    // the runtime to make a separate claim call after reading the heartbeat.
+    let nextTask = activeTask ? null : (taskManager.getNextTask(agent) || null)
+    if (!activeTask && nextTask && nextTask.status === 'todo') {
+      // Auto-claim wrapped in try/catch: if claim fails due to lifecycle gates
+      // (missing done_criteria/reviewer), heartbeat should still return normally
+      // rather than throwing — agent gets the suggestion without being crashed.
+      try {
+        const { claimTask } = await import('./todoHoardingGuard.js')
+        const claimed = await claimTask(nextTask.id, agent)
+        nextTask = claimed || null
+      } catch {
+        // Claim blocked by lifecycle gate — return task as suggestion only
+      }
+    }
 
     const allMessages = chatManager.getMessages({ limit: 200, since: Date.now() - (4 * 60 * 60 * 1000) })
     const inbox = inboxManager.getInbox(agent, allMessages, { limit: 10 })
