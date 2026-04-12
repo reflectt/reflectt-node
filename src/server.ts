@@ -9490,15 +9490,14 @@ export async function createServer(): Promise<FastifyInstance> {
             const agentLaneConfig = getAgentLane(claimingAgent)
             const agentLaneName = agentLaneConfig?.name?.toLowerCase() ?? null
 
-            if (!agentLaneName || agentLaneName !== taskLane) {
+            // Only reject if agent IS in a different lane — unconfigured agents are unrestricted.
+            if (agentLaneName && agentLaneName !== taskLane) {
               reply.code(400)
               return {
                 success: false,
-                error: agentLaneName
-                  ? `Lane mismatch: ${claimingAgent} belongs to "${agentLaneConfig!.name}" lane but task is in "${taskLane}" lane.`
-                  : `Lane mismatch: ${claimingAgent} has no lane assignment but task is in "${taskLane}" lane.`,
+                error: `Lane mismatch: ${claimingAgent} belongs to "${agentLaneConfig!.name}" lane but task is in "${taskLane}" lane.`,
                 gate: 'lane_validation',
-                agentLane: agentLaneName ?? null,
+                agentLane: agentLaneName,
                 taskLane,
                 hint: 'Set metadata.lane_override=true to bypass this check.',
               }

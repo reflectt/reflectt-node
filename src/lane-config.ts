@@ -34,6 +34,14 @@ export interface LaneConfig {
 // If TEAM-ROLES.yaml has no lanes, all agents operate in a single default lane.
 export const DEFAULT_LANES: LaneConfig[] = []
 
+// ── Test-only lane override ─────────────────────────────────────────────────
+let testLanesOverride: LaneConfig[] | null = null
+
+/** Override lane config for tests. Call with null to reset. */
+export function setTestLanes(lanes: LaneConfig[] | null): void {
+  testLanesOverride = lanes
+}
+
 // ── Config paths ────────────────────────────────────────────────────────────
 
 const CONFIG_PATHS = [
@@ -69,6 +77,8 @@ function parseLanesFromYaml(content: string): LaneConfig[] | null {
  */
 export function getLanesConfig(): LaneConfig[] {
   const isTest = Boolean(process.env.VITEST) || process.env.NODE_ENV === 'test'
+
+  if (isTest && testLanesOverride !== null) return testLanesOverride
 
   if (!isTest) {
     // Try user config files

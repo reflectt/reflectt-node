@@ -2,27 +2,37 @@
 // Ready-queue engine v1 tests
 // Proves: (a) lane below floor emits warning (no placeholder task creation), (b) WIP limit blocks pulls.
 
-import { describe, it, expect, beforeAll, afterEach } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { taskManager } from '../src/tasks.js'
 import { BoardHealthWorker } from '../src/boardHealthWorker.js'
-import { DEFAULT_LANES, checkWipLimit, getLanesConfig } from '../src/lane-config.js'
+import { DEFAULT_LANES, checkWipLimit, getLanesConfig, setTestLanes } from '../src/lane-config.js'
 import { presenceManager } from '../src/presence.js'
+import type { LaneConfig } from '../src/lane-config.js'
 
-// Use a test agent from DEFAULT_LANES so lane config is deterministic in tests
+// Test-specific lane config — generic names, not tied to production team
+const TEST_LANES: LaneConfig[] = [
+  { name: 'engineering', agents: ['link', 'sage'], readyFloor: 2, wipLimit: 2 },
+  { name: 'design', agents: ['pixel'], readyFloor: 1, wipLimit: 1 },
+]
 const TEST_AGENT = 'link'
-const TEST_LANE = DEFAULT_LANES.find(l => l.agents.includes(TEST_AGENT))!
+const TEST_LANE = TEST_LANES.find(l => l.agents.includes(TEST_AGENT))!
 
 describe('Ready-queue engine v1', () => {
   // Track tasks created during each test for cleanup
   const createdTaskIds: string[] = []
 
   beforeAll(() => {
+    setTestLanes(TEST_LANES)
     // Register presence for test agents so the ghost-agent guard doesn't skip them
-    for (const lane of DEFAULT_LANES) {
+    for (const lane of TEST_LANES) {
       for (const agent of lane.agents) {
         presenceManager.updatePresence(agent, 'idle')
       }
     }
+  })
+
+  afterAll(() => {
+    setTestLanes(null)
   })
 
   afterEach(() => {
@@ -34,16 +44,19 @@ describe('Ready-queue engine v1', () => {
 
   // ── Lane config ─────────────────────────────────────────────────────────
 
-  it('getLanesConfig returns DEFAULT_LANES in test environment', () => {
+  it('getLanesConfig returns test lanes when setTestLanes is active', () => {
     const lanes = getLanesConfig()
     expect(lanes).toBeDefined()
     expect(lanes.length).toBeGreaterThan(0)
-    // In tests VITEST=true so we always get defaults
-    expect(lanes).toEqual(DEFAULT_LANES)
+    expect(lanes).toEqual(TEST_LANES)
   })
 
-  it('DEFAULT_LANES have required fields', () => {
-    for (const lane of DEFAULT_LANES) {
+  it('DEFAULT_LANES is empty (no baked-in production lanes)', () => {
+    expect(DEFAULT_LANES).toEqual([])
+  })
+
+  it('test lanes have required fields', () => {
+    for (const lane of TEST_LANES) {
       expect(typeof lane.name).toBe('string')
       expect(lane.agents.length).toBeGreaterThan(0)
       expect(typeof lane.readyFloor).toBe('number')

@@ -9,11 +9,29 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { createServer } from '../src/server.js'
 import type { FastifyInstance } from 'fastify'
 import { getDb } from '../src/db.js'
+import { setTestRoles } from '../src/assignment.js'
+import { setTestLanes } from '../src/lane-config.js'
+import { presenceManager } from '../src/presence.js'
 
 let app: FastifyInstance
 const createdIds: string[] = []
 
+// Test-specific roles and lanes — generic names tied to test assertions only
+const TEST_ROLES = [
+  { name: 'link', role: 'builder', description: 'Test builder', affinityTags: [], wipCap: 2 },
+  { name: 'harmony', role: 'reviewer', description: 'Test reviewer', affinityTags: [], wipCap: 2 },
+  { name: 'pixel', role: 'designer', description: 'Test designer', affinityTags: [], wipCap: 1 },
+]
+const TEST_LANES = [
+  { name: 'engineering', agents: ['link'], readyFloor: 1, wipLimit: 2 },
+  { name: 'design', agents: ['pixel'], readyFloor: 1, wipLimit: 1 },
+  { name: 'qa', agents: ['harmony'], readyFloor: 1, wipLimit: 2 },
+]
+
 beforeAll(async () => {
+  setTestRoles(TEST_ROLES)
+  setTestLanes(TEST_LANES)
+  for (const r of TEST_ROLES) presenceManager.updatePresence(r.name, 'idle')
   app = await createServer()
   await app.ready()
 })
@@ -23,6 +41,8 @@ afterAll(async () => {
   for (const id of createdIds) {
     try { db.prepare('DELETE FROM tasks WHERE id = ?').run(id) } catch {}
   }
+  setTestRoles(null)
+  setTestLanes(null)
   await app?.close()
 })
 
