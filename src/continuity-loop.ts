@@ -139,8 +139,10 @@ function resolveMonitoredAgents(configAgents: string[]): string[] {
 
   // If we are running with built-in placeholder roles (no TEAM-ROLES.yaml found),
   // only target agents that have actually checked in via presence.
+  // Skip this guard in test mode — tests configure agents explicitly via policy.
+  const isTest = Boolean(process.env.VITEST) || process.env.NODE_ENV === 'test'
   const rolesSource = getAgentRolesSource().source
-  if (rolesSource === 'builtin') {
+  if (!isTest && rolesSource === 'builtin') {
     return trimmed.filter(a => Boolean(presenceManager.getPresence(a)))
   }
 

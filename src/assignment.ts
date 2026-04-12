@@ -196,11 +196,17 @@ export function stopConfigWatch(): void {
 
 /** Get the current loaded roles */
 export function getAgentRoles(): AgentRole[] {
+  const isTest = Boolean(process.env.VITEST) || process.env.NODE_ENV === 'test'
+  if (isTest && testRolesOverride) return testRolesOverride
   return loadedRoles
 }
 
 /** Get info about where roles were loaded from */
 export function getAgentRolesSource(): { source: string; count: number } {
+  const isTest = Boolean(process.env.VITEST) || process.env.NODE_ENV === 'test'
+  if (isTest && testRolesOverride) {
+    return { source: 'test-override', count: testRolesOverride.length }
+  }
   return {
     source: loadedFromPath || 'builtin',
     count: loadedRoles.length,
