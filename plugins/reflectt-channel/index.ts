@@ -213,6 +213,11 @@ async function fetchRecentMessages(url: string): Promise<Array<Record<string, un
 }
 
 async function seedAgentActivity(url: string, log?: any) {
+  if (WATCHED_AGENTS.length === 0) {
+    log?.info?.(`[reflectt][watchdog] skipping seed: roster not yet loaded`);
+    return;
+  }
+
   const now = Date.now();
   for (const agent of WATCHED_AGENTS) {
     lastUpdateByAgent.set(agent, now);
