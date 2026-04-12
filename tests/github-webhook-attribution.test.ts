@@ -1,32 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import { extractAgentFromBranch, resolveWebhookAttribution, enrichWebhookPayload, remapGitHubMentions } from '../src/github-webhook-attribution.js'
-import { loadAgentRoles } from '../src/assignment.js'
-import fs from 'node:fs'
-import path from 'node:path'
-import os from 'node:os'
+import { setTestRoles } from '../src/assignment.js'
 
-const TEST_ROLES_YAML = `
-- name: link
-  role: builder
-- name: spark
-  role: tester
-- name: kai
-  role: lead
-- name: rhythm
-  role: ops
-`
-
-function setupRoles() {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'reflectt-test-'))
-  const rolesFile = path.join(tmpDir, 'TEAM-ROLES.yaml')
-  fs.writeFileSync(rolesFile, TEST_ROLES_YAML)
-  loadAgentRoles(rolesFile)
-  return tmpDir
-}
+const TEST_ROLES = [
+  { name: 'link',   role: 'builder', affinityTags: [], wipCap: 1 },
+  { name: 'spark',  role: 'tester',  affinityTags: [], wipCap: 1 },
+  { name: 'kai',    role: 'lead',    affinityTags: [], wipCap: 1 },
+  { name: 'rhythm', role: 'ops',     affinityTags: [], wipCap: 1 },
+]
 
 describe('github-webhook-attribution', () => {
   beforeEach(() => {
-    setupRoles()
+    setTestRoles(TEST_ROLES)
+  })
+
+  afterEach(() => {
+    setTestRoles(null)
   })
 
   describe('extractAgentFromBranch', () => {
@@ -181,7 +170,11 @@ import { formatGitHubEvent } from '../src/github-webhook-chat.js'
 
 describe('formatGitHubEvent — branch-based agent attribution', () => {
   beforeEach(() => {
-    setupRoles()
+    setTestRoles(TEST_ROLES)
+  })
+
+  afterEach(() => {
+    setTestRoles(null)
   })
 
   it('mentions branch-resolved agent, not GitHub sender, for PR opened', () => {
