@@ -228,6 +228,9 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | POST | `/browser/sessions/:id/observe` | Discover available actions on current page. Body: `{ instruction }`. |
 | POST | `/browser/sessions/:id/navigate` | Navigate to a URL. Body: `{ url }`. |
 | GET | `/browser/sessions/:id/screenshot` | Take a screenshot of the current page. Returns `{ base64, mimeType }`. |
+| GET | `/browser/managed/sessions` | List managed browser sessions (cloud-stored auth profiles). Proxied to cloud relay using host credential auth. Query: `limit`, `offset`. |
+| POST | `/browser/managed/sessions` | Create a managed browser session via cloud relay. Body: `{ agent, url?, headless?, viewport? }`. Uses host credential auth. |
+| POST | `/browser/managed/sessions/:sessionId/runs` | Execute actions in a managed browser session. Body: `{ instruction, ... }`. Proxied via cloud relay. |
 | GET | `/capabilities` | Agent-facing endpoint discovery. Lists all endpoints grouped by purpose, compact support flags, and usage recommendations. |
 | GET | `/capabilities/readiness` | Per-capability readiness status for Browser/Email/SMS/Calendar. Returns `overall` + per-capability `status` (ready\|degraded\|not_ready\|unknown), `dependencies[]`, `last_error`, and `hint`. |
 | GET | `/version` | Current version + latest available from GitHub releases. Includes `update_available` boolean. Caches GitHub check for 15 minutes. |
@@ -1273,6 +1276,9 @@ Events are **append-only** — no updates, no deletes.
 | POST | `/browser/sessions/:id/observe` | Discover actions. Body: `{ instruction }` |
 | POST | `/browser/sessions/:id/navigate` | Go to URL. Body: `{ url }` |
 | GET | `/browser/sessions/:id/screenshot` | Screenshot as base64 PNG |
+| GET | `/browser/managed/sessions` | List managed sessions (cloud relay, host-credential auth). Query: `limit`, `offset`. |
+| POST | `/browser/managed/sessions` | Create managed session via cloud relay. Body: `{ agent, url?, headless?, viewport? }`. |
+| POST | `/browser/managed/sessions/:sessionId/runs` | Execute actions in a managed session via cloud relay. Body: `{ instruction, ... }`. |
 
 **Example: Create session and act**
 
