@@ -36,6 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
+# Install Playwright's Chromium browser (used by @browserbasehq/stagehand for local browser automation).
+# --with-deps installs required system libraries (libnss3, libatk-bridge2.0, etc.).
+RUN npx playwright install chromium --with-deps
+
 COPY --from=build /app/dist/ dist/
 # Copy pre-baked commit.txt for version reporting (run npm run build locally first)
 COPY commit.txt* ./

@@ -9,6 +9,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -114,15 +115,16 @@ function resolveChromiumPath(): string | undefined {
     return process.env.CHROME_PATH
   }
   try {
-    // playwright-core ships a bundled Chromium on all platforms.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { chromium } = require('playwright-core') as {
+    // playwright-core ships a bundled Chromium. Use createRequire so this works
+    // in ESM context (bare require() is not available in ES modules).
+    const req = createRequire(import.meta.url)
+    const { chromium } = req('playwright-core') as {
       chromium: { executablePath(): string }
     }
     const p = chromium.executablePath()
     if (p && existsSync(p)) return p
   } catch {
-    // playwright-core not installed — fall through
+    // playwright-core not installed or browser not downloaded — fall through
   }
   return undefined
 }
