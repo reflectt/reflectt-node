@@ -10,6 +10,9 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { fileURLToPath } from 'node:url'
+
+const _require = createRequire(fileURLToPath(import.meta.url))
 
 // ---------------------------------------------------------------------------
 // Types
@@ -117,8 +120,7 @@ function resolveChromiumPath(): string | undefined {
   try {
     // playwright-core ships a bundled Chromium. Use createRequire so this works
     // in ESM context (bare require() is not available in ES modules).
-    const req = createRequire(import.meta.url)
-    const { chromium } = req('playwright-core') as {
+    const { chromium } = _require('playwright-core') as {
       chromium: { executablePath(): string }
     }
     const p = chromium.executablePath()
