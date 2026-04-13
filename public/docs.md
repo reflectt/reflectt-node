@@ -1262,6 +1262,12 @@ Persistent key-value store with tags, namespaces, and expiration. Survives node 
 
 Events are **append-only** — no updates, no deletes.
 
+### Web Search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/search` | Search the web. Body: `{ query (required), limit? (default 10, max 20) }`. Returns `{ results: [{title, url, snippet, date?}], provider, query }`. Uses first configured key: `SERPER_API_KEY`, `BRAVE_SEARCH_API_KEY`, or `TAVILY_API_KEY`. 503 if no key configured. |
+
 ### Browser Capability
 
 | Method | Path | Description |

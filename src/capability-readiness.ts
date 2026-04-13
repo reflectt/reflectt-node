@@ -239,6 +239,35 @@ export function checkModelsReadiness(opts: { samplingProviders?: string[] } = {}
   }
 }
 
+// ── Search ────────────────────────────────────────────────────────────────────
+
+function checkSearchReadiness(): CapabilityReadiness {
+  const deps: DependencyCheck[] = []
+
+  const hasSerper = !!(process.env.SERPER_API_KEY)
+  const hasBrave = !!(process.env.BRAVE_SEARCH_API_KEY)
+  const hasTavily = !!(process.env.TAVILY_API_KEY)
+  const hasAny = hasSerper || hasBrave || hasTavily
+
+  const activeProvider = hasSerper ? 'SERPER_API_KEY' : hasBrave ? 'BRAVE_SEARCH_API_KEY' : hasTavily ? 'TAVILY_API_KEY' : null
+  deps.push({
+    name: 'search_api_key',
+    status: hasAny ? 'ok' : 'missing',
+    detail: hasAny
+      ? `${activeProvider} set`
+      : 'Set SERPER_API_KEY, BRAVE_SEARCH_API_KEY, or TAVILY_API_KEY to enable web search',
+  })
+
+  return {
+    capability: 'search',
+    status: hasAny ? 'ready' : 'not_ready',
+    last_success_at: null,
+    last_error: hasAny ? null : 'No search API key configured',
+    dependencies: deps,
+    hint: hasAny ? null : 'Set SERPER_API_KEY, BRAVE_SEARCH_API_KEY, or TAVILY_API_KEY on this node to enable web search.',
+  }
+}
+
 // ── Main readiness check ──────────────────────────────────────────────────────
 
 export function getCapabilityReadiness(opts: {
@@ -249,6 +278,7 @@ export function getCapabilityReadiness(opts: {
 }): ReadinessReport {
   const capabilities = [
     checkBrowserReadiness(),
+    checkSearchReadiness(),
     checkEmailReadiness(opts.cloudConnected, opts.cloudUrl, opts.webhooks),
     checkSmsReadiness(opts.cloudConnected, opts.cloudUrl, opts.webhooks),
     checkCalendarReadiness(),

@@ -19089,6 +19089,29 @@ If your heartbeat shows **no active task** and **no next task**:
     }, reply)
   })
 
+  // ── Web Search (node-managed, direct API call) ─────────────────────────
+  // Agents call POST /search to query the web. The node calls Serper, Brave,
+  // or Tavily directly using a locally-configured API key (whichever is set).
+
+  app.post('/search', async (request, reply) => {
+    const body = request.body as Record<string, unknown>
+    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    if (!query) return reply.code(400).send({ error: 'query is required' })
+    const limit = typeof body.limit === 'number' ? body.limit : 10
+
+    try {
+      const { search: webSearch } = await import('./capabilities/search.js')
+      const result = await webSearch(query, limit)
+      return result
+    } catch (err: any) {
+      const msg: string = err?.message ?? 'search failed'
+      if (msg.includes('No search API key')) {
+        return reply.code(503).send({ error: msg, hint: 'Set SERPER_API_KEY, BRAVE_SEARCH_API_KEY, or TAVILY_API_KEY on this node.' })
+      }
+      return reply.code(502).send({ error: msg })
+    }
+  })
+
   // ── Managed Browser Sessions (cloud relay via host credential) ─────────
   // Proxies to the cloud API's managed browser session stack using host auth.
   // Allows agents to use cloud-stored auth profiles (e.g., @ReflecttAI X session)

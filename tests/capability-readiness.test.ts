@@ -9,15 +9,16 @@ const baseOpts = {
 }
 
 describe('capability readiness contract', () => {
-  it('returns report with all 5 capabilities', () => {
+  it('returns report with all 6 capabilities', () => {
     const report = getCapabilityReadiness(baseOpts)
     const names = report.capabilities.map(c => c.capability)
     expect(names).toContain('browser')
+    expect(names).toContain('search')
     expect(names).toContain('email')
     expect(names).toContain('sms')
     expect(names).toContain('calendar')
     expect(names).toContain('models')
-    expect(report.capabilities).toHaveLength(5)
+    expect(report.capabilities).toHaveLength(6)
   })
 
   it('report has checked_at timestamp', () => {
@@ -105,8 +106,9 @@ describe('capability readiness contract', () => {
       { provider: 'twilio', active: true },
     ]
     const report = getCapabilityReadiness({ cloudConnected: true, cloudUrl: 'https://app.reflectt.ai', webhooks, samplingProviders: ['claude'] })
-    const nonBrowser = report.capabilities.filter(c => c.capability !== 'browser')
-    for (const cap of nonBrowser) {
+    // browser and search are node-managed — their readiness depends on local env vars not set in tests
+    const nonNodeManaged = report.capabilities.filter(c => c.capability !== 'browser' && c.capability !== 'search')
+    for (const cap of nonNodeManaged) {
       expect(cap.status, `${cap.capability} should be ready`).toBe('ready')
     }
   })
