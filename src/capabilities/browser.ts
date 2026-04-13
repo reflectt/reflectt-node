@@ -8,6 +8,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,6 +104,29 @@ export function getBrowserConfig(): BrowserConfig {
   return { ...config }
 }
 
+/**
+ * Resolve a Chrome/Chromium executable path for Stagehand's LOCAL env.
+ * Priority: CHROME_PATH env → playwright-core bundled chromium.
+ * Returns undefined if nothing is found (Stagehand will throw a clear error).
+ */
+function resolveChromiumPath(): string | undefined {
+  if (process.env.CHROME_PATH && existsSync(process.env.CHROME_PATH)) {
+    return process.env.CHROME_PATH
+  }
+  try {
+    // playwright-core ships a bundled Chromium on all platforms.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { chromium } = require('playwright-core') as {
+      chromium: { executablePath(): string }
+    }
+    const p = chromium.executablePath()
+    if (p && existsSync(p)) return p
+  } catch {
+    // playwright-core not installed — fall through
+  }
+  return undefined
+}
+
 function touchSession(session: BrowserSession): void {
   session.lastActivityAt = Date.now()
   if (session._idleTimer) clearTimeout(session._idleTimer)
@@ -140,6 +164,7 @@ export async function createSession(opts: CreateSessionOpts): Promise<BrowserSes
     disablePino: true,
     disableAPI: true,
     localBrowserLaunchOptions: {
+      executablePath: resolveChromiumPath(),
       headless: opts.headless ?? config.headless,
       viewport: opts.viewport ?? config.viewport,
     },
