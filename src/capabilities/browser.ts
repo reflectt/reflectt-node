@@ -169,6 +169,9 @@ export async function createSession(opts: CreateSessionOpts): Promise<BrowserSes
       executablePath: resolveChromiumPath(),
       headless: opts.headless ?? config.headless,
       viewport: opts.viewport ?? config.viewport,
+      // Required in containerised environments (Docker/Fly) where the kernel
+      // sandbox is unavailable. Safe because the container itself is isolated.
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
     },
   })
 
