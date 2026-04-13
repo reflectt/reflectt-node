@@ -37,14 +37,14 @@ describe('capability readiness contract', () => {
   })
 
   it('email is degraded when cloud connected but no inbound webhook', () => {
-    const report = getCapabilityReadiness({ ...baseOpts, cloudConnected: true, cloudUrl: 'https://app.reflectt.ai' })
+    const report = getCapabilityReadiness({ ...baseOpts, cloudConnected: true, cloudUrl: 'https://api.reflectt.ai' })
     const email = report.capabilities.find(c => c.capability === 'email')!
     expect(email.status).toBe('degraded')
   })
 
   it('email is ready when cloud connected + resend webhook active', () => {
     const webhooks = [{ provider: 'resend', active: true }]
-    const report = getCapabilityReadiness({ ...baseOpts, cloudConnected: true, cloudUrl: 'https://app.reflectt.ai', webhooks })
+    const report = getCapabilityReadiness({ ...baseOpts, cloudConnected: true, cloudUrl: 'https://api.reflectt.ai', webhooks })
     const email = report.capabilities.find(c => c.capability === 'email')!
     expect(email.status).toBe('ready')
     expect(email.last_error).toBeNull()
@@ -59,7 +59,7 @@ describe('capability readiness contract', () => {
 
   it('sms is ready when cloud connected + twilio webhook active', () => {
     const webhooks = [{ provider: 'twilio', active: true }]
-    const report = getCapabilityReadiness({ ...baseOpts, cloudConnected: true, cloudUrl: 'https://app.reflectt.ai', webhooks })
+    const report = getCapabilityReadiness({ ...baseOpts, cloudConnected: true, cloudUrl: 'https://api.reflectt.ai', webhooks })
     const sms = report.capabilities.find(c => c.capability === 'sms')!
     expect(sms.status).toBe('ready')
   })
@@ -68,6 +68,23 @@ describe('capability readiness contract', () => {
     const report = getCapabilityReadiness(baseOpts)
     const cal = report.capabilities.find(c => c.capability === 'calendar')!
     expect(cal.status).toBe('ready')
+  })
+
+  it('browser is ready when cloud connected (managed relay path)', () => {
+    const report = getCapabilityReadiness({ ...baseOpts, cloudConnected: true, cloudUrl: 'https://api.reflectt.ai' })
+    const browser = report.capabilities.find(c => c.capability === 'browser')!
+    expect(browser.status).toBe('ready')
+    expect(browser.last_error).toBeNull()
+    expect(browser.hint).toBeNull()
+    const relayDep = browser.dependencies.find(d => d.name === 'managed_relay')
+    expect(relayDep?.status).toBe('ok')
+  })
+
+  it('browser is not_ready or degraded when not cloud connected and no local Stagehand', () => {
+    const report = getCapabilityReadiness(baseOpts)
+    const browser = report.capabilities.find(c => c.capability === 'browser')!
+    // standalone without stagehand installed → not_ready; without LLM key only → degraded
+    expect(['not_ready', 'degraded']).toContain(browser.status)
   })
 
   it('each capability has non-empty dependencies array with valid statuses', () => {
@@ -93,7 +110,7 @@ describe('capability readiness contract', () => {
 
     const after = getCapabilityReadiness({
       cloudConnected: true,
-      cloudUrl: 'https://app.reflectt.ai',
+      cloudUrl: 'https://api.reflectt.ai',
       webhooks: [{ provider: 'resend', active: true }],
     })
     const emailAfter = after.capabilities.find(c => c.capability === 'email')!
@@ -105,7 +122,7 @@ describe('capability readiness contract', () => {
       { provider: 'resend', active: true },
       { provider: 'twilio', active: true },
     ]
-    const report = getCapabilityReadiness({ cloudConnected: true, cloudUrl: 'https://app.reflectt.ai', webhooks, samplingProviders: ['claude'] })
+    const report = getCapabilityReadiness({ cloudConnected: true, cloudUrl: 'https://api.reflectt.ai', webhooks, samplingProviders: ['claude'] })
     // browser and search are node-managed — their readiness depends on local env vars not set in tests
     const nonNodeManaged = report.capabilities.filter(c => c.capability !== 'browser' && c.capability !== 'search')
     for (const cap of nonNodeManaged) {
