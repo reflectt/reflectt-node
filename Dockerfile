@@ -28,13 +28,41 @@ FROM node:22-slim
 
 WORKDIR /app
 
-# Runtime dependency for better-sqlite3
+# Runtime dependencies
+# - libsqlite3-0: better-sqlite3
+# - fonts-noto: Chromium font rendering
+# - gstreamer1.0-libav gstreamer1.0-plugins-* : audio/video codecs for Stagehand
+# - libnss3: Chromium SSL
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-0 \
+    fonts-noto \
+    gstreamer1.0-libav \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && \
+    env PLAYWRIGHT_BROWSERS_PATH=/ms-playwright npx -y playwright install chromium --with-deps && \
+    rm -rf /root/.cache/ms-playwright/artifact* /root/.cache/ms-playwright/*.zip
+
+# Set Playwright browser path for stagehand
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV CHROME_PATH=/ms-playwright/chromium-1208/chrome-linux/chrome
 
 # Install Playwright's Chromium browser (used by @browserbasehq/stagehand for local browser automation).
 # Pin PLAYWRIGHT_BROWSERS_PATH to a fixed location so the install path and runtime executablePath() agree
