@@ -35,7 +35,7 @@ function checkBrowserReadiness(): CapabilityReadiness {
 
   // Check if Stagehand package is available.
   // Use existsSync on the package directory — require.resolve is not available in ESM.
-  const stagehandPath = new URL('../../node_modules/@browserbasehq/stagehand/package.json', import.meta.url)
+  const stagehandPath = new URL('../node_modules/@browserbasehq/stagehand/package.json', import.meta.url)
   const stagehandInstalled = (() => { try { return existsSync(stagehandPath) } catch { return false } })()
   if (stagehandInstalled) {
     deps.push({ name: 'stagehand_package', status: 'ok' })
