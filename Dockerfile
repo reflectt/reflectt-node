@@ -37,7 +37,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # Install Playwright's Chromium browser (used by @browserbasehq/stagehand for local browser automation).
-# --with-deps installs required system libraries (libnss3, libatk-bridge2.0, etc.).
+# Pin PLAYWRIGHT_BROWSERS_PATH to a fixed location so the install path and runtime executablePath() agree
+# regardless of the HOME env at runtime (Fly sets HOME differently from the Docker build context).
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN npx playwright install chromium --with-deps
 
 COPY --from=build /app/dist/ dist/
