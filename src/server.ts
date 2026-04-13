@@ -19006,7 +19006,7 @@ If your heartbeat shows **no active task** and **no next task**:
     method: 'GET' | 'POST' = 'POST',
   ): Promise<unknown> {
     const cloudUrl = process.env.REFLECTT_CLOUD_URL
-    const hostToken = process.env.REFLECTT_HOST_TOKEN
+    const hostToken = process.env.REFLECTT_HOST_TOKEN || process.env.REFLECTT_HOST_CREDENTIAL
     if (!cloudUrl || !hostToken) {
       reply.code(503)
       return { error: 'Not connected to cloud. Configure REFLECTT_CLOUD_URL and REFLECTT_HOST_TOKEN.' }
