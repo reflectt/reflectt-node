@@ -29,12 +29,43 @@ export interface ReadinessReport {
 
 // ── Browser ──────────────────────────────────────────────────────────────────
 
-function checkBrowserReadiness(): CapabilityReadiness {
+function checkBrowserReadiness(cloudConnected: boolean): CapabilityReadiness {
   const deps: DependencyCheck[] = []
+
+  if (cloudConnected) {
+    // Managed hosts use the cloud browser relay (/browser/managed/sessions →
+    // /api/hosts/:hostId/relay/browser/sessions). The cloud holds the LLM keys;
+    // the node just proxies. No local Stagehand or API key required.
+    deps.push({
+      name: 'managed_relay',
+      status: 'ok',
+      detail: 'Cloud browser relay available via /browser/managed/sessions',
+    })
+
+    // Local Stagehand runtime (optional — useful for debugging/fallback).
+    const stagehandPath = new URL('../node_modules/@browserbasehq/stagehand/package.json', import.meta.url)
+    const stagehandInstalled = (() => { try { return existsSync(stagehandPath) } catch { return false } })()
+    deps.push({
+      name: 'local_stagehand',
+      status: stagehandInstalled ? 'ok' : 'missing',
+      detail: stagehandInstalled
+        ? 'Local Stagehand runtime available (direct sessions via /browser/sessions)'
+        : 'Optional — local Stagehand not installed; use /browser/managed/sessions instead',
+    })
+
+    return {
+      capability: 'browser',
+      status: 'ready',
+      last_success_at: null,
+      last_error: null,
+      dependencies: deps,
+      hint: null,
+    }
+  }
+
+  // Standalone (not cloud-connected) — must use local Stagehand with a local LLM key.
   const errors: string[] = []
 
-  // Check if Stagehand package is available.
-  // Use existsSync on the package directory — require.resolve is not available in ESM.
   const stagehandPath = new URL('../node_modules/@browserbasehq/stagehand/package.json', import.meta.url)
   const stagehandInstalled = (() => { try { return existsSync(stagehandPath) } catch { return false } })()
   if (stagehandInstalled) {
@@ -44,23 +75,14 @@ function checkBrowserReadiness(): CapabilityReadiness {
     errors.push('Stagehand package not installed')
   }
 
-  // Check for ANTHROPIC_API_KEY or OPENAI_API_KEY (required by Stagehand)
   const hasAnthropicKey = !!(process.env.ANTHROPIC_API_KEY)
   const hasOpenAIKey = !!(process.env.OPENAI_API_KEY)
   if (hasAnthropicKey || hasOpenAIKey) {
     deps.push({ name: 'llm_api_key', status: 'ok', detail: hasAnthropicKey ? 'ANTHROPIC_API_KEY set' : 'OPENAI_API_KEY set' })
   } else {
-    deps.push({ name: 'llm_api_key', status: 'missing', detail: 'ANTHROPIC_API_KEY or OPENAI_API_KEY required for Stagehand' })
+    deps.push({ name: 'llm_api_key', status: 'missing', detail: 'ANTHROPIC_API_KEY or OPENAI_API_KEY required for local Stagehand AI operations' })
     errors.push('LLM API key missing (ANTHROPIC_API_KEY or OPENAI_API_KEY)')
   }
-
-  // Check BROWSERBASE_API_KEY (optional — cloud browser)
-  const hasBrowserbaseKey = !!(process.env.BROWSERBASE_API_KEY)
-  deps.push({
-    name: 'browserbase_api_key',
-    status: hasBrowserbaseKey ? 'ok' : 'missing',
-    detail: hasBrowserbaseKey ? 'BROWSERBASE_API_KEY set' : 'Optional — uses local browser if absent',
-  })
 
   const status: ReadinessStatus = errors.length === 0 ? 'ready'
     : errors.some(e => e.includes('package')) ? 'not_ready'
@@ -73,7 +95,9 @@ function checkBrowserReadiness(): CapabilityReadiness {
     last_error: errors.length > 0 ? errors[0] : null,
     dependencies: deps,
     hint: status !== 'ready'
-      ? 'Install @browserbasehq/stagehand and set ANTHROPIC_API_KEY to enable browser automation.'
+      ? errors.some(e => e.includes('package'))
+        ? 'Install @browserbasehq/stagehand and set ANTHROPIC_API_KEY, or enroll this host with Reflectt Cloud to use the managed browser relay.'
+        : 'Set ANTHROPIC_API_KEY or OPENAI_API_KEY for local AI extraction, or enroll this host with Reflectt Cloud to use the managed browser relay.'
       : null,
   }
 }
@@ -281,7 +305,7 @@ export function getCapabilityReadiness(opts: {
   samplingProviders?: string[]
 }): ReadinessReport {
   const capabilities = [
-    checkBrowserReadiness(),
+    checkBrowserReadiness(opts.cloudConnected),
     checkSearchReadiness(),
     checkEmailReadiness(opts.cloudConnected, opts.cloudUrl, opts.webhooks),
     checkSmsReadiness(opts.cloudConnected, opts.cloudUrl, opts.webhooks),

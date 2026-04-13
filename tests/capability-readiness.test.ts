@@ -70,6 +70,23 @@ describe('capability readiness contract', () => {
     expect(cal.status).toBe('ready')
   })
 
+  it('browser is ready when cloud connected (managed relay path)', () => {
+    const report = getCapabilityReadiness({ ...baseOpts, cloudConnected: true, cloudUrl: 'https://app.reflectt.ai' })
+    const browser = report.capabilities.find(c => c.capability === 'browser')!
+    expect(browser.status).toBe('ready')
+    expect(browser.last_error).toBeNull()
+    expect(browser.hint).toBeNull()
+    const relayDep = browser.dependencies.find(d => d.name === 'managed_relay')
+    expect(relayDep?.status).toBe('ok')
+  })
+
+  it('browser is not_ready or degraded when not cloud connected and no local Stagehand', () => {
+    const report = getCapabilityReadiness(baseOpts)
+    const browser = report.capabilities.find(c => c.capability === 'browser')!
+    // standalone without stagehand installed → not_ready; without LLM key only → degraded
+    expect(['not_ready', 'degraded']).toContain(browser.status)
+  })
+
   it('each capability has non-empty dependencies array with valid statuses', () => {
     const report = getCapabilityReadiness(baseOpts)
     for (const cap of report.capabilities) {
