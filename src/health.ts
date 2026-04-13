@@ -1628,7 +1628,8 @@ class TeamHealthMonitor {
    */
   private extractMentionedTrioAgents(content: string): Array<typeof this.trioAgents[number]> {
     if (!content) return []
-    const matches = content.match(/@(kai|link|pixel)\b/gi) || []
+    const agentPattern = this.trioAgents.length > 0 ? this.trioAgents.join('|') : 'kai|link|pixel'
+    const matches = content.match(new RegExp(`@(${agentPattern})\\b`, 'gi')) || []
     const uniq = new Set<typeof this.trioAgents[number]>()
     for (const m of matches) {
       const name = m.replace('@', '').toLowerCase() as typeof this.trioAgents[number]
@@ -1764,7 +1765,8 @@ class TeamHealthMonitor {
       const channel = (m.channel || 'general')
       const content = typeof m.content === 'string' ? m.content : ''
       if (channel !== 'general' || from !== 'ryan') return false
-      return /@(kai|link|pixel)\b/i.test(content)
+      const agentPat = this.trioAgents.length > 0 ? this.trioAgents.join('|') : 'kai|link|pixel'
+      return new RegExp(`@(${agentPat})\\b`, 'i').test(content)
     })
 
     const trioSet = new Set(this.trioAgents)
