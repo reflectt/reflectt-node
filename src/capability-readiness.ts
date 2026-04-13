@@ -2,6 +2,8 @@
 // Capability readiness contract — per-capability status with dependency checks.
 // Powers GET /capabilities/readiness and cloud UI badges.
 
+import { existsSync } from 'node:fs'
+
 export type ReadinessStatus = 'ready' | 'degraded' | 'not_ready' | 'unknown'
 
 export interface CapabilityReadiness {
@@ -31,11 +33,13 @@ function checkBrowserReadiness(): CapabilityReadiness {
   const deps: DependencyCheck[] = []
   const errors: string[] = []
 
-  // Check if Stagehand package is available
-  try {
-    require.resolve('@browserbasehq/stagehand')
+  // Check if Stagehand package is available.
+  // Use existsSync on the package directory — require.resolve is not available in ESM.
+  const stagehandPath = new URL('../../node_modules/@browserbasehq/stagehand/package.json', import.meta.url)
+  const stagehandInstalled = (() => { try { return existsSync(stagehandPath) } catch { return false } })()
+  if (stagehandInstalled) {
     deps.push({ name: 'stagehand_package', status: 'ok' })
-  } catch {
+  } else {
     deps.push({ name: 'stagehand_package', status: 'missing', detail: '@browserbasehq/stagehand not installed' })
     errors.push('Stagehand package not installed')
   }
