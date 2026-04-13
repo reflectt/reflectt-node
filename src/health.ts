@@ -1488,7 +1488,8 @@ class TeamHealthMonitor {
           // Rate-limit failure suppressor: trio is silent due to provider outage, not genuine inactivity
           this.markCadenceAlert(key, now)
         } else {
-          const content = `🔁 **[Product Enforcement] Cadence reset**: no #general update from trio for ${trioSilenceMin}m (threshold ${silenceMin}m). @owner @link @pixel post status now: 1) shipped 2) blocker 3) next+ETA. *(Automated — no leadership action needed.)*`
+          const agentMentions = this.escalationTargets.map(a => `@${a}`).join(' ')
+          const content = `🔁 **[Cadence nudge]**: no #general update for ${trioSilenceMin}m. ${agentMentions} — quick status? 1) shipped 2) blocker 3) next. *(Automated)*`
           alerts.push(content)
 
           if (!dryRun) {
