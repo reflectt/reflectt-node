@@ -217,3 +217,31 @@ If a provision fails:
 
 - [CLOUD_PROVISIONING.md](../CLOUD_PROVISIONING.md) — full provisioning flow
 - [INTERNAL-URL-ROUTING-FINDINGS.md](../INTERNAL-URL-ROUTING-FINDINGS.md) — staging exploration findings
+
+---
+
+## Known Staging Hosts (2026-04-14)
+
+| Host ID | URL | Team | Status | Verified |
+|---------|-----|------|--------|----------|
+| `rn-b4c59013-5toqvf` | `rn-b4c59013-5toqvf.fly.dev` | Fresh provisioned QA team | Active | ✅ |
+| `rn-34faba44-d35k2b` | `rn-34faba44-d35k2b.fly.dev` | EnjoyVancouverIsland.com | Active | ✅ |
+
+### Verification Results (2026-04-14)
+
+**`rn-b4c59013-5toqvf.fly.dev` (Fresh QA team)**
+- Bootstrap: ✅ Main agent starts and reads TEAM_INTENT
+- Search: ✅ `POST /search` returns live Brave results
+- Identity: ✅ Agents set up `IDENTITY.md` files when prompted
+- Browser automation: ❌ NOT available on staging (no Playwright/Chromium)
+- Canvas: ⚠️ Mobile bridge only, not a shared visual workspace
+
+**`rn-34faba44-d35k2b.fly.dev` (EnjoyVancouverIsland.com)**
+- Bootstrap: ✅ Main agent bootstraps successfully
+- Team size: 5 agents (Compass, Tide, Vista, Coast + main)
+- Real blocker: Needs GitHub/Netlify credentials to deploy site
+
+### Key Gaps Found
+1. **Browser automation** — Staging nodes don't have Playwright/Chromium installed. This is a product gap.
+2. **Fly internal routing** — Agents on Fly managed hosts may not be able to reach `localhost:4445`. Verification pending @rhythm container check.
+3. **AGENTS.md instruction gap** — `PUT /config/team-roles` needs `{"yaml": "..."}` wrapper format but AGENTS.md didn't specify this.
