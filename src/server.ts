@@ -2215,6 +2215,7 @@ export async function createServer(): Promise<FastifyInstance> {
       '| GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md for your agent |',
       '| POST | `/bootstrap/team` | Recommend team composition + initial tasks + heartbeat configs |',
       '| GET | `/manage/status` | Remote management: unified status (auth-gated) |',
+      '| GET | `/doctor` | Structured host diagnosis with recovery suggestions |',
       '| GET | `/health` | System health + version + stats |',
       '| GET | `/version` | Current version + update availability |',
       '',
@@ -2848,6 +2849,197 @@ export async function createServer(): Promise<FastifyInstance> {
       },
       version: BUILD_VERSION,
       uptime_s: Math.round((now - BUILD_STARTED_AT) / 1000),
+    }
+  })
+
+  // ── Doctor: structured host diagnosis with recovery suggestions ─────────────
+  // Single-call diagnostic for operators. No SSH required.
+  // Covers: bootstrap stalls, crash loops, agent health, channel, errors.
+  app.get('/doctor', async () => {
+    const now = Date.now()
+    const uptimeMs = now - BUILD_STARTED_AT
+    const uptimeMin = uptimeMs / 60000
+
+    // Bootstrap state
+    const firstBootMarker = join(DATA_DIR, '.first-boot-done')
+    const teamRolesPath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
+    const hasBootstrapped = existsSync(firstBootMarker)
+    const hasTeamRoles = existsSync(teamRolesPath)
+    const teamIntentPath = join(DATA_DIR, 'TEAM_INTENT.md')
+    const hasTeamIntent = existsSync(teamIntentPath)
+    const allTasks = taskManager.listTasks({})
+    const bootstrapTask = allTasks.find(t =>
+      t.priority === 'P0' && t.assignee === 'main' && t.title?.toLowerCase().includes('bootstrap')
+    )
+    const bootstrapStatus = hasBootstrapped && hasTeamRoles
+      ? 'complete'
+      : bootstrapTask?.status === 'done'
+      ? 'complete'
+      : bootstrapTask
+      ? bootstrapTask.status
+      : hasTeamRoles
+      ? 'complete'
+      : 'not_started'
+
+    // Agent health
+    const presences = presenceManager.getAllPresence()
+    const ONLINE_THRESHOLD_MS = 5 * 60 * 1000
+    const agentSummary = presences.map(p => ({
+      agent: p.agent,
+      status: p.last_active && (now - p.last_active) < ONLINE_THRESHOLD_MS ? 'online' : 'offline',
+      last_active_ago_s: p.last_active ? Math.round((now - p.last_active) / 1000) : null,
+    }))
+    const agentsOnline = agentSummary.filter(a => a.status === 'online').length
+
+    // Crash loop detection: uptime < 5 min + high error rate
+    const metrics = getRequestMetrics()
+    const errorRate = metrics.total > 0
+      ? Math.round((metrics.errors / metrics.total) * 10000) / 100
+      : 0
+    const isCrashLooping = uptimeMin < 5 && errorRate > 5
+
+    // Bootstrap stall: bootstrap task exists but has been in non-done state for > 30 min
+    let bootstrapStalled = false
+    let bootstrapStallAgeMin = 0
+    if (bootstrapTask && bootstrapStatus !== 'complete') {
+      const updatedAt = bootstrapTask.updatedAt ?? bootstrapTask.createdAt ?? now
+      const ageMin = (now - updatedAt) / 60000
+      if (ageMin > 30 && bootstrapTask.status === 'doing') {
+        bootstrapStalled = true
+        bootstrapStallAgeMin = Math.round(ageMin)
+      }
+    }
+
+    // Channel / cloud
+    const channelOk = !!openclawConfig.gatewayToken
+
+    // Task queue
+    const taskStats = taskManager.getStats()
+
+    // Build diagnoses
+    const diagnoses: Array<{ area: string; status: string; message: string; recovery?: string }> = []
+
+    // Bootstrap diagnosis
+    if (bootstrapStatus === 'complete') {
+      diagnoses.push({ area: 'bootstrap', status: 'pass', message: 'Bootstrap complete, team roles configured' })
+    } else if (bootstrapStalled) {
+      diagnoses.push({
+        area: 'bootstrap',
+        status: 'fail',
+        message: `Bootstrap stalled — main agent stuck on "${bootstrapTask?.title}" for ${bootstrapStallAgeMin} min`,
+        recovery: 'Check main agent heartbeat for blockers. Check /tasks/' + (bootstrapTask?.id ?? '') + ' for task-level issues.',
+      })
+    } else if (bootstrapStatus === 'not_started') {
+      diagnoses.push({
+        area: 'bootstrap',
+        status: 'fail',
+        message: 'Bootstrap not started — no TEAM_INTENT found',
+        recovery: 'Set REFLECTT_TEAM_INTENT env var or run provisioning flow.',
+      })
+    } else {
+      diagnoses.push({
+        area: 'bootstrap',
+        status: 'warn',
+        message: `Bootstrap in progress: ${bootstrapStatus}`,
+      })
+    }
+
+    // Crash loop diagnosis
+    if (isCrashLooping) {
+      diagnoses.push({
+        area: 'crash_loop',
+        status: 'fail',
+        message: `Possible crash loop — node uptime ${Math.round(uptimeMin)}min but error rate ${errorRate}%`,
+        recovery: 'Check /health/errors for recent errors. Check Docker/Fly.io logs for panic traces.',
+      })
+    } else if (uptimeMin < 5) {
+      diagnoses.push({
+        area: 'crash_loop',
+        status: 'warn',
+        message: `Node recently restarted — uptime ${Math.round(uptimeMin)} min`,
+      })
+    } else {
+      diagnoses.push({ area: 'crash_loop', status: 'pass', message: 'No crash loop detected' })
+    }
+
+    // Agent health diagnosis
+    if (agentsOnline > 0) {
+      diagnoses.push({
+        area: 'agents',
+        status: 'pass',
+        message: `${agentsOnline} agent(s) online`,
+      })
+    } else if (bootstrapStatus === 'complete') {
+      diagnoses.push({
+        area: 'agents',
+        status: 'fail',
+        message: 'No agents online but bootstrap complete',
+        recovery: 'Check OpenClaw gateway status. Verify agents can reach /heartbeat/:agent.',
+      })
+    } else {
+      diagnoses.push({
+        area: 'agents',
+        status: 'warn',
+        message: 'No agents online yet (bootstrap in progress)',
+      })
+    }
+
+    // Channel diagnosis
+    if (channelOk) {
+      diagnoses.push({ area: 'channel', status: 'pass', message: 'OpenClaw gateway configured' })
+    } else {
+      diagnoses.push({
+        area: 'channel',
+        status: 'warn',
+        message: 'OpenClaw gateway not configured — agent-to-agent messaging uses REST relay',
+      })
+    }
+
+    // Error rate diagnosis
+    if (errorRate < 1) {
+      diagnoses.push({ area: 'errors', status: 'pass', message: `Error rate ${errorRate}%` })
+    } else if (errorRate < 10) {
+      diagnoses.push({
+        area: 'errors',
+        status: 'warn',
+        message: `Error rate ${errorRate}% — elevated but not critical`,
+        recovery: 'Check /health/errors for details.',
+      })
+    } else {
+      diagnoses.push({
+        area: 'errors',
+        status: 'fail',
+        message: `Error rate ${errorRate}% — high`,
+        recovery: 'Check /health/errors for top error buckets.',
+      })
+    }
+
+    // Compute overall
+    const hasFailure = diagnoses.some(d => d.status === 'fail')
+    const healthy = !hasFailure && agentsOnline > 0
+
+    // Next action: first failure recovery
+    const firstFail = diagnoses.find(d => d.status === 'fail')
+    const nextAction = firstFail?.recovery || null
+
+    return {
+      healthy,
+      timestamp: now,
+      diagnoses,
+      next_action: nextAction,
+      stats: {
+        uptime_min: Math.round(uptimeMin),
+        agents_online: agentsOnline,
+        agents_total: agentSummary.length,
+        task_queue: {
+          todo: taskStats.byStatus?.todo ?? 0,
+          doing: taskStats.byStatus?.doing ?? 0,
+          validating: taskStats.byStatus?.validating ?? 0,
+          done: taskStats.byStatus?.done ?? 0,
+        },
+        error_rate_pct: errorRate,
+      },
+      version: BUILD_VERSION,
     }
   })
 
