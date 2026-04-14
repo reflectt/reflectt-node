@@ -2041,8 +2041,16 @@ async function syncCapabilityContext(): Promise<void> {
       return
     }
 
-    writeFileSync(CAPABILITY_CONTEXT_FILE, `## Team capabilities\n\n${hint}\n`)
-    console.log(`[cloud] capability context updated (${hint.length} chars)`)
+    // Append internal node URL so agents can reach node APIs (browser, search, etc.)
+    // from exec without public URL coaching. Only set on Fly.io managed hosts.
+    const flyAppName = process.env.FLY_APP_NAME
+    const nodePort = process.env.PORT || '4445'
+    const nodeUrlSection = flyAppName
+      ? `\n## Node API\n\nREFLECTT_NODE_URL=http://${flyAppName}.internal:${nodePort}\n\nUse this URL for direct node API calls from exec (e.g. browser sessions, search).\n`
+      : ''
+
+    writeFileSync(CAPABILITY_CONTEXT_FILE, `## Team capabilities\n\n${hint}\n${nodeUrlSection}`)
+    console.log(`[cloud] capability context updated (${hint.length} chars${flyAppName ? ', node URL included' : ''})`)
   } catch (err: any) {
     // Non-fatal: agents run without capability context if the fetch fails
     console.warn(`[cloud] capability context fetch failed: ${err?.message || 'unknown error'}`)
