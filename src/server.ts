@@ -2753,6 +2753,104 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // ── Host status — single-call operator diagnostic endpoint ───────────────
+  // Returns everything needed to diagnose a managed host without SSH.
+  // Covers: bootstrap, agents, tasks, channel, errors.
+  app.get('/host/status', async () => {
+    const now = Date.now()
+
+    // Bootstrap markers
+    const firstBootMarker = join(DATA_DIR, '.first-boot-done')
+    const teamRolesPath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
+    const hasBootstrapped = existsSync(firstBootMarker)
+    const hasTeamRoles = existsSync(teamRolesPath)
+    const teamIntentPath = join(DATA_DIR, 'TEAM_INTENT.md')
+    const hasTeamIntent = existsSync(teamIntentPath)
+
+    // Bootstrap task status
+    const allTasks = taskManager.listTasks({})
+    const bootstrapTask = allTasks.find(t =>
+      t.priority === 'P0' && t.assignee === 'main' && t.title?.toLowerCase().includes('bootstrap')
+    )
+
+    // Agent presence
+    const presences = presenceManager.getAllPresence()
+    const ONLINE_THRESHOLD_MS = 5 * 60 * 1000 // 5 min
+    const agentSummary = presences.map(p => ({
+      agent: p.agent,
+      status: p.last_active && (now - p.last_active) < ONLINE_THRESHOLD_MS ? 'online' : 'offline',
+      last_active: p.last_active ?? null,
+      last_active_ago_s: p.last_active ? Math.round((now - p.last_active) / 1000) : null,
+    }))
+
+    // Task queue
+    const taskStats = taskManager.getStats()
+
+    // Channel / cloud
+    const channelOk = !!openclawConfig.gatewayToken
+
+    // Error rate
+    const metrics = getRequestMetrics()
+    const errorRate = metrics.total > 0
+      ? Math.round((metrics.errors / metrics.total) * 10000) / 100
+      : 0
+
+    // Derive overall health
+    const bootstrapStatus = hasBootstrapped && hasTeamRoles
+      ? 'complete'
+      : bootstrapTask?.status === 'done'
+      ? 'complete'
+      : bootstrapTask
+      ? bootstrapTask.status  // todo / doing / validating
+      : hasTeamRoles
+      ? 'complete'
+      : 'not_started'
+
+    const agentsOnline = agentSummary.filter(a => a.status === 'online').length
+    const healthy =
+      bootstrapStatus === 'complete' &&
+      agentsOnline > 0 &&
+      channelOk &&
+      errorRate < 10
+
+    return {
+      healthy,
+      timestamp: now,
+      bootstrap: {
+        status: bootstrapStatus,
+        first_boot_marker: hasBootstrapped,
+        team_roles_yaml: hasTeamRoles,
+        team_intent_seeded: hasTeamIntent,
+        task: bootstrapTask
+          ? { id: bootstrapTask.id, status: bootstrapTask.status, title: bootstrapTask.title }
+          : null,
+      },
+      agents: {
+        online: agentsOnline,
+        total: agentSummary.length,
+        roster: agentSummary,
+      },
+      tasks: {
+        todo: taskStats.byStatus?.todo ?? 0,
+        doing: taskStats.byStatus?.doing ?? 0,
+        validating: taskStats.byStatus?.validating ?? 0,
+        done: taskStats.byStatus?.done ?? 0,
+        total: taskStats.total ?? 0,
+      },
+      channel: {
+        openclaw_configured: channelOk,
+        gateway_url: openclawConfig.gatewayUrl ?? null,
+      },
+      errors: {
+        rate_pct: errorRate,
+        total_errors: metrics.errors,
+        total_requests: metrics.total,
+      },
+      version: BUILD_VERSION,
+      uptime_s: Math.round((now - BUILD_STARTED_AT) / 1000),
+    }
+  })
+
   app.get('/health/reflection-pipeline', async () => {
     const health = computeReflectionPipelineHealth(Date.now())
     return {
