@@ -212,6 +212,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | GET | `/heartbeat/:agent` | Single compact heartbeat payload (~200 tokens). Returns active task, next task, slim inbox, queue counts, suggested action, boot context (recent memories top 5, active agent_run). Replaces 3+ separate API calls. |
 | GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md content for agent. References best endpoints. Includes version stamp and content hash for change detection. |
 | POST | `/bootstrap/team` | Returns TEAM-ROLES.yaml schema, constraints, well-formed examples, and save endpoint. The calling agent composes the team itself. Body: `{ useCase?, maxAgents? }`. Returns `{ schema, constraints, examples[], saveEndpoint, nextSteps[] }`. |
+| GET | `/bootstrap/roster` | List agents defined in TEAM-ROLES.yaml. Used by the main bootstrap agent to discover which agents to spawn after writing the team roster via `PUT /config/team-roles`. Returns `{ agents[], count, hint }`. |
 | GET | `/manage/status` | Remote management: unified status (version + health + uptime). Auth: `x-manage-token` header or `Authorization: Bearer`. |
 | GET | `/manage/config` | Remote management: config introspection with secrets redacted. Auth required. |
 | GET | `/manage/logs` | Remote management: bounded log tail. Query: `level`, `since`, `limit`, `format=text`. Auth required. |
