@@ -29,6 +29,7 @@ import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
 import { listApprovalQueue, listAgentEvents, listAgentRuns, type AgentRun } from './agent-runs.js'
 import { getUnpushedTrustEvents, markTrustEventsPushed } from './trust-events.js'
+import { getCapabilityReadiness } from './capability-readiness.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -885,6 +886,18 @@ async function sendHeartbeat(): Promise<void> {
         errors: m.rolling.errors,
         windowMs,
         errorRatePct: Math.round(errorRatePct * 100) / 100,
+      }
+    })(),
+    capabilityReadiness: (() => {
+      try {
+        const r = getCapabilityReadiness({
+          cloudConnected: true,
+          cloudUrl: config.cloudUrl,
+          webhooks: [],
+        })
+        return r
+      } catch {
+        return undefined
       }
     })(),
     source: {
