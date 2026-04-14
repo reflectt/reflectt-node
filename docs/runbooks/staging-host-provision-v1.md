@@ -226,6 +226,7 @@ If a provision fails:
 |---------|-----|------|--------|----------|
 | `rn-b4c59013-5toqvf` | `rn-b4c59013-5toqvf.fly.dev` | Fresh provisioned QA team | Active | ✅ |
 | `rn-34faba44-d35k2b` | `rn-34faba44-d35k2b.fly.dev` | EnjoyVancouverIsland.com | Active | ✅ |
+| `rn-b1964d01-fhdmps` | `rn-b1964d01-fhdmps.fly.dev` | Canonical staging host | Active | ✅ |
 
 ### Verification Results (2026-04-14)
 
@@ -243,5 +244,5 @@ If a provision fails:
 
 ### Key Gaps Found
 1. **Browser automation** — Staging nodes don't have Playwright/Chromium installed. This is a product gap.
-2. **Fly internal routing** — Agents on Fly managed hosts may not be able to reach `localhost:4445`. Verification pending @rhythm container check.
+2. **Fly internal routing** — ✅ Verified on canonical host `rn-b1964d01-fhdmps`: `/health` → 200, `REFLECTT_NODE_URL=http://rn-b1964d01-fhdmps.internal:4445` present in agent exec env, `/capabilities` returns full API surface.
 3. **AGENTS.md instruction gap** — `PUT /config/team-roles` needs `{"yaml": "..."}` wrapper format but AGENTS.md didn't specify this.
