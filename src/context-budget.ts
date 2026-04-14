@@ -17,6 +17,7 @@ import { homedir } from 'os'
 import { getDb, safeJsonParse, safeJsonStringify } from './db.js'
 import type { AgentMessage } from './types.js'
 import { memoryManager } from './memory.js'
+import { REFLECTT_HOME } from './config.js'
 
 export type ContextLayer = 'session_local' | 'agent_persistent' | 'team_shared'
 
@@ -259,6 +260,7 @@ async function buildAgentPersistentItems(agent: string): Promise<ContextItem[]> 
     { id: 'USER.md', title: 'USER.md', path: join(root, 'USER.md'), maxChars: 16_000 },
     { id: 'AGENTS.md', title: 'AGENTS.md', path: join(root, 'AGENTS.md'), maxChars: 16_000 },
     { id: 'HEARTBEAT.md', title: 'HEARTBEAT.md', path: join(root, 'HEARTBEAT.md'), maxChars: 16_000 },
+    { id: 'capability-context.md', title: 'capability-context.md', path: join(REFLECTT_HOME, 'capability-context.md'), maxChars: 4_000 },
   ]
 
   const memoryItems: ContextItem[] = []
