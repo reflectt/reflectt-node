@@ -31,12 +31,12 @@ const BUILD_VERSION = (() => {
 })()
 
 const BUILD_COMMIT = (() => {
-  // Prefer commit baked at build time (dist/commit.txt) — accurate regardless of CWD at runtime.
+  // Prefer commit baked at build time (dist/commit.txt) - accurate regardless of CWD at runtime.
   // Falls back to git rev-parse for dev mode (tsx / ts-node).
   try {
     const commitFile = new URL('../commit.txt', import.meta.url)
     return readFileSync(commitFile, 'utf8').trim()
-  } catch { /* not a built dist — fall through to git */ }
+  } catch { /* not a built dist - fall through to git */ }
   try {
     return execSync('git rev-parse --short HEAD', { encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
   } catch { return 'unknown' }
@@ -239,8 +239,8 @@ const CreateTaskSchema = z.object({
   tags: z.array(z.string()).optional(),
   teamId: z.string().optional(),
   metadata: z.record(z.unknown()).optional(),
-  dueAt: z.number().int().positive().optional(),           // epoch ms — when the task is due
-  scheduledFor: z.number().int().positive().optional(),     // epoch ms — when work should start
+  dueAt: z.number().int().positive().optional(),           // epoch ms - when the task is due
+  scheduledFor: z.number().int().positive().optional(),     // epoch ms - when work should start
 })
 
 /**
@@ -291,7 +291,7 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
   }
 
   // For todo tasks, skip type-specific done_criteria quality checks.
-  // These are backlog items — full readiness is enforced when moving to doing.
+  // These are backlog items - full readiness is enforced when moving to doing.
   if (data.status === 'todo') {
     return problems // Return early with only title-level + presence checks
   }
@@ -331,7 +331,7 @@ function checkDefinitionOfReady(data: z.infer<typeof CreateTaskSchema>): string[
   // Reflection-origin invariant: all tasks must trace back to a reflection/insight
   // unless explicitly exempted (system tasks, recurring materialization, etc.)
   // Auto-exempt when no reflections exist yet (fresh install / new user onboarding)
-  // Also skip for todo tasks — backlog items don't need reflection provenance.
+  // Also skip for todo tasks - backlog items don't need reflection provenance.
   const meta = (data.metadata || {}) as Record<string, unknown>
   const hasReflectionSource = Boolean(meta.source_reflection || meta.source_insight || meta.source === 'reflection_pipeline')
   const systemHasReflections = countReflections() > 0
@@ -968,7 +968,7 @@ function applyReviewStateMetadata(
     // This prevents reviewers from hitting "file not found" due to workspace-dependent paths.
     const normResult = normalizeTaskArtifactPaths(metadata)
     if (normResult.rejected.length > 0) {
-      // Log but don't block — auto-normalize what we can
+      // Log but don't block - auto-normalize what we can
       console.warn(`[ArtifactNormalize] task ${existing.id}: rejected paths:`, normResult.rejected)
     }
     if (Object.keys(normResult.patches).length > 0) {
@@ -1183,7 +1183,7 @@ async function enforceReviewHandoffGateForValidating(
 
   const root = (metadata as Record<string, unknown> | null) || {}
 
-  // Duplicate/superseded tasks bypass review handoff — handled by QA bundle gate's lighter path
+  // Duplicate/superseded tasks bypass review handoff - handled by QA bundle gate's lighter path
   const closeReason = typeof root.close_reason === 'string' ? root.close_reason.toLowerCase().trim() : ''
   if (closeReason === 'duplicate' || closeReason === 'superseded') return { ok: true }
 
@@ -1227,7 +1227,7 @@ async function enforceReviewHandoffGateForValidating(
       commentId = candidate.id
       handoffComment = candidate
     } else {
-      // No comments exist — create a stable anchor comment.
+      // No comments exist - create a stable anchor comment.
       const created = await taskManager.addTaskComment(
         taskId,
         'system',
@@ -1870,7 +1870,7 @@ function buildAutonomyWarnings(content: string): string[] {
   // Detect the specific anti-pattern: asking a human leader/operator what to do next.
   // Keep the pattern narrow to avoid false positives on legitimate asks.
   const approvalSeeking =
-    /\b(what should i (do|work on) next|what(?:['’]?s) next(?: for me)?|what do i do next|what do you want me to do next|should i (do|work on)( [^\n\r]{0,80})? next)\b/i
+    /\b(what should i (do|work on) next|what(?:['']?s) next(?: for me)?|what do i do next|what do you want me to do next|should i (do|work on)( [^\n\r]{0,80})? next)\b/i
   if (!approvalSeeking.test(normalized)) return []
 
   return [
@@ -1943,13 +1943,13 @@ function buildNoMentionWarning(
   const mentions = extractMentions(content)
   if (mentions.length > 0) return {}
   // Cooldown: only warn once per sender+channel per AUTO_ROUTE_COOLDOWN_MS
-  // Prevents repeated status posts (e.g. "Standing by — non-dev lane.") from
+  // Prevents repeated status posts (e.g. "Standing by - non-dev lane.") from
   // flooding every agent's inbox with ⚠️ auto-route noise.
   const cooldownKey = `${from}:${channel}`
   const lastWarned = autoRouteCooldowns.get(cooldownKey) ?? 0
   if (Date.now() - lastWarned < AUTO_ROUTE_COOLDOWN_MS) return {}
   autoRouteCooldowns.set(cooldownKey, Date.now())
-  // No @mentions in a coordination channel — this is a dead handoff
+  // No @mentions in a coordination channel - this is a dead handoff
   // Find the main agent (first in roster, or kai as fallback)
   const roster = presenceManager.getAllPresence()
   const mainAgent = roster.find(r => (r as any).role === 'coordinator')?.agent
@@ -1957,7 +1957,7 @@ function buildNoMentionWarning(
     || getAgentRoles()[0]?.name
     || undefined
   return {
-    warning: `No @mention in #${channel} — this message won't trigger action from any agent. Consider adding @${mainAgent} or the relevant owner. Auto-routing visibility to @${mainAgent}.`,
+    warning: `No @mention in #${channel} - this message won't trigger action from any agent. Consider adding @${mainAgent} or the relevant owner. Auto-routing visibility to @${mainAgent}.`,
     autoRouted: mainAgent,
   }
 }
@@ -2023,7 +2023,7 @@ function defaultHintForStatus(status: number): string | undefined {
   return undefined
 }
 
-// Quiet hours — now driven by unified policy config
+// Quiet hours - now driven by unified policy config
 function getHourInTimezone(nowMs: number, timeZone: string): number {
   try {
     const formatter = new Intl.DateTimeFormat('en-US', {
@@ -2166,7 +2166,7 @@ export async function createServer(): Promise<FastifyInstance> {
         request.headers as Record<string, string | string[] | undefined>,
       )
     } catch { /* never let compliance logging break a request */ }
-    
+
     if (reply.statusCode >= 400) {
       healthMonitor.trackError()
       // Normalize URL before telemetry to prevent PII leaks in query params
@@ -2202,7 +2202,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const md = [
-      `# 404 — \`${method} ${url}\` not found`,
+      `# 404 - \`${method} ${url}\` not found`,
       '',
       `reflectt-node v${BUILD_VERSION} does not have this endpoint.`,
       '',
@@ -2214,6 +2214,7 @@ export async function createServer(): Promise<FastifyInstance> {
       '| GET | `/heartbeat/:agent` | Single compact heartbeat (~200 tokens) |',
       '| GET | `/bootstrap/heartbeat/:agent` | Generate optimal HEARTBEAT.md for your agent |',
       '| POST | `/bootstrap/team` | Recommend team composition + initial tasks + heartbeat configs |',
+      '| GET | `/bootstrap/roster` | List agents in TEAM-ROLES.yaml for post-bootstrap spawning |',
       '| GET | `/manage/status` | Remote management: unified status (auth-gated) |',
       '| GET | `/doctor` | Structured host diagnosis with recovery suggestions |',
       '| GET | `/health` | System health + version + stats |',
@@ -2229,7 +2230,7 @@ export async function createServer(): Promise<FastifyInstance> {
       '',
       '> **Tip:** Add `?compact=true` to most GET endpoints to reduce response size by 50-75%.',
       '',
-      '> **New here?** Start with `GET /capabilities` — it lists every endpoint with hints.',
+      '> **New here?** Start with `GET /capabilities` - it lists every endpoint with hints.',
     ].join('\n')
 
     reply.code(404).header('content-type', 'text/markdown; charset=utf-8')
@@ -2276,20 +2277,20 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     const md = [
-      `# 500 — Internal Server Error`,
+      `# 500 - Internal Server Error`,
       '',
       `**Request:** \`${request.method} ${request.url}\``,
       '',
       '## What to check',
       '',
-      '1. **System health:** `GET /health` — verify status is "ok"',
-      '2. **Error logs:** `GET /logs?level=error&limit=5` — recent errors',
-      '3. **Retry** — transient errors often resolve on retry',
+      '1. **System health:** `GET /health` - verify status is "ok"',
+      '2. **Error logs:** `GET /logs?level=error&limit=5` - recent errors',
+      '3. **Retry** - transient errors often resolve on retry',
       '',
       '## Need help?',
       '',
-      '- `GET /capabilities` — verify endpoint exists and check required params',
-      '- `GET /docs` — full API reference with request/response schemas',
+      '- `GET /capabilities` - verify endpoint exists and check required params',
+      '- `GET /docs` - full API reference with request/response schemas',
     ].join('\n')
 
     reply.code(status).header('content-type', 'text/markdown; charset=utf-8')
@@ -2463,8 +2464,8 @@ export async function createServer(): Promise<FastifyInstance> {
         if (deleted > 0) {
           console.log(`[webhook-purge] Purged ${deleted} processed payload(s) older than ${WEBHOOK_RETENTION_DAYS} days`)
         }
-      } catch { /* non-fatal — storage may not be initialised yet on first tick */ }
-    }).catch(() => { /* module unavailable — skip */ })
+      } catch { /* non-fatal - storage may not be initialised yet on first tick */ }
+    }).catch(() => { /* module unavailable - skip */ })
   }
   runWebhookPurge() // eager first run on startup
   const webhookPurgeTimer = setInterval(runWebhookPurge, WEBHOOK_PURGE_INTERVAL_MS)
@@ -2475,7 +2476,7 @@ export async function createServer(): Promise<FastifyInstance> {
   inboxDeliveryDedupSweep.unref()
 
   // Daily digest: surface active tasks with empty or placeholder done_criteria.
-  // Warns via #ops — does not hard-error (legacy tasks may predate the gate).
+  // Warns via #ops - does not hard-error (legacy tasks may predate the gate).
   const DONE_CRITERIA_DIGEST_INTERVAL_MS = 24 * 60 * 60 * 1000
   const DONE_CRITERIA_PLACEHOLDER_DIGEST_RE = /^\s*(tbd|todo|to-do|to do|placeholder|n\/a|na|none|fix later|coming soon|see description|wip)\s*$/i
   const runDoneCriteriaDigest = () => {
@@ -2493,7 +2494,7 @@ export async function createServer(): Promise<FastifyInstance> {
       chatManager.sendMessage({
         channel: 'ops',
         from: 'system',
-        content: `📋 **Done-criteria digest** — ${missing.length} active task${missing.length === 1 ? '' : 's'} missing verifiable done_criteria:\n${lines.join('\n')}\nAdd at least 1 concrete criterion to each before moving to validating.`,
+        content: `📋 **Done-criteria digest** - ${missing.length} active task${missing.length === 1 ? '' : 's'} missing verifiable done_criteria:\n${lines.join('\n')}\nAdd at least 1 concrete criterion to each before moving to validating.`,
       }).catch(() => {})
     } catch { /* non-fatal */ }
   }
@@ -2501,7 +2502,7 @@ export async function createServer(): Promise<FastifyInstance> {
   const doneCriteriaDigestTimer = setInterval(runDoneCriteriaDigest, DONE_CRITERIA_DIGEST_INTERVAL_MS)
   doneCriteriaDigestTimer.unref()
 
-  // Approval card expiry sweep — run on startup to prune stale cards before any canvas queries.
+  // Approval card expiry sweep - run on startup to prune stale cards before any canvas queries.
   // Undecided approval_requested/review_requested events older than 24h get a synthetic
   // rejection event, preventing them from reappearing after node restarts.
   import('./agent-runs.js').then(({ sweepExpiredApprovalCards }) => {
@@ -2509,7 +2510,7 @@ export async function createServer(): Promise<FastifyInstance> {
     if (pruned > 0) console.log(`[ApprovalSweep] Pruned ${pruned} expired approval card(s) on startup`)
   }).catch(err => console.warn('[ApprovalSweep] Startup sweep failed:', err))
 
-  // Approval card restore — re-emit canvas_push for undecided validating tasks on startup.
+  // Approval card restore - re-emit canvas_push for undecided validating tasks on startup.
   // Ensures approval cards survive node restarts without re-emitting already-decided cards.
   const APPROVAL_CARD_TTL_MS = 24 * 60 * 60 * 1000 // 24h
   const CANVAS_AGENT_COLORS_RESTART: Record<string, string> = {
@@ -2520,13 +2521,13 @@ export async function createServer(): Promise<FastifyInstance> {
   try {
     const validatingTasks = taskManager.listTasks({ status: 'validating' })
     const cutoff = Date.now() - APPROVAL_CARD_TTL_MS
-    // Known agent names — agent-to-agent reviews should not produce canvas approval cards
+    // Known agent names - agent-to-agent reviews should not produce canvas approval cards
     const KNOWN_AGENTS_RESTORE = new Set(getAgentRoles().map(r => r.name))
     for (const task of validatingTasks) {
       const meta = (task.metadata ?? {}) as Record<string, unknown>
       // Skip if already decided
       if (meta.review_decided === true || meta.reviewer_approved === true || meta.review_state === 'approved' || meta.review_state === 'rejected') continue
-      // Skip agent-to-agent reviews — only human-required approvals show on canvas
+      // Skip agent-to-agent reviews - only human-required approvals show on canvas
       const reviewerId = (task.reviewer ?? '').toLowerCase().trim()
       if (reviewerId && KNOWN_AGENTS_RESTORE.has(reviewerId)) continue
       // Skip if card is older than TTL (sweep handled it)
@@ -2566,11 +2567,11 @@ export async function createServer(): Promise<FastifyInstance> {
   // Load unified policy config (file + env overrides)
   const policy = policyManager.load()
 
-  // Board health execution worker — config from policy
+  // Board health execution worker - config from policy
   boardHealthWorker.updateConfig(policy.boardHealth)
   boardHealthWorker.start()
 
-  // Notification delivery worker — pushes pending agent-notifications to active agents
+  // Notification delivery worker - pushes pending agent-notifications to active agents
   const { NotificationDeliveryWorker } = await import('./notification-worker.js')
   const notificationWorker = new NotificationDeliveryWorker(
     getDb,
@@ -2579,7 +2580,7 @@ export async function createServer(): Promise<FastifyInstance> {
   )
   notificationWorker.start()
 
-  // Activate noise budget enforcement — the 24h canary period is complete.
+  // Activate noise budget enforcement - the 24h canary period is complete.
   // Canary mode (log-only) is still the default in case of fresh installs,
   // but on a running server we want real duplicate suppression.
   noiseBudgetManager.activateEnforcement()
@@ -2588,7 +2589,7 @@ export async function createServer(): Promise<FastifyInstance> {
   noiseBudgetManager.setDigestFlushHandler(async (channel, entries) => {
     if (entries.length === 0) return
     const summary = entries.map(e =>
-      `• [${e.category}] ${e.from}: ${e.content.substring(0, 120)}${e.content.length > 120 ? '…' : ''}`
+      `• [${e.category}] ${e.from}: ${e.content.substring(0, 120)}${e.content.length > 120 ? '...' : ''}`
     ).join('\n')
     const digestContent = `📦 **Noise Budget Digest** (${entries.length} batched messages for #${channel}):\n${summary}`
     await chatManager.sendMessage({
@@ -2616,7 +2617,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // Shipped-artifact auto-heartbeat → #general on validating/done with artifact_path
   startShippedHeartbeat()
 
-  // Team context auto-writer — writes team facts to TEAM-CONTEXT.md on key events
+  // Team context auto-writer - writes team facts to TEAM-CONTEXT.md on key events
   // task-1774672289270-9qhb17cgk
   startTeamContextWriter({
     reflecttHome: REFLECTT_HOME,
@@ -2624,13 +2625,13 @@ export async function createServer(): Promise<FastifyInstance> {
     taskManager: taskManager as any,
   })
 
-  // Calendar reminder engine — polls for pending reminders every 30s
+  // Calendar reminder engine - polls for pending reminders every 30s
   startReminderEngine()
 
-  // Deploy monitor — alert within 5m when production deploys fail (Vercel + health URL)
+  // Deploy monitor - alert within 5m when production deploys fail (Vercel + health URL)
   startDeployMonitor()
 
-  // OpenClaw usage sync — ingest token/cost data from ~/.openclaw/agents sessions
+  // OpenClaw usage sync - ingest token/cost data from ~/.openclaw/agents sessions
   // Bridges agents not reporting via node heartbeat into the cloud usage dashboard
   startOpenClawUsageSync()
 
@@ -2650,14 +2651,14 @@ export async function createServer(): Promise<FastifyInstance> {
     wsHeartbeat.stop()
   })
 
-  // Canvas state map — forward reference for route handlers that emit before the canvas block.
+  // Canvas state map - forward reference for route handlers that emit before the canvas block.
   // Populated in the canvas state section below. Route handlers (e.g. PATCH /tasks) access
   // this via closure to synchronously update orb state when task status transitions occur.
   // eslint-disable-next-line prefer-const
   let _canvasStateMap: Map<string, { state: string; sensors: string | null; payload: unknown; updatedAt: number; lastMessage?: { content: string; timestamp: number } }> | null = null
 
   // Health check
-  // Ultra-lightweight ping — no DB, no stats, instant response.
+  // Ultra-lightweight ping - no DB, no stats, instant response.
   // Use for keepalive cron triggers (Cloudflare, load balancers, uptime monitors).
   app.get('/health/ping', async () => {
     return { status: 'ok', uptime_seconds: Math.round((Date.now() - BUILD_STARTED_AT) / 1000), ts: Date.now() }
@@ -2682,7 +2683,7 @@ export async function createServer(): Promise<FastifyInstance> {
         chat: { rooms: chatStats.rooms, totalMessages: chatStats.totalMessages },
       },
       ...(coldStart ? {
-        remediation: 'Instance recently restarted. If this happens frequently, add a keepalive cron — see docs/KEEPALIVE.md',
+        remediation: 'Instance recently restarted. If this happens frequently, add a keepalive cron - see docs/KEEPALIVE.md',
       } : {}),
       boot_info: getBootInfo(),
     }
@@ -2719,7 +2720,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // ─── Request errors — last N errors for launch-day debugging ───
+  // ─── Request errors - last N errors for launch-day debugging ───
   app.get('/health/chat', async () => {
     const stats = chatManager.getStats()
     return {
@@ -2743,7 +2744,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // ── Version summary — used by cloud dashboard + ops tooling ──────────────
+  // ── Version summary - used by cloud dashboard + ops tooling ──────────────
   app.get('/health/version', async () => {
     return {
       version: BUILD_VERSION,
@@ -3220,7 +3221,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // Select an agent to send the intervention (use lastAgent from context, or default)
     const agentName = event.context?.lastAgent || getAgentRoles()[0]?.name || 'system'
-    const message = result.message || 'Hey! Just checking in — want to pick up where you left off?'
+    const message = result.message || 'Hey! Just checking in - want to pick up where you left off?'
 
     // Post to #general as the intervening agent
     const baseUrl = `http://127.0.0.1:${serverPort}`
@@ -3349,11 +3350,11 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // ── Shared team context (TEAM-CONTEXT.md) ──────────────────────────────────
-  // POST /team-context/facts — agents write team-wide facts directly
+  // POST /team-context/facts - agents write team-wide facts directly
   // task-1774672289270-9qhb17cgk
   app.post('/team-context/facts', teamContextFactEndpoint(REFLECTT_HOME) as any)
 
-  // GET /team-context — read current TEAM-CONTEXT.md
+  // GET /team-context - read current TEAM-CONTEXT.md
   app.get('/team-context', async () => {
     const filePath = join(REFLECTT_HOME, 'workspace', 'TEAM-CONTEXT.md')
     if (!existsSync(filePath)) return { content: null, hint: 'No TEAM-CONTEXT.md yet. Facts will be written automatically on task completions and decisions.' }
@@ -3921,7 +3922,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // Validating-stall nudge tick — DMs reviewer when task stalls in validating with no formal review action
+  // Validating-stall nudge tick - DMs reviewer when task stalls in validating with no formal review action
   app.post('/health/validating-nudge/tick', async (request, reply) => {
     const parsedQuery = HealthTickQuerySchema.safeParse(request.query ?? {})
     if (!parsedQuery.success) {
@@ -4058,12 +4059,12 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // Build info — git SHA, branch, PID, uptime
+  // Build info - git SHA, branch, PID, uptime
   app.get('/health/build', async () => {
     return getBuildInfo()
   })
 
-  // Deploy identity — version + SHA + build timestamp for attestation workflows
+  // Deploy identity - version + SHA + build timestamp for attestation workflows
   app.get('/health/deploy', async () => {
     const build = getBuildInfo()
     return {
@@ -4185,7 +4186,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ============ DASHBOARD ============
 
-  // Root redirects to dashboard — first thing a user sees
+  // Root redirects to dashboard - first thing a user sees
   app.get('/', async (_request, reply) => {
     reply.redirect('/dashboard')
   })
@@ -4197,8 +4198,8 @@ export async function createServer(): Promise<FastifyInstance> {
     reply.type('text/html').send(getDashboardHTML({ internalMode }))
   })
 
-  // API docs page (markdown — token-efficient for agents)
-  // UI Kit reference page — living component/states documentation
+  // API docs page (markdown - token-efficient for agents)
+  // UI Kit reference page - living component/states documentation
   app.get('/ui-kit', async (_request, reply) => {
     try {
       const { promises: fs } = await import('fs')
@@ -4214,7 +4215,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // Presence loop demo — live end-to-end ambient→run→approve→result→collapse
+  // Presence loop demo - live end-to-end ambient→run→approve→result→collapse
   app.get('/presence-loop', async (_request, reply) => {
     try {
       const { promises: fs } = await import('fs')
@@ -4312,7 +4313,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     // Default avatar: render an initial when possible, else '?'
-    const initial = safe ? (filename.replace(/\.(png|svg)$/i, '').charAt(0) || '?').toUpperCase() : '?' 
+    const initial = safe ? (filename.replace(/\.(png|svg)$/i, '').charAt(0) || '?').toUpperCase() : '?'
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
       <rect width="64" height="64" rx="12" fill="#21262d"/>
       <text x="32" y="38" text-anchor="middle" font-family="system-ui,sans-serif" font-size="24" font-weight="600" fill="#8d96a0">${initial}</text>
@@ -4347,12 +4348,12 @@ export async function createServer(): Promise<FastifyInstance> {
       const { join } = await import('path')
       const { fileURLToPath } = await import('url')
       const { dirname } = await import('path')
-      
+
       const __filename = fileURLToPath(import.meta.url)
       const __dirname = dirname(__filename)
       const publicDir = join(__dirname, '..', 'public')
       const filePath = join(publicDir, 'dashboard-animations.css')
-      
+
       const data = await fs.readFile(filePath, 'utf-8')
       reply.type('text/css').send(data)
     } catch (err) {
@@ -4537,7 +4538,7 @@ export async function createServer(): Promise<FastifyInstance> {
       presenceManager.recordActivity(data.from, 'message')
       presenceManager.touchPresence(data.from)
 
-      // Stall detector: user sent a message — record activity
+      // Stall detector: user sent a message - record activity
       getStallDetector().recordActivity(data.from)
 
       // Activation funnel: first team message
@@ -4637,7 +4638,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // ── Agent context endpoint ──────────────────────────────────────────
   // Returns a compact, deduplicated view of recent chat optimized for
   // agent context injection. Includes: mentions of the agent, recent
-  // system alerts (deduplicated), and team messages — all in slim format.
+  // system alerts (deduplicated), and team messages - all in slim format.
   app.get<{ Params: { agent: string } }>('/chat/context/:agent', async (request) => {
     const agent = String(request.params.agent || '').trim().toLowerCase()
     const query = request.query as Record<string, string>
@@ -4788,7 +4789,7 @@ export async function createServer(): Promise<FastifyInstance> {
           const blockedBy = Array.isArray(t.blocked_by) && t.blocked_by.length > 0 ? ` (blocked_by: ${t.blocked_by.join(', ')})` : ''
           push(`- ${t.id} ${t.title}${blockedBy}`)
         }
-        if (blocked.length > 3) push(`- (+${blocked.length - 3} more)`) 
+        if (blocked.length > 3) push(`- (+${blocked.length - 3} more)`)
       }
       push('LAST MENTION:')
       push(lastMention ? `- [${lastMention.ch}] ${String(lastMention.content || '').slice(0, 220)}` : '- none')
@@ -5113,7 +5114,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
     const query = parsedQuery.data
-    
+
     // For inbox, get more messages than default to scan for @mentions etc.
     // But still cap it to avoid blowing through context windows
     // Get last 100 messages or since timestamp if provided
@@ -5121,7 +5122,7 @@ export async function createServer(): Promise<FastifyInstance> {
       limit: MAX_LIMITS.inboxScanMessages,
       since: parseEpochMs(query.since),
     })
-    
+
     const agentName = request.params.agent
     const sinceMs = parseEpochMs(query.since)
     const itemLimit = boundedLimit(query.limit, DEFAULT_LIMITS.inbox, MAX_LIMITS.inbox)
@@ -5207,23 +5208,23 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
     const body = parsedBody.data
-    
+
     if (body.all) {
       const allMessages = chatManager.getMessages()
       await inboxManager.ackAll(request.params.agent, allMessages)
       return { success: true, message: 'All messages acknowledged' }
     }
-    
+
     // Allow updating lastReadTimestamp without acking specific messages
     if (body.timestamp !== undefined && !body.messageIds) {
       await inboxManager.ackMessages(request.params.agent, undefined, body.timestamp)
       return { success: true, message: 'lastReadTimestamp updated' }
     }
-    
+
     if (!body.messageIds || !Array.isArray(body.messageIds)) {
       return { error: 'messageIds array, timestamp, or all=true is required' }
     }
-    
+
     await inboxManager.ackMessages(request.params.agent, body.messageIds, body.timestamp)
     // Clear delivery records so re-delivery is possible if the message resurfaces
     for (const id of body.messageIds) clearDeliveryRecord(request.params.agent, id)
@@ -5241,7 +5242,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
     const body = parsedBody.data
-    
+
     const subscriptions = await inboxManager.updateSubscriptions(request.params.agent, body.channels)
     return { success: true, subscriptions }
   })
@@ -5263,12 +5264,12 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get<{ Params: { agent: string } }>('/inbox/:agent/mentions', async (request) => {
     const query = request.query as Record<string, string>
     const limit = boundedLimit(query.limit, DEFAULT_LIMITS.unreadMentions, MAX_LIMITS.unreadMentions)
-    
+
     const allMessages = chatManager.getMessages({ limit: MAX_LIMITS.unreadScanMessages })
     const mentions = inboxManager.getUnreadMentions(request.params.agent, allMessages)
-    
-    return { 
-      mentions: mentions.slice(0, limit), 
+
+    return {
+      mentions: mentions.slice(0, limit),
       count: mentions.length,
       agent: request.params.agent
     }
@@ -5752,7 +5753,7 @@ export async function createServer(): Promise<FastifyInstance> {
     // Fire-and-forget: index for knowledge search
     import('./vector-store.js')
       .then(({ indexSharedFile }) => {
-        const text = `[contact] ${contact.name}${contact.org ? ` (${contact.org})` : ''} — ${contact.notes} tags:${contact.tags.join(',')}`
+        const text = `[contact] ${contact.name}${contact.org ? ` (${contact.org})` : ''} - ${contact.notes} tags:${contact.tags.join(',')}`
         indexSharedFile(`contact/${contact.id}`, text)
       })
       .catch(() => {})
@@ -5808,7 +5809,7 @@ export async function createServer(): Promise<FastifyInstance> {
     // Re-index
     import('./vector-store.js')
       .then(({ indexSharedFile }) => {
-        const text = `[contact] ${contact.name}${contact.org ? ` (${contact.org})` : ''} — ${contact.notes} tags:${contact.tags.join(',')}`
+        const text = `[contact] ${contact.name}${contact.org ? ` (${contact.org})` : ''} - ${contact.notes} tags:${contact.tags.join(',')}`
         indexSharedFile(`contact/${contact.id}`, text)
       })
       .catch(() => {})
@@ -5932,7 +5933,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     if (!resolved.task || !resolved.resolvedId) {
-      // Check if this task was deleted — return 410 Gone with tombstone metadata instead of 404.
+      // Check if this task was deleted - return 410 Gone with tombstone metadata instead of 404.
       const tombstone = taskManager.getTaskDeletionTombstone(request.params.id)
       if (tombstone) {
         reply.code(410)
@@ -6009,7 +6010,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // Task artifact visibility — resolves artifact paths and checks accessibility
+  // Task artifact visibility - resolves artifact paths and checks accessibility
   app.get<{ Params: { id: string } }>('/tasks/:id/artifacts', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
     if (!resolved) return
@@ -6126,7 +6127,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // Artifact viewer — safe in-browser view for repo-relative proof docs (process/ etc.)
+  // Artifact viewer - safe in-browser view for repo-relative proof docs (process/ etc.)
   app.get('/artifacts/view', async (request, reply) => {
     const parsed = z.object({ path: z.string().min(1).max(500) }).safeParse(request.query || {})
     if (!parsed.success) {
@@ -6183,7 +6184,7 @@ export async function createServer(): Promise<FastifyInstance> {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${escapeHtml(title)} — artifact view</title>
+<title>${escapeHtml(title)} - artifact view</title>
 <style>
   :root { --bg:#0a0e14; --surface:#141920; --border:#252d38; --text:#d4dae3; --text-muted:#6b7a8d; --accent:#4da6ff; }
   body { margin:0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; background:var(--bg); color:var(--text); }
@@ -6282,7 +6283,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const title = path.split('/').pop() || path
     reply.type('text/html; charset=utf-8').send(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>${escapeHtml(title)} — shared artifact</title>
+<title>${escapeHtml(title)} - shared artifact</title>
 <style>:root{--bg:#0a0e14;--surface:#141920;--border:#252d38;--text:#d4dae3;--muted:#6b7a8d;--accent:#4da6ff}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}header{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:space-between}a{color:var(--accent);text-decoration:none}main{padding:18px}pre{white-space:pre-wrap;background:#0f141a;border:1px solid var(--border);border-radius:10px;padding:14px;line-height:1.55;font-size:12px}code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}</style>
 </head><body>
 <header><div><b>Shared Artifact</b><div style="font-size:12px;color:var(--muted)">${escapeHtml(path)}</div></div><div><a href="/dashboard">← dashboard</a></div></header>
@@ -6290,7 +6291,7 @@ export async function createServer(): Promise<FastifyInstance> {
 </body></html>`)
   })
 
-  // Task heartbeat status — all doing tasks with stale comment activity
+  // Task heartbeat status - all doing tasks with stale comment activity
   app.get('/tasks/heartbeat-status', async () => {
     const HEARTBEAT_THRESHOLD_MS = 30 * 60 * 1000
     const now = Date.now()
@@ -6332,12 +6333,12 @@ export async function createServer(): Promise<FastifyInstance> {
   /**
    * GET /tasks/slow-blocked
    * Detect doing tasks that are slow (>4h no event, not explicitly blocked)
-   * vs explicitly blocked tasks. Different handling paths — no @kai escalation
+   * vs explicitly blocked tasks. Different handling paths - no @kai escalation
    * needed for detection; host enforces it.
    *
    * Returns:
-   *   slow[]  — doing tasks with no activity in >4h (not explicitly blocked)
-   *   blocked[] — tasks in blocked status
+   *   slow[]  - doing tasks with no activity in >4h (not explicitly blocked)
+   *   blocked[] - tasks in blocked status
    */
   app.get('/tasks/slow-blocked', async (request) => {
     const query = request.query as Record<string, string>
@@ -6508,7 +6509,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
       if (prRes.ok) prData = await prRes.json()
       if (filesRes.ok) prFiles = (await filesRes.json()) as any[]
-    } catch { /* GitHub API unavailable — degrade gracefully */ }
+    } catch { /* GitHub API unavailable - degrade gracefully */ }
 
     // Fetch CI check runs
     const headSha = prData?.head?.sha
@@ -6540,7 +6541,7 @@ export async function createServer(): Promise<FastifyInstance> {
       dirGroups[dir].deletions += f.deletions || 0
     }
 
-    // Risk indicator (use total churn, not net — pure deletions are still large changes)
+    // Risk indicator (use total churn, not net - pure deletions are still large changes)
     let riskLevel: 'small' | 'medium' | 'large' = 'small'
     if (totalChurn > 500 || changedFiles > 15) riskLevel = 'large'
     else if (totalChurn > 100 || changedFiles > 5) riskLevel = 'medium'
@@ -6804,7 +6805,7 @@ export async function createServer(): Promise<FastifyInstance> {
             commentContent: data.content,
           })
           if (autoClose.fired && autoClose.decision) {
-            // Self-review detection (non-blocking — just emits trust event)
+            // Self-review detection (non-blocking - just emits trust event)
             if (
               taskForReview.reviewer &&
               taskForReview.assignee &&
@@ -7037,9 +7038,9 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // POST /tasks/:id/block-external — mark a task as externally blocked
+  // POST /tasks/:id/block-external - mark a task as externally blocked
   // Suppresses idle-detection, suggest-close, and auto-requeue while the flag is set.
-  // Required: reason (e.g. "Apple Developer credentials — human action required")
+  // Required: reason (e.g. "Apple Developer credentials - human action required")
   // Sets metadata.blocked_external=true + metadata.blocked_external_reason
   app.post<{ Params: { id: string } }>('/tasks/:id/block-external', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
@@ -7049,7 +7050,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const reason = typeof body.reason === 'string' ? body.reason.trim() : ''
     if (!reason) {
       reply.code(400)
-      return { success: false, error: 'reason is required — describe the external dependency (e.g. "Apple Developer credentials — human action required")' }
+      return { success: false, error: 'reason is required - describe the external dependency (e.g. "Apple Developer credentials - human action required")' }
     }
 
     const task = resolved.task
@@ -7079,7 +7080,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // POST /tasks/:id/unblock-external — remove the externally-blocked flag
+  // POST /tasks/:id/unblock-external - remove the externally-blocked flag
   app.post<{ Params: { id: string } }>('/tasks/:id/unblock-external', async (request, reply) => {
     const resolved = resolveTaskFromParam(request.params.id, reply)
     if (!resolved) return
@@ -7215,9 +7216,9 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const task = resolved.task
 
-    // AC: Stale review guard — reject if task is no longer in validating.
+    // AC: Stale review guard - reject if task is no longer in validating.
     // Prevents stale review notifications from being acted on after a task has moved on.
-    // Skipped in test environment (NODE_ENV=test) — test fixtures skip the validating gate.
+    // Skipped in test environment (NODE_ENV=test) - test fixtures skip the validating gate.
     if (process.env.NODE_ENV !== 'test' && task.status !== 'validating') {
       reply.code(409)
       const rh = (task.metadata as Record<string, unknown> | null)?.review_handoff as Record<string, unknown> | undefined
@@ -7256,7 +7257,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
 
     // ── Artifact link guard: review approval requires at least one artifact ref ──
-    // Accepts: PR URL (github.com/…/pull/N), PR shorthand (#N or PR #N),
+    // Accepts: PR URL (github.com/.../pull/N), PR shorthand (#N or PR #N),
     //          a process/ or docs/ path, or a file path with an extension.
     // Skip when task is in rejected/needs-author state (allow re-review after fixes).
     const taskMeta = (task.metadata ?? {}) as Record<string, unknown>
@@ -7434,7 +7435,7 @@ export async function createServer(): Promise<FastifyInstance> {
           },
         })
 
-        // Auto-paint canvas on task completion — the room reflects real work
+        // Auto-paint canvas on task completion - the room reflects real work
         // Brief visual moment showing what was shipped (task-1773689755389-ux4bbn1lo)
         const shortTitle = (updated.title ?? 'task').slice(0, 60)
         const pushSvg = `<svg viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg"><rect width="800" height="200" fill="transparent"/><text x="400" y="80" text-anchor="middle" fill="${milestoneColor}" font-size="24" font-family="monospace" font-weight="bold" opacity="0.8">✓ shipped</text><text x="400" y="120" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="16" font-family="monospace">${shortTitle.replace(/[<>&"']/g, '')}</text><text x="400" y="155" text-anchor="middle" fill="${milestoneColor}" font-size="12" font-family="monospace" opacity="0.4">${assigneeId}</text></svg>`
@@ -7492,9 +7493,9 @@ export async function createServer(): Promise<FastifyInstance> {
       required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description', 'metadata.source', 'metadata.steps_to_reproduce'],
       min_done_criteria: 1,
-      title_hint: 'Describe what is broken: "Bug: [component] — [symptom] when [action]"',
+      title_hint: 'Describe what is broken: "Bug: [component] - [symptom] when [action]"',
       example: {
-        title: 'Bug: dashboard login — 500 error when SSO callback missing state param',
+        title: 'Bug: dashboard login - 500 error when SSO callback missing state param',
         type: 'bug',
         assignee: '<builder-agent>',
         reviewer: '<lead-agent>',
@@ -7509,9 +7510,9 @@ export async function createServer(): Promise<FastifyInstance> {
       required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description', 'metadata.spec_link'],
       min_done_criteria: 2,
-      title_hint: 'Describe the user-facing outcome: "Feature: [what] — [user benefit]"',
+      title_hint: 'Describe the user-facing outcome: "Feature: [what] - [user benefit]"',
       example: {
-        title: 'Feature: host activity feed — show last 10 events per host on dashboard',
+        title: 'Feature: host activity feed - show last 10 events per host on dashboard',
         type: 'feature',
         assignee: '<builder-agent>',
         reviewer: '<lead-agent>',
@@ -7525,9 +7526,9 @@ export async function createServer(): Promise<FastifyInstance> {
       required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description'],
       min_done_criteria: 1,
-      title_hint: 'Describe the process change: "Process: [what changes] — [why]"',
+      title_hint: 'Describe the process change: "Process: [what changes] - [why]"',
       example: {
-        title: 'Process: enforce task intake schema — reject vague tasks at creation',
+        title: 'Process: enforce task intake schema - reject vague tasks at creation',
         type: 'process',
         assignee: '<builder-agent>',
         reviewer: '<lead-agent>',
@@ -7541,9 +7542,9 @@ export async function createServer(): Promise<FastifyInstance> {
       required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority', 'type'],
       recommended_fields: ['description', 'metadata.doc_path'],
       min_done_criteria: 1,
-      title_hint: 'Describe what docs need: "Docs: [topic] — [what is missing/wrong]"',
+      title_hint: 'Describe what docs need: "Docs: [topic] - [what is missing/wrong]"',
       example: {
-        title: 'Docs: enrollment handshake — document connect flow for agents',
+        title: 'Docs: enrollment handshake - document connect flow for agents',
         type: 'docs',
         assignee: '<ops-agent>',
         reviewer: '<lead-agent>',
@@ -7557,9 +7558,9 @@ export async function createServer(): Promise<FastifyInstance> {
       required_fields: ['title', 'assignee', 'reviewer', 'done_criteria', 'createdBy', 'priority'],
       recommended_fields: ['description'],
       min_done_criteria: 1,
-      title_hint: 'Describe the maintenance task: "Chore: [what] — [why now]"',
+      title_hint: 'Describe the maintenance task: "Chore: [what] - [why now]"',
       example: {
-        title: 'Chore: clean up stale branches — 15+ unmerged branches from last sprint',
+        title: 'Chore: clean up stale branches - 15+ unmerged branches from last sprint',
         type: 'chore',
         assignee: '<builder-agent>',
         reviewer: '<lead-agent>',
@@ -7577,7 +7578,7 @@ export async function createServer(): Promise<FastifyInstance> {
       required: ['title', 'assignee', 'done_criteria', 'createdBy', 'priority'],
       optional: ['eta', 'type', 'description', 'status', 'blocked_by', 'epic_id', 'tags', 'teamId', 'metadata', 'reviewer'],
       notes: {
-        reviewer: 'Defaults to "auto" — load-balanced assignment based on role, affinity, and SLA risk. Set explicitly to override.',
+        reviewer: 'Defaults to "auto" - load-balanced assignment based on role, affinity, and SLA risk. Set explicitly to override.',
         eta: 'Optional. If absent, defaults to ~2h (P0/P1) or ~4h (P2/P3) when status transitions to doing. Provide explicit ETA for better SLA tracking.',
       },
       types: TASK_TYPES,
@@ -7596,11 +7597,11 @@ export async function createServer(): Promise<FastifyInstance> {
         'Reviewer must be assigned at creation time',
         'done_criteria must have at least 1 entry (features require 2+)',
       ],
-      priorities: { P0: 'Critical/blocking', P1: 'High — ship this sprint', P2: 'Medium — next sprint', P3: 'Low — backlog' },
+      priorities: { P0: 'Critical/blocking', P1: 'High - ship this sprint', P2: 'Medium - next sprint', P3: 'Low - backlog' },
     }
   })
 
-  // Task template endpoint — returns template for a specific type
+  // Task template endpoint - returns template for a specific type
   app.get<{ Params: { type: string } }>('/tasks/templates/:type', async (request, reply) => {
     const taskType = request.params.type
     const template = TASK_TEMPLATES[taskType]
@@ -7629,8 +7630,8 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // ── Task creation dedup: reject identical or near-duplicate tasks ──
       // Two tiers:
-      //   Tier 1 (60s, exact, same-assignee) — reconnect double-fire collapse
-      //   Tier 2 (24h, fuzzy ≥80% Jaccard, any-assignee) — continuity-loop dupe prevention
+      //   Tier 1 (60s, exact, same-assignee) - reconnect double-fire collapse
+      //   Tier 2 (24h, fuzzy ≥80% Jaccard, any-assignee) - continuity-loop dupe prevention
       const skipDedup = data.title.startsWith('TEST:')
         || (data.metadata as Record<string, unknown> | undefined)?.skip_dedup === true
         || (data.metadata as Record<string, unknown> | undefined)?.is_test === true
@@ -7655,12 +7656,12 @@ export async function createServer(): Promise<FastifyInstance> {
               task: tier1Match,
               deduplicated: true,
               dedup_tier: 'exact-60s',
-              hint: `Duplicate suppressed — task "${tier1Match.title}" already exists for ${data.assignee} (${tier1Match.id}, created ${Math.round((now - tier1Match.createdAt) / 1000)}s ago).`,
+              hint: `Duplicate suppressed - task "${tier1Match.title}" already exists for ${data.assignee} (${tier1Match.id}, created ${Math.round((now - tier1Match.createdAt) / 1000)}s ago).`,
             }
           }
         }
 
-        // Tier 2: fuzzy-match (≥80% Jaccard word overlap) within 24h — catches continuity-loop dupes
+        // Tier 2: fuzzy-match (≥80% Jaccard word overlap) within 24h - catches continuity-loop dupes
         // Scoped to same-assignee: different agents may legitimately work on same-named tasks.
         if (data.assignee) {
           const FUZZY_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -7670,7 +7671,7 @@ export async function createServer(): Promise<FastifyInstance> {
             const cutoff24h = now - FUZZY_WINDOW_MS
             let bestFuzzy: { task: typeof activeTasks[0]; overlap: number } | null = null
             for (const existing of activeTasks) {
-              if (existing.assignee !== data.assignee) continue // different agent — allowed
+              if (existing.assignee !== data.assignee) continue // different agent - allowed
               if (existing.createdAt < cutoff24h) continue
               const existingWords = new Set(existing.title.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3))
               const intersection = [...newWords].filter((w: string) => existingWords.has(w))
@@ -7719,7 +7720,7 @@ export async function createServer(): Promise<FastifyInstance> {
           // Placeholder text always blocks (for both humans and agents).
           // Agent-created tasks (createdBy != 'user') always block on any DoR failure.
           if (isUserCreated && hasEmptyCriteria && !hasOnlyPlaceholders) {
-            // Warn only — pass through to creation with warnings appended below
+            // Warn only - pass through to creation with warnings appended below
             // (readinessProblems will be added to creationWarnings)
           } else {
             // Block: agent-created tasks, placeholder criteria, or other DoR failures
@@ -7789,7 +7790,7 @@ export async function createServer(): Promise<FastifyInstance> {
             rest.reviewer = reviewerSuggestion.suggested
             reviewerAutoAssigned = true
           } else {
-            // No suggestion available — fall back to first known agent
+            // No suggestion available - fall back to first known agent
             rest.reviewer = getAgentRoles()[0]?.name
             reviewerAutoAssigned = rest.reviewer !== undefined
           }
@@ -7827,7 +7828,7 @@ export async function createServer(): Promise<FastifyInstance> {
         metadata: newMetadata,
       })
 
-      
+
       // Touch presence: creating tasks proves the agent is alive, but shouldn't
       // override task-derived status (e.g. agent filing a task while reviewing)
       if (data.createdBy) {
@@ -8025,7 +8026,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // ── Bulk-close — maintenance cycle + board cleanup ──────────────────────────
+  // ── Bulk-close - maintenance cycle + board cleanup ──────────────────────────
   // Closes tasks that are in validating with reviewer_approved=true, or already done.
   // Skips tasks requiring manual gate work; returns granular per-task result.
   app.post('/tasks/bulk-close', async (request, reply) => {
@@ -8042,7 +8043,7 @@ export async function createServer(): Promise<FastifyInstance> {
       for (const rawId of ids) {
         const lookup = taskManager.resolveTaskId(rawId)
         if (lookup.matchType === 'ambiguous') {
-          errors.push({ id: rawId, error: `Ambiguous task ID — use a longer prefix` })
+          errors.push({ id: rawId, error: `Ambiguous task ID - use a longer prefix` })
           continue
         }
         const task = lookup.task
@@ -8057,7 +8058,7 @@ export async function createServer(): Promise<FastifyInstance> {
         }
 
         if (task.status !== 'validating') {
-          skipped.push({ id: lookup.resolvedId, reason: `status is "${task.status}" — only validating tasks can be bulk-closed` })
+          skipped.push({ id: lookup.resolvedId, reason: `status is "${task.status}" - only validating tasks can be bulk-closed` })
           continue
         }
 
@@ -8070,7 +8071,7 @@ export async function createServer(): Promise<FastifyInstance> {
         if (!reviewerApproved && !isDupOrSuperseded) {
           skipped.push({
             id: lookup.resolvedId,
-            reason: 'no reviewer_approved=true and no close_reason=duplicate/superseded — manual gate required',
+            reason: 'no reviewer_approved=true and no close_reason=duplicate/superseded - manual gate required',
           })
           continue
         }
@@ -8372,7 +8373,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return {
       success: true,
       quietUntil: Date.now() + (boardHealthWorker.getStatus().config?.restartQuietWindowMs ?? 300_000),
-      message: 'Quiet window reset — ready-queue alerts suppressed for restart window',
+      message: 'Quiet window reset - ready-queue alerts suppressed for restart window',
     }
   })
 
@@ -8460,7 +8461,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, decision }
   })
 
-  // Comms routing policy simulator — evaluate scenarios against a policy
+  // Comms routing policy simulator - evaluate scenarios against a policy
   // POST /routing/simulate
   // Body: { policy: CommsRoutingPolicy, scenarios: RoutingScenario[] }
   // Returns: { success, count, results: CommsRouteResult[] }
@@ -8488,7 +8489,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Voice API ──────────────────────────────────────────────────────────────
 
-  // POST /voice/input — create a voice session + begin processing
+  // POST /voice/input - create a voice session + begin processing
   // Body: { agentId: string, transcript?: string }
   // Returns: { sessionId }
   app.post('/voice/input', async (request, reply) => {
@@ -8546,10 +8547,10 @@ export async function createServer(): Promise<FastifyInstance> {
     // Build agent system context for the LLM responder
     const agentRole = getAgentRole(agentId)
     const agentSystemPrompt = agentRole
-      ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
-      : `You are ${agentId}, a team agent. Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+      ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely - your reply will be spoken aloud. 1-3 sentences max.`
+      : `You are ${agentId}, a team agent. Respond concisely - your reply will be spoken aloud. 1-3 sentences max.`
 
-    // Kick off async processing — do not await so we return sessionId immediately
+    // Kick off async processing - do not await so we return sessionId immediately
     const agentResponder = async (respAgentId: string, text: string, _sessionId: string): Promise<string | null> => {
       setActiveSpeaker(false)
 
@@ -8583,12 +8584,12 @@ export async function createServer(): Promise<FastifyInstance> {
         }
       }
 
-      // Stub fallback — always available, no key required
+      // Stub fallback - always available, no key required
       await new Promise(resolve => setTimeout(resolve, 400))
       return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
     }
 
-    // Agent voice IDs (ElevenLabs) — per-agent identity, same mapping as cloud
+    // Agent voice IDs (ElevenLabs) - per-agent identity, same mapping as cloud
     const NODE_AGENT_VOICE_IDS: Record<string, string> = {
       link: 'pNInz6obpgDQGcFmaJgB',    // Adam
       kai: 'onwK4e9ZLuTAKqWW03F9',     // Daniel
@@ -8598,7 +8599,7 @@ export async function createServer(): Promise<FastifyInstance> {
       echo: 'MF3mGyEYCl7XYWbV9V6O',    // Elli
     }
 
-    // ── Voice mutex — only one agent speaks at a time ──────────────────
+    // ── Voice mutex - only one agent speaks at a time ──────────────────
     // P0 fix: multiple agents were triggering TTS simultaneously, causing
     // overlapping audio on the canvas. Queue ensures serial playback.
     // task-1773686058943-v17yrucjr
@@ -8630,7 +8631,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const synthesizeTtsInternal = async (text: string, forAgentId: string): Promise<string | null> => {
       const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
 
-      // Fire canvas_expression alongside TTS — the room responds when an agent speaks.
+      // Fire canvas_expression alongside TTS - the room responds when an agent speaks.
       // Non-blocking: emit first, synthesize in parallel.
       const IDENTITY_COLORS: Record<string, string> = {
         link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
@@ -8678,9 +8679,9 @@ export async function createServer(): Promise<FastifyInstance> {
     // Subscribe to voice events to drive canvas state
     const unsubVoice = subscribeVoiceSession(session.id, (event) => {
       if (event.type === 'agent.thinking') {
-        // Agent is processing — keep existing canvas state (thinking is already set via presence)
+        // Agent is processing - keep existing canvas state (thinking is already set via presence)
       } else if (event.type === 'tts.ready') {
-        // Agent is now speaking — activate orb waveform/scale
+        // Agent is now speaking - activate orb waveform/scale
         setActiveSpeaker(true)
       } else if (event.type === 'session.end' || event.type === 'error') {
         // Clear speaker state
@@ -8697,7 +8698,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, sessionId: session.id }
   })
 
-  // POST /voice/audio — accept an audio blob, transcribe via STT, pipe to voice pipeline
+  // POST /voice/audio - accept an audio blob, transcribe via STT, pipe to voice pipeline
   // Completes the full speak→STT→LLM→TTS loop.
   // Form fields: agentId (string), audio (file: wav/mp3/webm/ogg/m4a)
   // Returns: { sessionId }
@@ -8726,7 +8727,7 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!audioBuffer || audioBuffer.length === 0) { reply.status(400); return { success: false, message: 'audio file is required' } }
     if (audioBuffer.length > 25 * 1024 * 1024) { reply.status(413); return { success: false, message: 'Audio exceeds 25MB limit' } }
 
-    // Transcribe audio — priority: local whisper.cpp → OpenAI Whisper cloud → 503
+    // Transcribe audio - priority: local whisper.cpp → OpenAI Whisper cloud → 503
     // Local whisper runs on-device (no API key, ~1.8s for tiny model on Apple Silicon)
     let transcript = ''
     let sttProvider = 'none'
@@ -8783,7 +8784,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     if (!transcript) {
       reply.status(503)
-      return { success: false, message: 'STT unavailable — install openai-whisper locally or set OPENAI_API_KEY' }
+      return { success: false, message: 'STT unavailable - install openai-whisper locally or set OPENAI_API_KEY' }
     }
 
     console.log(`[voice/audio] STT via ${sttProvider}: "${transcript.slice(0, 80)}"`)
@@ -8810,8 +8811,8 @@ export async function createServer(): Promise<FastifyInstance> {
     const session = createVoiceSession(agentId)
     const agentRole = getAgentRole(agentId)
     const agentSystemPrompt = agentRole
-      ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
-      : `You are ${agentId}, a team agent. Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
+      ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely - your reply will be spoken aloud. 1-3 sentences max.`
+      : `You are ${agentId}, a team agent. Respond concisely - your reply will be spoken aloud. 1-3 sentences max.`
 
     const identityColor = AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af'
 
@@ -8898,7 +8899,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return reply.code(201).send({ success: true, sessionId: session.id, transcript })
   })
 
-  // GET /voice/session/:id/events — SSE stream of voice pipeline state events
+  // GET /voice/session/:id/events - SSE stream of voice pipeline state events
   // Events: transcript.final, agent.thinking, agent.done, tts.ready, error, session.end
   app.get<{ Params: { id: string } }>('/voice/session/:id/events', async (request, reply) => {
     const { id } = request.params
@@ -8959,9 +8960,9 @@ export async function createServer(): Promise<FastifyInstance> {
     })
   })
 
-  // ── Agent Interface routes — software actions on behalf of the human ──────
+  // ── Agent Interface routes - software actions on behalf of the human ──────
 
-  // POST /agent-interface/runs — create and start a new agent action run
+  // POST /agent-interface/runs - create and start a new agent action run
   app.post('/agent-interface/runs', async (request, reply) => {
     const body = request.body as { kind?: string; repo?: string; title?: string; body?: string; dryRun?: boolean; intent?: Record<string, unknown> }
     if (!body?.kind) { reply.status(400); return { success: false, message: 'kind is required' } }
@@ -8972,7 +8973,7 @@ export async function createServer(): Promise<FastifyInstance> {
     // macos_ui_action: validate intent + kill-switch before creating run
     if (body.kind === 'macos_ui_action') {
       if (isKillSwitchEngaged()) {
-        reply.status(503); return { success: false, message: 'Kill-switch engaged — macOS accessibility control disabled' }
+        reply.status(503); return { success: false, message: 'Kill-switch engaged - macOS accessibility control disabled' }
       }
       const intent = body.intent as any
       const validation = macOSValidateIntent(intent ?? {})
@@ -8991,7 +8992,7 @@ export async function createServer(): Promise<FastifyInstance> {
       dryRun: body.dryRun ?? false,
     })
 
-    // Subscribe to run events — push canvas 'decision' state immediately when awaiting_approval
+    // Subscribe to run events - push canvas 'decision' state immediately when awaiting_approval
     // so the presence canvas decision card appears via SSE without waiting for the poll cycle.
     const runUnsub = subscribeRun(run.id, (event) => {
       if (event.type !== 'state_changed') return
@@ -9004,8 +9005,8 @@ export async function createServer(): Promise<FastifyInstance> {
           ? `macOS: ${inp.intent?.action ?? 'ui action'} in ${inp.intent?.app ?? 'app'}`
           : (inp.title ?? run.kind)
         const descLabel = isMAC
-          ? `Pilot — ${inp.intent?.action}${inp.intent?.text ? `: "${String(inp.intent.text).slice(0, 60)}"` : ''}`
-          : `${run.kind} — ${inp.repo ?? ''}`
+          ? `Pilot - ${inp.intent?.action}${inp.intent?.text ? `: "${String(inp.intent.text).slice(0, 60)}"` : ''}`
+          : `${run.kind} - ${inp.repo ?? ''}`
         const decisionPayload = {
           title: `Approval required: ${actionLabel}`,
           description: descLabel,
@@ -9038,7 +9039,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     })
 
-    // Execute async — non-blocking
+    // Execute async - non-blocking
     if (body.kind === 'macos_ui_action') {
       const intent = (body.intent ?? {}) as Record<string, unknown>
       executeMacOSUIAction(run.id, intent).catch(err => { console.error('[agent-interface] macos run error:', err); runUnsub() })
@@ -9054,28 +9055,28 @@ export async function createServer(): Promise<FastifyInstance> {
     return reply.code(201).send({ runId: run.id, status: run.status })
   })
 
-  // GET /agent-interface/runs — list runs, optionally filtered by status
-  // e.g. ?status=awaiting_approval — used by presence canvas to surface pending decisions
+  // GET /agent-interface/runs - list runs, optionally filtered by status
+  // e.g. ?status=awaiting_approval - used by presence canvas to surface pending decisions
   app.get('/agent-interface/runs', async (request) => {
     const { status } = request.query as { status?: string }
     return { runs: listRuns(status) }
   })
 
-  // GET /agent-interface/runs/:runId — get run state + log
+  // GET /agent-interface/runs/:runId - get run state + log
   app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId', async (request, reply) => {
     const run = getRun(request.params.runId)
     if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
     return { run }
   })
 
-  // GET /agent-interface/runs/:runId/replay — immutable audit + replay packet
+  // GET /agent-interface/runs/:runId/replay - immutable audit + replay packet
   app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId/replay', (request, reply) => {
     const packet = buildReplayPacket(request.params.runId)
     if (!packet) { reply.status(404); return { success: false, message: 'Run not found' } }
     return { packet }
   })
 
-  // GET /agent-interface/runs/:runId/events — SSE stream of run events
+  // GET /agent-interface/runs/:runId/events - SSE stream of run events
   app.get<{ Params: { runId: string } }>('/agent-interface/runs/:runId/events', async (request, reply) => {
     const run = getRun(request.params.runId)
     if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
@@ -9117,7 +9118,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return reply
   })
 
-  // POST /agent-interface/runs/:runId/approve — human approves the pending action
+  // POST /agent-interface/runs/:runId/approve - human approves the pending action
   app.post<{ Params: { runId: string } }>('/agent-interface/runs/:runId/approve', async (request, reply) => {
     const run = getRun(request.params.runId)
     if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
@@ -9127,7 +9128,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, runId: request.params.runId }
   })
 
-  // POST /agent-interface/runs/:runId/reject — human rejects the pending action
+  // POST /agent-interface/runs/:runId/reject - human rejects the pending action
   app.post<{ Params: { runId: string } }>('/agent-interface/runs/:runId/reject', async (request, reply) => {
     const run = getRun(request.params.runId)
     if (!run) { reply.status(404); return { success: false, message: 'Run not found' } }
@@ -9137,18 +9138,18 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, runId: request.params.runId }
   })
 
-  // POST /agent-interface/kill-switch — instantly disable all macOS accessibility control
+  // POST /agent-interface/kill-switch - instantly disable all macOS accessibility control
   app.post('/agent-interface/kill-switch', (request) => {
     const body = request.body as { engage?: boolean }
     if (body?.engage === false) {
       resetKillSwitch()
-      return { success: true, killSwitch: false, message: 'Kill-switch reset — macOS accessibility control re-enabled' }
+      return { success: true, killSwitch: false, message: 'Kill-switch reset - macOS accessibility control re-enabled' }
     }
     engageKillSwitch()
-    return { success: true, killSwitch: true, message: 'Kill-switch engaged — all macOS accessibility control disabled immediately' }
+    return { success: true, killSwitch: true, message: 'Kill-switch engaged - all macOS accessibility control disabled immediately' }
   })
 
-  // GET /agent-interface/kill-switch — check kill-switch state
+  // GET /agent-interface/kill-switch - check kill-switch state
   app.get('/agent-interface/kill-switch', () => {
     return { killSwitch: isKillSwitchEngaged() }
   })
@@ -9243,7 +9244,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // Exit canary mode → enforce
   app.post('/chat/noise-budget/activate', async () => {
     noiseBudgetManager.activateEnforcement()
-    return { success: true, canaryMode: false, message: 'Enforcement activated — suppression is now live' }
+    return { success: true, canaryMode: false, message: 'Enforcement activated - suppression is now live' }
   })
 
   // Force digest flush
@@ -9381,7 +9382,7 @@ export async function createServer(): Promise<FastifyInstance> {
           'blocked':    ['doing', 'todo', 'cancelled'],
           'validating': ['done', 'doing'],   // doing = reviewer rejection / rework
           'done':       [],                   // all exits require reopen
-          'cancelled':  [],                   // terminal state, like done — requires reopen to revive
+          'cancelled':  [],                   // terminal state, like done - requires reopen to revive
           'in-progress': ['blocked', 'validating', 'done', 'doing', 'todo', 'cancelled'], // legacy, permissive
         }
         const allowed = ALLOWED_TRANSITIONS[existing.status] ?? []
@@ -9401,7 +9402,7 @@ export async function createServer(): Promise<FastifyInstance> {
               gate: 'state_machine',
             }
           }
-          // Reopen is valid — stamp it in merged metadata
+          // Reopen is valid - stamp it in merged metadata
           mergedMeta.reopen = true
           mergedMeta.reopen_reason = reopenReason
           mergedMeta.reopened_at = Date.now()
@@ -9640,7 +9641,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // ── Task-close gate: enforce proof + reviewer sign-off before done ──
       if (parsed.status === 'done') {
-        // Duplicate/superseded tasks bypass all close gates — the QA bundle gate
+        // Duplicate/superseded tasks bypass all close gates - the QA bundle gate
         // already validated canonical refs + reason (line ~582).
         const taskCloseReason = typeof mergedMeta.close_reason === 'string'
           ? mergedMeta.close_reason.toLowerCase().trim()
@@ -9688,8 +9689,8 @@ export async function createServer(): Promise<FastifyInstance> {
                 openPrs.push(url)
               }
             } catch {
-              // If GitHub API is unavailable, don't block — log and continue
-              app.log.warn({ prUrl: url }, 'PR merge check skipped — GitHub API unavailable')
+              // If GitHub API is unavailable, don't block - log and continue
+              app.log.warn({ prUrl: url }, 'PR merge check skipped - GitHub API unavailable')
             }
           }
           if (openPrs.length > 0) {
@@ -9713,7 +9714,7 @@ export async function createServer(): Promise<FastifyInstance> {
               success: false,
               error: `Task-close gate: reviewer sign-off required from "${existing.reviewer}"`,
               gate: 'reviewer_signoff',
-              hint: `Reviewer "${existing.reviewer}" must approve via: POST /tasks/:id/review (decision=approve) (or PATCH as reviewer with actor set).`, 
+              hint: `Reviewer "${existing.reviewer}" must approve via: POST /tasks/:id/review (decision=approve) (or PATCH as reviewer with actor set).`,
             }
           }
         }
@@ -9826,7 +9827,7 @@ export async function createServer(): Promise<FastifyInstance> {
             const agentLaneConfig = getAgentLane(claimingAgent)
             const agentLaneName = agentLaneConfig?.name?.toLowerCase() ?? null
 
-            // Only reject if agent IS in a different lane — unconfigured agents are unrestricted.
+            // Only reject if agent IS in a different lane - unconfigured agents are unrestricted.
             if (agentLaneName && agentLaneName !== taskLane) {
               reply.code(400)
               return {
@@ -9845,7 +9846,7 @@ export async function createServer(): Promise<FastifyInstance> {
       // ── Working contract: reflection gate on claim ──
       // Only fires for fresh claims (todo→doing, blocked→doing), not re-claims
       // (validating→doing = reviewer rejection/rework on the agent's own task).
-      // Re-claiming after reviewer rejection is not new work — it's resuming.
+      // Re-claiming after reviewer rejection is not new work - it's resuming.
       const isFreshClaim = parsed.status === 'doing' && existing.status !== 'doing' && existing.status !== 'validating'
       if (isFreshClaim && !isTestTask) {
         try {
@@ -10054,7 +10055,7 @@ export async function createServer(): Promise<FastifyInstance> {
         if (parsed.status === 'done') {
           presenceManager.recordActivity(task.assignee, 'task_completed')
           presenceManager.updatePresence(task.assignee, 'working', null)
-          // Stall detector: agent completed a task — user should respond
+          // Stall detector: agent completed a task - user should respond
           // Determine who to notify: the task creator / assignee who might be waiting
           const waitingUserId = (task.metadata as any)?.userId || task.assignee
           getStallDetector().recordAgentResponse(waitingUserId, task.assignee)
@@ -10081,7 +10082,7 @@ export async function createServer(): Promise<FastifyInstance> {
         const artifactPath = (taskMeta?.review_handoff as Record<string, unknown> | undefined)?.artifact_path
           ?? ((taskMeta?.qa_bundle as Record<string, unknown> | undefined)?.review_packet as Record<string, unknown> | undefined)?.artifact_path
           ?? ''
-        // Build artifact navigation line — PR URL preferred, then artifact path
+        // Build artifact navigation line - PR URL preferred, then artifact path
         const artifactLine = prUrl ? `\nArtifact: ${prUrl}` : (artifactPath ? `\nArtifact: ${artifactPath}` : '')
         const reviewCmd = `\nReview: POST /tasks/${task.id}/review { decision: "approve"|"reject", reviewer: "${existing.reviewer}", comment: "..." }`
         chatManager.sendMessage({
@@ -10118,14 +10119,14 @@ export async function createServer(): Promise<FastifyInstance> {
       }
 
       // ── Approval card: proactively surface approval card on canvas when task enters validating ──
-      // Only emit for human reviewers — agent-to-agent reviews should NOT appear on canvas.
+      // Only emit for human reviewers - agent-to-agent reviews should NOT appear on canvas.
       // If the reviewer is a known agent name, skip the card entirely.
       if (parsed.status === 'validating' && existing.status !== 'validating') {
         const KNOWN_AGENT_IDS = new Set(getAgentRoles().map(r => r.name))
         const reviewerId = (task.reviewer ?? '').toLowerCase().trim()
         const isAgentReviewer = KNOWN_AGENT_IDS.has(reviewerId)
 
-        // Skip canvas card for agent-to-agent reviews — humans don't need to see these
+        // Skip canvas card for agent-to-agent reviews - humans don't need to see these
         if (isAgentReviewer) {
           // Still log for debugging, but no canvas card
           console.log(`[ApprovalCard] Skipped canvas card for agent-to-agent review: ${task.id} (reviewer: ${reviewerId})`)
@@ -10173,7 +10174,7 @@ export async function createServer(): Promise<FastifyInstance> {
       {
         const canvasAgent = (task.assignee || 'unknown').toLowerCase()
         const canvasNow = Date.now()
-        // Identity colors (canonical — match AGENT_IDENTITY_COLORS used by canvas render path)
+        // Identity colors (canonical - match AGENT_IDENTITY_COLORS used by canvas render path)
         const CANVAS_AGENT_ID_COLORS: Record<string, string> = {
           link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
           echo: '#f472b6', rhythm: '#a3e635', spark: '#fb923c', scout: '#fbbf24',
@@ -10267,7 +10268,7 @@ export async function createServer(): Promise<FastifyInstance> {
           queueCanvasPushEvent(validatingPushData)
           emitOrbState('handoff', { id: task.id, title: task.title ?? '' })
         } else if (parsed.status === 'done' && existing.status !== 'done') {
-          // Agent closes task — burst from their orb + orb returns to idle
+          // Agent closes task - burst from their orb + orb returns to idle
           // Enrich with PR metadata for proof artifact card on canvas
           const donePrUrl = (mergedMeta as any)?.review_handoff?.pr_url
             || (mergedMeta as any)?.pr_url
@@ -10295,7 +10296,7 @@ export async function createServer(): Promise<FastifyInstance> {
           queueCanvasPushEvent(donePushData)
           emitOrbState('idle')
         } else if (parsed.status === 'blocked' && existing.status !== 'blocked') {
-          // Agent is blocked — utterance from their orb + orb flips to needs-attention
+          // Agent is blocked - utterance from their orb + orb flips to needs-attention
           const blockedPushData = {
             type: 'utterance',
             agentId: canvasAgent,
@@ -10383,7 +10384,7 @@ export async function createServer(): Promise<FastifyInstance> {
         } else {
           chatManager.sendMessage({
             from: 'system',
-            content: `@${assignee} great work on ${task.id} (${task.title}) ✅\n\nQueue clear — no unassigned tasks available. Great work staying ahead!`,
+            content: `@${assignee} great work on ${task.id} (${task.title}) ✅\n\nQueue clear - no unassigned tasks available. Great work staying ahead!`,
             channel: 'task-notifications',
             metadata: {
               kind: 'auto-queue',
@@ -10419,7 +10420,7 @@ export async function createServer(): Promise<FastifyInstance> {
         const prUrl = (task.metadata as Record<string, unknown>)?.pr_url
           || ((task.metadata as Record<string, unknown>)?.qa_bundle as Record<string, unknown>)?.pr_url
           || ((task.metadata as Record<string, unknown>)?.review_handoff as Record<string, unknown>)?.pr_url
-        const prLink = typeof prUrl === 'string' && prUrl ? ` — ${prUrl}` : ''
+        const prLink = typeof prUrl === 'string' && prUrl ? ` - ${prUrl}` : ''
         const reviewMsg = `@${task.reviewer} review requested: **${task.title}** (${task.id})${prLink}. Please approve or flag issues.`
         chatManager.sendMessage({
           from: 'system',
@@ -10445,7 +10446,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
       for (const target of statusNotifTargets) {
         // Check dedupe guard before emitting.
-        // Pass targetAgent so each recipient gets an independent cursor — prevents
+        // Pass targetAgent so each recipient gets an independent cursor - prevents
         // the first recipient's cursor update from suppressing later recipients for
         // the same event (e.g. assignee + reviewer both getting taskCompleted on 'done').
         const dedupeCheck = shouldEmitNotification({
@@ -10491,7 +10492,7 @@ export async function createServer(): Promise<FastifyInstance> {
           }).catch(() => {}) // Non-blocking
         }
       }
-      
+
       // ── Artifact mirror: copy to shared workspace on validating/done ──
       if (
         (parsed.status === 'validating' || parsed.status === 'done')
@@ -10503,7 +10504,7 @@ export async function createServer(): Promise<FastifyInstance> {
           if (mirrorResult?.mirrored) {
             console.log(`[ArtifactMirror] Mirrored ${mirrorResult.filesCopied} file(s) for ${task.id} → ${mirrorResult.destination}`)
           } else if (mirrorResult && !mirrorResult.mirrored) {
-            // Skip silently when no error — source simply not found (expected in prod installs).
+            // Skip silently when no error - source simply not found (expected in prod installs).
             // Only warn on genuine I/O failures (permissions, disk full, etc.).
             if (mirrorResult.error) {
               console.warn(`[ArtifactMirror] FAILED for ${task.id}: ${mirrorResult.error} (source=${mirrorResult.source})`)
@@ -10570,7 +10571,7 @@ export async function createServer(): Promise<FastifyInstance> {
   app.get('/agents', async () => buildRoleRegistryPayload())
   app.get('/agents/roles', async () => buildRoleRegistryPayload())
 
-  // Host-native identity resolution — resolves agent by name, alias, or display name
+  // Host-native identity resolution - resolves agent by name, alias, or display name
   // without requiring the OpenClaw gateway. Merges YAML roles + agent_config table.
   app.get<{ Params: { name: string } }>('/agents/:name/identity', async (request) => {
     const { name } = request.params
@@ -10594,8 +10595,8 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // ── Agent visual identity — agents choose their own appearance ──────
-  // POST /agents/:name/identity/avatar — agent sets their visual form
+  // ── Agent visual identity - agents choose their own appearance ──────
+  // POST /agents/:name/identity/avatar - agent sets their visual form
   // task-1773690756100
   app.post<{ Params: { name: string } }>('/agents/:name/identity/avatar', async (request) => {
     const { name } = request.params
@@ -10652,7 +10653,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, agentId, avatar }
   })
 
-  // GET /agents/:name/identity/avatar — read agent's visual identity
+  // GET /agents/:name/identity/avatar - read agent's visual identity
   app.get<{ Params: { name: string } }>('/agents/:name/identity/avatar', async (request) => {
     const { name } = request.params
     const resolved = resolveAgentMention(name)
@@ -10668,7 +10669,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { found: true, agentId, avatar: settings.avatar }
   })
 
-  // GET /agents/avatars — all agent avatars (for canvas to render)
+  // GET /agents/avatars - all agent avatars (for canvas to render)
   app.get('/agents/avatars', async () => {
     const db = getDb()
     const rows = db.prepare('SELECT agent_id, settings FROM agent_config WHERE settings LIKE \'%avatar%\'').all() as Array<{ agent_id: string; settings: string }>
@@ -10937,7 +10938,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // POST /agents — Add a single agent to the team
+  // POST /agents - Add a single agent to the team
   app.post('/agents', async (request, reply) => {
     const body = request.body as Record<string, unknown>
     const name = typeof body.name === 'string' ? body.name.trim().toLowerCase() : ''
@@ -11020,7 +11021,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // DELETE /agents/:name — Remove an agent from the team
+  // DELETE /agents/:name - Remove an agent from the team
   app.delete<{ Params: { name: string } }>('/agents/:name', async (request, reply) => {
     const name = request.params.name.toLowerCase()
     const existing = getAgentRoles().find(r => r.name === name)
@@ -11250,7 +11251,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Canvas / Screen Surface (v0) ───────────────────────────────────
 
-  // POST /canvas/render — agents push content to slots
+  // POST /canvas/render - agents push content to slots
   app.post('/canvas/render', async (request, reply) => {
     const body = request.body as any
     if (!body || typeof body !== 'object') {
@@ -11300,7 +11301,7 @@ export async function createServer(): Promise<FastifyInstance> {
     payload: z.object({
       text: z.string().optional(),
       media: z.unknown().optional(),
-      // Explicit content type — eliminates heuristic inference on the canvas
+      // Explicit content type - eliminates heuristic inference on the canvas
       content: z.object({
         type: z.enum(['text', 'markdown', 'code', 'image']).optional(),
         lang: z.string().optional(),  // syntax hint for code blocks (e.g. "typescript", "bash")
@@ -11330,7 +11331,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }).default({}),
   })
 
-  // Current state per agent — in-memory, not persisted
+  // Current state per agent - in-memory, not persisted
   const canvasStateMap = new Map<string, { state: CanvasState; sensors: string | null; payload: unknown; updatedAt: number; lastMessage?: { content: string; timestamp: number } }>()
   _canvasStateMap = canvasStateMap // populate forward reference for earlier route handlers
 
@@ -11434,7 +11435,7 @@ export async function createServer(): Promise<FastifyInstance> {
           },
         })
       } catch (err) {
-        // Non-fatal — canvas auto-state is best-effort
+        // Non-fatal - canvas auto-state is best-effort
         console.warn('[canvas-auto-state] Sweep error:', err)
       }
     }
@@ -11443,7 +11444,7 @@ export async function createServer(): Promise<FastifyInstance> {
     autoStateTimer.unref()
   })().catch(() => { /* never fail startup */ })
 
-  // POST /canvas/state — agent emits a state transition
+  // POST /canvas/state - agent emits a state transition
   app.post('/canvas/state', async (request, reply) => {
     const result = CanvasRenderSchema.safeParse(request.body)
     if (!result.success) {
@@ -11518,7 +11519,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
-    // Auto ghost trail — every state transition leaves a faint particle exhale.
+    // Auto ghost trail - every state transition leaves a faint particle exhale.
     // Fires immediately so SSE subscribers receive it before the next pulse tick.
     // Client renders _ghost=true events with low opacity (0.06-0.14), no TTS.
     if (prevState !== state) {
@@ -11558,7 +11559,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // ── AgentPresence endpoint (matches presence-card-spec.md contract) ──
-  // POST /agents/:agentId/canvas — agent emits a presence-compatible canvas event
+  // POST /agents/:agentId/canvas - agent emits a presence-compatible canvas event
   // Emits canvas_render SSE event with AgentPresence shape + triggers immediate cloud sync
 
   const AGENT_IDENTITY_COLORS: Record<string, string> = {
@@ -11586,8 +11587,8 @@ export async function createServer(): Promise<FastifyInstance> {
     sensors: z.enum(['mic', 'camera', 'mic+camera']).nullable().default(null),
     payload: z.record(z.unknown()).optional(),
     currentPr: z.number().int().positive().optional(),   // open PR number agent is working on
-    progress: z.number().min(0).max(1).optional(),        // 0–1 completion estimate for active task
-    urgency: z.number().min(0).max(1).optional(),         // 0.0–1.0 visual intensity for living canvas
+    progress: z.number().min(0).max(1).optional(),        // 0-1 completion estimate for active task
+    urgency: z.number().min(0).max(1).optional(),         // 0.0-1.0 visual intensity for living canvas
     ambientCue: z.object({                                // living canvas atmosphere override
       colorHint: z.string().optional(),
       particleIntensity: z.number().min(0).max(1).optional(),
@@ -11674,7 +11675,7 @@ export async function createServer(): Promise<FastifyInstance> {
         sensors,
         agentId,
         payload: { ...payload, activeTask, attention },
-        // AgentPresence fields (new contract — includes urgency + ambientCue)
+        // AgentPresence fields (new contract - includes urgency + ambientCue)
         presence: agentPresence,
       },
     })
@@ -11685,7 +11686,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, presence: agentPresence, timestamp: now }
   })
 
-  // GET /agents/:agentId/canvas — current AgentPresence for one agent
+  // GET /agents/:agentId/canvas - current AgentPresence for one agent
   app.get<{ Params: { agentId: string } }>('/agents/:agentId/canvas', async (request) => {
     const { agentId } = request.params
     const entry = canvasStateMap.get(agentId)
@@ -11712,7 +11713,7 @@ export async function createServer(): Promise<FastifyInstance> {
       attention: (entry.payload as any)?.attention,
     }
   })
-  // Flow expression log — shared state for flow-score calculation (in canvas-routes.ts)
+  // Flow expression log - shared state for flow-score calculation (in canvas-routes.ts)
   const flowExpressionLog: Array<{ t: number }> = []
   ;(function trackExpressionVelocity() {
     const listenerId = 'flow-score-tracker'
@@ -11758,7 +11759,7 @@ export async function createServer(): Promise<FastifyInstance> {
   seedCapabilityMap(agents)
   console.log(`[capabilities] seeded ${agents.length} agents with platform capabilities`)
 
-  // ── Canvas activity stream — SSE with backfill ────────────────────────
+  // ── Canvas activity stream - SSE with backfill ────────────────────────
   // New viewers get the last 20 canvas events immediately on connect (backfill),
   // then receive live events going forward. Canvas feels alive from frame 1.
   // Event types: canvas_message, canvas_render, canvas_expression, canvas_burst
@@ -11854,9 +11855,9 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // POST /canvas/query — human asks the canvas a question; agent responds with a typed card
+  // POST /canvas/query - human asks the canvas a question; agent responds with a typed card
   // The response is emitted as a canvas_message event on the pulse SSE stream (no reload needed).
-  // ── Canvas session history — per-session conversation memory ───────────────
+  // ── Canvas session history - per-session conversation memory ───────────────
   // Keyed by sessionId (client-generated UUID). Stores last 5 human+assistant turns.
   // Used to inject conversation context into LLM calls so follow-up questions work.
   // task: link/canvas-session-continuity
@@ -11876,7 +11877,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
       return cached.turns
     }
-    // Cache miss — load from SQLite, prune stale rows
+    // Cache miss - load from SQLite, prune stale rows
     try {
       const db = getDb()
       const cutoff = now - CANVAS_SESSION_TTL_MS
@@ -11915,7 +11916,7 @@ export async function createServer(): Promise<FastifyInstance> {
         )
       `).run(sessionId, sessionId, CANVAS_SESSION_MAX_TURNS * 2)
     } catch {
-      // SQLite failure is non-fatal — in-memory session still works
+      // SQLite failure is non-fatal - in-memory session still works
     }
   }
 
@@ -11933,7 +11934,7 @@ export async function createServer(): Promise<FastifyInstance> {
   } as any)
 
 
-  // POST /canvas/push — agent self-initiates a canvas event without a human query.
+  // POST /canvas/push - agent self-initiates a canvas event without a human query.
   // Agents call this to surface their own work: utterances that float from their orb,
   // release pulses when something ships, handoff arcs when work moves between agents.
   // All events emit on the pulse SSE stream as canvas_push for the browser to render.
@@ -11947,11 +11948,11 @@ export async function createServer(): Promise<FastifyInstance> {
     canvasStateMap,
   } as any)
 
-  // GET /canvas/pulse — SSE stream emitting a heartbeat tick every 2s with live intensity values
+  // GET /canvas/pulse - SSE stream emitting a heartbeat tick every 2s with live intensity values
   // Drives smooth canvas animation without polling. Each tick includes per-agent orb data + team mood.
   // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
   app.get('/canvas/pulse', async (request, reply) => {
-    const STALE_MS = 60 * 60 * 1000 // 60min — agents stay visible as long as they heartbeat
+    const STALE_MS = 60 * 60 * 1000 // 60min - agents stay visible as long as they heartbeat
     const IDENTITY_COLORS: Record<string, string> = {
       kai: '#fb923c',
       pixel: '#a78bfa',
@@ -11971,7 +11972,7 @@ export async function createServer(): Promise<FastifyInstance> {
     let closed = false
     request.raw.on('close', () => { closed = true })
 
-    // Cache avatars — refresh every 30s to avoid DB reads on every tick
+    // Cache avatars - refresh every 30s to avoid DB reads on every tick
     let avatarCache: Record<string, { type: string; content: string; animated: boolean }> = {}
     let avatarCacheAge = 0
     const refreshAvatarCache = () => {
@@ -11991,7 +11992,7 @@ export async function createServer(): Promise<FastifyInstance> {
       } catch { /* non-blocking */ }
     }
 
-    // Cache for focus, calendar, and activity (30s TTL — cheap to compute)
+    // Cache for focus, calendar, and activity (30s TTL - cheap to compute)
     interface CanvasMetaCache { focus: ReturnType<typeof getFocus>; upcomingEvents: Array<{ id: string; summary: string; dtstart: number; organizer: string }>; recentActivity: Array<{ ts: number; type: string; subject: unknown }>; age: number }
     let canvasMetaCache: CanvasMetaCache | null = null
     const getCanvasMeta = (): CanvasMetaCache => {
@@ -12033,7 +12034,7 @@ export async function createServer(): Promise<FastifyInstance> {
         const explicitUrgency = typeof (payload as any).urgency === 'number' ? (payload as any).urgency : null
         const urgency = explicitUrgency ?? (STATE_URGENCY[presState] ?? STATE_URGENCY[entry.state] ?? 0)
 
-        // Extract current task label from payload — supports multiple sources:
+        // Extract current task label from payload - supports multiple sources:
         // 1. Explicit payload.task (agent-pushed)
         // 2. payload.activeTask.title (canvas state)
         // 3. payload.sourceTasks[0].title (auto-state sweep)
@@ -12108,13 +12109,13 @@ export async function createServer(): Promise<FastifyInstance> {
       eventBus.off(listenerId)
     })
 
-    // Keep connection alive — never resolve
+    // Keep connection alive - never resolve
     return new Promise<void>(() => {})
   })
 
-  // GET /canvas/session/mode — inferred presence mode for the current session
+  // GET /canvas/session/mode - inferred presence mode for the current session
   // Mode is derived from: time of day + active canvas states + team rhythm.
-  // Human never selects a mode — surface adapts silently.
+  // Human never selects a mode - surface adapts silently.
   // Returns: { mode, reason, narrative }
   app.get('/canvas/session/mode', async () => {
     const now = Date.now()
@@ -12136,11 +12137,11 @@ export async function createServer(): Promise<FastifyInstance> {
     const activeCount = activeAgents.length
     const isLateNight = hour >= 22 || hour < 6
 
-    // Mode inference — priority cascade
-    // immersive: urgent or decision — human needs full attention
+    // Mode inference - priority cascade
+    // immersive: urgent or decision - human needs full attention
     // operational: rendering/thinking agents, human is watching work happen
-    // conversational: active agents but nothing critical — human may want to talk
-    // ambient: nothing active or late night — canvas breathing quietly
+    // conversational: active agents but nothing critical - human may want to talk
+    // ambient: nothing active or late night - canvas breathing quietly
 
     let mode: 'ambient' | 'conversational' | 'operational' | 'immersive'
     let reason: string
@@ -12156,17 +12157,17 @@ export async function createServer(): Promise<FastifyInstance> {
       reason = 'agents active during working hours'
     } else {
       mode = 'ambient'
-      reason = isLateNight ? 'late night — quiet watch' : 'no active agents'
+      reason = isLateNight ? 'late night - quiet watch' : 'no active agents'
     }
 
-    // One-line narrative — what's happening right now
+    // One-line narrative - what's happening right now
     const agentPhrases: string[] = []
     for (const a of activeAgents.slice(0, 3)) {
       const payload = a.payload as Record<string, unknown>
       const presState = (payload as any)?.presenceState ?? a.state
       const task = (payload as any)?.activeTask?.title
       const phrase = presState === 'thinking' ? `${a.id} is thinking`
-        : presState === 'rendering' ? (task ? `${a.id} is rendering${task ? ` — ${task.slice(0, 30)}` : ''}` : `${a.id} is rendering`)
+        : presState === 'rendering' ? (task ? `${a.id} is rendering${task ? ` - ${task.slice(0, 30)}` : ''}` : `${a.id} is rendering`)
         : presState === 'working' ? (task ? `${a.id} on ${task.slice(0, 30)}` : `${a.id} is working`)
         : presState === 'urgent' ? `${a.id} needs attention`
         : presState === 'decision' ? `${a.id} awaits your decision`
@@ -12190,7 +12191,7 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // GET /canvas/session/snapshot — resumable session state for cross-device continuity
+  // GET /canvas/session/snapshot - resumable session state for cross-device continuity
   // Returns the minimal snapshot needed for a second surface to resume from the same point.
   // Spec: /Users/ryan/.openclaw/workspace-pixel/design/interface-os-v0-continuity.html
   app.get('/canvas/session/snapshot', async (request) => {
@@ -12254,7 +12255,7 @@ export async function createServer(): Promise<FastifyInstance> {
         ? { type: lastContent.event.slot, body: lastContent.event.payload, timestamp: lastContent.timestamp }
         : null,
 
-      // Decision payload — must follow the human to the next surface
+      // Decision payload - must follow the human to the next surface
       active_decision: isDecision ? (payload.decision ?? payload.attention ?? null) : null,
 
       // Attention / approval context
@@ -12267,14 +12268,14 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // Handoff metadata
       handoff: {
-        // Sensor consent is per-device — new device must re-consent
+        // Sensor consent is per-device - new device must re-consent
         sensor_consent_transferred: false,
-        // In-progress streams cannot freeze — target joins at next complete block
+        // In-progress streams cannot freeze - target joins at next complete block
         stream_in_progress: activeEntry.state === 'rendering',
         // Summary for handoff banner (e.g. "Agent is rendering a code review")
         summary: (() => {
           const name = payload.agentLabel ?? activeAgentId
-          if (activeEntry!.state === 'rendering') return `${name} is rendering${payload.activeTask ? ` — ${(payload.activeTask as any).title}` : ''}`
+          if (activeEntry!.state === 'rendering') return `${name} is rendering${payload.activeTask ? ` - ${(payload.activeTask as any).title}` : ''}`
           if (activeEntry!.state === 'decision' || activeEntry!.state === 'urgent') return `${name} needs a decision`
           if (activeEntry!.state === 'thinking') return `${name} is thinking`
           if (activeEntry!.state === 'waiting') return `${name} is waiting`
@@ -12286,7 +12287,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { snapshot, generated_at: snapshot.generated_at }
   })
 
-  // GET /canvas/history — recent render history
+  // GET /canvas/history - recent render history
   app.get('/canvas/history', async (request) => {
     const query = request.query as any
     const slot = query?.slot as string | undefined
@@ -12296,7 +12297,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // /canvas/rejections → canvas-routes.ts plugin
 
-  // GET /canvas/stream — SSE stream of canvas render events
+  // GET /canvas/stream - SSE stream of canvas render events
   app.get('/canvas/stream', async (request, reply) => {
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -12309,7 +12310,7 @@ export async function createServer(): Promise<FastifyInstance> {
     liveViewerCount++
     let viewersDirty = true
 
-    // Derive agents from task board — only show agents in current TEAM-ROLES.yaml
+    // Derive agents from task board - only show agents in current TEAM-ROLES.yaml
     const allTasks = taskManager.listTasks({})
     const agentStates: Record<string, any> = {}
     const registeredAgentNames = new Set(getAgentRoles().map(r => r.name.toLowerCase()))
@@ -12323,7 +12324,7 @@ export async function createServer(): Promise<FastifyInstance> {
       const isBlocked = task.status === 'blocked'
       const isWorking = task.status === 'doing'
       if (!agentStates[agentId]) {
-        // First task for this agent — create entry with state derived from canvas or task status
+        // First task for this agent - create entry with state derived from canvas or task status
         const lastMsg = (canvasEntry as any)?.lastMessage
         agentStates[agentId] = {
           state: canvasEntry?.state || (isDone ? 'ambient' : isBlocked ? 'attention' : isWorking ? 'working' : 'floor'),
@@ -12342,7 +12343,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
-    // Send current state as initial snapshot — include all agents from task board
+    // Send current state as initial snapshot - include all agents from task board
     const activeSlots = canvasSlots.getActive()
     reply.raw.write(`event: snapshot\ndata: ${JSON.stringify({ slots: activeSlots, agents: agentStates, viewers: liveViewerCount })}\n\n`)
 
@@ -12901,7 +12902,7 @@ export async function createServer(): Promise<FastifyInstance> {
       role_types: ROLE_TYPES,
       severity_levels: SEVERITY_LEVELS,
       confidence_range: { min: 0, max: 10 },
-      evidence_note: 'Array of strings — at least one evidence link, path, or reference required',
+      evidence_note: 'Array of strings - at least one evidence link, path, or reference required',
       dedup: {
         window_hours: 24,
         scope: 'Identical reflections from the same author within the window are suppressed and the canonical reflection is returned.',
@@ -13286,7 +13287,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return insightStats()
   })
 
-  // POST /insights/stale-candidates/reconcile — run stale candidate reconcile sweep
+  // POST /insights/stale-candidates/reconcile - run stale candidate reconcile sweep
   // Closes candidate insights where post-incident recovery evidence exists and guardrails pass.
   app.post<{ Body: { dry_run?: boolean; insight_ids?: string[]; actor?: string } }>(
     '/insights/stale-candidates/reconcile',
@@ -13306,7 +13307,7 @@ export async function createServer(): Promise<FastifyInstance> {
     },
   )
 
-  // GET /insights/stale-candidates/preview — dry-run reconcile (GET for convenience)
+  // GET /insights/stale-candidates/preview - dry-run reconcile (GET for convenience)
   app.get('/insights/stale-candidates/preview', async () => {
     const result = runStaleCandidateReconcileSweep({ dryRun: true, actor: 'preview' })
     return { success: true, ...result }
@@ -13454,12 +13455,12 @@ export async function createServer(): Promise<FastifyInstance> {
 
   // ── Insight auto-tagger ────────────────────────────────────────────────────
 
-  // GET /insights/auto-tag/rules — return current keyword rule set
+  // GET /insights/auto-tag/rules - return current keyword rule set
   app.get('/insights/auto-tag/rules', async () => {
     return { rules: getAutoTagRules(), default_count: DEFAULT_AUTO_TAG_RULES.length }
   })
 
-  // PUT /insights/auto-tag/rules — replace rule set at runtime
+  // PUT /insights/auto-tag/rules - replace rule set at runtime
   app.put('/insights/auto-tag/rules', async (request, reply) => {
     const body = request.body as { rules?: AutoTagRule[] }
     if (!Array.isArray(body?.rules)) {
@@ -13470,13 +13471,13 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, count: body.rules.length }
   })
 
-  // DELETE /insights/auto-tag/rules — reset to defaults
+  // DELETE /insights/auto-tag/rules - reset to defaults
   app.delete('/insights/auto-tag/rules', async () => {
     resetAutoTagRules()
     return { success: true, message: 'Rules reset to defaults', count: DEFAULT_AUTO_TAG_RULES.length }
   })
 
-  // POST /insights/auto-tag/backfill — reclassify all uncategorized insights
+  // POST /insights/auto-tag/backfill - reclassify all uncategorized insights
   // Query: dry_run=true to preview without writing
   app.post('/insights/auto-tag/backfill', async (request) => {
     const q = request.query as Record<string, string>
@@ -13485,7 +13486,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, dry_run: dryRun, ...summary }
   })
 
-  // POST /insights/:id/auto-tag — re-run auto-tag on a single insight
+  // POST /insights/:id/auto-tag - re-run auto-tag on a single insight
   app.post<{ Params: { id: string } }>('/insights/:id/auto-tag', async (request, reply) => {
     const { id } = request.params
     const insight = getInsight(id)
@@ -13818,7 +13819,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // ── Routing Approvals (explicit queue, not all todos) ────────────────
 
   /**
-   * GET /routing/approvals — List tasks with routing_approval=true.
+   * GET /routing/approvals - List tasks with routing_approval=true.
    * This is router-fed ONLY. Tasks without routing_approval never appear.
    */
   app.get('/routing/approvals', async () => {
@@ -13848,7 +13849,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   /**
-   * POST /routing/approvals/:taskId/decide — Approve or reject a routing suggestion.
+   * POST /routing/approvals/:taskId/decide - Approve or reject a routing suggestion.
    * Body: { decision: 'approve' | 'reject', actor: string, assignee?: string, note?: string }
    */
   app.post<{ Params: { taskId: string } }>('/routing/approvals/:taskId/decide', async (request, reply) => {
@@ -13898,7 +13899,7 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   /**
-   * POST /routing/approvals/suggest — Submit a routing suggestion for a task.
+   * POST /routing/approvals/suggest - Submit a routing suggestion for a task.
    * Creates routing_approval=true + routing_suggestion on the task.
    * Body: { taskId: string, suggestedAssignee: string, confidence: number, reason: string, alternatives?: [...] }
    */
@@ -14211,13 +14212,13 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!activeTask && nextTask && nextTask.status === 'todo') {
       // Auto-claim wrapped in try/catch: if claim fails due to lifecycle gates
       // (missing done_criteria/reviewer), heartbeat should still return normally
-      // rather than throwing — agent gets the suggestion without being crashed.
+      // rather than throwing - agent gets the suggestion without being crashed.
       try {
         const { claimTask } = await import('./todoHoardingGuard.js')
         const claimed = await claimTask(nextTask.id, agent)
         nextTask = claimed || null
       } catch {
-        // Claim blocked by lifecycle gate — return task as suggestion only
+        // Claim blocked by lifecycle gate - return task as suggestion only
       }
     }
 
@@ -14241,7 +14242,7 @@ export async function createServer(): Promise<FastifyInstance> {
     } : null
     presenceManager.recordActivity(agent, 'heartbeat')
 
-    // Keep canvasStateMap fresh — agents visible on canvas as long as they heartbeat.
+    // Keep canvasStateMap fresh - agents visible on canvas as long as they heartbeat.
     // Derive canvas state from task activity (same logic as emitOrbState).
     {
       const derivedState = activeTask
@@ -14294,7 +14295,7 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     } catch { /* agent-runs not available */ }
 
-    // Capability context — written by syncCapabilityContext() in cloud.ts.
+    // Capability context - written by syncCapabilityContext() in cloud.ts.
     // Included in heartbeat so Claude Code agents receive it on every check-in.
     const capabilityContext = readCapabilityContext()
 
@@ -14339,7 +14340,7 @@ export async function createServer(): Promise<FastifyInstance> {
     return { success: true, agent, status: 'idle' }
   })
 
-  // ── Agent thought — brief expression that flows to canvas via presence → pulse ──
+  // ── Agent thought - brief expression that flows to canvas via presence → pulse ──
   // POST /agents/:name/thought { text: "..." }
   // Thought is attached to agent's presence entry and synced to cloud heartbeat.
   // Canvas renders it as ephemeral expression (8s TTL managed client-side).
@@ -14381,6 +14382,28 @@ export async function createServer(): Promise<FastifyInstance> {
     const host = request.headers['x-forwarded-host'] || request.headers.host || `127.0.0.1:${serverConfig.port}`
     const baseUrl = `${proto}://${host}`
 
+    // Main bootstrap agent gets post-bootstrap roster activation instructions
+    const isMainAgent = agent === 'main'
+    const mainAgentRosterSection = isMainAgent ? `
+
+## Post-Bootstrap Roster Activation (main agent)
+After you write the team roster via \`PUT /config/team-roles\`, you MUST also spawn the configured agents so they appear as running processes:
+
+1. **Read the roster:** \`curl -s "${baseUrl}/bootstrap/roster"\` — returns agents defined in TEAM-ROLES.yaml
+2. **For each agent in the roster (that isn't 'main' or 'bootstrap'):**
+   a. **Update agents.json** — add to \`~/.openclaw/workspaces/default/agents.json\`:
+      \`\`\`json
+      {"id": "<agentName>", "name": "<displayName>", "model": "minimax-portal/MiniMax-M2.7-highspeed", "workspace": "default"}
+      \`\`\`
+   b. **Spawn the agent** — call \`sessions_spawn\` with:
+      - \`runtime: "subagent"\`
+      - \`mode: "session"\`
+      - \`label: "<agentName>"\`
+      - \`task: "You are <displayName>. Role: <role>. Description: <description>. Read your workspace (${baseUrl}/bootstrap/heartbeat/<agentName>) and start working. Your team is on reflectt."\`
+   c. **Verify** — after spawning, check \`curl -s "${baseUrl}/me/<agentName>"\` to confirm the agent is registered
+3. **Skip already-spawned agents** — check \`curl -s "${baseUrl}/me/<agentName>"\` before spawning. If the agent already exists, skip.
+` : ''
+
     const heartbeatMd = `# HEARTBEAT.md — ${agent}
 # Auto-generated by reflectt-node v${version}
 # Re-fetch: GET /bootstrap/heartbeat/${agent}
@@ -14400,9 +14423,9 @@ If your heartbeat shows **no active task** and **no next task**:
 2. Check the board + top signals:
    - \`curl -s "${baseUrl}/tasks?status=todo&limit=5&compact=true"\`
    - \`curl -s "${baseUrl}/loop/summary?compact=true"\`
-3. If there’s a clear next task for your lane, claim it and start work. If a signal/insight is actionable, create/claim a task and start work.
+3. If there's a clear next task for your lane, claim it and start work. If a signal/insight is actionable, create/claim a task and start work.
 4. If the board + signals are empty, write up what you checked and propose a next step in a problems/ideas channel if your team has one (otherwise use \`#general\`).
-5. If you’re still idle after checking, propose the next highest-leverage work item with evidence — don’t wait for someone else to assign it.
+5. If you're still idle after checking, propose the next highest-leverage work item with evidence — don't wait for someone else to assign it.
 
 ## Comms Protocol (required)
 **Rule: task updates go to the task, not to chat.**
@@ -14427,7 +14450,7 @@ If your heartbeat shows **no active task** and **no next task**:
 - Maintain **>=2 unblocked todo tasks** during active hours.
 - Before moving any task to validating/done, check: will queue drop below 2?
 - If yes: flag in task comment + alert in #general.
-- Board health worker monitors this automatically.
+- Board health worker monitors this automatically.${mainAgentRosterSection}
 
 ## Rules
 - Do not load full chat history.
@@ -14458,9 +14481,32 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
+  // ── Bootstrap Roster: list agents in TEAM-ROLES.yaml for spawning ──────
+  // Used by the main bootstrap agent to discover which agents to spawn after
+  // writing the team roster via PUT /config/team-roles.
+  app.get('/bootstrap/roster', async () => {
+    const roles = getAgentRoles()
+    const spawnable = roles
+      .filter(r => r.name !== 'main' && r.role !== 'bootstrap')
+      .map(r => ({
+        name: r.name,
+        role: r.role,
+        displayName: r.displayName || r.name,
+        description: r.description || '',
+        model: 'minimax-portal/MiniMax-M2.7-highspeed', // default model for spawned agents
+        workspace: 'default',
+      }))
+
+    return {
+      agents: spawnable,
+      count: spawnable.length,
+      hint: 'For each agent: add to ~/.openclaw/workspaces/default/agents.json, then call sessions_spawn.',
+    }
+  })
+
   // ── Capabilities: lightweight, queryable alternative to /docs ────────
   // Full docs: GET /docs (68K chars / ~17K tokens)
-  // This endpoint: ~2K chars filtered, ~4K unfiltered — 90%+ reduction
+  // This endpoint: ~2K chars filtered, ~4K unfiltered - 90%+ reduction
   // Query: ?category=tasks|chat|insights|reflections|heartbeat|inbox|system
   app.get('/capabilities', async (request) => {
     const query = request.query as Record<string, string>
@@ -14473,6 +14519,7 @@ If your heartbeat shows **no active task** and **no next task**:
           { method: 'GET', path: '/heartbeat/:agent', hint: 'Single compact payload (~200 tokens). Replaces /tasks/active + /tasks/next + /inbox.' },
           { method: 'GET', path: '/bootstrap/heartbeat/:agent', hint: 'Generate optimal HEARTBEAT.md. Re-fetch when version changes.' },
           { method: 'POST', path: '/bootstrap/team', hint: 'Returns TEAM-ROLES.yaml schema, constraints, examples, and save endpoint. The calling agent composes the team. Body: { useCase?, maxAgents? }' },
+          { method: 'GET', path: '/bootstrap/roster', hint: 'List agents in TEAM-ROLES.yaml. Used by main agent to discover agents to spawn after bootstrap.' },
         ],
       },
       tasks: {
@@ -14581,7 +14628,7 @@ If your heartbeat shows **no active task** and **no next task**:
     latest: null,
     checkedAt: 0,
   }
-  // GET /capabilities/readiness — per-capability status with dependency checks
+  // GET /capabilities/readiness - per-capability status with dependency checks
   app.get('/capabilities/readiness', async () => {
     const { getCapabilityReadiness } = await import('./capability-readiness.js')
     const provStatus = provisioning.getStatus()
@@ -14826,7 +14873,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
     const shortId = lookup.resolvedId.replace(/^task-\d+-/, '')
     const branch = `${body.agent}/task-${shortId}`
-    // Inject default eta when absent — prevents 500 on the doing-status gate
+    // Inject default eta when absent - prevents 500 on the doing-status gate
     const existingMeta = (task.metadata || {}) as Record<string, unknown>
     const etaDefault = !existingMeta.eta
       ? ({ P0: '~2h', P1: '~2h', P2: '~4h', P3: '~4h' }[task.priority || 'P2'] ?? '~4h')
@@ -15038,7 +15085,7 @@ If your heartbeat shows **no active task** and **no next task**:
   app.post<{ Params: { agent: string } }>('/presence/:agent', async (request) => {
     try {
       const body = request.body as { status: PresenceStatus; task?: string | null; since?: number }
-      
+
       if (!body.status) {
         return { success: false, error: 'status is required' }
       }
@@ -15071,7 +15118,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   // ── Scope Overlap Scanner ──────────────────────────────────────────
-  // POST /pr-link-reconciler/sweep — manually trigger a PR-link reconcile sweep
+  // POST /pr-link-reconciler/sweep - manually trigger a PR-link reconcile sweep
   // Stamps canonical_pr + canonical_commit for validating tasks whose PRs have merged.
   app.post('/pr-link-reconciler/sweep', async (_request, reply) => {
     try {
@@ -15086,7 +15133,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // GET /pr-link-reconciler/preview — dry-run: show which tasks would be updated
+  // GET /pr-link-reconciler/preview - dry-run: show which tasks would be updated
   app.get('/pr-link-reconciler/preview', async () => {
     const tasks = taskManager.listTasks({ status: 'validating' })
     const { extractPrUrl, hasCanonicalRefs } = await import('./pr-link-reconciler.js')
@@ -15101,7 +15148,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, candidates, total: candidates.length }
   })
 
-  // POST /scope-overlap — trigger scope overlap scan after a PR merge
+  // POST /scope-overlap - trigger scope overlap scan after a PR merge
   app.post<{ Body: { prNumber: number; prTitle: string; prBranch: string; mergedTaskId?: string; repo?: string; mergeCommit?: string; notify?: boolean } }>('/scope-overlap', async (request) => {
     const { prNumber, prTitle, prBranch, mergedTaskId, repo, mergeCommit, notify } = request.body || {} as any
     if (!prNumber || !prTitle || !prBranch) {
@@ -15116,13 +15163,13 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   // ── Team Focus ─────────────────────────────────────────────────────
-  // GET /focus — current team focus directive
+  // GET /focus - current team focus directive
   app.get('/focus', async () => {
     const focus = getFocus()
     return focus ? { focus } : { focus: null, message: 'No focus set. Use POST /focus to set one.' }
   })
 
-  // POST /focus — set team focus directive
+  // POST /focus - set team focus directive
   app.post<{ Body: { directive: string; setBy: string; expiresAt?: number; tags?: string[] } }>('/focus', async (request) => {
     const { directive, setBy, expiresAt, tags } = request.body || {} as any
     if (!directive || !setBy) {
@@ -15132,7 +15179,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, focus }
   })
 
-  // DELETE /focus — clear team focus
+  // DELETE /focus - clear team focus
   app.delete('/focus', async () => {
     clearFocus()
     return { success: true, message: 'Focus cleared' }
@@ -15145,28 +15192,28 @@ If your heartbeat shows **no active task** and **no next task**:
 
     // Filter to agents known to this node's TEAM-ROLES registry
     const knownAgentNames = new Set(getAgentRoles().map(r => r.name.toLowerCase()))
-    
+
     // Build map of explicit presence by agent (filtered to registry)
     const presenceMap = new Map(
       explicitPresences
         .filter(p => knownAgentNames.size === 0 || knownAgentNames.has(p.agent.toLowerCase()))
         .map(p => [p.agent, p])
     )
-    
+
     // Add inferred presence for agents with only activity (registry-gated)
     const now = Date.now()
     for (const activity of allActivity) {
       if (!presenceMap.has(activity.agent) && activity.last_active
           && (knownAgentNames.size === 0 || knownAgentNames.has(activity.agent.toLowerCase()))) {
         const inactiveMs = now - activity.last_active
-        
+
         let status: PresenceStatus = 'offline'
-        if (inactiveMs < 15 * 60 * 1000) { // Active in last 15 minutes — match presence.ts IDLE_THRESHOLD_MS
+        if (inactiveMs < 15 * 60 * 1000) { // Active in last 15 minutes - match presence.ts IDLE_THRESHOLD_MS
           status = activity.tasks_completed_today > 0 ? 'working' : 'idle'
-        } else if (inactiveMs < 30 * 60 * 1000) { // 15-30 min — idle grace period before offline
+        } else if (inactiveMs < 30 * 60 * 1000) { // 15-30 min - idle grace period before offline
           status = 'idle'
         }
-        
+
         presenceMap.set(activity.agent, {
           agent: activity.agent,
           status,
@@ -15176,7 +15223,7 @@ If your heartbeat shows **no active task** and **no next task**:
         })
       }
     }
-    
+
     // Enrich with calendar context
     const enriched = Array.from(presenceMap.values()).map(p => {
       const calAvailability = calendarManager.getAgentAvailability(p.agent)
@@ -15209,22 +15256,22 @@ If your heartbeat shows **no active task** and **no next task**:
   // Get specific agent presence
   app.get<{ Params: { agent: string } }>('/presence/:agent', async (request) => {
     let presence = presenceManager.getPresence(request.params.agent)
-    
+
     // If no explicit presence, infer from activity
     if (!presence) {
       const activity = presenceManager.getAgentActivity(request.params.agent)
       if (activity && activity.last_active) {
         const now = Date.now()
         const inactiveMs = now - activity.last_active
-        
-        // Infer status based on recent activity — match presence.ts thresholds
+
+        // Infer status based on recent activity - match presence.ts thresholds
         let status: PresenceStatus = 'offline'
         if (inactiveMs < 15 * 60 * 1000) { // Active in last 15 minutes
           status = activity.tasks_completed_today > 0 ? 'working' : 'idle'
         } else if (inactiveMs < 30 * 60 * 1000) { // 15-30 min idle grace
           status = 'idle'
         }
-        
+
         presence = {
           agent: request.params.agent,
           status,
@@ -15234,7 +15281,7 @@ If your heartbeat shows **no active task** and **no next task**:
         }
       }
     }
-    
+
     if (!presence) {
       return { presence: null, message: 'No presence data for this agent' }
     }
@@ -15267,7 +15314,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
   const agentNotifModule = await import('./agent-notifications.js')
 
-  // POST /agent-notifications — create a notification
+  // POST /agent-notifications - create a notification
   app.post('/agent-notifications', async (request, reply) => {
     const body = request.body as Record<string, unknown>
     const target_agent = String(body.target_agent || '').trim()
@@ -15297,7 +15344,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, notification }
   })
 
-  // POST /agent-notifications/:id/ack — acknowledge a notification
+  // POST /agent-notifications/:id/ack - acknowledge a notification
   app.post<{ Params: { id: string } }>('/agent-notifications/:id/ack', async (request, reply) => {
     const { id } = request.params
     const body = request.body as Record<string, unknown>
@@ -15317,7 +15364,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, notification }
   })
 
-  // GET /agent-notifications?agent=:id — list notifications for an agent
+  // GET /agent-notifications?agent=:id - list notifications for an agent
   app.get('/agent-notifications', async (request, reply) => {
     const query = request.query as Record<string, string>
     const agent = String(query.agent || '').trim()
@@ -15333,18 +15380,18 @@ If your heartbeat shows **no active task** and **no next task**:
     return { notifications: result.notifications, total: result.total }
   })
 
-  // GET /agent-notifications/worker/stats — delivery worker status
+  // GET /agent-notifications/worker/stats - delivery worker status
   app.get('/agent-notifications/worker/stats', async () => {
     return { success: true, stats: notificationWorker.getStats() }
   })
 
-  // POST /agent-notifications/worker/tick — manually trigger delivery tick (for testing)
+  // POST /agent-notifications/worker/tick - manually trigger delivery tick (for testing)
   app.post('/agent-notifications/worker/tick', async () => {
     const results = await notificationWorker.tick()
     return { success: true, results }
   })
 
-  // POST /agent-presence — upsert agent presence (delegates to PresenceManager + logs)
+  // POST /agent-presence - upsert agent presence (delegates to PresenceManager + logs)
   app.post('/agent-presence', async (request) => {
     const body = request.body as Record<string, unknown>
     const agent = String(body.agent || '').trim()
@@ -15369,7 +15416,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, presence }
   })
 
-  // GET /agent-presence?agent=:id — read current agent presence
+  // GET /agent-presence?agent=:id - read current agent presence
   app.get('/agent-presence', async (request, reply) => {
     const query = request.query as Record<string, string>
     const agent = String(query.agent || '').trim()
@@ -15585,7 +15632,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // ============ SECRET VAULT ENDPOINTS ============
 
-  // List secrets (metadata only — no plaintext)
+  // List secrets (metadata only - no plaintext)
   app.get('/secrets', async () => {
     return { success: true, secrets: vault.list(), stats: vault.getStats() }
   })
@@ -15796,16 +15843,16 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get('/analytics/foragents', async (request) => {
     const query = request.query as Record<string, string>
     const period = (query.period || '7d') as '1h' | '24h' | '7d' | '30d'
-    
+
     const analytics = await analyticsManager.getForAgentsAnalytics(period)
-    
+
     if (!analytics) {
-      return { 
-        error: 'Vercel analytics not configured', 
-        message: 'Set VERCEL_TOKEN and VERCEL_PROJECT_ID in .env' 
+      return {
+        error: 'Vercel analytics not configured',
+        message: 'Set VERCEL_TOKEN and VERCEL_PROJECT_ID in .env'
       }
     }
-    
+
     return { analytics }
   })
 
@@ -15817,11 +15864,11 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // ── Activation Funnel ──────────────────────────────────────────────
   /**
-   * GET /activation/funnel — per-user funnel state + aggregate summary.
+   * GET /activation/funnel - per-user funnel state + aggregate summary.
    * Query params:
-   *   ?userId=xxx — get single user's funnel state
-   *   ?raw=true   — include internal/infrastructure users (for debugging)
-   *   (no params) — get aggregate summary across all users (clean, external only)
+   *   ?userId=xxx - get single user's funnel state
+   *   ?raw=true   - include internal/infrastructure users (for debugging)
+   *   (no params) - get aggregate summary across all users (clean, external only)
    */
   app.get('/activation/funnel', async (request) => {
     const query = request.query as Record<string, string>
@@ -15836,7 +15883,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
-   * GET /activation/doctor-gate — polling-optimized endpoint for cloud onboarding UI.
+   * GET /activation/doctor-gate - polling-optimized endpoint for cloud onboarding UI.
    * Cloud BYOH onboarding polls this every 5s to check if the user ran reflectt doctor.
    * Returns a simple passed/failed state without the full funnel payload.
    *
@@ -15877,7 +15924,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
-   * POST /activation/event — manually emit an activation event.
+   * POST /activation/event - manually emit an activation event.
    * Body: { type, userId, metadata? }
    * Used by cloud signup flow and workspace setup.
    */
@@ -15910,7 +15957,7 @@ If your heartbeat shows **no active task** and **no next task**:
   // ── Onboarding Telemetry Dashboard ──────────────────────────────────
 
   /**
-   * GET /activation/dashboard — Full onboarding telemetry dashboard.
+   * GET /activation/dashboard - Full onboarding telemetry dashboard.
    * Returns conversion funnel, failure distribution, and weekly trends.
    * Query: ?weeks=12 (number of weeks for trend history)
    */
@@ -15922,7 +15969,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
-   * GET /activation/funnel/conversions — Step-by-step conversion rates.
+   * GET /activation/funnel/conversions - Step-by-step conversion rates.
    * Returns per-step reach count, conversion rate, and median step time.
    */
   app.get('/activation/funnel/conversions', async (request) => {
@@ -15932,7 +15979,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
-   * GET /activation/funnel/failures — Failure-reason distribution per step.
+   * GET /activation/funnel/failures - Failure-reason distribution per step.
    * Shows where users drop off and why (from event metadata).
    */
   app.get('/activation/funnel/failures', async () => {
@@ -15940,7 +15987,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
-   * GET /activation/funnel/weekly — Weekly trend snapshots for planning.
+   * GET /activation/funnel/weekly - Weekly trend snapshots for planning.
    * Query: ?weeks=12 (default 12 weeks of history)
    * Exportable JSON for planning dashboards.
    */
@@ -15951,7 +15998,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
-   * GET /activation/ghost-signups — Users who signed up but never ran preflight.
+   * GET /activation/ghost-signups - Users who signed up but never ran preflight.
    * Cloud polls this to find candidates for the ghost signup nudge email.
    * Query: ?minAgeHours=2 (default 2h; use 24 for 24h tier candidates)
    *
@@ -15967,7 +16014,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
-   * POST /activation/ghost-signup-nudge — Send re-engagement email to a ghost signup.
+   * POST /activation/ghost-signup-nudge - Send re-engagement email to a ghost signup.
    * Cloud calls this with { userId, email, nudgeTier? } after finding candidates.
    * Node sends the email via cloud relay, tags the user, and returns result.
    *
@@ -16011,7 +16058,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
-   * POST /tracking/live-cta — Track /live page CTA clicks
+   * POST /tracking/live-cta - Track /live page CTA clicks
    * Called by cloud app when user clicks "Start Free" on /live
    * task-1774294960543-v778wwmio
    */
@@ -16025,7 +16072,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   /**
-   * POST /tracking/live-visit — Track /live page visits
+   * POST /tracking/live-visit - Track /live page visits
    * Simple hit counter - logs each visit to console
    */
   app.post('/tracking/live-visit', async (request) => {
@@ -16039,7 +16086,7 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get('/tasks/analytics', async (request) => {
     const query = request.query as Record<string, string>
     const since = query.since ? parseInt(query.since, 10) : undefined
-    
+
     const analytics = analyticsManager.getTaskAnalytics(since)
     return { analytics }
   })
@@ -16081,7 +16128,7 @@ If your heartbeat shows **no active task** and **no next task**:
       return { success: false, error: 'Invalid telemetry payload' }
     }
     // Store telemetry data (for cloud aggregation)
-    // For now, just acknowledge — storage comes with reflectt-cloud
+    // For now, just acknowledge - storage comes with reflectt-cloud
     return { success: true, received: true, timestamp: Date.now() }
   })
 
@@ -16122,7 +16169,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, count: events.length }
   })
 
-  // POST /usage/ingest — accept external usage records from OpenClaw sessions
+  // POST /usage/ingest - accept external usage records from OpenClaw sessions
   // Bridges agents not connected via node heartbeat (swift, kotlin, qa, etc.)
   // into the model_usage table so the cloud dashboard captures all agent spend.
   // Auth: REFLECTT_HOST_HEARTBEAT_TOKEN (Bearer / x-heartbeat-token / body.token).
@@ -16183,7 +16230,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, event }
   })
 
-  // POST /usage/sync/openclaw — on-demand trigger for OpenClaw session sync
+  // POST /usage/sync/openclaw - on-demand trigger for OpenClaw session sync
   // Reads ~/.openclaw/agents/*/sessions/sessions.json and ingests new sessions.
   app.post('/usage/sync/openclaw', async (request, reply) => {
     const auth = verifyHeartbeatAuth(request as any)
@@ -16230,7 +16277,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return getUsageByTask({ since: q.since ? Number(q.since) : undefined, limit: q.limit ? Number(q.limit) : undefined })
   })
 
-  // Cost estimate (dry run — no storage)
+  // Cost estimate (dry run - no storage)
   app.get('/usage/estimate', async (request) => {
     const q = request.query as Record<string, string>
     if (!q.model) return { error: 'model query parameter required' }
@@ -16273,7 +16320,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   // ── Cost Dashboard ──
-  // GET /costs — aggregated spend: daily by model, avg per lane, top tasks
+  // GET /costs - aggregated spend: daily by model, avg per lane, top tasks
   app.get('/costs', async (request) => {
     const q = request.query as Record<string, string>
     const days = q.days ? Math.min(Number(q.days), 90) : 7
@@ -16292,7 +16339,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
 
     // Note: avg_cost_by_lane and avg_cost_by_agent use Math.max(days, 30) as their window.
-    // Lane/agent-level averages need task density to be meaningful — a 7-day window might
+    // Lane/agent-level averages need task density to be meaningful - a 7-day window might
     // have 0-1 closed tasks per agent/lane and produce misleading numbers. Using a 30-day
     // floor is intentional. daily_by_model, daily_totals, and top_tasks_by_cost use the
     // requested `days` window directly and will match the `window_days` field in the response.
@@ -16375,7 +16422,7 @@ If your heartbeat shows **no active task** and **no next task**:
   app.get('/metrics/summary', async (request, reply) => {
     const query = request.query as Record<string, string>
     const includeContent = query.includeContent !== 'false'
-    
+
     const summary = await analyticsManager.getMetricsSummary(includeContent)
     const rawTimestamp = (summary as any)?.timestamp || Date.now()
     const cacheBucketMs = Math.floor(rawTimestamp / 30000) * 30000 // 30s bucket
@@ -16561,7 +16608,7 @@ If your heartbeat shows **no active task** and **no next task**:
     const types = query.types ? query.types.split(',').map(t => t.trim()) : undefined
 
     eventBus.subscribe(reply, agent, topics, types)
-    
+
     // Keep the connection open - don't return anything
     // The reply is handled by the event bus
   })
@@ -16701,7 +16748,7 @@ If your heartbeat shows **no active task** and **no next task**:
   const provisioning = getProvisioningManager()
   provisioning.setVault(vault)
 
-  // Get provisioning status (dashboard-safe — no credentials)
+  // Get provisioning status (dashboard-safe - no credentials)
   app.get('/provisioning/status', async () => {
     return { success: true, provisioning: provisioning.getStatus() }
   })
@@ -16906,7 +16953,7 @@ If your heartbeat shows **no active task** and **no next task**:
             data: {
               type: 'test' as const,
               agentId,
-              title: `CI: ${String(wfRun.name ?? 'workflow')} — ${conclusion}`,
+              title: `CI: ${String(wfRun.name ?? 'workflow')} - ${conclusion}`,
               url: (wfRun.html_url as string) ?? undefined,
               conclusion,
               passed: checkRunsArr.length > 0 ? passed : conclusion === 'success' ? 1 : 0,
@@ -17338,7 +17385,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // ============ OPENCLAW ENDPOINTS ============
 
-  // OpenClaw status — show real config state + remediation when missing
+  // OpenClaw status - show real config state + remediation when missing
   app.get('/openclaw/status', async () => {
     const hasToken = !!openclawConfig.gatewayToken
     const hasUrl = !!openclawConfig.gatewayUrl
@@ -17399,7 +17446,7 @@ If your heartbeat shows **no active task** and **no next task**:
     reply.send(response.body)
   })
 
-  // GET /audit/mutation-alerts — suspicious mutation alert status
+  // GET /audit/mutation-alerts - suspicious mutation alert status
   app.get('/audit/mutation-alerts', async (_request, reply) => {
     reply.send(getMutationAlertStatus())
   })
@@ -17408,7 +17455,7 @@ If your heartbeat shows **no active task** and **no next task**:
   const pruneTimer = setInterval(pruneOldAttempts, 30 * 60 * 1000)
   pruneTimer.unref()
 
-  // GET /compliance/violations — state-read-before-assertion compliance violations
+  // GET /compliance/violations - state-read-before-assertion compliance violations
   app.get('/compliance/violations', async (request, reply) => {
     const query = request.query as Record<string, string>
     const agent = query.agent || undefined
@@ -17427,7 +17474,7 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
-  // GET /audit/reviews — review-field mutation audit ledger
+  // GET /audit/reviews - review-field mutation audit ledger
   app.get('/audit/reviews', async (request, reply) => {
     const query = request.query as Record<string, string>
     const taskId = query.taskId || undefined
@@ -17480,7 +17527,7 @@ If your heartbeat shows **no active task** and **no next task**:
     console.error('[RestartDrift] Failed to run drift guard:', err)
   })
 
-  // GET /execution-health — sweeper status + current violations
+  // GET /execution-health - sweeper status + current violations
   app.get('/execution-health', async (_request, reply) => {
     const status = getSweeperStatus()
     const freshSweep = await sweepValidatingQueue()
@@ -17498,7 +17545,7 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
-  // GET /drift-report — comprehensive PR↔task drift report
+  // GET /drift-report - comprehensive PR↔task drift report
   app.get('/drift-report', async (_request, reply) => {
     const report = generateDriftReport()
     const status = getSweeperStatus()
@@ -17513,7 +17560,7 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
-  // POST /pr-event — webhook for PR state changes (merge/close)
+  // POST /pr-event - webhook for PR state changes (merge/close)
   app.post<{ Body: { taskId: string; prState: 'merged' | 'closed'; prUrl?: string } }>('/pr-event', async (request, reply) => {
     const { taskId, prState, prUrl } = request.body || {}
     if (!taskId || !prState) {
@@ -17551,7 +17598,7 @@ If your heartbeat shows **no active task** and **no next task**:
               },
             })
           } catch {
-            // Task update might fail validation — that's ok
+            // Task update might fail validation - that's ok
           }
         }
       }
@@ -17572,7 +17619,7 @@ If your heartbeat shows **no active task** and **no next task**:
             },
           })
         } catch {
-          // Lifecycle gate might prevent this — log it
+          // Lifecycle gate might prevent this - log it
           console.warn(`[PR-Event] Could not auto-block task ${taskId} after PR close`)
         }
       }
@@ -17585,7 +17632,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // GET /pr-automerge/status — recent merge attempt log
+  // GET /pr-automerge/status - recent merge attempt log
   app.get('/pr-automerge/status', async (_request, reply) => {
     const log = getMergeAttemptLog()
     return {
@@ -17747,7 +17794,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return getReminderEngineStats()
   })
 
-  // ── Schedule feed — team-wide time-awareness ──────────────────────────────
+  // ── Schedule feed - team-wide time-awareness ──────────────────────────────
   //
   // Provides canonical records for deploy windows, focus blocks, and
   // scheduled task work so agents can coordinate timing without chat.
@@ -17755,7 +17802,7 @@ If your heartbeat shows **no active task** and **no next task**:
   // MVP scope: one-off windows only. No iCal/RRULE, no reminders.
   // See src/schedule.ts for what is intentionally NOT included.
 
-  // GET /schedule/feed — upcoming entries in chronological order
+  // GET /schedule/feed - upcoming entries in chronological order
   app.get('/schedule/feed', async (request) => {
     const q = request.query as Record<string, string>
     const kinds = q.kinds ? (q.kinds.split(',') as ScheduleKind[]) : undefined
@@ -17769,7 +17816,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return { entries, count: entries.length }
   })
 
-  // POST /schedule/entries — create a new schedule entry
+  // POST /schedule/entries - create a new schedule entry
   app.post('/schedule/entries', async (request, reply) => {
     try {
       const entry = createScheduleEntry(request.body as any)
@@ -17852,7 +17899,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
 
     if (!icsContent.includes('BEGIN:VCALENDAR') && !icsContent.includes('BEGIN:VEVENT')) {
-      return reply.code(400).send({ error: 'Invalid .ics content — must contain BEGIN:VCALENDAR or BEGIN:VEVENT' })
+      return reply.code(400).send({ error: 'Invalid .ics content - must contain BEGIN:VCALENDAR or BEGIN:VEVENT' })
     }
 
     try {
@@ -17869,7 +17916,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // ── Calendar Events API ────────────────────────────────────────────────
 
-  // GET /calendar/upcoming — next N days of events (agent execution surface)
+  // GET /calendar/upcoming - next N days of events (agent execution surface)
   // Accepts ?days=7 (default 7). Returns spec-shaped response sorted chronologically.
   app.get('/calendar/upcoming', async (request) => {
     const q = request.query as Record<string, string>
@@ -17906,7 +17953,7 @@ If your heartbeat shows **no active task** and **no next task**:
       let input: CreateEventInput
 
       if (typeof body.title === 'string' || typeof body.start === 'string') {
-        // Spec format — translate to internal CreateEventInput
+        // Spec format - translate to internal CreateEventInput
         const title = typeof body.title === 'string' ? body.title.trim() : ''
         const startStr = typeof body.start === 'string' ? body.start : ''
         if (!title) return reply.code(400).send({ error: 'title is required' })
@@ -18271,7 +18318,7 @@ If your heartbeat shows **no active task** and **no next task**:
   // Append an event
   const { validateRoutingSemantics } = await import('./agent-runs.js')
 
-  // GET /events/routing/validate — check if a payload passes routing semantics
+  // GET /events/routing/validate - check if a payload passes routing semantics
   app.post('/events/routing/validate', async (request) => {
     const body = request.body as { eventType?: string; payload?: Record<string, unknown> }
     if (!body?.eventType) return { valid: false, errors: ['eventType is required'], warnings: [] }
@@ -18280,7 +18327,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
   app.post<{ Params: { agentId: string } }>('/agents/:agentId/events', async (request, reply) => {
     const { agentId } = request.params
-    // Note: `enforceRouting` is intentionally excluded from the accepted body — API layer always enforces.
+    // Note: `enforceRouting` is intentionally excluded from the accepted body - API layer always enforces.
     const body = request.body as { eventType?: string; runId?: string; payload?: Record<string, unknown> }
     if (!body?.eventType) return reply.code(400).send({ error: 'eventType is required' })
     try {
@@ -18289,7 +18336,7 @@ If your heartbeat shows **no active task** and **no next task**:
         runId: body.runId,
         eventType: body.eventType,
         payload: body.payload,
-        enforceRouting: true,  // always enforce at API boundary — callers cannot bypass
+        enforceRouting: true,  // always enforce at API boundary - callers cannot bypass
       })
       return reply.code(201).send(event)
     } catch (err: any) {
@@ -18307,7 +18354,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // POST /runs/:runId/events — post an event to a run by runId (without requiring agentId).
+  // POST /runs/:runId/events - post an event to a run by runId (without requiring agentId).
   // Routing semantics are always enforced at this boundary; callers cannot opt out.
   app.post<{ Params: { runId: string } }>('/runs/:runId/events', async (request, reply) => {
     const { runId } = request.params
@@ -18356,8 +18403,8 @@ If your heartbeat shows **no active task** and **no next task**:
 
   // ── Run Event Stream (SSE) ─────────────────────────────────────────────
   // Real-time SSE stream for run events. Canvas subscribes here instead of polling.
-  // GET /agents/:agentId/runs/:runId/stream — stream events for a specific run
-  // GET /agents/:agentId/stream — stream all events for an agent
+  // GET /agents/:agentId/runs/:runId/stream - stream events for a specific run
+  // GET /agents/:agentId/stream - stream all events for an agent
 
   app.get<{ Params: { agentId: string; runId: string } }>('/agents/:agentId/runs/:runId/stream', async (request, reply) => {
     const { agentId, runId } = request.params
@@ -18462,7 +18509,7 @@ If your heartbeat shows **no active task** and **no next task**:
   })
 
   // ── Run Stream (by run ID only) ──────────────────────────────────────
-  // GET /runs/:runId/stream — SSE stream for a run without requiring agentId.
+  // GET /runs/:runId/stream - SSE stream for a run without requiring agentId.
   // Cloud Presence surface subscribes here to show live run activity.
   // Supports Last-Event-ID for reconnection: on reconnect, replays missed events.
   app.get<{ Params: { runId: string } }>('/runs/:runId/stream', async (request, reply) => {
@@ -18526,10 +18573,10 @@ If your heartbeat shows **no active task** and **no next task**:
 
   const { listWorkflowTemplates, getWorkflowTemplate, runWorkflow } = await import('./workflow-templates.js')
 
-  // GET /workflows — list available workflow templates
+  // GET /workflows - list available workflow templates
   app.get('/workflows', async () => ({ templates: listWorkflowTemplates() }))
 
-  // GET /workflows/:id — get template details
+  // GET /workflows/:id - get template details
   app.get<{ Params: { id: string } }>('/workflows/:id', async (request, reply) => {
     const template = getWorkflowTemplate(request.params.id)
     if (!template) { reply.code(404); return { error: 'Template not found' } }
@@ -18541,7 +18588,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // POST /workflows/:id/run — execute a workflow
+  // POST /workflows/:id/run - execute a workflow
   app.post<{ Params: { id: string } }>('/workflows/:id/run', async (request, reply) => {
     const template = getWorkflowTemplate(request.params.id)
     if (!template) { reply.code(404); return { error: 'Template not found' } }
@@ -18556,7 +18603,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return result
   })
 
-  // POST /workflows/pr-review-demo — canonical runnable regression workflow
+  // POST /workflows/pr-review-demo - canonical runnable regression workflow
   // Happy path: create task (if missing) → run template → return run + recent events.
   app.post('/workflows/pr-review-demo', async (request, reply) => {
     const body = request.body as {
@@ -18730,7 +18777,7 @@ If your heartbeat shows **no active task** and **no next task**:
   // Run once at startup to archive any stale runs immediately
   try { applyRunRetention({ policy: { maxAgeDays: serverConfig.runRetentionDays } }) } catch { /* non-fatal */ }
 
-  // Schedule daily webhook payload purge — removes stored payloads older than 90 days.
+  // Schedule daily webhook payload purge - removes stored payloads older than 90 days.
   // ── Stale candidate reconciler scheduler ──
   // Runs at startup (after 90s) + every 4 hours. Dry-run unless REFLECTT_AUTO_RECONCILE_CANDIDATES=true.
   ;(async () => {
@@ -18797,10 +18844,10 @@ If your heartbeat shows **no active task** and **no next task**:
         try { purgeOldPayloads(WEBHOOK_PAYLOAD_RETENTION_DAYS) } catch { /* non-fatal */ }
       }, 24 * 60 * 60 * 1000)
       webhookPurgeTimer.unref()
-    } catch { /* webhook-storage not available — skip */ }
+    } catch { /* webhook-storage not available - skip */ }
   })().catch(() => { /* outer non-fatal */ })
 
-  // GET /runs/retention/stats — preview what retention policy would do
+  // GET /runs/retention/stats - preview what retention policy would do
   app.get('/runs/retention/stats', async (request) => {
     const query = request.query as { maxAgeDays?: string; maxCompletedRuns?: string }
     return getRetentionStats({
@@ -18809,7 +18856,7 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
-  // POST /runs/retention/apply — apply retention policy
+  // POST /runs/retention/apply - apply retention policy
   app.post('/runs/retention/apply', async (request) => {
     const body = request.body as {
       maxAgeDays?: number
@@ -18949,7 +18996,7 @@ If your heartbeat shows **no active task** and **no next task**:
 
   const { listTrustEvents } = await import('./trust-events.js')
 
-  // GET /trust-events — list trust-collapse signals (diagnostic)
+  // GET /trust-events - list trust-collapse signals (diagnostic)
   app.get('/trust-events', async (request) => {
     const query = request.query as { agentId?: string; eventType?: string; since?: string; limit?: string }
     return listTrustEvents({
@@ -18977,7 +19024,7 @@ If your heartbeat shows **no active task** and **no next task**:
     })
   })
 
-  // Dedicated approval queue — unified view of everything needing human decision.
+  // Dedicated approval queue - unified view of everything needing human decision.
   // Answers: what needs decision, who owns it, when it expires, what happens if ignored.
   app.get('/approval-queue', async (request) => {
     const query = request.query as {
@@ -18993,7 +19040,7 @@ If your heartbeat shows **no active task** and **no next task**:
       limit: query.limit ? parseInt(query.limit, 10) : undefined,
     })
 
-    // Also surface agent-interface runs awaiting approval — they appear in the same decision card
+    // Also surface agent-interface runs awaiting approval - they appear in the same decision card
     const pendingRuns = listPendingRuns()
     const agentInterfaceItems = pendingRuns.map(run => ({
       id: run.id,
@@ -19001,7 +19048,7 @@ If your heartbeat shows **no active task** and **no next task**:
       agentId: 'agent-interface',
       runId: run.id,
       title: `Agent action: ${(run.input as any).title ?? run.kind}`,
-      description: `${run.kind} — ${(run.input as any).repo ?? ''}: ${(run.input as any).title ?? ''}`.trim(),
+      description: `${run.kind} - ${(run.input as any).repo ?? ''}: ${(run.input as any).title ?? ''}`.trim(),
       urgency: 'normal',
       owner: 'human',
       expiresAt: run.createdAt + 10 * 60 * 1000,
@@ -19011,7 +19058,7 @@ If your heartbeat shows **no active task** and **no next task**:
       event: { id: run.id, event_type: 'approval_requested', payload: run.input },
     }))
 
-    // Filter out agent-to-agent reviews — humans don't need to see these on the canvas.
+    // Filter out agent-to-agent reviews - humans don't need to see these on the canvas.
     // Only show items where the reviewer is a human (not a known agent).
     const KNOWN_AGENTS_APPROVAL = new Set(getAgentRoles().map(r => r.name))
 
@@ -19050,7 +19097,7 @@ If your heartbeat shows **no active task** and **no next task**:
       return reply.code(400).send({ error: 'actor is required' })
     }
     try {
-      // Auto-supply minimal rationale if omitted — humans approving via UI won't know to send it
+      // Auto-supply minimal rationale if omitted - humans approving via UI won't know to send it
       const rationale = body.rationale ?? {
         choice: `${body.decision === 'approve' ? 'Approved' : 'Rejected'} by ${body.actor}`,
         considered: ['approve', 'reject'],
@@ -19112,9 +19159,9 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // POST /run-approvals/:eventId/decide — iOS lock screen action buttons + agent-interface approval bridge
+  // POST /run-approvals/:eventId/decide - iOS lock screen action buttons + agent-interface approval bridge
   // Accepts approve/reject decisions from mobile clients directly.
-  // Also handles agent-interface run approvals — if eventId matches a pending agent-interface run,
+  // Also handles agent-interface run approvals - if eventId matches a pending agent-interface run,
   // routes to approveRun/rejectRun instead of the legacy event system.
   app.post<{ Params: { eventId: string } }>('/run-approvals/:eventId/decide', async (request, reply) => {
     const { eventId } = request.params
@@ -19221,7 +19268,7 @@ If your heartbeat shows **no active task** and **no next task**:
     // Normalize: accept `type` as alias for `action` (canvas_input.v1 compat)
     const action: CanvasInputAction = (input.action ?? input.type) as CanvasInputAction
 
-    // Route surface signals — surface_tap and presence_dot_tap
+    // Route surface signals - surface_tap and presence_dot_tap
     // These are UI receptivity signals from the canvas surface, not agent-control actions.
     if (action === 'surface_tap' || action === 'presence_dot_tap') {
       eventBus.emit({
@@ -19273,7 +19320,7 @@ If your heartbeat shows **no active task** and **no next task**:
           updateAgentRun(runId, {
             status: action === 'interrupt' ? 'cancelled' : 'blocked',
           })
-        } catch { /* run may not exist — still emit event */ }
+        } catch { /* run may not exist - still emit event */ }
       }
 
       eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
@@ -19310,7 +19357,7 @@ If your heartbeat shows **no active task** and **no next task**:
       return { success: true, action: 'resume', targetRunId: runId || null, actor: input.actor, timestamp: now }
     }
 
-    // Mute/unmute — emit event only, no state change needed
+    // Mute/unmute - emit event only, no state change needed
     eventBus.emit({ id: `cinput-${Date.now()}-${Math.random().toString(36).slice(2,8)}`, type: "canvas_input" as const, timestamp: Date.now(), data: {
       action,
       actor: input.actor,
@@ -19320,16 +19367,16 @@ If your heartbeat shows **no active task** and **no next task**:
     return { success: true, action, actor: input.actor, timestamp: now }
   })
 
-  // GET /canvas/input/schema — discovery endpoint
+  // GET /canvas/input/schema - discovery endpoint
   app.get('/canvas/input/schema', async () => ({
     actions: CANVAS_INPUT_ACTIONS,
     schema: {
       action: 'decision | interrupt | pause | resume | mute | unmute',
-      targetRunId: 'optional — which run to act on',
-      decisionId: 'required for decision action — approval event ID',
-      choice: 'required for decision — approve | deny | defer',
-      actor: 'required — who made this input',
-      comment: 'optional — rationale',
+      targetRunId: 'optional - which run to act on',
+      decisionId: 'required for decision action - approval event ID',
+      choice: 'required for decision - approve | deny | defer',
+      actor: 'required - who made this input',
+      comment: 'optional - rationale',
     },
   }))
 
@@ -19380,7 +19427,7 @@ If your heartbeat shows **no active task** and **no next task**:
     if (!subject) return reply.code(400).send({ error: 'subject is required' })
     if (!body.html && !body.text) return reply.code(400).send({ error: 'html or text body is required' })
 
-    // Use host-relay endpoint — authenticates with host credential, uses host's own teamId server-side
+    // Use host-relay endpoint - authenticates with host credential, uses host's own teamId server-side
     const hostId = process.env.REFLECTT_HOST_ID
     const relayPath = hostId ? `/api/hosts/${encodeURIComponent(hostId)}/relay/email` : '/api/hosts/relay/email'
     return cloudRelay(relayPath, {
@@ -19451,9 +19498,9 @@ If your heartbeat shows **no active task** and **no next task**:
   // ── Managed Browser Sessions (cloud relay via host credential) ─────────
   // Proxies to the cloud API's managed browser session stack using host auth.
   // Allows agents to use cloud-stored auth profiles (e.g., @ReflecttAI X session)
-  // without needing Supabase JWT — uses host credential auth instead.
+  // without needing Supabase JWT - uses host credential auth instead.
 
-  // GET /browser/managed/sessions — list managed sessions
+  // GET /browser/managed/sessions - list managed sessions
   app.get('/browser/managed/sessions', async (request, reply) => {
     const query = request.query as Record<string, string>
     const hostId = process.env.REFLECTT_HOST_ID
@@ -19468,7 +19515,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return cloudRelay(`${relayPath}${qs ? `?${qs}` : ''}`, {}, reply, 'GET')
   })
 
-  // POST /browser/managed/sessions — create a managed session
+  // POST /browser/managed/sessions - create a managed session
   app.post('/browser/managed/sessions', async (request, reply) => {
     const body = request.body as Record<string, unknown>
     const hostId = process.env.REFLECTT_HOST_ID
@@ -19481,7 +19528,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }, reply)
   })
 
-  // POST /browser/managed/sessions/:sessionId/runs — execute actions in a managed session
+  // POST /browser/managed/sessions/:sessionId/runs - execute actions in a managed session
   app.post<{ Params: { sessionId: string } }>('/browser/managed/sessions/:sessionId/runs', async (request, reply) => {
     const { sessionId } = request.params
     const body = request.body as Record<string, unknown>
@@ -19501,13 +19548,13 @@ If your heartbeat shows **no active task** and **no next task**:
 
   const { getAgentConfig, listAgentConfigs, setAgentConfig, deleteAgentConfig, checkCostCap } = await import('./agent-config.js')
 
-  // GET /agents/:agentId/config — get config for an agent
+  // GET /agents/:agentId/config - get config for an agent
   app.get<{ Params: { agentId: string } }>('/agents/:agentId/config', async (request) => {
     const config = getAgentConfig(request.params.agentId)
     return config ?? { agentId: request.params.agentId, configured: false }
   })
 
-  // PUT /agents/:agentId/config — upsert config for an agent
+  // PUT /agents/:agentId/config - upsert config for an agent
   app.put<{ Params: { agentId: string } }>('/agents/:agentId/config', async (request, reply) => {
     const body = request.body as Record<string, unknown> ?? {}
     try {
@@ -19527,20 +19574,20 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // DELETE /agents/:agentId/config — remove config for an agent
+  // DELETE /agents/:agentId/config - remove config for an agent
   app.delete<{ Params: { agentId: string } }>('/agents/:agentId/config', async (request, reply) => {
     const deleted = deleteAgentConfig(request.params.agentId)
     if (!deleted) { reply.code(404); return { error: 'Config not found' } }
     return { success: true }
   })
 
-  // GET /agent-configs — list all agent configs
+  // GET /agent-configs - list all agent configs
   app.get('/agent-configs', async (request) => {
     const query = request.query as { teamId?: string }
     return { configs: listAgentConfigs({ teamId: query.teamId }) }
   })
 
-  // GET /agents/:agentId/cost-check — runtime cost enforcement check
+  // GET /agents/:agentId/cost-check - runtime cost enforcement check
   // Used by the runtime before making model calls.
   app.get<{ Params: { agentId: string } }>('/agents/:agentId/cost-check', async (request) => {
     const query = request.query as { dailySpend?: string; monthlySpend?: string }
@@ -19562,14 +19609,14 @@ If your heartbeat shows **no active task** and **no next task**:
 
   ensureUsageLogTable()
 
-  // POST /agents/:agentId/enforce-cost — runtime enforcement before model calls
+  // POST /agents/:agentId/enforce-cost - runtime enforcement before model calls
   app.post<{ Params: { agentId: string } }>('/agents/:agentId/enforce-cost', async (request, reply) => {
     const result = enforcePolicy(request.params.agentId)
     const status = result.action === 'deny' ? 403 : 200
     return reply.code(status).send(result)
   })
 
-  // GET /agents/:agentId/spend — current daily + monthly spend
+  // GET /agents/:agentId/spend - current daily + monthly spend
   app.get<{ Params: { agentId: string } }>('/agents/:agentId/spend', async (request) => {
     const { agentId } = request.params
     return {
@@ -19579,7 +19626,7 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // POST /usage/record — record a usage event
+  // POST /usage/record - record a usage event
   // Writes to BOTH usage_log (cost-enforcement) AND model_usage (usage-tracking → cloud sync).
   // Previously only wrote to usage_log, causing all models (gpt-5.4, etc.) to appear as $0
   // in the cloud usage dashboard which reads from model_usage via syncUsage().
@@ -19598,7 +19645,7 @@ If your heartbeat shows **no active task** and **no next task**:
     const outputTokens = body.outputTokens ?? 0
     const cost = body.cost
 
-    // Write to cost-enforcement usage_log (existing path — enforces caps)
+    // Write to cost-enforcement usage_log (existing path - enforces caps)
     recordUsage({
       agentId: body.agentId,
       model: body.model,
@@ -19626,7 +19673,7 @@ If your heartbeat shows **no active task** and **no next task**:
     return reply.code(201).send({ ok: true })
   })
 
-  // POST /usage/purge — purge old usage records
+  // POST /usage/purge - purge old usage records
   app.post('/usage/purge', async (request) => {
     const body = request.body as { maxAgeDays?: number } | null
     const deleted = purgeUsageLog(body?.maxAgeDays ?? 90)
