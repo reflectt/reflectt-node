@@ -28,8 +28,8 @@ import { join } from 'path'
 import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
 import { listApprovalQueue, listAgentEvents, listAgentRuns, type AgentRun } from './agent-runs.js'
+import { syncTeamContextToAgents } from './team-context-writer.js'
 import { getUnpushedTrustEvents, markTrustEventsPushed } from './trust-events.js'
-import { getCapabilityReadiness } from './capability-readiness.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -886,18 +886,6 @@ async function sendHeartbeat(): Promise<void> {
         errors: m.rolling.errors,
         windowMs,
         errorRatePct: Math.round(errorRatePct * 100) / 100,
-      }
-    })(),
-    capabilityReadiness: (() => {
-      try {
-        const r = getCapabilityReadiness({
-          cloudConnected: true,
-          cloudUrl: config.cloudUrl,
-          webhooks: [],
-        })
-        return r
-      } catch {
-        return undefined
       }
     })(),
     source: {
@@ -2037,12 +2025,16 @@ async function syncCapabilityContext(): Promise<void> {
       // No capabilities yet — remove stale file so agents don't get outdated context
       if (existsSync(CAPABILITY_CONTEXT_FILE)) {
         writeFileSync(CAPABILITY_CONTEXT_FILE, '')
+        syncTeamContextToAgents(REFLECTT_HOME)
       }
       return
     }
 
     writeFileSync(CAPABILITY_CONTEXT_FILE, `## Team capabilities\n\n${hint}\n`)
     console.log(`[cloud] capability context updated (${hint.length} chars)`)
+
+    // Sync capability context to all agent workspaces so agents see available capabilities
+    syncTeamContextToAgents(REFLECTT_HOME)
   } catch (err: any) {
     // Non-fatal: agents run without capability context if the fetch fails
     console.warn(`[cloud] capability context fetch failed: ${err?.message || 'unknown error'}`)

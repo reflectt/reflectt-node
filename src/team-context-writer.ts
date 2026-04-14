@@ -154,23 +154,37 @@ export function writeTeamFact(reflecttHome: string, fact: TeamFact): void {
  * Copies the shared TEAM-CONTEXT.md to each agent's workspace-{name}/ directory.
  */
 export function syncTeamContextToAgents(reflecttHome: string): void {
-  const sharedPath = getTeamContextPath(reflecttHome)
-  if (!existsSync(sharedPath)) return
-  const content = readFileSync(sharedPath, 'utf-8')
-
   // Find all agent workspace directories
+  let agentEntries: string[] = []
   try {
-    const entries = readdirSync(reflecttHome)
-    for (const entry of entries) {
-      if (!entry.startsWith('workspace-')) continue
+    agentEntries = readdirSync(reflecttHome).filter(e => e.startsWith('workspace-'))
+  } catch { return }
+
+  // Sync shared TEAM-CONTEXT.md to each agent workspace
+  const sharedPath = getTeamContextPath(reflecttHome)
+  if (existsSync(sharedPath)) {
+    const content = readFileSync(sharedPath, 'utf-8')
+    for (const entry of agentEntries) {
       const agentWsPath = join(reflecttHome, entry)
       try {
         if (!statSync(agentWsPath).isDirectory()) continue
-        const agentContextPath = join(agentWsPath, TEAM_CONTEXT_FILENAME)
-        writeFileSync(agentContextPath, content, 'utf-8')
+        writeFileSync(join(agentWsPath, TEAM_CONTEXT_FILENAME), content, 'utf-8')
       } catch { /* skip inaccessible dirs */ }
     }
-  } catch { /* no workspace dirs */ }
+  }
+
+  // Sync capability context to each agent workspace so agents see available capabilities
+  const capContextPath = join(reflecttHome, 'capability-context.md')
+  if (existsSync(capContextPath)) {
+    const capContent = readFileSync(capContextPath, 'utf-8')
+    for (const entry of agentEntries) {
+      const agentWsPath = join(reflecttHome, entry)
+      try {
+        if (!statSync(agentWsPath).isDirectory()) continue
+        writeFileSync(join(agentWsPath, 'capability-context.md'), capContent, 'utf-8')
+      } catch { /* skip inaccessible dirs */ }
+    }
+  }
 }
 
 /**
