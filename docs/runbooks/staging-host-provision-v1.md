@@ -246,3 +246,52 @@ If a provision fails:
 1. **Browser automation** — Staging nodes don't have Playwright/Chromium installed. This is a product gap.
 2. **Fly internal routing** — ✅ Verified on canonical host `rn-b1964d01-fhdmps`: `/health` → 200, `REFLECTT_NODE_URL=http://rn-b1964d01-fhdmps.internal:4445` present in agent exec env, `/capabilities` returns full API surface.
 3. **AGENTS.md instruction gap** — `PUT /config/team-roles` needs `{"yaml": "..."}` wrapper format but AGENTS.md didn't specify this.
+
+---
+
+## Known Issues / Recent Fixes
+
+### Bootstrap Stall (Fixed in reflectt-cloud#2345)
+
+**Symptom:** Founding agent crash-loops after fresh invite-path provision. Generic "Welcome" task created instead of intent-driven bootstrap.
+
+**Root cause:** `TEAM_INTENT` env var was never passed to the node Fly machine during provision. Gateway had the file, but node read empty `process.env.TEAM_INTENT`.
+
+**What happened:**
+1. `fly-provisioner.ts` seeded `TEAM_INTENT.md` in gateway workspace ✅
+2. `opts.intent` was NOT passed as `TEAM_INTENT` env var to node machine ❌
+3. Node took "no-intent first-boot path" → created generic "Welcome" task
+4. Gateway agent crashed and restart-looped
+
+**Fix:** reflectt-cloud#2345 — `fly-provisioner.ts` now passes `TEAM_INTENT` as env var to the node machine alongside the gateway file seed.
+
+**PR references:**
+- reflectt-cloud#2342 — Seed `TEAM_INTENT.md` in gateway workspace ✅
+- reflectt-cloud#2345 — Pass `TEAM_INTENT` env var to node machine ✅
+
+**Both are needed.** #2342 alone was incomplete.
+
+**Verification steps (post-fix):**
+1. Provision ONE fresh host via invite path — do NOT use existing broken hosts
+2. Verify `TEAM_INTENT` in node env: `flyctl logs -a <nodeApp> --since 5m | grep TEAM_INTENT`
+3. Verify intent-driven bootstrap task (not generic "Welcome")
+4. Verify `main` completes bootstrap, `TEAM-ROLES.yaml` written
+5. Verify teammates spawn (2+ extra agents)
+
+---
+
+### Fly Machines API Image Update (Fixed in reflectt-cloud#2348)
+
+**Symptom:** Bulk node image update returned 404 for all 19 staging nodes.
+
+**Root cause:** `updateManagedNodeImage` called `PATCH /apps/:app/machines/:id` which doesn't exist in Fly Machines API v1.
+
+**Fix:** Changed to `POST /apps/:app/machines/:id` (same path, correct method). reflectt-cloud#2348.
+
+**Fleet image update command:**
+```bash
+curl -X POST "https://api.staging.reflectt.ai/api/admin/hosts/update-image" \
+  -H "Authorization: Bearer <admin-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"image": "ghcr.io/reflectt/reflectt-node:<tag>"}'
+```
