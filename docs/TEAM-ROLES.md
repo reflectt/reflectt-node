@@ -25,7 +25,31 @@ export REFLECTT_HOME=/data/reflectt   # Docker, managed hosts, etc.
 
 Default: `~/.reflectt`
 
-## Config Location
+### On a Managed Host (Fly.io)
+
+On Fly.io managed hosts, you cannot SSH directly into the machine. Instead, update TEAM-ROLES.yaml via the REST API:
+
+```bash
+# Read current config
+curl http://<host>:4445/team/roles
+
+# Update via the bootstrap config endpoint
+curl -X PUT http://<host>:4445/config/team-roles \
+  -H "Content-Type: application/json" \
+  -d '{"yaml": "agents:\n  - name: alice\n    role: builder\n    description: Full-stack developer\n    affinityTags: [backend, api, frontend]\n    wipCap: 2\n  - name: bob\n    role: designer\n    description: UI/UX designer\n    affinityTags: [design, ui, css]\n    wipCap: 1\n"}'
+
+# Verify changes
+curl http://<host>:4445/team/roles | jq '.agents'
+```
+
+Changes are hot-reloaded within 5 seconds — no restart needed.
+
+To see what agents are currently configured (read-only):
+```bash
+curl http://<host>:4445/team/roles
+```
+
+### Config Location
 
 Checked in order (all under `REFLECTT_HOME`):
 1. `$REFLECTT_HOME/TEAM-ROLES.yaml`
