@@ -33,7 +33,7 @@ describe('notificationDedupeGuard', () => {
       expect(result.emit).toBe(true)
     })
 
-    it('drops event when updatedAt equals lastSeen', () => {
+    it('drops event when updatedAt equals lastSeen (same-rank re-emit)', () => {
       shouldEmitNotification({ taskId: 'task-1', eventUpdatedAt: 1000, eventStatus: 'doing' })
 
       const result = shouldEmitNotification({
@@ -42,7 +42,7 @@ describe('notificationDedupeGuard', () => {
         eventStatus: 'doing',
       })
       expect(result.emit).toBe(false)
-      expect(result.reason).toContain('Stale event')
+      expect(result.reason).toContain('Same-rank re-emit')
     })
 
     it('drops event when updatedAt is less than lastSeen', () => {
@@ -82,6 +82,32 @@ describe('notificationDedupeGuard', () => {
       })
       expect(result.emit).toBe(false)
       expect(result.reason).toContain('Contradictory')
+    })
+
+    it('suppresses same-status re-emit (done→done on already-done task)', () => {
+      // Bug: server-side handler calls shouldEmitNotification with task.updatedAt for both
+      // eventUpdatedAt and currentTaskUpdatedAt (they're equal). Same-rank re-emits slip
+      // through unless the dedupe cursor tracks last-emitted status.
+      // First call — emits (no prior cursor), sets cursor to {3000, done}
+      const r1 = shouldEmitNotification({
+        taskId: 'task-3',
+        eventUpdatedAt: 3000,
+        eventStatus: 'done',
+        currentTaskStatus: 'done',
+        currentTaskUpdatedAt: 3000,
+      })
+      expect(r1.emit).toBe(true)
+
+      // Second call — same timestamp AND same status, cursor exists → suppressed
+      const r2 = shouldEmitNotification({
+        taskId: 'task-3',
+        eventUpdatedAt: 3000,
+        eventStatus: 'done',
+        currentTaskStatus: 'done',
+        currentTaskUpdatedAt: 3000,
+      })
+      expect(r2.emit).toBe(false)
+      expect(r2.reason).toContain('Same-rank re-emit')
     })
 
     it('allows event when task status matches', () => {
@@ -129,8 +155,8 @@ describe('notificationDedupeGuard', () => {
 
       const state = getDedupeState()
       expect(state.size).toBe(2)
-      expect(state.cursors['task-a']).toBe(100)
-      expect(state.cursors['task-b']).toBe(200)
+      expect(state.cursors['task-a']).toEqual({ updatedAt: 100, status: 'doing' })
+      expect(state.cursors['task-b']).toEqual({ updatedAt: 200, status: 'todo' })
     })
 
     it('clearDedupeState resets all cursors', () => {
@@ -146,7 +172,7 @@ describe('notificationDedupeGuard', () => {
     })
 
     it('pruneDedupeState removes old entries', () => {
-      // Insert an entry with old timestamp
+      // Insert an entry with old timestamp (1ms is always < now - 1000ms)
       shouldEmitNotification({ taskId: 'old-task', eventUpdatedAt: 1, eventStatus: 'doing' })
       shouldEmitNotification({ taskId: 'new-task', eventUpdatedAt: Date.now(), eventStatus: 'doing' })
 

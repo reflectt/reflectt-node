@@ -5,15 +5,20 @@
  * Notification Dedupe Guard
  *
  * Prevents stale/out-of-order task notification events:
- *   1. Tracks lastSeenUpdatedAt per taskId — drops events with updatedAt <= lastSeen
+ *   1. Tracks lastSeen {updatedAt, status } per taskId — drops stale events and same-rank re-emits
  *   2. Checks current task status before emitting — suppresses contradictory transitions
  *      (e.g., event says →doing but task is already done/cancelled)
  *   3. Uses strict > (not >=) cursor semantics for poller ordering
  */
 
-// ── In-memory cursor: taskId → last seen updatedAt ─────────────────────────
+// ── In-memory cursor: taskId → { updatedAt, status } ───────────────────────
 
-const lastSeenByTaskId = new Map<string, number>()
+interface CursorEntry {
+  updatedAt: number
+  status: string
+}
+
+const lastSeenByTaskId = new Map<string, CursorEntry>()
 
 // ── Status ordering (higher = further along the lifecycle) ─────────────────
 
@@ -64,12 +69,22 @@ export function shouldEmitNotification(input: DedupeCheckInput): DedupeCheckResu
   // mutually suppressed by each other's cursor update.
   const cursorKey = targetAgent ? `${taskId}:${targetAgent}` : taskId
 
-  // Guard 1: Monotonic cursor — drop events with updatedAt <= lastSeen
+  // Guard 1: Monotonic cursor — drop events with updatedAt < lastSeen
+  // Also detect same-rank re-emit: same updatedAt AND same status as last emission.
+  // Guard 2 handles contradictory transitions (currentRank > eventRank).
   const lastSeen = lastSeenByTaskId.get(cursorKey)
-  if (lastSeen !== undefined && eventUpdatedAt <= lastSeen) {
-    return {
-      emit: false,
-      reason: `Stale event: updatedAt ${eventUpdatedAt} <= lastSeen ${lastSeen} for ${cursorKey}`,
+  if (lastSeen !== undefined) {
+    if (eventUpdatedAt < lastSeen.updatedAt) {
+      return {
+        emit: false,
+        reason: `Stale event: updatedAt ${eventUpdatedAt} < lastSeen ${lastSeen.updatedAt} for ${cursorKey}`,
+      }
+    }
+    if (eventUpdatedAt === lastSeen.updatedAt && eventStatus === lastSeen.status) {
+      return {
+        emit: false,
+        reason: `Same-rank re-emit: →${eventStatus} already emitted at ${eventUpdatedAt} for ${cursorKey}`,
+      }
     }
   }
 
@@ -78,17 +93,19 @@ export function shouldEmitNotification(input: DedupeCheckInput): DedupeCheckResu
     const eventRank = statusRank(eventStatus)
     const currentRank = statusRank(currentTaskStatus)
 
-    // If current task is further along AND has a newer updatedAt, suppress
-    if (currentRank > eventRank && currentTaskUpdatedAt > eventUpdatedAt) {
+    // If current task is further along than the event claims, suppress.
+    // Guard 1 (monotonic cursor) handles ordering via updatedAt.
+    // Guard 2 catches contradictory transitions: event says →doing but task is already done.
+    if (currentRank > eventRank) {
       return {
         emit: false,
-        reason: `Contradictory: event says →${eventStatus} but task is already ${currentTaskStatus} (updatedAt: ${currentTaskUpdatedAt} > ${eventUpdatedAt})`,
+        reason: `Contradictory: event says →${eventStatus} but task is already ${currentTaskStatus}`,
       }
     }
   }
 
   // Update cursor
-  lastSeenByTaskId.set(cursorKey, eventUpdatedAt)
+  lastSeenByTaskId.set(cursorKey, { updatedAt: eventUpdatedAt, status: eventStatus })
 
   return { emit: true }
 }
@@ -96,8 +113,8 @@ export function shouldEmitNotification(input: DedupeCheckInput): DedupeCheckResu
 /**
  * Get current dedup state for diagnostics.
  */
-export function getDedupeState(): { cursors: Record<string, number>; size: number } {
-  const cursors: Record<string, number> = {}
+export function getDedupeState(): { cursors: Record<string, CursorEntry>; size: number } {
+  const cursors: Record<string, CursorEntry> = {}
   for (const [k, v] of lastSeenByTaskId) cursors[k] = v
   return { cursors, size: lastSeenByTaskId.size }
 }
@@ -116,8 +133,8 @@ export function clearDedupeState(): void {
 export function pruneDedupeState(maxAgeMs: number = 24 * 60 * 60 * 1000): number {
   const cutoff = Date.now() - maxAgeMs
   let pruned = 0
-  for (const [taskId, ts] of lastSeenByTaskId) {
-    if (ts < cutoff) {
+  for (const [taskId, entry] of lastSeenByTaskId) {
+    if (entry.updatedAt < cutoff) {
       lastSeenByTaskId.delete(taskId)
       pruned++
     }
