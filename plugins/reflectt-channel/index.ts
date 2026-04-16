@@ -632,6 +632,14 @@ function handleInbound(data: string, url: string, account: ReflecttAccount, ctx:
     // Determine sender's agent ID (if message is from an agent)
     const senderAgentId = agentNameToId.get(from.toLowerCase());
 
+    // Resolve sender display name for speaker attribution.
+    // Use the agent's identity name if available, otherwise fall back to raw `from`.
+    let senderDisplayName = from;
+    if (senderAgentId) {
+      const senderAgent = agentList.find(a => a.id === senderAgentId);
+      senderDisplayName = senderAgent?.identity?.name || senderAgentId;
+    }
+
     // Find mentioned agent
     ctx.log?.debug(`[reflectt] Processing mentions: ${mentions.join(", ")}`);
     let matchedMentions = 0;
@@ -690,8 +698,8 @@ function handleInbound(data: string, url: string, account: ReflecttAccount, ctx:
         MessageSid: msgId,
         ChatType: "group",
         ConversationLabel: `reflectt-node #${channel}`,
-        SenderName: from,
-        SenderId: from,
+        SenderName: senderDisplayName,
+        SenderId: senderAgentId || from,
         Timestamp: msg.timestamp || Date.now(),
         Provider: "reflectt",
         Surface: "reflectt",
