@@ -32,7 +32,8 @@ export type EventType =
   | 'canvas_message'   // typed visual card — response to human query (tasks/info/revenue/onboarding)
   | 'canvas_push'      // agent self-initiates canvas event without human query (utterance/work_released/handoff)
   | 'canvas_artifact'  // proof artifact drifts through canvas on task/PR completion (commit/pr/test/run/approval)
-  | 'canvas_takeover'  // agent claims/releases full-screen takeover — orbs fade, agent content is the canvas
+  | 'canvas_takeover'
+  | 'agent_identity_changed'  // agent claims/releases full-screen takeover — orbs fade, agent content is the canvas
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -53,6 +54,7 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'canvas_push',
   'canvas_artifact',
   'canvas_takeover',
+  'agent_identity_changed',
 ])
 
 export interface Event {
@@ -227,7 +229,7 @@ class EventBus {
     }
 
     // Canvas events bypass batching — flush immediately for sub-100ms render latency
-    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression', 'canvas_message', 'canvas_push', 'canvas_artifact'])
+    const IMMEDIATE_TYPES = new Set(['canvas_render', 'canvas_burst', 'canvas_spark', 'canvas_milestone', 'canvas_expression', 'canvas_message', 'canvas_push', 'canvas_artifact', 'agent_identity_changed'])
     if (IMMEDIATE_TYPES.has(event.type)) {
       if (this.batchTimer) { clearTimeout(this.batchTimer); this.batchTimer = null }
       this.pendingEvents.push(event)

@@ -33,6 +33,11 @@ interface OpenClawEvent {
 
 type OpenClawMessage = OpenClawRequest | OpenClawResponse | OpenClawEvent
 
+export interface AgentIdentity {
+  name: string
+  displayName?: string
+}
+
 export class OpenClawClient {
   private ws: WebSocket | null = null
   private connected = false
@@ -45,6 +50,7 @@ export class OpenClawClient {
     reject: (error: Error) => void
   }>()
   private eventHandlers = new Map<string, Set<(payload: unknown) => void>>()
+  private activeIdentity: AgentIdentity = { name: openclawConfig.agentId }
 
   // Reconnect backoff: 1s, 2s, 4s, 8s, 16s, 30s (cap)
   private static readonly BASE_RECONNECT_MS = 1000
@@ -129,8 +135,8 @@ export class OpenClawClient {
         minProtocol: 3,
         maxProtocol: 3,
         client: {
-          id: 'cli',
-          displayName: 'Reflectt Node',
+          id: this.activeIdentity.name,
+          displayName: this.activeIdentity.displayName || this.activeIdentity.name,
           version: PKG_VERSION,
           platform: 'node',
           mode: 'cli',
@@ -146,13 +152,39 @@ export class OpenClawClient {
         locale: 'en-US',
         userAgent: `reflectt-node/${PKG_VERSION}`,
       })
-      
+
       console.log('[OpenClaw] Handshake successful:', response)
       this.connected = true
     } catch (err) {
       console.error('[OpenClaw] Handshake failed:', err)
       this.ws?.close()
     }
+  }
+
+  /**
+   * Update the gateway session identity and reconnect so the new name/displayName
+   * takes effect immediately. Used when the bootstrap agent completes identity claim
+   * (name + avatar + voice chosen by the agent during first-boot).
+   */
+  reidentify(identity: AgentIdentity): void {
+    if (this.activeIdentity.name === identity.name && this.activeIdentity.displayName === identity.displayName) {
+      return // already up-to-date
+    }
+    console.log(`[OpenClaw] Reidentifying: ${this.activeIdentity.name} → ${identity.name}`)
+    this.activeIdentity = identity
+    // Close current connection — the close handler calls scheduleReconnect → connect → handshake
+    // which will use the new activeIdentity.
+    this.connected = false
+    this.stopPing()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.ws?.close()
+  }
+
+  getIdentity(): AgentIdentity {
+    return { ...this.activeIdentity }
   }
 
   private handleMessage(msg: OpenClawMessage) {
@@ -259,4 +291,6 @@ export const openclawClient = {
   },
   close() { _client?.close() },
   isConnected() { return _client?.isConnected() ?? false },
+  reidentify(identity: AgentIdentity) { _client?.reidentify(identity) },
+  getIdentity(): AgentIdentity { return _client?.getIdentity() ?? { name: openclawConfig.agentId } },
 }

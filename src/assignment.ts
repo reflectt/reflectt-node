@@ -10,9 +10,9 @@ export interface AgentRole {
   name: string
   role: string
   description?: string
-  /** Optional: human-friendly display name (e.g. "Juniper" vs agent ID "agent-1"). Used in dashboard, chat, and mention resolution. */
+  /** Optional: human-friendly display name (e.g. “Juniper” vs agent ID “agent-1”). Used in dashboard, chat, and mention resolution. */
   displayName?: string
-  /** Optional: additional names that should be treated as this agent for task lookup (e.g. OpenClaw agent "main" can act as "finance-agent"). */
+  /** Optional: additional names that should be treated as this agent for task lookup (e.g. OpenClaw agent “main” can act as “finance-agent”). */
   aliases?: string[]
   affinityTags: string[]
   alwaysRoute?: string[]       // soft routing preference for assignment suggestions
@@ -27,6 +27,12 @@ export interface AgentRole {
   // Optional exception: ignore neverRoute blocks when task metadata.lane matches this value.
   // Used for cases like “onboarding plumbing is excluded unless lane=design explicitly opts in”.
   neverRouteUnlessLane?: string
+
+  // Identity bundle — set when the agent chooses their visual/voice identity.
+  // avatar: URL, emoji, or base64 SVG/image content used for visual presence.
+  // voice: ElevenLabs voice ID (or provider-specific voice name) for TTS.
+  avatar?: string
+  voice?: string
 }
 
 // ── YAML config paths (checked in order) ──
@@ -91,6 +97,8 @@ function parseRolesYaml(content: string): AgentRole[] {
       routingMode: (a.routingMode === 'opt-in' || a.routingMode === 'default') ? a.routingMode : undefined,
       neverRouteUnlessLane: typeof a.neverRouteUnlessLane === 'string' ? a.neverRouteUnlessLane : undefined,
       wipCap: typeof a.wipCap === 'number' && a.wipCap > 0 ? a.wipCap : 1,
+      avatar: typeof a.avatar === 'string' ? a.avatar : undefined,
+      voice: typeof a.voice === 'string' ? a.voice : undefined,
     }
   })
 }
@@ -253,6 +261,8 @@ export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: stri
       ...(r.neverRoute?.length ? { neverRoute: r.neverRoute } : {}),
       ...(r.protectedDomains?.length ? { protectedDomains: r.protectedDomains } : {}),
       wipCap: r.wipCap,
+      ...(r.avatar ? { avatar: r.avatar } : {}),
+      ...(r.voice ? { voice: r.voice } : {}),
     })),
   }
 
