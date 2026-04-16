@@ -612,7 +612,14 @@ function handleInbound(data: string, url: string, account: ReflecttAccount, ctx:
     const regex = /@(\w+)/g;
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) mentions.push(match[1].toLowerCase());
-    if (mentions.length === 0) return;
+    // Track whether this message was explicitly @mentioned (vs. default-routed to main)
+    const hasExplicitMention = mentions.length > 0;
+
+    // Default to main agent if no mentions — unmentioned customer messages still need routing
+    if (mentions.length === 0) {
+      mentions.push("main");
+      ctx.log?.debug(`[reflectt] No @mentions — defaulting to @main for: ${content.slice(0, 60)}...`);
+    }
 
     // Build agent ID map
     const cfg = pluginRuntime?.config?.loadConfig?.() ?? {};
@@ -705,7 +712,7 @@ function handleInbound(data: string, url: string, account: ReflecttAccount, ctx:
         Surface: "reflectt",
         OriginatingChannel: "reflectt" as const,
         OriginatingTo: channel,
-        WasMentioned: true,
+        WasMentioned: hasExplicitMention,
         CommandAuthorized: false,
       };
 
