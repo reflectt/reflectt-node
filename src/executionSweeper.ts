@@ -483,6 +483,7 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
             assignee: task.assignee,
             tags: meta.tags as string[] | undefined,
             done_criteria: task.done_criteria,
+            metadata: task.metadata as Record<string, unknown> | undefined,
           },
           tasksForScoring,
         )
