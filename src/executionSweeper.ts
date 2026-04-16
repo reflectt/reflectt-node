@@ -316,6 +316,14 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
         continue
       }
 
+      // Guard: re-check live status before closing — snapshot may be stale if another
+      // path (chat approval, review endpoint) already closed this task concurrently.
+      const { task: liveBeforeReconcile } = taskManager.resolveTaskId(task.id)
+      if (!liveBeforeReconcile || liveBeforeReconcile.status === 'done' || liveBeforeReconcile.status === 'cancelled') {
+        autoClosedIds.add(task.id)
+        continue
+      }
+
       try {
         await taskManager.updateTask(task.id, {
           status: 'done',
@@ -418,6 +426,13 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
             content: `⚠️ Drift-repair auto-close blocked for duplicate closure without canonical refs: ${task.id}. Requeued to todo.`,
           }).catch(() => {})
         } catch {}
+        continue
+      }
+
+      // Guard: re-check live status — chat approval may have already transitioned this task.
+      const { task: liveBeforeDrift } = taskManager.resolveTaskId(task.id)
+      if (!liveBeforeDrift || liveBeforeDrift.status === 'done' || liveBeforeDrift.status === 'cancelled') {
+        autoClosedIds.add(task.id)
         continue
       }
 
@@ -544,6 +559,12 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
         const liveState = checkLivePrState(prUrl)
         if (liveState.state === 'merged') {
           logDryRun('pr_merged_autoclose', `${task.id} — PR ${prUrl} is merged, auto-closing instead of escalating`)
+          // Guard: re-check live status before closing — another path may have already closed this task.
+          const { task: liveBeforePrMerge } = taskManager.resolveTaskId(task.id)
+          if (!liveBeforePrMerge || liveBeforePrMerge.status === 'done' || liveBeforePrMerge.status === 'cancelled') {
+            autoClosedIds.add(task.id)
+            continue
+          }
           try {
             await taskManager.updateTask(task.id, {
               status: 'done',
@@ -605,6 +626,12 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
           // Tier B: 24h+ since last activity — auto-close regardless of review state
           if (ageSinceActivity >= POST_MERGE_AUTOCLOSE_MS) {
             logDryRun('pr_merged_autoclose_24h', `${task.id} — PR merged, 24h stale, auto-closing`)
+            // Guard: re-check live status before closing — another path may have already closed this task.
+            const { task: liveBeforeStaleClose } = taskManager.resolveTaskId(task.id)
+            if (!liveBeforeStaleClose || liveBeforeStaleClose.status === 'done' || liveBeforeStaleClose.status === 'cancelled') {
+              autoClosedIds.add(task.id)
+              continue
+            }
             try {
               const reviewApproved = meta.reviewer_approved === true || meta.review_state === 'approved'
               await taskManager.updateTask(task.id, {
