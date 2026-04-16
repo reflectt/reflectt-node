@@ -10409,10 +10409,10 @@ export async function createServer(): Promise<FastifyInstance> {
       const notifMgr = getNotificationManager()
       const statusNotifTargets: Array<{ agent: string; type: 'taskAssigned' | 'taskCompleted' | 'reviewRequested' | 'statusChange' }> = []
 
-      if (parsed.status === 'doing' && task.assignee) {
+      if (parsed.status === 'doing' && existing.status !== 'doing' && task.assignee) {
         statusNotifTargets.push({ agent: task.assignee, type: 'taskAssigned' })
       }
-      if (parsed.status === 'validating' && task.reviewer) {
+      if (parsed.status === 'validating' && existing.status !== 'validating' && task.reviewer) {
         statusNotifTargets.push({ agent: task.reviewer, type: 'reviewRequested' })
 
         // ── Explicit reviewer routing: ping reviewer with PR link + ask ──
@@ -10435,7 +10435,7 @@ export async function createServer(): Promise<FastifyInstance> {
           },
         }).catch(() => {}) // Non-blocking
       }
-      if (parsed.status === 'done') {
+      if (parsed.status === 'done' && existing.status !== 'done') {
         if (task.assignee) statusNotifTargets.push({ agent: task.assignee, type: 'taskCompleted' })
         if (task.reviewer) statusNotifTargets.push({ agent: task.reviewer, type: 'taskCompleted' })
       }
