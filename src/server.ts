@@ -2814,7 +2814,9 @@ export async function createServer(): Promise<FastifyInstance> {
         bootstrapStalledReason = 'no_team_intent_and_no_bootstrap_task'
       } else if (hasTeamIntent && !bootstrapTask) {
         bootstrapStalledReason = 'team_intent_present_but_no_bootstrap_task_created'
-      } else if (bootstrapTask && (bootstrapTask.status === 'todo' || bootstrapTask.status === 'doing')) {
+      } else if (bootstrapTask && bootstrapTask.status === 'todo') {
+        bootstrapStalledReason = 'bootstrap_task_not_started'
+      } else if (bootstrapTask && bootstrapTask.status === 'doing') {
         bootstrapStalledReason = 'bootstrap_task_in_progress'
       } else if (!hasTeamRoles) {
         bootstrapStalledReason = 'team_roles_yaml_not_written'
@@ -2831,6 +2833,9 @@ export async function createServer(): Promise<FastifyInstance> {
     } else if (!bootstrapComplete && bootstrapStalledReason === 'team_intent_present_but_no_bootstrap_task_created') {
       diagnosisCode = 'BOOTSTRAP_STALLED_NO_TASK'
       diagnosisAction = 'Bootstrap task was never created — restart the node to re-trigger first-boot detection'
+    } else if (!bootstrapComplete && bootstrapTask && bootstrapTask.status === 'todo') {
+      diagnosisCode = 'BOOTSTRAP_NOT_STARTED'
+      diagnosisAction = 'Bootstrap task exists but no agent has claimed it — check that the main agent is running and heartbeating'
     } else if (!bootstrapComplete && bootstrapTask) {
       diagnosisCode = 'BOOTSTRAP_IN_PROGRESS'
       diagnosisAction = 'Bootstrap is running — wait or check if the main agent is stuck'
@@ -2981,6 +2986,13 @@ export async function createServer(): Promise<FastifyInstance> {
         status: 'fail',
         message: 'Bootstrap not started — no TEAM_INTENT found',
         recovery: 'Set REFLECTT_TEAM_INTENT env var or run provisioning flow.',
+      })
+    } else if (bootstrapStatus === 'todo') {
+      diagnoses.push({
+        area: 'bootstrap',
+        status: 'warn',
+        message: 'Bootstrap task created but not yet claimed — check that the main agent is running and heartbeating',
+        recovery: 'Verify main agent is active: GET /health/agents. If offline, check gateway connection.',
       })
     } else {
       diagnoses.push({
