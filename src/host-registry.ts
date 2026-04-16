@@ -28,6 +28,7 @@ export interface Host {
   status: 'online' | 'offline' | 'stale'
   last_seen_at: number
   registered_at: number
+  teamId: string | null
 }
 
 // ── Constants ──
@@ -149,5 +150,6 @@ function rowToHost(row: Record<string, unknown>): Host {
     status,
     last_seen_at: lastSeen,
     registered_at: Number(row.registered_at) || 0,
+    teamId: (row.team_id as string) || null,
   }
 }
