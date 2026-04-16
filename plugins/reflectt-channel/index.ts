@@ -435,8 +435,27 @@ function connectSSE(url: string, account: ReflecttAccount, ctx: any) {
             ctx.log?.error(`[reflectt] batch parse error: ${e}`);
           }
         }
+      } else if (eventType === "agent_identity_changed" && eventData) {
+        try {
+          const payload = JSON.parse(eventData);
+          const newName = payload?.newName;
+          const previousName = payload?.previousName;
+          ctx.log?.info(`[reflectt] identity changed: ${previousName} → ${newName}`);
+          // Invalidate any stale session index entries so chat attribution uses
+          // the current identity rather than a stale cache entry.
+          if (newName) {
+            for (const agentId of WATCHED_AGENTS) {
+              // Purge the canonical session key for this agent so the next dispatch
+              // rebuilds the session index from current identity, not a stale name.
+              purgeSessionIndexEntry(agentId, `agent:${agentId}:reflectt:main`, ctx);
+            }
+          }
+        } catch (e) {
+          ctx.log?.error(`[reflectt] agent_identity_changed parse error: ${e}`);
+        }
       }
     });
+
 
     res.on("end", () => {
       ctx.log?.warn("[reflectt] SSE stream ended by server");
