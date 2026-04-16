@@ -26,6 +26,24 @@ function normalizeSenderId(value: unknown): string | null {
   return id.length > 0 ? id : null;
 }
 
+/** Resolve the default agent ID from OpenClaw config — mirrors the gateway's own default resolution. */
+function resolveDefaultAgentId(cfg: OpenClawConfig): string {
+  const routingDefault =
+    typeof (cfg as any)?.routing?.defaultAgentId === "string"
+      ? (cfg as any).routing.defaultAgentId.trim()
+      : "";
+  if (routingDefault) return routingDefault;
+
+  const agents = cfg.agents?.list;
+  if (Array.isArray(agents) && agents.length > 0) {
+    const defaults = agents.filter((a: any) => a?.default);
+    const chosen = (defaults[0] ?? agents[0]) as any;
+    if (chosen?.id?.trim()) return chosen.id.trim();
+  }
+
+  return "main";
+}
+
 function shouldEscalate(state: WatchdogState, key: string, now: number): boolean {
   const last = state.lastEscalationAt.get(key) ?? 0;
   if (now - last < ESCALATION_COOLDOWN_MS) return false;
@@ -157,7 +175,7 @@ export const reflecttPlugin: ChannelPlugin<ResolvedReflecttAccount> = {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            from: "openclaw_agent",
+            from: ctx.identity?.name || "openclaw_agent",
             channel: ctx.to || "general",
             content: ctx.text,
           }),
@@ -273,6 +291,18 @@ export const reflecttPlugin: ChannelPlugin<ResolvedReflecttAccount> = {
 
                     await handleChatMessage(message, cfg, runtime, log);
                   }
+
+                  // Flush cached attribution when an agent's identity changes.
+                  // The bootstrap → real identity handoff invalidates any per-agent
+                  // attribution state (lastUpdateByAgent, lastEscalationAt) keyed to the old name.
+                  if (event.type === "agent_identity_changed") {
+                    const changedAgent = (event as any)?.agentId || (event as any)?.name;
+                    if (changedAgent && runtime?.state) {
+                      runtime.state.lastUpdateByAgent.delete(changedAgent);
+                      runtime.state.lastEscalationAt.delete(changedAgent);
+                      log?.info?.(`Flushed attribution cache for agent identity change: ${changedAgent}`);
+                    }
+                  }
                 } catch (parseError) {
                   log?.warn?.(`Failed to parse SSE data: ${parseError}`);
                 }
@@ -321,15 +351,19 @@ async function handleChatMessage(
     // Check if message mentions an agent
     const mentionedAgents = extractAgentMentions(safeContent, cfg);
     
-    if (mentionedAgents.length === 0) {
-      // No mentions, ignore
-      return;
+    // Default routing: if no mentions, route to the main/default agent
+    // This ensures humans can message without @mentioning anyone
+    let routeAgents = mentionedAgents;
+    if (routeAgents.length === 0) {
+      const defaultAgentId = resolveDefaultAgentId(cfg);
+      routeAgents = [defaultAgentId];
+      log?.info?.(`No mentions — routing to default agent: ${defaultAgentId}`);
     }
 
-    log?.info?.(`Processing reflectt message from ${from} in ${safeChannel} (mentions: ${mentionedAgents.join(", ")})`);
+    log?.info?.(`Processing reflectt message from ${from} in ${safeChannel} (routing to: ${routeAgents.join(", ")})`);
 
-    // Route to each mentioned agent
-    for (const agentId of mentionedAgents) {
+    // Route to each agent (mentioned OR default)
+    for (const agentId of routeAgents) {
       try {
         // Resolve agent route — all reflectt rooms share one session per agent.
         // Room identity is preserved in To/OriginatingTo so replies route correctly.
