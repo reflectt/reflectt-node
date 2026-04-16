@@ -15,6 +15,7 @@ import { getInsight, updateInsightStatus, type Insight } from './insights.js'
 import { taskManager } from './tasks.js'
 import { getDb } from './db.js'
 import { suggestAssignee, suggestReviewer, getAgentRoles } from './assignment.js'
+import { getAgentLane } from './lane-config.js'
 
 // ── Types ──
 
@@ -416,6 +417,7 @@ async function autoCreateTask(insight: Insight): Promise<void> {
         source: 'insight-task-bridge',
         reflection_count: insight.reflection_ids.length,
         authors: insight.authors,
+        lane: getAgentLane(decision.assignee)?.name,
         assignment_decision: {
           reason: decision.reason,
           guardrail_applied: decision.guardrailApplied,
