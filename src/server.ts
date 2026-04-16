@@ -15,6 +15,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME, DATA_DIR } from './config.js'
+import { openclawClient } from './openclaw.js'
 import { getStallDetector, emitWorkflowStall, onStallEvent } from './stall-detector.js'
 import { processStallEvent } from './intervention-template.js'
 import { trackRequest, getRequestMetrics } from './request-tracker.js'
@@ -8663,7 +8664,10 @@ export async function createServer(): Promise<FastifyInstance> {
       })
 
       if (!elevenKey) return null
-      const voiceId = NODE_AGENT_VOICE_IDS[forAgentId] ?? NODE_AGENT_VOICE_IDS['link']
+      // Prefer voice stored in agent_config (set during identity claim) over hardcoded map
+      const agentConfigRow = getDb().prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(forAgentId) as { settings: string } | undefined
+      const agentConfigVoice: string | undefined = agentConfigRow ? (() => { try { return JSON.parse(agentConfigRow.settings)?.voice } catch { return undefined } })() : undefined
+      const voiceId = agentConfigVoice ?? NODE_AGENT_VOICE_IDS[forAgentId] ?? NODE_AGENT_VOICE_IDS['link']
       try {
         const res = await fetch(
           `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -10694,6 +10698,109 @@ export async function createServer(): Promise<FastifyInstance> {
     return { avatars }
   })
 
+  // ── POST /agents/:name/identity/claim — atomic identity handoff ────────────
+  // Called by the bootstrap agent after the human picks name + avatar + voice.
+  // Renames the agent in TEAM-ROLES.yaml, stores avatar+voice in agent_config,
+  // reconnects the OpenClaw gateway under the new identity, and emits
+  // agent_identity_changed so all connected clients update attribution instantly.
+  app.post<{ Params: { name: string } }>('/agents/:name/identity/claim', async (request, reply) => {
+    const { name } = request.params
+    const body = request.body as Record<string, unknown> ?? {}
+
+    const claimedName = typeof body.claimedName === 'string' ? body.claimedName.trim().toLowerCase() : ''
+    const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : undefined
+    const voice = typeof body.voice === 'string' ? body.voice.trim() : undefined
+    const avatar = body.avatar && typeof body.avatar === 'object' ? body.avatar as Record<string, unknown> : undefined
+
+    if (!claimedName) {
+      reply.code(400)
+      return { success: false, error: 'claimedName is required' }
+    }
+    if (/[^a-z0-9_-]/.test(claimedName)) {
+      reply.code(400)
+      return { success: false, error: 'claimedName must be lowercase alphanumeric (a-z, 0-9, -, _)' }
+    }
+
+    // Resolve the source agent (must exist)
+    const resolved = resolveAgentMention(name)
+    const sourceId = resolved ?? name
+    const sourceRole = getAgentRole(sourceId)
+    if (!sourceRole) {
+      reply.code(404)
+      return { success: false, error: `Agent "${name}" not found in TEAM-ROLES.yaml` }
+    }
+
+    // Build updated roles: replace sourceId with claimedName, add source as alias
+    const currentRoles = getAgentRoles()
+    const updatedRoles = currentRoles.map(r => {
+      if (r.name !== sourceId) return r
+      return {
+        ...r,
+        name: claimedName,
+        displayName: displayName ?? r.displayName,
+        // Keep old name as alias so existing task assignments still resolve
+        aliases: Array.from(new Set([...(r.aliases ?? []), sourceId])),
+        ...(voice ? { voice } : {}),
+      }
+    })
+
+    saveAgentRoles(updatedRoles)
+
+    // Store avatar + voice in agent_config DB for TTS and canvas
+    const db = getDb()
+    const settingsRow = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(claimedName) as { settings: string } | undefined
+    const settings = settingsRow ? JSON.parse(settingsRow.settings) : {}
+    if (avatar) settings.avatar = { ...avatar, updatedAt: Date.now() }
+    if (voice) settings.voice = voice
+
+    if (settingsRow) {
+      db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
+        .run(JSON.stringify(settings), Date.now(), claimedName)
+    } else {
+      db.prepare('INSERT INTO agent_config (agent_id, team_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run(claimedName, 'default', JSON.stringify(settings), Date.now(), Date.now())
+    }
+
+    const now = Date.now()
+
+    // Reconnect OpenClaw gateway under new identity
+    openclawClient.reidentify({
+      name: claimedName,
+      displayName: displayName || claimedName,
+    })
+
+    // Broadcast identity switch — clients update chat attribution, presence, roster
+    eventBus.emit({
+      id: `identity-claim-${now}`,
+      type: 'agent_identity_changed' as const,
+      timestamp: now,
+      data: {
+        previousName: sourceId,
+        newName: claimedName,
+        displayName: displayName ?? null,
+        avatar: avatar ?? null,
+        voice: voice ?? null,
+      },
+    })
+
+    // Emit canvas render so the agent appears in presence bar immediately
+    eventBus.emit({
+      id: `identity-claim-canvas-${now}`,
+      type: 'canvas_render' as const,
+      timestamp: now,
+      data: { agentId: claimedName, state: 'idle', sensors: null, payload: { identityClaimed: true, previousName: sourceId } },
+    })
+
+    return {
+      success: true,
+      previousName: sourceId,
+      newName: claimedName,
+      displayName: displayName ?? null,
+      avatarSet: !!avatar,
+      voiceSet: !!voice,
+    }
+  })
+
   // Team-scoped alias for assignment-engine consumers
   app.get('/team/roles', async () => {
     const payload = buildRoleRegistryPayload()
@@ -10934,6 +11041,23 @@ export async function createServer(): Promise<FastifyInstance> {
             data: { agentId: role.name, state: 'idle', sensors: null, payload: { justJoined: true } },
           })
         }
+      }
+
+      // Identity handoff: if bootstrap 'main' agent was replaced by a real agent,
+      // reidentify the OpenClaw gateway session so new messages carry the real name.
+      const newPrimary = reloaded.roles.find(r => r.role !== 'bootstrap') ?? reloaded.roles[0]
+      const prevWasBootstrap = prevAgentNames.has('main') && prevAgentNames.size === 1
+      if (newPrimary && prevWasBootstrap && newPrimary.name !== 'main') {
+        openclawClient.reidentify({
+          name: newPrimary.name,
+          displayName: newPrimary.displayName || newPrimary.name,
+        })
+        eventBus.emit({
+          id: `identity-handoff-${now}`,
+          type: 'agent_identity_changed' as const,
+          timestamp: now,
+          data: { previousName: 'main', newName: newPrimary.name, displayName: newPrimary.displayName ?? null },
+        })
       }
 
       return {
