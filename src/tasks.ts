@@ -811,7 +811,8 @@ class TaskManager {
         const shouldSkipForOpenPredecessor =
           !options?.force &&
           previousInstance !== undefined &&
-          previousInstance.status !== 'done'
+          previousInstance.status !== 'done' &&
+          previousInstance.status !== 'cancelled'
 
         if (shouldSkipForOpenPredecessor) {
           const reason = `skip: previous recurring instance still open (${previousInstance!.id}, status=${previousInstance!.status})`
