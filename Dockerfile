@@ -53,7 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libasound2 \
-    curl git \
+    ca-certificates curl git \
   && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI (gh) — agents use it to create PRs, manage issues
