@@ -103,6 +103,7 @@ import { recordUsage as recordUsageTracking, recordUsageBatch, getUsageSummary, 
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import { initGitHubActorAuth, resolveGitHubTokenForActor } from './github-actor-auth.js'
+import { startGitHubTokenRefresh } from './github-cloud-token.js'
 import { approvePullRequest, githubWhoami } from './github-reviews.js'
 import type { GitHubIdentityProvider } from './github-identity.js'
 import { computeCiFromCheckRuns, computeCiFromCombinedStatus } from './github-ci.js'
@@ -2312,6 +2313,9 @@ export async function createServer(): Promise<FastifyInstance> {
   } catch (err) {
     console.error('[Vault] Failed to initialize:', (err as Error).message)
   }
+
+  // Fetch GitHub installation token from cloud API (if GitHub App connected on team)
+  startGitHubTokenRefresh().catch(err => console.warn('[GitHubCloudToken] Init error:', err))
 
   // Initialize GitHub identity provider (PAT env fallback + optional GitHub App installation token mode)
   // v1: per-node/team configuration via env vars; secrets stored in SecretVault.
