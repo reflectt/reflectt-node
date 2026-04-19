@@ -4621,10 +4621,8 @@ export async function createServer(): Promise<FastifyInstance> {
           // PR #N match without repo — record with wildcard repo
           recordPreviewApproval('*', parseInt(prRefMatch[1], 10), data.from)
         } else {
-          // No PR number in message (e.g. "looks good. Please merge the associated PR")
-          // Record a wildcard approval — the next merge attempt for any PR will be allowed
-          recordPreviewApproval('*', 0, data.from)
-          console.log(`[MergeGate] Wildcard approval recorded from ${data.from} (no PR number in message)`)
+          // No PR number in message — cannot create scoped approval
+          console.log(`[MergeGate] Skipped approval from ${data.from} — no PR number found in message`)
         }
       }
     }
