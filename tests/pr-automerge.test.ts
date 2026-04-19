@@ -14,6 +14,8 @@ import {
   getMergeAttemptLog,
   _clearMergeabilityCache,
   recordPreviewApproval,
+  hasPreviewApproval,
+  _clearPreviewApprovals,
 } from '../src/prAutoMerge.js'
 import { taskManager } from '../src/tasks.js'
 
@@ -94,6 +96,7 @@ describe('PR Auto-Merge', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     _clearMergeabilityCache()
+    _clearPreviewApprovals()
   })
 
   describe('parsePrUrl', () => {
@@ -235,6 +238,54 @@ describe('PR Auto-Merge', () => {
 
       const result = attemptAutoMerge('https://github.com/reflectt/reflectt-node/pull/42')
       expect(result.success).toBe(true)
+    })
+
+    it('cross-thread isolation: approving PR A does not approve PR B', () => {
+      // Two PRs from different threads/repos
+      recordPreviewApproval('reflectt/repo-a', 10, 'user')
+
+      // PR A should be approved
+      expect(hasPreviewApproval('reflectt/repo-a', 10)).toBe(true)
+      // PR B should NOT be approved
+      expect(hasPreviewApproval('reflectt/repo-b', 20)).toBe(false)
+
+      // Merge gate: PR A passes, PR B blocked
+      mockExecSync.mockReturnValueOnce('' as any)
+      mockExecSync.mockReturnValueOnce('sha1234' as any)
+      const resultA = attemptAutoMerge('https://github.com/reflectt/repo-a/pull/10')
+      expect(resultA.success).toBe(true)
+
+      const resultB = attemptAutoMerge('https://github.com/reflectt/repo-b/pull/20')
+      expect(resultB.success).toBe(false)
+      expect(resultB.error).toContain('[MergeGate] Blocked')
+    })
+
+    it('cross-thread isolation: same repo different PRs are independent', () => {
+      recordPreviewApproval('reflectt/staging-preview-test', 28, 'user')
+
+      // PR 28 approved, PR 29 not
+      expect(hasPreviewApproval('reflectt/staging-preview-test', 28)).toBe(true)
+      expect(hasPreviewApproval('reflectt/staging-preview-test', 29)).toBe(false)
+
+      // PR 29 blocked
+      const result = attemptAutoMerge('https://github.com/reflectt/staging-preview-test/pull/29')
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('[MergeGate] Blocked')
+    })
+
+    it('cross-thread isolation: wildcard repo with specific PR does not bleed', () => {
+      // Wildcard repo approval for PR 15 (from PR #N without full URL)
+      recordPreviewApproval('*', 15, 'user')
+
+      // PR 15 should pass for any repo
+      expect(hasPreviewApproval('*', 15)).toBe(true)
+      // But PR 16 should NOT pass
+      expect(hasPreviewApproval('*', 16)).toBe(false)
+
+      // PR 16 blocked even though PR 15 has wildcard approval
+      const result = attemptAutoMerge('https://github.com/reflectt/some-repo/pull/16')
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('[MergeGate] Blocked')
     })
 
     it('returns failure for invalid PR URL', () => {

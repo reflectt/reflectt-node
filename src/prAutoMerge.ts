@@ -77,6 +77,11 @@ export function getPreviewApprovals(): Array<{ key: string; approvedAt: number; 
   return [...previewApprovals.entries()].map(([key, v]) => ({ key, ...v }))
 }
 
+/** Clear all preview approvals (for testing) */
+export function _clearPreviewApprovals(): void {
+  previewApprovals.clear()
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 
 const mergeAttemptLog: MergeAttemptLog[] = []
