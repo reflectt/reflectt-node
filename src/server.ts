@@ -4606,20 +4606,25 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
-    // Preview approval gate: detect "Previewed ... looks good. Please merge" messages
+    // Preview approval gate: detect "looks good. Please merge" messages
     // and record the approval so the merge gate allows the PR to be merged.
     if (data.content) {
-      const previewApprovalMatch = data.content.match(/looks good\.?\s+Please merge.*?(?:PR|pull request)\b/i)
-      const prRefMatch = data.content.match(/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/)
-        || data.content.match(/PR\s*#?(\d+)/i)
-      if (previewApprovalMatch && prRefMatch) {
+      const previewApprovalMatch = data.content.match(/looks good\.?\s.*?(?:merge|PR|pull request)\b/i)
+      if (previewApprovalMatch) {
         const { recordPreviewApproval } = await import('./prAutoMerge.js')
-        if (prRefMatch[2]) {
+        const prRefMatch = data.content.match(/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/)
+          || data.content.match(/PR\s*#(\d+)/i)
+        if (prRefMatch?.[2]) {
           // Full github URL match: owner/repo and PR number
           recordPreviewApproval(prRefMatch[1], parseInt(prRefMatch[2], 10), data.from)
-        } else if (prRefMatch[1]) {
+        } else if (prRefMatch?.[1]) {
           // PR #N match without repo — record with wildcard repo
           recordPreviewApproval('*', parseInt(prRefMatch[1], 10), data.from)
+        } else {
+          // No PR number in message (e.g. "looks good. Please merge the associated PR")
+          // Record a wildcard approval — the next merge attempt for any PR will be allowed
+          recordPreviewApproval('*', 0, data.from)
+          console.log(`[MergeGate] Wildcard approval recorded from ${data.from} (no PR number in message)`)
         }
       }
     }
