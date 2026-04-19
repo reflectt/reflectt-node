@@ -216,8 +216,8 @@ export function attemptAutoMerge(prUrl: string, { skipPreviewGate = false } = {}
   }
 
   // Preview approval gate — block merge unless approved via canvas thread
-  // Check: exact repo+PR, wildcard repo with exact PR, or wildcard approval (PR 0 = any PR)
-  if (!skipPreviewGate && !hasPreviewApproval(parsed.repo, parsed.prNumber) && !hasPreviewApproval('*', parsed.prNumber) && !hasPreviewApproval('*', 0)) {
+  // Check: exact repo+PR, or wildcard repo with exact PR number
+  if (!skipPreviewGate && !hasPreviewApproval(parsed.repo, parsed.prNumber) && !hasPreviewApproval('*', parsed.prNumber)) {
     const msg = `[MergeGate] Blocked: PR ${parsed.repo}#${parsed.prNumber} has no preview approval. A "Looks good" message in the canvas thread is required before merging.`
     console.log(msg)
     return { success: false, error: msg, mergeCommitSha: null }
