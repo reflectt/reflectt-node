@@ -4627,6 +4627,26 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     }
 
+    // Merge-gate honesty: when an agent posts a PR URL, check if it's unapproved
+    // and inject a visible status message so the customer knows merge is waiting on them.
+    if (data.content && data.from !== 'user' && data.from !== 'system' && data.from !== 'dashboard') {
+      const prUrlMatch = data.content.match(/https?:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/)
+      if (prUrlMatch) {
+        const { hasPreviewApproval } = await import('./prAutoMerge.js')
+        const prRepo = prUrlMatch[1]
+        const prNum = parseInt(prUrlMatch[2], 10)
+        if (!hasPreviewApproval(prRepo, prNum) && !hasPreviewApproval('*', prNum)) {
+          // Post a system message indicating merge is blocked until approval
+          chatManager.sendMessage({
+            from: 'system',
+            content: `Merge blocked for PR #${prNum} — waiting for your approval. Click "Looks good" when you're ready to merge.`,
+            channel: data.channel || 'general',
+          })
+          console.log(`[MergeGate] Honesty message posted for ${prRepo}#${prNum}`)
+        }
+      }
+    }
+
     return {
       success: true,
       message,
