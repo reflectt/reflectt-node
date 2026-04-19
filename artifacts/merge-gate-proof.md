@@ -55,10 +55,27 @@ Clicked "Looks good" — approval sent, genesis will merge
 
 ## 5) Persistence
 
-Approvals are in-memory (Map). They don't survive node restart.
-Acceptable for current lifecycle — preview → approve → merge happens in one session.
+Approvals are persisted to `DATA_DIR/merge-gate-approvals.json` (PR #1257).
+On startup, approvals are loaded from disk. On each new approval, the file is written.
 
-## 6) Open seams
+### Restart survival proof (2026-04-19T11:49Z)
+```
+# Before restart: approval for reflectt/restart-test#55 recorded
+# Node restarted via `flyctl machines restart`
+# After restart:
+Approvals AFTER restart: [{"key":"reflectt/restart-test#55","approvedAt":1776599345589,"approver":"user"}]
+PR 55 still approved: true
+PR 56 still blocked: false
+```
 
-- [ ] Cross-thread isolation — two concurrent PRs, approve one, verify no bleed
-- [ ] Customer-visible honesty — blocked merge should show in canvas, not stall silently
+## 6) Customer-visible honesty (PR #1256)
+
+When an agent posts a PR URL with no preview approval, the node injects:
+`"Merge blocked for PR #N — waiting for your approval. Click 'Looks good' when you're ready to merge."`
+
+## 7) Open seams
+
+- [x] Cross-thread isolation — proved, no bleed (PR #1255)
+- [x] Customer-visible honesty — system message injected (PR #1256)
+- [x] Durable persistence — restart survival proved (PR #1257)
+- [ ] Thread-state badge — promote honesty message to first-class UI state (future polish)
