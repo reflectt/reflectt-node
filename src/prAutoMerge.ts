@@ -54,6 +54,29 @@ export interface MergeAttemptLog {
   detail: string
 }
 
+// ── Preview Approval Gate ──────────────────────────────────────────────────
+// Tracks preview approvals from canvas "Looks good" messages.
+// Merge is blocked unless the PR has a recorded approval.
+
+const previewApprovals = new Map<string, { approvedAt: number; approver: string }>()
+
+/** Record a preview approval for a PR (called when "Looks good" message arrives) */
+export function recordPreviewApproval(repo: string, prNumber: number, approver: string): void {
+  const key = `${repo}#${prNumber}`
+  previewApprovals.set(key, { approvedAt: Date.now(), approver })
+  console.log(`[MergeGate] Preview approved: ${key} by ${approver}`)
+}
+
+/** Check if a PR has been preview-approved */
+export function hasPreviewApproval(repo: string, prNumber: number): boolean {
+  return previewApprovals.has(`${repo}#${prNumber}`)
+}
+
+/** Get all preview approvals (for diagnostics) */
+export function getPreviewApprovals(): Array<{ key: string; approvedAt: number; approver: string }> {
+  return [...previewApprovals.entries()].map(([key, v]) => ({ key, ...v }))
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 
 const mergeAttemptLog: MergeAttemptLog[] = []
@@ -186,10 +209,17 @@ export function checkPrMergeability(prUrl: string): PrMergeability {
 
 // ── Attempt Auto-Merge ─────────────────────────────────────────────────────
 
-export function attemptAutoMerge(prUrl: string): MergeAttemptResult {
+export function attemptAutoMerge(prUrl: string, { skipPreviewGate = false } = {}): MergeAttemptResult {
   const parsed = parsePrUrl(prUrl)
   if (!parsed) {
     return { success: false, error: 'Invalid PR URL format', mergeCommitSha: null }
+  }
+
+  // Preview approval gate — block merge unless approved via canvas thread
+  if (!skipPreviewGate && !hasPreviewApproval(parsed.repo, parsed.prNumber) && !hasPreviewApproval('*', parsed.prNumber)) {
+    const msg = `[MergeGate] Blocked: PR ${parsed.repo}#${parsed.prNumber} has no preview approval. A "Looks good" message in the canvas thread is required before merging.`
+    console.log(msg)
+    return { success: false, error: msg, mergeCommitSha: null }
   }
 
   try {

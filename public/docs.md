@@ -850,6 +850,8 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/execution-health` | Execution sweeper status: validating queue violations, SLA breaches, escalation tracking. |
 | POST | `/pr-event` | PR state webhook. Body: `{ taskId, prState: "merged"|"closed", prUrl? }`. Auto-updates task artifacts on merge, auto-blocks on close. |
 | GET | `/pr-automerge/status` | PR auto-merge attempt log: recent merge/close attempts with summary counts (attempted, success, failed, skipped, auto-close, close-gate-fail). |
+| GET | `/merge-gate/check/:owner/:repo/:prNumber` | Check if a PR has preview approval. Returns `{ approved: boolean, repo, prNumber }`. Checks both exact repo match and wildcard approvals. |
+| GET | `/merge-gate/approvals` | List all recorded preview approvals (diagnostics). Returns `{ approvals: [{ key, approvedAt, approver }] }`. |
 | GET | `/drift-report` | Task/PR drift report: tasks with merged PRs still in validating, orphan PRs, state mismatches. |
 | POST | `/activation/event` | Record activation funnel event. Body: `{ type, userId, metadata? }`. Events: signup_completed, host_preflight_passed, host_preflight_failed, workspace_ready, first_task_started, first_task_completed, first_team_message_sent, day2_return_action. |
 | GET | `/activation/doctor-gate` | Check whether the BYOH onboarding doctor-gate has been passed for a user. Query: `?userId=...`. Returns `{ passed: boolean, events: ActivationEvent[] }`. Used by cloud onboarding to gate progression to workspace-ready step. |

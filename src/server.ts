@@ -63,7 +63,7 @@ import { presenceManager } from './presence.js'
 import type { NotificationType, NotificationPriorityLevel, AckDecision, NotificationStatus } from './agent-notifications.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
 import { runRestartDriftGuard } from './restart-drift-guard.js'
-import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog } from './prAutoMerge.js'
+import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog, hasPreviewApproval, getPreviewApprovals } from './prAutoMerge.js'
 import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
 import { listSharedFiles, readSharedFile, resolveTaskArtifact, validatePath, ALLOWED_EXTENSIONS } from './shared-workspace-api.js'
@@ -4602,6 +4602,24 @@ export async function createServer(): Promise<FastifyInstance> {
           }
         } catch (err) {
           app.log.warn({ err, signal: detection.signal }, '[ChatApproval] Failed to apply approval')
+        }
+      }
+    }
+
+    // Preview approval gate: detect "Previewed ... looks good. Please merge" messages
+    // and record the approval so the merge gate allows the PR to be merged.
+    if (data.content) {
+      const previewApprovalMatch = data.content.match(/looks good\.?\s+Please merge.*?(?:PR|pull request)\b/i)
+      const prRefMatch = data.content.match(/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/)
+        || data.content.match(/PR\s*#?(\d+)/i)
+      if (previewApprovalMatch && prRefMatch) {
+        const { recordPreviewApproval } = await import('./prAutoMerge.js')
+        if (prRefMatch[2]) {
+          // Full github URL match: owner/repo and PR number
+          recordPreviewApproval(prRefMatch[1], parseInt(prRefMatch[2], 10), data.from)
+        } else if (prRefMatch[1]) {
+          // PR #N match without repo — record with wildcard repo
+          recordPreviewApproval('*', parseInt(prRefMatch[1], 10), data.from)
         }
       }
     }
@@ -17741,6 +17759,22 @@ If your heartbeat shows **no active task** and **no next task**:
         closeGateFail: log.filter(l => l.action === 'close_gate_fail').length,
       },
     }
+  })
+
+  // GET /merge-gate/check/:owner/:repo/:prNumber — check if PR has preview approval
+  app.get<{ Params: { owner: string; repo: string; prNumber: string } }>('/merge-gate/check/:owner/:repo/:prNumber', async (request) => {
+    const { owner, repo, prNumber } = request.params
+    const fullRepo = `${owner}/${repo}`
+    const prNum = parseInt(prNumber, 10)
+    if (isNaN(prNum)) return { approved: false, error: 'Invalid PR number' }
+    // Check both exact repo match and wildcard
+    const approved = hasPreviewApproval(fullRepo, prNum) || hasPreviewApproval('*', prNum)
+    return { approved, repo: fullRepo, prNumber: prNum }
+  })
+
+  // GET /merge-gate/approvals — list all recorded preview approvals (diagnostics)
+  app.get('/merge-gate/approvals', async () => {
+    return { approvals: getPreviewApprovals() }
   })
 
   // ── Calendar API ──────────────────────────────────────────────────────────

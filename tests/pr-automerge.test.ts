@@ -13,6 +13,7 @@ import {
   generateRemediation,
   getMergeAttemptLog,
   _clearMergeabilityCache,
+  recordPreviewApproval,
 } from '../src/prAutoMerge.js'
 import { taskManager } from '../src/tasks.js'
 
@@ -205,7 +206,7 @@ describe('PR Auto-Merge', () => {
       mockExecSync.mockReturnValueOnce('' as any) // merge
       mockExecSync.mockReturnValueOnce('abc1234def5678' as any) // get SHA
 
-      const result = attemptAutoMerge('https://github.com/reflectt/reflectt-node/pull/42')
+      const result = attemptAutoMerge('https://github.com/reflectt/reflectt-node/pull/42', { skipPreviewGate: true })
       expect(result.success).toBe(true)
       expect(result.error).toBeNull()
       expect(result.mergeCommitSha).toBe('abc1234def5678')
@@ -216,9 +217,24 @@ describe('PR Auto-Merge', () => {
       error.stderr = Buffer.from('PR has merge conflicts')
       mockExecSync.mockImplementationOnce(() => { throw error })
 
-      const result = attemptAutoMerge('https://github.com/reflectt/reflectt-node/pull/42')
+      const result = attemptAutoMerge('https://github.com/reflectt/reflectt-node/pull/42', { skipPreviewGate: true })
       expect(result.success).toBe(false)
       expect(result.error).toContain('PR has merge conflicts')
+    })
+
+    it('blocks merge without preview approval', () => {
+      const result = attemptAutoMerge('https://github.com/reflectt/reflectt-node/pull/42')
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('[MergeGate] Blocked')
+    })
+
+    it('allows merge with preview approval', () => {
+      recordPreviewApproval('reflectt/reflectt-node', 42, 'test-user')
+      mockExecSync.mockReturnValueOnce('' as any) // merge
+      mockExecSync.mockReturnValueOnce('abc1234def5678' as any) // get SHA
+
+      const result = attemptAutoMerge('https://github.com/reflectt/reflectt-node/pull/42')
+      expect(result.success).toBe(true)
     })
 
     it('returns failure for invalid PR URL', () => {
@@ -358,6 +374,8 @@ describe('PR Auto-Merge', () => {
   describe('processAutoMerge (sweep integration)', () => {
     it('attempts merge for green+approved PR', async () => {
       const prUrl = 'https://github.com/reflectt/reflectt-node/pull/99'
+      // Register preview approval so merge gate allows it
+      recordPreviewApproval('reflectt/reflectt-node', 99, 'test-user')
       const taskId = await createValidatingTask('sweep-merge', {
         pr_url: prUrl,
         reviewer_approved: true,
