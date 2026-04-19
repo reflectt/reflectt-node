@@ -103,7 +103,7 @@ import { recordUsage as recordUsageTracking, recordUsageBatch, getUsageSummary, 
 import { getTeamConfigHealth } from './team-config.js'
 import { SecretVault } from './secrets.js'
 import { initGitHubActorAuth, resolveGitHubTokenForActor } from './github-actor-auth.js'
-import { startGitHubTokenRefresh } from './github-cloud-token.js'
+import { startGitHubTokenRefresh, getCloudGitHubToken } from './github-cloud-token.js'
 import { approvePullRequest, githubWhoami } from './github-reviews.js'
 import type { GitHubIdentityProvider } from './github-identity.js'
 import { computeCiFromCheckRuns, computeCiFromCombinedStatus } from './github-ci.js'
@@ -17775,6 +17775,16 @@ If your heartbeat shows **no active task** and **no next task**:
   // GET /merge-gate/approvals — list all recorded preview approvals (diagnostics)
   app.get('/merge-gate/approvals', async () => {
     return { approvals: getPreviewApprovals() }
+  })
+
+  // GET /github/token — expose the cloud-refreshed GitHub installation token
+  // Used by gateway/agent startup to set GH_TOKEN before spawning Claude Code.
+  app.get('/github/token', async () => {
+    const token = getCloudGitHubToken()
+    if (!token) {
+      return { available: false, error: 'No GitHub token available — cloud token refresh may not be configured' }
+    }
+    return { available: true, token }
   })
 
   // ── Calendar API ──────────────────────────────────────────────────────────
