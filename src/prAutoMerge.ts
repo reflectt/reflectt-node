@@ -57,14 +57,51 @@ export interface MergeAttemptLog {
 // ── Preview Approval Gate ──────────────────────────────────────────────────
 // Tracks preview approvals from canvas "Looks good" messages.
 // Merge is blocked unless the PR has a recorded approval.
+// Approvals are persisted to disk so they survive node restarts.
 
+import { join } from 'node:path'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { DATA_DIR } from './config.js'
+
+const APPROVALS_FILE = join(DATA_DIR, 'merge-gate-approvals.json')
 const previewApprovals = new Map<string, { approvedAt: number; approver: string }>()
+
+/** Load persisted approvals from disk on startup */
+function loadApprovals(): void {
+  try {
+    const raw = readFileSync(APPROVALS_FILE, 'utf-8')
+    const entries = JSON.parse(raw) as Array<{ key: string; approvedAt: number; approver: string }>
+    for (const entry of entries) {
+      previewApprovals.set(entry.key, { approvedAt: entry.approvedAt, approver: entry.approver })
+    }
+    if (entries.length > 0) {
+      console.log(`[MergeGate] Loaded ${entries.length} persisted approval(s) from disk`)
+    }
+  } catch {
+    // File doesn't exist or is invalid — start fresh
+  }
+}
+
+/** Persist current approvals to disk */
+function persistApprovals(): void {
+  try {
+    mkdirSync(DATA_DIR, { recursive: true })
+    const entries = [...previewApprovals.entries()].map(([key, v]) => ({ key, ...v }))
+    writeFileSync(APPROVALS_FILE, JSON.stringify(entries, null, 2))
+  } catch (err) {
+    console.warn('[MergeGate] Failed to persist approvals:', err)
+  }
+}
+
+// Load on module init
+loadApprovals()
 
 /** Record a preview approval for a PR (called when "Looks good" message arrives) */
 export function recordPreviewApproval(repo: string, prNumber: number, approver: string): void {
   const key = `${repo}#${prNumber}`
   previewApprovals.set(key, { approvedAt: Date.now(), approver })
   console.log(`[MergeGate] Preview approved: ${key} by ${approver}`)
+  persistApprovals()
 }
 
 /** Check if a PR has been preview-approved */
