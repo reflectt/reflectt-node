@@ -64,6 +64,11 @@ export async function startGitHubTokenRefresh(): Promise<void> {
   if (refreshTimer.unref) refreshTimer.unref()
 }
 
+/** Get the current cloud-refreshed GitHub token (if any). */
+export function getCloudGitHubToken(): string | null {
+  return process.env.GH_TOKEN || process.env.GITHUB_TOKEN || null
+}
+
 export function stopGitHubTokenRefresh(): void {
   if (refreshTimer) {
     clearInterval(refreshTimer)
