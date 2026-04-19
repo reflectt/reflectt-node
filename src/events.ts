@@ -33,6 +33,7 @@ export type EventType =
   | 'canvas_push'      // agent self-initiates canvas event without human query (utterance/work_released/handoff)
   | 'canvas_artifact'  // proof artifact drifts through canvas on task/PR completion (commit/pr/test/run/approval)
   | 'canvas_takeover'  // agent claims/releases full-screen takeover — orbs fade, agent content is the canvas
+  | 'support_request'   // cross-team support request to Reflectt team
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -53,6 +54,7 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'canvas_push',
   'canvas_artifact',
   'canvas_takeover',
+  'support_request',
 ])
 
 export interface Event {

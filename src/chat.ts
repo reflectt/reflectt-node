@@ -505,6 +505,9 @@ class ChatManager {
     // Emit event to event bus
     eventBus.emitMessagePosted(fullMessage)
 
+    // Check for support mention and emit support_request event if detected
+    this.maybeEmitSupportRequest(fullMessage)
+
     // Route to agent inboxes (auto-routing)
     this.routeToInboxes(fullMessage)
 
@@ -527,6 +530,57 @@ class ChatManager {
       .catch(err => {
         console.error('[Chat] Failed to route message to inboxes:', err)
       })
+  }
+
+  /**
+   * Detect @reflectt mentions and emit support_request event.
+   * This allows the Reflectt team to receive cross-team support requests.
+   *
+   * Note: we use @reflectt (not @support) as the canonical trigger to avoid
+   * namespace collision — customer teams may have their own "support" agent.
+   * @reflectt is clearly platform-specific and unambiguous.
+   */
+  private maybeEmitSupportRequest(message: AgentMessage): void {
+    const content = message.content || ''
+    const hasReflecttMention = /\b@reflectt\b/i.test(content)
+
+    if (!hasReflecttMention) return
+
+    // Build recent thread context (last 5 messages in same channel)
+    const recentMessages = this.getMessages({
+      channel: message.channel,
+      limit: 5,
+      before: message.timestamp,
+    })
+
+    const threadSnapshot = recentMessages
+      .slice(-5)
+      .map(m => `[${new Date(m.timestamp).toISOString()}] ${m.from}: ${m.content.slice(0, 200)}`)
+      .join('\n')
+
+    const supportPayload = {
+      id: message.id,
+      from: message.from,
+      content: content,
+      channel: message.channel,
+      timestamp: message.timestamp,
+      metadata: {
+        supportRequest: true,
+        // Context will be enriched by cloud.ts with hostId/org info
+        threadSnapshot,
+        detectedMention: content.match(/@reflectt/i)?.[0] || '@reflectt',
+      },
+    }
+
+    // Emit support_request event (cloud.ts listens for this)
+    eventBus.emit({
+      id: `sr-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'support_request',
+      timestamp: Date.now(),
+      data: supportPayload,
+    })
+
+    console.log(`[Chat] @reflectt mention detected from ${message.from}: "${content.slice(0, 60)}..."`)
   }
 
   /**

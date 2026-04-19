@@ -29,6 +29,7 @@ import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
 import { listApprovalQueue, listAgentEvents, listAgentRuns, type AgentRun } from './agent-runs.js'
 import { getUnpushedTrustEvents, markTrustEventsPushed } from './trust-events.js'
+import { eventBus } from './events.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -414,6 +415,9 @@ export async function startCloudIntegration(): Promise<void> {
   state.running = true
   state.startedAt = Date.now()
   logConnectionEvent({ type: 'connected', timestamp: Date.now(), reason: `host ${config.hostName} → ${config.cloudUrl}` })
+
+  // Register event listeners for cloud integration
+  registerCloudEventListeners()
 
   // Immediate first heartbeat
   sendHeartbeat().catch(() => {})
@@ -1037,6 +1041,80 @@ function markTaskRowsErrored(rows: DirtyTaskRow[], errorMessage: string): void {
   tx(rows)
 }
 
+// ---- Support Request Handler ----
+
+interface SupportRequestPayload {
+  id: string
+  from: string
+  content: string
+  channel: string
+  timestamp: number
+  metadata: {
+    supportRequest: true
+    threadSnapshot: string
+    detectedMention: string
+  }
+}
+
+/**
+ * Send a support request to the Reflectt team via the cloud API.
+ * This is called when the eventBus emits a 'support_request' event.
+ */
+async function handleSupportRequest(payload: SupportRequestPayload): Promise<void> {
+  if (!state.hostId || !config) {
+    console.log('[Cloud] Support request ignored: not connected to cloud')
+    return
+  }
+
+  // Don't send if this node IS the Reflectt support node
+  // (we don't want to send support requests to ourselves)
+  const supportHostId = process.env.SUPPORT_HOST_ID
+  if (supportHostId && state.hostId === supportHostId) {
+    console.log('[Cloud] Support request ignored: this is the support node')
+    return
+  }
+
+  try {
+    // Enrich with host context
+    const enrichedPayload = {
+      ...payload,
+      metadata: {
+        ...payload.metadata,
+        hostId: state.hostId,
+        hostName: config.hostName,
+        // team/org info could be added here from config or team settings
+      },
+    }
+
+    const result = await cloudPost<{ ok: boolean; routed: boolean }>(
+      '/api/support/request',
+      enrichedPayload
+    )
+
+    if (result.success && result.data?.ok) {
+      console.log(`[Cloud] Support request sent: "${payload.content.slice(0, 50)}..."`)
+    } else {
+      console.warn(`[Cloud] Support request failed: ${result.error || 'unknown error'}`)
+    }
+  } catch (err: any) {
+    console.error(`[Cloud] Support request error: ${err?.message || err}`)
+  }
+}
+
+/**
+ * Register event listeners for cloud integration.
+ * Called after cloud connection is established.
+ */
+function registerCloudEventListeners(): void {
+  // Listen for support_request events from chat.ts
+  eventBus.on('cloud-support-request', (event) => {
+    if (event.type === 'support_request') {
+      handleSupportRequest(event.data as SupportRequestPayload).catch(() => {})
+    }
+  })
+  console.log('[Cloud] Event listeners registered')
+}
+
 async function syncTasks(): Promise<void> {
   if (!state.hostId || !config) return
 
@@ -1189,6 +1267,7 @@ async function syncChat(): Promise<void> {
       content: string
       timestamp: number
       channel?: string
+      metadata?: Record<string, unknown>
     }>
   }>(`/api/hosts/${state.hostId}/chat/sync`, { messages: payload })
 
@@ -1224,7 +1303,7 @@ async function syncChat(): Promise<void> {
             from: msg.from,
             content,
             channel: msg.channel || 'general',
-            metadata: { source: 'cloud-relay', cloudMessageId: msg.id },
+            metadata: { source: 'cloud-relay', cloudMessageId: msg.id, ...(msg.metadata || {}) },
           })
           console.log(`☁️  [Chat] Relayed message from ${msg.from}: "${msg.content.slice(0, 50)}..."`)
         } catch (err: any) {
