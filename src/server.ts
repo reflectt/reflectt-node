@@ -2302,7 +2302,7 @@ export async function createServer(): Promise<FastifyInstance> {
   loadAgentRoles()
   startConfigWatch()
 
-  // Seed avatars for agents that don't have one yet
+  // Seed avatars for agents that don't have one yet (task-1776727968015-kutlwwcsh)
   try {
     const { seedAgentAvatars } = await import('./agent-config.js')
     seedAgentAvatars()
