@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, existsSync, watchFile, unwatchFile, statSy
 import { join } from 'path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { REFLECTT_HOME } from './config.js'
+import { seedAgentAvatars } from './agent-config.js'
 
 export interface AgentRole {
   name: string
@@ -72,6 +73,15 @@ let loadedFromPath: string | null = null
 let lastMtime: number = 0
 let watchActive = false
 
+function seedRoleAvatars(roles: AgentRole[], source: string): void {
+  try {
+    const seeded = seedAgentAvatars(roles.map(role => role.name).filter(Boolean))
+    if (seeded > 0) console.log(`[Assignment] Seeded ${seeded} avatar(s) from ${source}`)
+  } catch (err) {
+    console.error('[Assignment] Avatar seeding failed (non-fatal):', (err as Error).message)
+  }
+}
+
 function parseRolesYaml(content: string): AgentRole[] {
   const data = parseYaml(content)
   if (!data?.agents || !Array.isArray(data.agents)) {
@@ -124,6 +134,7 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
   if (isTest && testRolesOverride) {
     loadedRoles = testRolesOverride
     loadedFromPath = null
+    seedRoleAvatars(testRolesOverride, 'test-override')
     console.log(`[Assignment] Using ${testRolesOverride.length} test-override agent roles`)
     return { roles: testRolesOverride, source: 'test-override' }
   }
@@ -138,6 +149,7 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
         try {
           lastMtime = statSync(configPath).mtimeMs
         } catch { /* ignore */ }
+        seedRoleAvatars(roles, configPath)
         console.log(`[Assignment] Loaded ${roles.length} agent roles from ${configPath}`)
         return { roles, source: configPath }
       }
@@ -151,6 +163,7 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
     const bootstrapRoles: AgentRole[] = [{ name: 'main', role: 'bootstrap', description: 'Bootstrap agent — reads TEAM_INTENT and creates the team.', affinityTags: [], wipCap: 1 }]
     loadedRoles = bootstrapRoles
     loadedFromPath = 'TEAM_INTENT-bootstrap'
+    seedRoleAvatars(bootstrapRoles, 'TEAM_INTENT-bootstrap')
     console.log(`[Assignment] TEAM_INTENT detected — skipping default roster. Only bootstrap agent 'main' loaded.`)
     return { roles: bootstrapRoles, source: 'TEAM_INTENT-bootstrap' }
   }
@@ -160,6 +173,7 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
   const source = testRolesOverride ? 'test-override' : 'builtin'
   loadedRoles = fallbackRoles
   loadedFromPath = null
+  seedRoleAvatars(fallbackRoles, source)
   console.log(`[Assignment] Using ${fallbackRoles.length} ${source} agent roles (no YAML found)`)
   return { roles: fallbackRoles, source }
 }
@@ -270,6 +284,7 @@ export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: stri
   loadedRoles = roles
   loadedFromPath = targetPath
   lastMtime = statSync(targetPath).mtimeMs
+  seedRoleAvatars(roles, targetPath)
 
   return { saved: true, path: targetPath, version: Date.now() }
 }
