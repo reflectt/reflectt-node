@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Agent configuration API — model preference + cost cap per agent
 import { getDb } from './db.js'
+import { getAgentRoles } from './assignment.js'
 
 export interface AgentConfig {
   agentId: string
@@ -178,4 +179,106 @@ export function checkCostCap(agentId: string, currentDailySpend: number, current
     model: config.model,
     fallbackModel: config.fallbackModel,
   }
+}
+
+/* ─── Avatar generation + seeding ─── */
+
+const KNOWN_AGENTS: Record<string, { emoji: string; color: string }> = {
+  kai:     { emoji: '🤖', color: '#3b57e8' },
+  link:    { emoji: '🔗', color: '#8b5cf6' },
+  pixel:   { emoji: '🎨', color: '#ec4899' },
+  claude:  { emoji: '🧩', color: '#d97706' },
+  echo:    { emoji: '📝', color: '#f59e0b' },
+  sage:    { emoji: '🧠', color: '#10b981' },
+  rhythm:  { emoji: '🥁', color: '#ef4444' },
+  scout:   { emoji: '🔍', color: '#0ea5e9' },
+  harmony: { emoji: '🫶', color: '#a855f7' },
+  spark:   { emoji: '🚀', color: '#fb923c' },
+}
+
+function hashStr(s: string): number {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return Math.abs(h)
+}
+
+const GEN_HUES = [210, 280, 340, 30, 160, 60, 190, 310, 120, 250]
+
+function genColor(name: string): string {
+  return `hsl(${GEN_HUES[hashStr(name) % GEN_HUES.length]}, 65%, 55%)`
+}
+
+function generateAvatarSvg(name: string): string {
+  const ln = name.toLowerCase()
+  const known = KNOWN_AGENTS[ln]
+  const color = known?.color || genColor(ln)
+  const emoji = known?.emoji || ln[0]?.toUpperCase() || '?'
+  const h = hashStr(ln)
+
+  // Generate 3-5 geometric shapes
+  const count = 3 + (h % 3)
+  let shapes = ''
+  for (let i = 0; i < count; i++) {
+    const seed = hashStr(`${ln}-shape-${i}`)
+    const x = 10 + ((seed >> 4) % 80)
+    const y = 10 + ((seed >> 8) % 80)
+    const size = 12 + ((seed >> 12) % 25)
+    const opacity = 0.15 + ((seed >> 16) % 30) / 100
+    const rotation = (seed >> 20) % 360
+    const type = seed % 3
+
+    if (type === 0) {
+      shapes += `<circle cx="${x}" cy="${y}" r="${size / 2}" fill="${color}" opacity="${opacity}" transform="rotate(${rotation} ${x} ${y})"/>`
+    } else if (type === 1) {
+      shapes += `<rect x="${x - size / 2}" y="${y - size / 2}" width="${size}" height="${size}" rx="${size * 0.15}" fill="${color}" opacity="${opacity}" transform="rotate(${rotation} ${x} ${y})"/>`
+    } else {
+      const half = size / 2
+      shapes += `<polygon points="${x},${y - half} ${x - half},${y + half * 0.6} ${x + half},${y + half * 0.6}" fill="${color}" opacity="${opacity}" transform="rotate(${rotation} ${x} ${y})"/>`
+    }
+  }
+
+  return `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<defs><linearGradient id="bg-${ln}" x1="0%" y1="0%" x2="100%" y2="100%">
+<stop offset="0%" stop-color="${color}" stop-opacity="0.15"/>
+<stop offset="100%" stop-color="${color}" stop-opacity="0.05"/>
+</linearGradient></defs>
+<circle cx="50" cy="50" r="50" fill="url(#bg-${ln})"/>
+${shapes}
+<text x="50" y="50" text-anchor="middle" dominant-baseline="central" font-size="40">${emoji}</text>
+</svg>`
+}
+
+/**
+ * Seed avatars for all agents in TEAM-ROLES.yaml that don't have one yet.
+ * Called once at startup after loadAgentRoles().
+ */
+export function seedAgentAvatars(): number {
+  const roles = getAgentRoles()
+  const db = getDb()
+  let seeded = 0
+
+  for (const role of roles) {
+    const row = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(role.name) as { settings: string } | undefined
+    const settings = row ? JSON.parse(row.settings || '{}') : {}
+
+    if (settings.avatar?.content) continue // already has an avatar
+
+    const svg = generateAvatarSvg(role.name)
+    settings.avatar = { type: 'svg', content: svg, updatedAt: Date.now() }
+
+    const now = Date.now()
+    if (row) {
+      db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
+        .run(JSON.stringify(settings), now, role.name)
+    } else {
+      db.prepare('INSERT INTO agent_config (agent_id, team_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+        .run(role.name, 'default', JSON.stringify(settings), now, now)
+    }
+    seeded++
+  }
+
+  if (seeded > 0) {
+    console.log(`[AgentConfig] Seeded avatars for ${seeded} agent(s)`)
+  }
+  return seeded
 }
