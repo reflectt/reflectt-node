@@ -248,33 +248,44 @@ ${shapes}
 </svg>`
 }
 
+function ensureAgentAvatar(agentId: string): boolean {
+  const existing = getAgentConfig(agentId)
+  const currentAvatar = (existing?.settings as Record<string, unknown> | undefined)?.avatar as Record<string, unknown> | undefined
+  if (typeof currentAvatar?.content === 'string' && currentAvatar.content.trim()) return false
+
+  const settings = { ...(existing?.settings || {}) } as Record<string, unknown>
+  settings.avatar = {
+    type: 'svg',
+    content: generateAvatarSvg(agentId),
+    updatedAt: Date.now(),
+    source: 'bootstrap-seed',
+  }
+
+  setAgentConfig(agentId, {
+    teamId: existing?.teamId ?? 'default',
+    model: existing?.model,
+    fallbackModel: existing?.fallbackModel,
+    costCapDaily: existing?.costCapDaily,
+    costCapMonthly: existing?.costCapMonthly,
+    maxTokensPerCall: existing?.maxTokensPerCall,
+    settings,
+  })
+  return true
+}
+
 /**
- * Seed avatars for all agents in TEAM-ROLES.yaml that don't have one yet.
- * Called once at startup after loadAgentRoles().
+ * Seed avatars for agent IDs provided by a TEAM-ROLES materialization event,
+ * or for all currently loaded roles when called without arguments.
  */
-export function seedAgentAvatars(): number {
-  const roles = getAgentRoles()
-  const db = getDb()
+export function seedAgentAvatars(agentIds?: string[]): number {
+  const targets = Array.isArray(agentIds) && agentIds.length > 0
+    ? agentIds
+    : getAgentRoles().map(role => role.name)
+
   let seeded = 0
-
-  for (const role of roles) {
-    const row = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(role.name) as { settings: string } | undefined
-    const settings = row ? JSON.parse(row.settings || '{}') : {}
-
-    if (settings.avatar?.content) continue // already has an avatar
-
-    const svg = generateAvatarSvg(role.name)
-    settings.avatar = { type: 'svg', content: svg, updatedAt: Date.now() }
-
-    const now = Date.now()
-    if (row) {
-      db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
-        .run(JSON.stringify(settings), now, role.name)
-    } else {
-      db.prepare('INSERT INTO agent_config (agent_id, team_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-        .run(role.name, 'default', JSON.stringify(settings), now, now)
-    }
-    seeded++
+  for (const agentId of targets) {
+    if (!agentId) continue
+    if (ensureAgentAvatar(agentId)) seeded++
   }
 
   if (seeded > 0) {
