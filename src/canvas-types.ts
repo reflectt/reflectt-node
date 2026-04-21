@@ -101,16 +101,6 @@ export interface SlotEvent {
 
 // ── Agent identity (from Pixel's spec) ───────────────────────────────
 
-export const AGENT_COLORS: Record<string, string> = {
-  pixel: '#a78bfa',   // violet
-  link: '#60a5fa',    // blue
-  kai: '#f59e0b',     // amber
-  harmony: '#34d399', // green
-  sage: '#9eb3ca',    // slate
-  echo: '#f87171',    // red
-  scout: '#fb923c',   // orange
-}
-
 export const AGENT_DEFAULT_EXPRESSION: Record<string, ContentType> = {
   pixel: 'text.brief',       // component / annotation
   link: 'code.diff.summary', // code diff / stream
