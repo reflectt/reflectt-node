@@ -8,6 +8,7 @@ import { taskManager } from './tasks.js'
 import { emitActivationEvent } from './activationEvents.js'
 import type { CanvasStateEntry } from './canvas-routes.js'
 import { getAgentRoles } from './assignment.js'
+import { getIdentityColor } from './agent-config.js'
 
 interface CanvasPushDeps {
   eventBus: typeof eventBusInstance
@@ -48,10 +49,6 @@ export async function canvasPushRoutes(
       const raw = typeof body.text === 'string' ? body.text.trim() : ''
       const text = raw.slice(0, 200)
       const ttl = typeof body.ttl === 'number' && body.ttl > 0 ? Math.min(body.ttl, 30_000) : 8_000
-      const THOUGHT_COLORS: Record<string, string> = {
-        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
-        scout: '#fbbf24', echo: '#f472b6', rhythm: '#6ee7b7', spark: '#f97316',
-      }
       eventBus.emit({
         id: `cmsg-thought-${now}-${Math.random().toString(36).slice(2, 8)}`,
         type: 'canvas_message' as const,
@@ -60,7 +57,7 @@ export async function canvasPushRoutes(
           type: 'expression',
           expression: 'thought',
           agentId,
-          agentColor: THOUGHT_COLORS[agentId] ?? '#60a5fa',
+          agentColor: getIdentityColor(agentId, '#60a5fa'),
           text,
           ttl,
         },
@@ -109,10 +106,6 @@ export async function canvasPushRoutes(
 
       payload = { ...payload, content: richContent, position, layer, ttl, size }
 
-      const RICH_COLORS: Record<string, string> = {
-        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
-        scout: '#fbbf24', echo: '#f472b6', rhythm: '#6ee7b7', spark: '#f97316',
-      }
       eventBus.emit({
         id: `cmsg-rich-${now}-${Math.random().toString(36).slice(2, 8)}`,
         type: 'canvas_message' as const,
@@ -120,7 +113,7 @@ export async function canvasPushRoutes(
         data: {
           type: 'rich',
           agentId,
-          agentColor: RICH_COLORS[agentId] ?? '#60a5fa',
+          agentColor: getIdentityColor(agentId, '#60a5fa'),
           content: richContent,
           layer,
         },
@@ -134,11 +127,7 @@ export async function canvasPushRoutes(
       const query = typeof body.query === 'string' ? body.query.slice(0, 200) : undefined
       payload = { ...payload, card, query }
 
-      const RESP_COLORS: Record<string, string> = {
-        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
-        scout: '#f472b6', echo: '#fbbf24', rhythm: '#6ee7b7', spark: '#f97316',
-      }
-      const agentColor = RESP_COLORS[agentId] ?? '#60a5fa'
+      const agentColor = getIdentityColor(agentId, '#60a5fa')
       eventBus.emit({
         id: `cmsg-${now}-${Math.random().toString(36).slice(2, 8)}`,
         type: 'canvas_message' as const,
@@ -168,12 +157,7 @@ export async function canvasPushRoutes(
     const taskId = typeof body.taskId === 'string' ? body.taskId : undefined
     const now = Date.now()
 
-    const AGENT_COLORS: Record<string, string> = {
-      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-      rhythm: '#a3e635', swift: '#38bdf8', kotlin: '#f97316',
-    }
-    const agentColor = AGENT_COLORS[agentId] ?? '#94a3b8'
+    const agentColor = getIdentityColor(agentId, '#94a3b8')
 
     const payload = { type, agentId, agentColor, title, url, taskId, timestamp: now }
     eventBus.emit({
