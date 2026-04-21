@@ -55,15 +55,15 @@ function checkManageAuth(request: FastifyRequest, reply: FastifyReply, opts?: { 
   reply.send({
     error: 'Forbidden: invalid manage token',
     hint: opts?.allowHostCredential
-      ? 'Provide x-manage-token or Authorization: Bearer <token> matching REFLECTT_MANAGE_TOKEN (or the managed host credential for reset-first-boot).'
+      ? 'Provide x-manage-token or Authorization: Bearer <token> matching REFLECTT_MANAGE_TOKEN (or the managed host credential for reset-bootstrap).'
       : 'Provide x-manage-token header or Authorization: Bearer <token> matching REFLECTT_MANAGE_TOKEN.',
   })
   return false
 }
 
-export const FIRST_BOOT_RESET_CONFIRM = 'RESET_FIRST_BOOT'
+export const BOOTSTRAP_RESET_CONFIRM = 'RESET_BOOTSTRAP'
 
-export interface FirstBootResetSummary {
+export interface BootstrapResetSummary {
   backupDir: string
   removedMarker: boolean
   movedAgentEntries: string[]
@@ -72,17 +72,17 @@ export interface FirstBootResetSummary {
   removedBackupDir: boolean
 }
 
-export async function resetFirstBootState(opts?: {
+export async function resetBootstrapState(opts?: {
   reflecttHome?: string
   dataDir?: string
   actor?: string
   now?: () => number
   listTasks?: () => Array<{ id: string }>
   deleteTask?: (taskId: string, actor: string) => Promise<boolean>
-}): Promise<FirstBootResetSummary> {
+}): Promise<BootstrapResetSummary> {
   const reflecttHome = opts?.reflecttHome || REFLECTT_HOME
   const dataDir = opts?.dataDir || DATA_DIR
-  const actor = opts?.actor || 'system-first-boot-reset'
+  const actor = opts?.actor || 'system-bootstrap-reset'
   const now = opts?.now || (() => Date.now())
 
   let importedTaskManager: Awaited<typeof import('./tasks.js')>['taskManager'] | null = null
@@ -352,21 +352,21 @@ export function registerManageRoutes(app: FastifyInstance, deps: {
     }, 500)
   })
 
-  // POST /manage/reset-first-boot — destructive bootstrap reset for managed-host reproof
-  app.post('/manage/reset-first-boot', async (request, reply) => {
+  // POST /manage/reset-bootstrap — destructive bootstrap reset for managed-host reproof
+  app.post('/manage/reset-bootstrap', async (request, reply) => {
     if (!checkManageAuth(request, reply, { allowHostCredential: true })) return
 
     const body = (request.body && typeof request.body === 'object') ? request.body as Record<string, unknown> : {}
-    if (body.confirm !== FIRST_BOOT_RESET_CONFIRM) {
+    if (body.confirm !== BOOTSTRAP_RESET_CONFIRM) {
       reply.code(400)
       return {
-        error: `confirm must equal ${FIRST_BOOT_RESET_CONFIRM}`,
-        hint: 'This endpoint is destructive. It clears first-boot markers, moves agent state aside, deletes live tasks, and optionally restarts the host.',
+        error: `confirm must equal ${BOOTSTRAP_RESET_CONFIRM}`,
+        hint: 'This endpoint is destructive. It clears bootstrap state, deletes stale bootstrap tasks if present, and optionally restarts the host.',
       }
     }
 
     const restart = body.restart !== false
-    const reset = await resetFirstBootState()
+    const reset = await resetBootstrapState()
     const method = restart ? detectRestartMethod() : null
 
     if (restart && !method) {

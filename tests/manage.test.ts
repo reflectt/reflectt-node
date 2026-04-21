@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { resetFirstBootState } from '../src/manage.js'
+import { resetBootstrapState } from '../src/manage.js'
 
-describe('resetFirstBootState', () => {
+describe('resetBootstrapState', () => {
   it('moves first-boot artifacts into backup and deletes live tasks', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'reflectt-reset-first-boot-'))
+    const root = mkdtempSync(join(tmpdir(), 'reflectt-reset-bootstrap-'))
     const reflecttHome = join(root, '.reflectt')
     const dataDir = join(reflecttHome, 'data')
     const agentsDir = join(dataDir, 'agents')
@@ -19,7 +19,7 @@ describe('resetFirstBootState', () => {
     writeFileSync(join(reflecttHome, 'TEAM-ROLES.yaml'), 'agents: []\n', 'utf-8')
 
     const deleted: string[] = []
-    const summary = await resetFirstBootState({
+    const summary = await resetBootstrapState({
       reflecttHome,
       dataDir,
       now: () => 12345,
@@ -52,12 +52,12 @@ describe('resetFirstBootState', () => {
   })
 
   it('removes the empty backup directory when nothing needed resetting', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'reflectt-reset-first-boot-'))
+    const root = mkdtempSync(join(tmpdir(), 'reflectt-reset-bootstrap-'))
     const reflecttHome = join(root, '.reflectt')
     const dataDir = join(reflecttHome, 'data')
     mkdirSync(dataDir, { recursive: true })
 
-    const summary = await resetFirstBootState({
+    const summary = await resetBootstrapState({
       reflecttHome,
       dataDir,
       now: () => 999,

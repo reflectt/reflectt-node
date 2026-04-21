@@ -14732,7 +14732,7 @@ If your heartbeat shows **no active task** and **no next task**:
           { method: 'GET', path: '/manage/config', hint: 'Config introspection (secrets redacted). Auth required.' },
           { method: 'GET', path: '/manage/logs', hint: 'Bounded log tail. Query: level, since, limit, format=text. Auth required.' },
           { method: 'POST', path: '/manage/restart', hint: 'Graceful restart (Docker/systemd/CLI). Auth required.' },
-          { method: 'POST', path: '/manage/reset-first-boot', hint: 'Destructive reproof reset for managed hosts. Clears first-boot markers, moves agent state aside, deletes live tasks, and optionally restarts. Auth: manage token or managed host credential. Body must include { confirm: "RESET_FIRST_BOOT" }.' },
+          { method: 'POST', path: '/manage/reset-bootstrap', hint: 'Destructive reproof reset for managed hosts. Clears bootstrap state, deletes stale bootstrap tasks if present, and optionally restarts. Auth: manage token or managed host credential. Body must include { confirm: "RESET_BOOTSTRAP" }.' },
           { method: 'GET', path: '/manage/disk', hint: 'Data directory sizes. Auth required.' },
         ],
       },
