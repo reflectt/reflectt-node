@@ -52,6 +52,7 @@ import { getFocus, setFocus, clearFocus, getFocusSummary } from './focus.js'
 import { generatePulse, generateCompactPulse } from './pulse.js'
 import { scanScopeOverlap, scanAndNotify } from './scopeOverlap.js'
 import { getDb } from './db.js'
+import { getIdentityColor } from './agent-config.js'
 import type { AgentMessage, Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest, getActiveSamplingProviders } from './mcp.js'
@@ -8590,7 +8591,7 @@ export async function createServer(): Promise<FastifyInstance> {
             payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active },
             presence: {
               name: agentId,
-              identityColor: AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af',
+              identityColor: getIdentityColor(agentId),
               state: (existing.payload as any)?.presenceState ?? 'working',
               activeSpeaker: active,
               activeTask: (existing.payload as any)?.activeTask,
@@ -8685,9 +8686,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // Fire canvas_expression alongside TTS — the room responds when an agent speaks.
       // Non-blocking: emit first, synthesize in parallel.
-      // Resolve agent's claimed identity color from agent_config, fall back to neutral blue
-      const colorRow = getDb().prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(forAgentId) as { settings: string } | undefined
-      const claimedColor: string = colorRow ? (() => { try { return JSON.parse(colorRow.settings)?.identityColor ?? '#60a5fa' } catch { return '#60a5fa' } })() : '#60a5fa'
+      const claimedColor = getIdentityColor(forAgentId, '#60a5fa')
       eventBus.emit({
         id: `voice-expr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         type: 'canvas_expression' as const,
@@ -8854,7 +8853,7 @@ export async function createServer(): Promise<FastifyInstance> {
       data: {
         type: 'voice_transcript',
         agentId,
-        agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af',
+        agentColor: getIdentityColor(agentId),
         transcript,
         sttProvider,
       },
@@ -8868,7 +8867,7 @@ export async function createServer(): Promise<FastifyInstance> {
       ? `You are ${agentId}, a ${agentRole.role ?? 'team agent'} on Team Reflectt. ${agentRole.description ?? ''} Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
       : `You are ${agentId}, a team agent. Respond concisely — your reply will be spoken aloud. 1-3 sentences max.`
 
-    const identityColor = AGENT_IDENTITY_COLORS[agentId] ?? '#9ca3af'
+    const identityColor = getIdentityColor(agentId)
 
     const setActiveSpeakerAudio = (active: boolean) => {
       const existing = canvasStateMap.get(agentId)
@@ -8907,10 +8906,6 @@ export async function createServer(): Promise<FastifyInstance> {
     const synthesizeTtsAudio = async (text: string, forAgentId: string): Promise<string | null> => {
       const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
       // canvas_expression fires whether or not ElevenLabs is configured
-      const IDENTITY_COLORS_AUDIO: Record<string, string> = {
-        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-      }
       eventBus.emit({
         id: `voice-expr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         type: 'canvas_expression' as const,
@@ -8919,7 +8914,7 @@ export async function createServer(): Promise<FastifyInstance> {
           agentId: forAgentId,
           channels: {
             voice: text.slice(0, 300),
-            visual: { flash: IDENTITY_COLORS_AUDIO[forAgentId] ?? '#60a5fa', particles: 'surge' },
+            visual: { flash: getIdentityColor(forAgentId, '#60a5fa'), particles: 'surge' },
             narrative: `${forAgentId} responds`,
           },
         },
@@ -10228,13 +10223,7 @@ export async function createServer(): Promise<FastifyInstance> {
       {
         const canvasAgent = (task.assignee || 'unknown').toLowerCase()
         const canvasNow = Date.now()
-        // Identity colors (canonical — match AGENT_IDENTITY_COLORS used by canvas render path)
-        const CANVAS_AGENT_ID_COLORS: Record<string, string> = {
-          link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa', sage: '#34d399',
-          echo: '#f472b6', rhythm: '#a3e635', spark: '#fb923c', scout: '#fbbf24',
-          harmony: '#34c45c', swift: '#06b6d4', kotlin: '#7c3aed',
-        }
-        const agentColor = CANVAS_AGENT_ID_COLORS[canvasAgent] ?? '#94a3b8'
+        const agentColor = getIdentityColor(canvasAgent, '#94a3b8')
         const taskSnippet = (task.title ?? '').slice(0, 60)
 
         // Helper: emit canvas_render to update agent orb state (presence layer).
@@ -10738,10 +10727,13 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // ── POST /agents/:name/identity/claim — atomic identity handoff ────────────
-  // Called by the bootstrap agent after the human picks name + avatar + voice.
-  // Renames the agent in TEAM-ROLES.yaml, stores avatar+voice in agent_config,
-  // reconnects the OpenClaw gateway under the new identity, and emits
-  // agent_identity_changed so all connected clients update attribution instantly.
+  // Called by each agent on boot to claim their Reflectt identity.
+  // Renames the agent in TEAM-ROLES.yaml (keeping the old name as an alias),
+  // stores avatar + voice + color in agent_config.settings, reconnects the
+  // OpenClaw gateway under the new identity, and emits agent_identity_changed.
+  // This is the only path that produces real persisted on-host identity —
+  // callers that only edit TEAM-ROLES.yaml via PUT /config/team-roles bypass
+  // avatar/voice/color persistence and orphan the alias path.
   app.post<{ Params: { name: string } }>('/agents/:name/identity/claim', async (request, reply) => {
     const { name } = request.params
     const body = request.body as Record<string, unknown> ?? {}
@@ -10749,6 +10741,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const claimedName = typeof body.claimedName === 'string' ? body.claimedName.trim().toLowerCase() : ''
     const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : undefined
     const voice = typeof body.voice === 'string' ? body.voice.trim() : undefined
+    const color = typeof body.color === 'string' ? body.color.trim() : undefined
     const avatar = body.avatar && typeof body.avatar === 'object' ? body.avatar as Record<string, unknown> : undefined
 
     if (!claimedName) {
@@ -10758,6 +10751,15 @@ export async function createServer(): Promise<FastifyInstance> {
     if (/[^a-z0-9_-]/.test(claimedName)) {
       reply.code(400)
       return { success: false, error: 'claimedName must be lowercase alphanumeric (a-z, 0-9, -, _)' }
+    }
+    // Reject hallucinated voices — must match Kokoro prefix (af_/am_/bf_/bm_) or ElevenLabs ID shape.
+    if (voice && !/^(af_|am_|bf_|bm_)[a-z0-9_]+$/i.test(voice) && !/^[a-zA-Z0-9]{20,}$/.test(voice)) {
+      reply.code(400)
+      return { success: false, error: `voice "${voice}" is not a recognized Kokoro or ElevenLabs voice ID. Kokoro voices: af_sarah, af_nicole, af_bella, am_adam, am_michael, bf_emma, bf_isabella, bm_george, bm_lewis.` }
+    }
+    if (color && !/^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\))$/.test(color)) {
+      reply.code(400)
+      return { success: false, error: `color "${color}" must be a hex (#rrggbb) or rgb()/rgba() value` }
     }
 
     // Resolve the source agent (must exist)
@@ -10785,12 +10787,13 @@ export async function createServer(): Promise<FastifyInstance> {
 
     saveAgentRoles(updatedRoles)
 
-    // Store avatar + voice in agent_config DB for TTS and canvas
+    // Store avatar + voice + color in agent_config DB for TTS and canvas
     const db = getDb()
     const settingsRow = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(claimedName) as { settings: string } | undefined
     const settings = settingsRow ? JSON.parse(settingsRow.settings) : {}
     if (avatar) settings.avatar = { ...avatar, updatedAt: Date.now() }
     if (voice) settings.voice = voice
+    if (color) settings.identityColor = color
 
     if (settingsRow) {
       db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
@@ -10819,6 +10822,7 @@ export async function createServer(): Promise<FastifyInstance> {
         displayName: displayName ?? null,
         avatar: avatar ?? null,
         voice: voice ?? null,
+        color: color ?? null,
       },
     })
 
@@ -11513,11 +11517,6 @@ export async function createServer(): Promise<FastifyInstance> {
   // Derives canvas state from task board for agents who haven't pushed recently.
   // Prevents blank canvas when agents are working but not calling POST /canvas/state.
   ;(async () => {
-    const AGENT_IDENTITY_COLORS: Record<string, string> = {
-      kai: '#fb923c', pixel: '#a78bfa', link: '#60a5fa',
-      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-    }
-
     function doCanvasAutoStateSweep() {
       try {
         runCanvasAutoStateSweep({
@@ -11558,7 +11557,7 @@ export async function createServer(): Promise<FastifyInstance> {
                 payload: { _auto: true },
                 presence: {
                   name: agentId,
-                  color: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
+                  color: getIdentityColor(agentId, '#60a5fa'),
                   state,
                   canvasState: state,
                   task: sourceTasks[0]?.title ?? null,
@@ -11579,7 +11578,7 @@ export async function createServer(): Promise<FastifyInstance> {
                 type: 'expression',
                 expression: 'thought',
                 agentId,
-                agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
+                agentColor: getIdentityColor(agentId, '#60a5fa'),
                 text: `${task.title}`,
                 state: 'working',
                 task: task.title,
@@ -11599,7 +11598,7 @@ export async function createServer(): Promise<FastifyInstance> {
                 type: 'expression',
                 expression: 'thought',
                 agentId,
-                agentColor: AGENT_IDENTITY_COLORS[agentId] ?? '#60a5fa',
+                agentColor: getIdentityColor(agentId, '#60a5fa'),
                 text: task.title.slice(0, 80),
                 state: 'working',
                 task: task.title,
@@ -11736,12 +11735,6 @@ export async function createServer(): Promise<FastifyInstance> {
   // POST /agents/:agentId/canvas — agent emits a presence-compatible canvas event
   // Emits canvas_render SSE event with AgentPresence shape + triggers immediate cloud sync
 
-  const AGENT_IDENTITY_COLORS: Record<string, string> = {
-    pixel: '#a78bfa', link: '#60a5fa', kai: '#fb923c', harmony: '#34c45c',
-    rhythm: '#f472b6', echo: '#f87171', scout: '#fbbf24', sage: 'rgba(255,255,255,0.4)',
-    spark: '#f59e0b', swift: '#06b6d4', kotlin: '#7c3aed', bookkeeper: '#10b981',
-  }
-
   type PresenceState = 'idle' | 'working' | 'thinking' | 'rendering' | 'needs-attention' | 'urgent' | 'handoff' | 'decision' | 'waiting'
 
   const VALID_PRESENCE_STATES: PresenceState[] = ['idle', 'working', 'thinking', 'rendering', 'needs-attention', 'urgent', 'handoff', 'decision', 'waiting']
@@ -11793,7 +11786,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     const { state: presenceState, activeTask, recency, attention, sensors, payload, currentPr, progress, urgency, ambientCue } = result.data
     const now = Date.now()
-    const identityColor = AGENT_IDENTITY_COLORS[agentId] || '#9ca3af'
+    const identityColor = getIdentityColor(agentId)
 
     // Map presence state to canvas state for backward compatibility
     // New states pass through directly to canvas (1:1 where names match)
@@ -11867,7 +11860,7 @@ export async function createServer(): Promise<FastifyInstance> {
     if (!entry) {
       return {
         name: agentId,
-        identityColor: AGENT_IDENTITY_COLORS[agentId] || '#9ca3af',
+        identityColor: getIdentityColor(agentId),
         state: 'idle' as PresenceState,
         recency: 'unknown',
       }
@@ -11880,7 +11873,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     return {
       name: agentId,
-      identityColor: AGENT_IDENTITY_COLORS[agentId] || '#9ca3af',
+      identityColor: getIdentityColor(agentId),
       state: presenceState,
       activeTask: (entry.payload as any)?.activeTask,
       recency: formatRecency(entry.updatedAt),
@@ -11908,7 +11901,6 @@ export async function createServer(): Promise<FastifyInstance> {
   await app.register(canvasReadRoutes, {
     canvasStateMap,
     canvasSlots: { getActive: () => canvasSlots.getActive(), getAll: () => canvasSlots.getAll(), getStats: () => canvasSlots.getStats() },
-    agentIdentityColors: AGENT_IDENTITY_COLORS,
     getDb,
     getRecentRejections,
     flowExpressionLog,
@@ -12127,11 +12119,6 @@ export async function createServer(): Promise<FastifyInstance> {
   // Tick shape: { agents: [{ id, state, urgency, activeSpeaker, color, age }], team: { rhythm, tension, ambientPulse, dominantColor } }
   app.get('/canvas/pulse', async (request, reply) => {
     const STALE_MS = 60 * 60 * 1000 // 60min — agents stay visible as long as they heartbeat
-    const IDENTITY_COLORS: Record<string, string> = {
-      kai: '#fb923c',
-      pixel: '#a78bfa',
-      link: '#60a5fa',
-    }
     const STATE_URGENCY: Record<string, number> = {
       urgent: 1.0, decision: 0.85, needs_attention: 0.75,
       rendering: 0.5, thinking: 0.45, working: 0.3,
@@ -12223,7 +12210,7 @@ export async function createServer(): Promise<FastifyInstance> {
           state: presState,
           urgency,
           activeSpeaker: !!(payload as any).activeSpeaker,
-          color: IDENTITY_COLORS[agentId] ?? '#94a3b8',
+          color: getIdentityColor(agentId, '#94a3b8'),
           age: now - entry.updatedAt,
           task: taskLabel,
           avatar: avatarCache[agentId] ?? null,
@@ -12413,7 +12400,7 @@ export async function createServer(): Promise<FastifyInstance> {
       // Core session identity
       agent_id: activeAgentId,
       agent_label: payload.agentLabel ?? activeAgentId,
-      identity_color: AGENT_IDENTITY_COLORS[activeAgentId] ?? '#9ca3af',
+      identity_color: getIdentityColor(activeAgentId),
 
       // Canvas state (transferable)
       canvas_state: activeEntry.state,

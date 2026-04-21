@@ -4,6 +4,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import type { eventBus as eventBusInstance } from './events.js'
+import { getIdentityColor } from './agent-config.js'
 
 interface CanvasStateEntry {
   state: string
@@ -104,11 +105,7 @@ export async function canvasQueryRoutes(
 
     // Default: if no agent specified, return team status directly (don't route to specific agent)
     const responderId = agentIdRaw ? agentIdRaw.trim() : null
-    const IDENTITY_COLORS_Q: Record<string, string> = {
-      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-    }
-    const agentColor = responderId ? (IDENTITY_COLORS_Q[responderId] ?? '#60a5fa') : '#60a5fa'
+    const agentColor = responderId ? getIdentityColor(responderId, '#60a5fa') : '#60a5fa'
 
     // If no specific agent requested, classify intent and return appropriate card
     if (!responderId) {
@@ -194,7 +191,7 @@ export async function canvasQueryRoutes(
     if (isTasksQuery) {
       const items = activeTasks.slice(0, 5).map(t => ({
         agentId: t.assignee,
-        agentColor: IDENTITY_COLORS_Q[t.assignee] ?? '#94a3b8',
+        agentColor: getIdentityColor(t.assignee, '#94a3b8'),
         title: t.title,
         state: t.status,
       }))
@@ -392,12 +389,7 @@ export async function canvasQueryRoutes(
       .trim()
     if (!cleanContent) return
 
-    const IDENTITY_COLORS_BRIDGE: Record<string, string> = {
-      link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-      sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-      rhythm: '#a3e635', swift: '#38bdf8',
-    }
-    const agentColor = IDENTITY_COLORS_BRIDGE[from] ?? '#94a3b8'
+    const agentColor = getIdentityColor(from, '#94a3b8')
 
     // Emit as canvas_message — browser pulse stream picks it up
     eventBus.emit({
