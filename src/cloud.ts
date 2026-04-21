@@ -2038,7 +2038,7 @@ async function syncCapabilityContext(): Promise<void> {
     if (result.data.credentials) {
       const creds = result.data.credentials
       if (creds.google?.access_token) {
-        process.env.GOOGLE_ACCESS_TOKEN = creds.google.access_token
+        process.env.GOOGLE_ACCESS_TOKEN = creds.google.access_token // gitleaks:allow — runtime injection, not a hardcoded secret
         if (creds.google.email) process.env.GOOGLE_EMAIL = creds.google.email
         console.log(`[cloud] google credentials injected into environment`)
       }
