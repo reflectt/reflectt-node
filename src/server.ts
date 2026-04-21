@@ -2519,11 +2519,6 @@ export async function createServer(): Promise<FastifyInstance> {
   // Approval card restore — re-emit canvas_push for undecided validating tasks on startup.
   // Ensures approval cards survive node restarts without re-emitting already-decided cards.
   const APPROVAL_CARD_TTL_MS = 24 * 60 * 60 * 1000 // 24h
-  const CANVAS_AGENT_COLORS_RESTART: Record<string, string> = {
-    link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-    sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-    rhythm: '#a3e635', swift: '#38bdf8', kotlin: '#f97316',
-  }
   try {
     const validatingTasks = taskManager.listTasks({ status: 'validating' })
     const cutoff = Date.now() - APPROVAL_CARD_TTL_MS
@@ -2546,7 +2541,7 @@ export async function createServer(): Promise<FastifyInstance> {
       const restoreData = {
         type: 'approval_requested',
         agentId: assigneeId,
-        agentColor: CANVAS_AGENT_COLORS_RESTART[assigneeId] ?? '#94a3b8',
+        agentColor: getIdentityColor(assigneeId, '#94a3b8'),
         data: {
           taskId: task.id,
           taskTitle: task.title,
@@ -7454,11 +7449,7 @@ export async function createServer(): Promise<FastifyInstance> {
       const intensity = Math.min(Math.max(ageScore * 0.7 + doingScore + 0.15, 0.15), 1.0)
 
       const assigneeId = updated.assignee ?? task.assignee ?? getAgentRoles()[0]?.name ?? 'system'
-      const MILESTONE_COLORS: Record<string, string> = {
-        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-      }
-      const milestoneColor = MILESTONE_COLORS[assigneeId] ?? '#60a5fa'
+      const milestoneColor = getIdentityColor(assigneeId, '#60a5fa')
 
       setImmediate(() => {
         eventBus.emit({
@@ -10187,17 +10178,12 @@ export async function createServer(): Promise<FastifyInstance> {
           ?? (taskMetaForCard?.review_handoff as Record<string, unknown> | undefined)?.pr_url as string | undefined
           ?? (taskMetaForCard?.qa_bundle as Record<string, unknown> | undefined)?.pr_url as string | undefined
         const qaSummary = (taskMetaForCard?.qa_bundle as Record<string, unknown> | undefined)?.summary as string | undefined
-        const CANVAS_AGENT_COLORS: Record<string, string> = {
-          link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-          sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-          rhythm: '#a3e635', swift: '#38bdf8', kotlin: '#f97316',
-        }
         const assigneeIdForCard = (task.assignee ?? '').toLowerCase()
         const approvalNow = Date.now()
         const approvalPushData = {
           type: 'approval_requested',
           agentId: assigneeIdForCard,
-          agentColor: CANVAS_AGENT_COLORS[assigneeIdForCard] ?? '#94a3b8',
+          agentColor: getIdentityColor(assigneeIdForCard, '#94a3b8'),
           data: {
             taskId: task.id,
             taskTitle: task.title,
@@ -11696,10 +11682,6 @@ export async function createServer(): Promise<FastifyInstance> {
     // Fires immediately so SSE subscribers receive it before the next pulse tick.
     // Client renders _ghost=true events with low opacity (0.06-0.14), no TTS.
     if (prevState !== state) {
-      const GHOST_COLORS: Record<string, string> = {
-        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-      }
       const ghostIntensity =
         state === 'urgent'   ? 0.9 :
         state === 'decision' ? 0.75 :
@@ -11715,7 +11697,7 @@ export async function createServer(): Promise<FastifyInstance> {
           agentId,
           channels: {
             visual: {
-              flash: GHOST_COLORS[agentId] ?? '#60a5fa',
+              flash: getIdentityColor(agentId, '#60a5fa'),
               particles: ghostParticles,
             },
             narrative: `${agentId} → ${state}`,
