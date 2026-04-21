@@ -10727,7 +10727,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const claimedName = typeof body.claimedName === 'string' ? body.claimedName.trim().toLowerCase() : ''
     const displayName = typeof body.displayName === 'string' ? body.displayName.trim() : undefined
     const voice = typeof body.voice === 'string' ? body.voice.trim() : undefined
-    const color = typeof body.color === 'string' ? body.color.trim() : undefined
+    const color = typeof body.color === 'string' ? body.color.trim() : ''
     const avatar = body.avatar && typeof body.avatar === 'object' ? body.avatar as Record<string, unknown> : undefined
 
     if (!claimedName) {
@@ -10738,14 +10738,18 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.code(400)
       return { success: false, error: 'claimedName must be lowercase alphanumeric (a-z, 0-9, -, _)' }
     }
+    if (!color) {
+      reply.code(400)
+      return { success: false, error: 'color is required — pick a hex (#rrggbb) or rgb()/rgba() value. It persists as settings.identityColor and is the single source of truth for your canvas color.' }
+    }
+    if (!/^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\))$/.test(color)) {
+      reply.code(400)
+      return { success: false, error: `color "${color}" must be a hex (#rrggbb) or rgb()/rgba() value` }
+    }
     // Reject hallucinated voices — must match Kokoro prefix (af_/am_/bf_/bm_) or ElevenLabs ID shape.
     if (voice && !/^(af_|am_|bf_|bm_)[a-z0-9_]+$/i.test(voice) && !/^[a-zA-Z0-9]{20,}$/.test(voice)) {
       reply.code(400)
       return { success: false, error: `voice "${voice}" is not a recognized Kokoro or ElevenLabs voice ID. Kokoro voices: af_sarah, af_nicole, af_bella, am_adam, am_michael, bf_emma, bf_isabella, bm_george, bm_lewis.` }
-    }
-    if (color && !/^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\))$/.test(color)) {
-      reply.code(400)
-      return { success: false, error: `color "${color}" must be a hex (#rrggbb) or rgb()/rgba() value` }
     }
 
     // Resolve the source agent (must exist)
@@ -10827,6 +10831,7 @@ export async function createServer(): Promise<FastifyInstance> {
       displayName: displayName ?? null,
       avatarSet: !!avatar,
       voiceSet: !!voice,
+      colorSet: !!color,
     }
   })
 

@@ -77,7 +77,7 @@ describe('fresh-host identity handoff', () => {
     ])
   })
 
-  // ── Proof 1: claim endpoint renames agent + stores avatar/voice ───────────
+  // ── Proof 1: claim endpoint renames agent + stores avatar/voice/color ────
   it('POST /agents/main/identity/claim: returns success + renames to claimedName', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -85,6 +85,7 @@ describe('fresh-host identity handoff', () => {
       payload: {
         claimedName: 'nova',
         displayName: 'Nova',
+        color: '#fb923c',
         voice: 'EXAVITQu4vr4xnSDxMaL',
         avatar: { type: 'emoji', content: '🌟' },
       },
@@ -97,6 +98,21 @@ describe('fresh-host identity handoff', () => {
     expect(body.newName).toBe('nova')
     expect(body.avatarSet).toBe(true)
     expect(body.voiceSet).toBe(true)
+    expect(body.colorSet).toBe(true)
+  })
+
+  // ── Proof 1b: claimed color persists to agent_config.settings.identityColor
+  it('claim persists color as settings.identityColor and presence reflects it', async () => {
+    const cfgRes = await app.inject({ method: 'GET', url: '/agents/nova/config' })
+    expect(cfgRes.statusCode).toBe(200)
+    const cfg = JSON.parse(cfgRes.body)
+    expect(cfg.settings?.identityColor).toBe('#fb923c')
+
+    const presRes = await app.inject({ method: 'GET', url: '/canvas/presence' })
+    expect(presRes.statusCode).toBe(200)
+    const pres = JSON.parse(presRes.body)
+    const nova = (pres.agents || []).find((a: { name: string }) => a.name === 'nova')
+    if (nova) expect(nova.identityColor).toBe('#fb923c')
   })
 
   // ── Proof 2: reidentify was called with the new name ─────────────────────
@@ -142,5 +158,21 @@ describe('fresh-host identity handoff', () => {
     expect(res.statusCode).toBe(400)
     const body = JSON.parse(res.body)
     expect(body.error).toMatch(/claimedName/)
+  })
+
+  // ── Proof 7: claim requires color — forcing function for persistence ─────
+  // task-1776796380591-wroo87jmu: fresh managed agents were claiming name+avatar+voice
+  // but not color, because the contract treated color as optional. With color
+  // required, the LLM cannot silently skip it and leave presence at the neutral
+  // #9ca3af fallback.
+  it('claim returns 400 when color is missing', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/agents/main/identity/claim',
+      payload: { claimedName: 'colorless', voice: 'am_adam', avatar: { type: 'emoji', content: '🫥' } },
+    })
+    expect(res.statusCode).toBe(400)
+    const body = JSON.parse(res.body)
+    expect(body.error).toMatch(/color/)
   })
 })
