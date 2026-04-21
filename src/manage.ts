@@ -6,8 +6,8 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME, DATA_DIR } from './config.js'
-import { readFileSync, existsSync, statSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { readFileSync, existsSync, statSync, writeFileSync, mkdirSync, readdirSync, renameSync, rmSync } from 'fs'
+import { join, dirname } from 'path'
 
 // ── Auth helper ──────────────────────────────────────────────────────
 // Uses REFLECTT_MANAGE_TOKEN or falls back to REFLECTT_INSIGHT_MUTATION_TOKEN.
@@ -29,9 +29,15 @@ function isLoopback(request: FastifyRequest): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
 }
 
-function checkManageAuth(request: FastifyRequest, reply: FastifyReply): boolean {
+function checkManageAuth(request: FastifyRequest, reply: FastifyReply, opts?: { allowHostCredential?: boolean }): boolean {
   const requiredToken = process.env.REFLECTT_MANAGE_TOKEN || process.env.REFLECTT_INSIGHT_MUTATION_TOKEN
-  if (!requiredToken) {
+  const hostCredential = opts?.allowHostCredential ? process.env.REFLECTT_HOST_CREDENTIAL : undefined
+  const provided = extractToken(request)
+
+  if (requiredToken && provided === requiredToken) return true
+  if (hostCredential && provided === hostCredential) return true
+
+  if (!requiredToken && !hostCredential) {
     // No token configured — allow loopback only
     if (isLoopback(request)) return true
     reply.code(403)
@@ -42,18 +48,102 @@ function checkManageAuth(request: FastifyRequest, reply: FastifyReply): boolean 
     return false
   }
 
-  const provided = extractToken(request)
-  if (provided === requiredToken) return true
-
   // Allow loopback even with token configured (convenient for local dev)
   if (isLoopback(request)) return true
 
   reply.code(403)
   reply.send({
     error: 'Forbidden: invalid manage token',
-    hint: 'Provide x-manage-token header or Authorization: Bearer <token> matching REFLECTT_MANAGE_TOKEN.',
+    hint: opts?.allowHostCredential
+      ? 'Provide x-manage-token or Authorization: Bearer <token> matching REFLECTT_MANAGE_TOKEN (or the managed host credential for reset-first-boot).'
+      : 'Provide x-manage-token header or Authorization: Bearer <token> matching REFLECTT_MANAGE_TOKEN.',
   })
   return false
+}
+
+export const FIRST_BOOT_RESET_CONFIRM = 'RESET_FIRST_BOOT'
+
+export interface FirstBootResetSummary {
+  backupDir: string
+  removedMarker: boolean
+  movedAgentEntries: string[]
+  removedTeamRoles: boolean
+  deletedTaskIds: string[]
+  removedBackupDir: boolean
+}
+
+export async function resetFirstBootState(opts?: {
+  reflecttHome?: string
+  dataDir?: string
+  actor?: string
+  now?: () => number
+  listTasks?: () => Array<{ id: string }>
+  deleteTask?: (taskId: string, actor: string) => Promise<boolean>
+}): Promise<FirstBootResetSummary> {
+  const reflecttHome = opts?.reflecttHome || REFLECTT_HOME
+  const dataDir = opts?.dataDir || DATA_DIR
+  const actor = opts?.actor || 'system-first-boot-reset'
+  const now = opts?.now || (() => Date.now())
+
+  let importedTaskManager: Awaited<typeof import('./tasks.js')>['taskManager'] | null = null
+  const getTaskManager = async () => {
+    if (importedTaskManager) return importedTaskManager
+    const mod = await import('./tasks.js')
+    importedTaskManager = mod.taskManager
+    return importedTaskManager
+  }
+  const deleteTask = opts?.deleteTask || (async (taskId: string, deleteActor: string) => {
+    const taskManager = await getTaskManager()
+    return taskManager.deleteTask(taskId, deleteActor)
+  })
+
+  const backupDir = join(dataDir, '_bootstrap_resets', `reset-${now()}`)
+  mkdirSync(backupDir, { recursive: true })
+
+  const moveIntoBackup = (src: string, relativeDest: string): boolean => {
+    if (!existsSync(src)) return false
+    const dest = join(backupDir, relativeDest)
+    mkdirSync(dirname(dest), { recursive: true })
+    renameSync(src, dest)
+    return true
+  }
+
+  const removedMarker = moveIntoBackup(join(dataDir, '.first-boot-done'), 'data.first-boot-done.bak')
+
+  const movedAgentEntries: string[] = []
+  const agentsDir = join(dataDir, 'agents')
+  if (existsSync(agentsDir)) {
+    for (const entry of readdirSync(agentsDir)) {
+      if (!entry || entry.startsWith('.')) continue
+      if (moveIntoBackup(join(agentsDir, entry), join('agents', entry))) {
+        movedAgentEntries.push(entry)
+      }
+    }
+  }
+
+  const removedTeamRoles = moveIntoBackup(join(reflecttHome, 'TEAM-ROLES.yaml'), 'TEAM-ROLES.yaml.bak')
+
+  const liveTasks = opts?.listTasks ? opts.listTasks() : (await getTaskManager()).listTasks({ includeTest: true })
+  const deletedTaskIds: string[] = []
+  for (const task of liveTasks) {
+    if (!task?.id) continue
+    const deleted = await deleteTask(task.id, actor)
+    if (deleted) deletedTaskIds.push(task.id)
+  }
+
+  const removedBackupDir = !removedMarker && !removedTeamRoles && movedAgentEntries.length === 0 && deletedTaskIds.length === 0
+  if (removedBackupDir) {
+    rmSync(backupDir, { recursive: true, force: true })
+  }
+
+  return {
+    backupDir,
+    removedMarker,
+    movedAgentEntries,
+    removedTeamRoles,
+    deletedTaskIds,
+    removedBackupDir,
+  }
 }
 
 // ── Redact sensitive values ──────────────────────────────────────────
@@ -255,6 +345,57 @@ export function registerManageRoutes(app: FastifyInstance, deps: {
     setTimeout(() => {
       if (method === 'exit') {
         // Docker/systemd will auto-restart on exit code 0
+        process.exit(0)
+      } else if (method === 'sigterm') {
+        process.kill(process.pid, 'SIGTERM')
+      }
+    }, 500)
+  })
+
+  // POST /manage/reset-first-boot — destructive bootstrap reset for managed-host reproof
+  app.post('/manage/reset-first-boot', async (request, reply) => {
+    if (!checkManageAuth(request, reply, { allowHostCredential: true })) return
+
+    const body = (request.body && typeof request.body === 'object') ? request.body as Record<string, unknown> : {}
+    if (body.confirm !== FIRST_BOOT_RESET_CONFIRM) {
+      reply.code(400)
+      return {
+        error: `confirm must equal ${FIRST_BOOT_RESET_CONFIRM}`,
+        hint: 'This endpoint is destructive. It clears first-boot markers, moves agent state aside, deletes live tasks, and optionally restarts the host.',
+      }
+    }
+
+    const restart = body.restart !== false
+    const reset = await resetFirstBootState()
+    const method = restart ? detectRestartMethod() : null
+
+    if (restart && !method) {
+      reply.code(501)
+      return {
+        success: false,
+        error: 'Restart not supported in this environment',
+        hint: 'Reset succeeded, but restart is not supported here. Reboot the process manually or call this endpoint with { restart: false }.',
+        reset,
+      }
+    }
+
+    reply.send({
+      success: true,
+      reset,
+      restart: restart
+        ? {
+            scheduled: true,
+            method,
+            pid: process.pid,
+            message: `First-boot reset applied. Server will restart via ${method}.`,
+          }
+        : { scheduled: false },
+    })
+
+    if (!restart || !method) return
+
+    setTimeout(() => {
+      if (method === 'exit') {
         process.exit(0)
       } else if (method === 'sigterm') {
         process.kill(process.pid, 'SIGTERM')
