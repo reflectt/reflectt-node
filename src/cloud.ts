@@ -2034,13 +2034,20 @@ async function syncCapabilityContext(): Promise<void> {
     console.log(`[cloud] capability context updated (${hint.length} chars)`)
 
     // Inject capability credentials into environment so agents can use them directly.
-    // Tokens are refreshed every CAPABILITY_CONTEXT_REFRESH_MS by re-fetching context.
+    // Generic loop — same contract for all capabilities. Each plugin on the cloud
+    // side implements getCredentials() if it has runtime tokens to provide.
+    // Convention: {CAPABILITY}_{KEY} → e.g. GOOGLE_ACCESS_TOKEN, GITHUB_TOKEN
     if (result.data.credentials) {
-      const creds = result.data.credentials
-      if (creds.google?.access_token) {
-        process.env.GOOGLE_ACCESS_TOKEN = creds.google.access_token // gitleaks:allow — runtime injection, not a hardcoded secret
-        if (creds.google.email) process.env.GOOGLE_EMAIL = creds.google.email
-        console.log(`[cloud] google credentials injected into environment`)
+      const injected: string[] = []
+      for (const [capability, creds] of Object.entries(result.data.credentials)) {
+        const prefix = capability.toUpperCase()
+        for (const [key, value] of Object.entries(creds)) {
+          process.env[`${prefix}_${key.toUpperCase()}`] = value // gitleaks:allow — runtime injection, not hardcoded secrets
+        }
+        injected.push(capability)
+      }
+      if (injected.length > 0) {
+        console.log(`[cloud] capability credentials injected: ${injected.join(', ')}`)
       }
     }
 
