@@ -2017,7 +2017,7 @@ async function syncCapabilityContext(): Promise<void> {
   lastCapabilityContextFetchAt = now
 
   try {
-    const result = await cloudGet<{ systemPromptHint: string }>(`/api/hosts/${state.hostId}/capabilities/context`)
+    const result = await cloudGet<{ systemPromptHint: string; credentials?: Record<string, Record<string, string>> }>(`/api/hosts/${state.hostId}/capabilities/context`)
     if (!result.success || !result.data?.systemPromptHint) return
 
     const hint = result.data.systemPromptHint.trim()
@@ -2032,6 +2032,17 @@ async function syncCapabilityContext(): Promise<void> {
 
     writeFileSync(CAPABILITY_CONTEXT_FILE, `## Team capabilities\n\n${hint}\n`)
     console.log(`[cloud] capability context updated (${hint.length} chars)`)
+
+    // Inject capability credentials into environment so agents can use them directly.
+    // Tokens are refreshed every CAPABILITY_CONTEXT_REFRESH_MS by re-fetching context.
+    if (result.data.credentials) {
+      const creds = result.data.credentials
+      if (creds.google?.access_token) {
+        process.env.GOOGLE_ACCESS_TOKEN = creds.google.access_token
+        if (creds.google.email) process.env.GOOGLE_EMAIL = creds.google.email
+        console.log(`[cloud] google credentials injected into environment`)
+      }
+    }
 
     // Sync capability context to all agent workspaces so agents see available capabilities
     syncTeamContextToAgents(REFLECTT_HOME)
