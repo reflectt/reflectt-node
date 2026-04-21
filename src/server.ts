@@ -11069,21 +11069,51 @@ export async function createServer(): Promise<FastifyInstance> {
       const prevRoles = getAgentRoles()
       const prevAgentNames = new Set(prevRoles.map(r => r.name))
       let preservedNames: string[] = []
+      let aliasMergedNames: string[] = []
       let yamlToWrite = yaml
       try {
         const incomingRoles = parseRolesYaml(yaml)
         const incomingNames = new Set(incomingRoles.map(r => r.name.toLowerCase()))
         const claimedIds = getClaimedAgentIds()
+        const prevByName = new Map(prevRoles.map(r => [r.name.toLowerCase(), r]))
+
+        // Alias preservation: if an incoming agent has the same name as a previously
+        // claimed agent, merge any aliases from the prev row that are missing in the
+        // incoming row. This protects aliases like `main` on a renamed founder
+        // (e.g. main → forge with aliases:[main]) from being wiped when the
+        // bootstrap-written yaml only carries the new name without the alias.
+        const mergedIncoming = incomingRoles.map(r => {
+          const prev = prevByName.get(r.name.toLowerCase())
+          if (!prev || !claimedIds.has(r.name.toLowerCase())) return r
+          const prevAliases = prev.aliases ?? []
+          if (prevAliases.length === 0) return r
+          const incomingAliasesLower = new Set((r.aliases ?? []).map(a => a.toLowerCase()))
+          const merged = [...(r.aliases ?? [])]
+          for (const a of prevAliases) {
+            if (!incomingAliasesLower.has(a.toLowerCase())) merged.push(a)
+          }
+          if (merged.length !== (r.aliases ?? []).length) {
+            aliasMergedNames.push(r.name)
+            return { ...r, aliases: merged }
+          }
+          return r
+        })
+
         const preserved = prevRoles.filter(r =>
           claimedIds.has(r.name.toLowerCase()) && !incomingNames.has(r.name.toLowerCase())
         )
-        if (preserved.length > 0) {
+        if (preserved.length > 0 || aliasMergedNames.length > 0) {
           // Use saveAgentRoles to write the merged structured roster (preserves
           // aliases/avatar/voice fields verbatim). The raw yaml string is discarded
           // for this path; downstream load reads the merged file.
-          saveAgentRoles([...incomingRoles, ...preserved])
+          saveAgentRoles([...mergedIncoming, ...preserved])
           preservedNames = preserved.map(r => r.name)
-          console.log(`[config/team-roles] Preserved ${preserved.length} claimed agent(s) dropped by incoming yaml: ${preservedNames.join(', ')}`)
+          if (preserved.length > 0) {
+            console.log(`[config/team-roles] Preserved ${preserved.length} claimed agent(s) dropped by incoming yaml: ${preservedNames.join(', ')}`)
+          }
+          if (aliasMergedNames.length > 0) {
+            console.log(`[config/team-roles] Preserved aliases on ${aliasMergedNames.length} claimed agent(s): ${aliasMergedNames.join(', ')}`)
+          }
         } else {
           writeFileSync(filePath, yamlToWrite, 'utf-8')
         }
