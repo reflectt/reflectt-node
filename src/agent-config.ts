@@ -119,6 +119,24 @@ export function setAgentConfig(agentId: string, updates: {
 }
 
 /**
+ * Read the agent's claimed identity color from agent_config.settings.identityColor.
+ * Returns a neutral fallback when the agent hasn't claimed a color.
+ * This is the single source of truth for identity color — no roster maps.
+ */
+export function getIdentityColor(agentId: string, fallback = '#9ca3af'): string {
+  try {
+    const db = getDb()
+    const row = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(agentId) as { settings: string } | undefined
+    if (!row) return fallback
+    const settings = JSON.parse(row.settings || '{}') as Record<string, unknown>
+    const color = settings.identityColor
+    return typeof color === 'string' && color.length > 0 ? color : fallback
+  } catch {
+    return fallback
+  }
+}
+
+/**
  * Delete config for an agent.
  */
 export function deleteAgentConfig(agentId: string): boolean {

@@ -17,6 +17,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { PresenceStatus } from './presence.js'
 import type Database from 'better-sqlite3'
 import { emitActivationEvent } from './activationEvents.js'
+import { getIdentityColor } from './agent-config.js'
 
 /**
  * Resolve userId for activation event attribution.
@@ -74,7 +75,6 @@ export interface CanvasRouteDeps {
     getAll: () => unknown[]
     getStats: () => unknown
   }
-  agentIdentityColors: Record<string, string>
   getDb: () => Database.Database
   getRecentRejections: () => unknown[]
   /** Expression log for flow-score velocity calculation */
@@ -126,7 +126,7 @@ export async function canvasReadRoutes(app: FastifyInstance, deps: CanvasRouteDe
 
       agents.push({
         name: agentId,
-        identityColor: deps.agentIdentityColors[agentId] || '#9ca3af',
+        identityColor: getIdentityColor(agentId),
         state: presenceState,
         activeTask: (entry.payload as any)?.activeTask,
         recency: formatRecency(entry.updatedAt),
@@ -304,7 +304,7 @@ export async function canvasReadRoutes(app: FastifyInstance, deps: CanvasRouteDe
     let dominantColor = '#60a5fa'
     for (const [agentId, entry] of deps.canvasStateMap) {
       if (entry.state !== 'floor' && entry.state !== 'ambient') {
-        dominantColor = deps.agentIdentityColors[agentId] ?? dominantColor
+        dominantColor = getIdentityColor(agentId, dominantColor)
         break
       }
     }

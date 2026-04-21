@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { eventBus as eventBusInstance } from './events.js'
 import { getDb } from './db.js'
+import { getIdentityColor } from './agent-config.js'
 
 // ── Types ──
 
@@ -109,13 +110,6 @@ export function broadcastRenderCommand(agentId: string, cmd: RealityMixerCommand
 }
 
 export function getRenderCommandLog() { return renderCommandLog }
-
-// ── Identity colors (shared across interactive routes) ──
-
-const IDENTITY_COLORS: Record<string, string> = {
-  link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-  sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-}
 
 // ── Plugin ──
 
@@ -254,7 +248,7 @@ export async function canvasInteractiveRoutes(
         agentId,
         channels: {
           voice: line,
-          visual: { flash: IDENTITY_COLORS[agentId] ?? '#60a5fa', ambientCue: 'deep-focus' },
+          visual: { flash: getIdentityColor(agentId, '#60a5fa'), ambientCue: 'deep-focus' },
           typography: {
             text: activeTask?.title?.slice(0, 60) ?? line,
             size: 'xl',
@@ -346,7 +340,7 @@ export async function canvasInteractiveRoutes(
             channels: {
               voice: voiceLine,
               visual: {
-                flash: IDENTITY_COLORS[agent.agentId] ?? '#94a3b8',
+                flash: getIdentityColor(agent.agentId, '#94a3b8'),
                 particles: (agent.state === 'urgent' ? 'surge' : ['rendering', 'thinking'].includes(agent.state) ? 'drift' : 'scatter') as 'surge' | 'drift' | 'scatter',
               },
               typography: {
@@ -423,7 +417,7 @@ export async function canvasInteractiveRoutes(
           data: {
             agentId: waveAgentId,
             channels: {
-              visual: { flash: IDENTITY_COLORS[waveAgentId] ?? '#f59e0b', particles: 'surge' },
+              visual: { flash: getIdentityColor(waveAgentId, '#f59e0b'), particles: 'surge' },
               haptic: { preset: 'acknowledge' },
             },
             _victoryWave: true,
@@ -433,7 +427,7 @@ export async function canvasInteractiveRoutes(
       }, delay + WAVE_STAGGER_MS)
     }
 
-    const agentColor = IDENTITY_COLORS[agentId] ?? '#60a5fa'
+    const agentColor = getIdentityColor(agentId, '#60a5fa')
     eventBus.emit({
       id: `artifact-pr-${now}`,
       type: 'canvas_artifact' as const,
