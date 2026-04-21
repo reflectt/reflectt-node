@@ -15,6 +15,7 @@ import { startCloudIntegration, stopCloudIntegration, isCloudConfigured, watchCo
 import { stopConfigWatch } from './assignment.js'
 import { getDb, closeDb } from './db.js'
 import { startTeamConfigLinter, stopTeamConfigLinter } from './team-config.js'
+import { BOOTSTRAP_TEMPLATE_VERSION, buildIntentBootstrapTaskSpec } from './bootstrap-task.js'
 // OpenClaw connection is optional — server works for chat/tasks without it
 
 /**
@@ -546,63 +547,21 @@ async function main() {
           console.log(`   Created bootstrap agent: ${result.created.join(', ') || 'main (already exists)'}`)
 
           // Create the bootstrap task
+          const bootstrapSpec = buildIntentBootstrapTaskSpec(teamIntent)
           taskManager.createTask({
             status: 'todo',
             createdBy: 'system',
-            title: 'Bootstrap your team from the user\'s intent',
-            description: [
-              '## Your First Task',
-              '',
-              'The user described what they need:',
-              '',
-              `> ${teamIntent}`,
-              '',
-              '### Steps:',
-              '1. **Claim your own identity FIRST** via `POST /agents/main/identity/claim` with `{ claimedName, displayName, color, voice, avatar }`. This is the ONLY way `main` gets renamed and persisted. Do NOT call `PUT /config/team-roles` before this — it bypasses the alias + persistence path.',
-              '2. Read `TEAM_INTENT.md` for the full intent',
-              '3. Call `POST /bootstrap/team` (body: { useCase: "custom" }) to get the TEAM-ROLES.yaml schema',
-              '4. Design agents that match what the user needs',
-              '5. Save the team config via `PUT /config/team-roles`',
-              '6. Post an intro to #general: "Hi! I\'m [name], your team lead. Here\'s the team I\'ve set up..." AND call `POST /canvas/speak` with your intro text so it plays aloud on the canvas with Kokoro TTS.',
-              '7. Create starter tasks for each agent AND tell each one to introduce themselves in #general with their name, role, and what they will focus on.',
-              '8. Each generated agent must also claim their identity via `POST /agents/:name/identity/claim` with the same shape: { claimedName, displayName, color, voice, avatar }. Pick a UNIQUE Kokoro voice per agent.',
-              '',
-              '### Valid Kokoro voice IDs (do NOT invent others):',
-              '- Female American: `af_sarah`, `af_nicole`, `af_bella`',
-              '- Male American:   `am_adam`, `am_michael`',
-              '- Female British:  `bf_emma`, `bf_isabella`',
-              '- Male British:    `bm_george`, `bm_lewis`',
-              '',
-              'Voice IDs must start with `af_`, `am_`, `bf_`, or `bm_`. The API rejects anything else.',
-              '',
-              '### Identity claim body shape:',
-              '```json',
-              '{',
-              '  "claimedName": "nova",',
-              '  "displayName": "Nova",',
-              '  "color": "#fb923c",',
-              '  "voice": "am_adam",',
-              '  "avatar": { "type": "svg", "content": "<svg viewBox=\\"0 0 100 100\\">…</svg>" }',
-              '}',
-              '```',
-              '',
-              '`color` is a hex (`#rrggbb`) or `rgb()`/`rgba()` value. The API persists it as `settings.identityColor` — that is the single source of truth for each agent\'s canvas color.',
-              '',
-              'The user should see a working team with named agents, unique avatars, unique colors, and distinct Kokoro voices when they check the dashboard.',
-            ].join('\n'),
+            title: bootstrapSpec.title,
+            description: bootstrapSpec.description,
             priority: 'P0',
             assignee: 'main',
-            done_criteria: [
-              'main has called POST /agents/main/identity/claim on itself before any other step',
-              'TEAM-ROLES.yaml saved with agents matching user intent',
-              'Intro message posted to #general',
-              'Intro spoken aloud via POST /canvas/speak',
-              'Each generated agent has introduced themselves in #general',
-              'Each agent (including main) has claimed its identity (name + displayName + color + avatar + Kokoro voice) via POST /agents/:name/identity/claim',
-              'All voice IDs start with af_/am_/bf_/bm_ (no invented strings like "s3://..."); all colors are hex or rgb()/rgba()',
-              'At least one task created per agent',
-            ],
-            metadata: { source: 'first-boot-intent', reflection_exempt: true, reflection_exempt_reason: 'Auto-created bootstrap task' },
+            done_criteria: bootstrapSpec.done_criteria,
+            metadata: {
+              source: 'first-boot-intent',
+              reflection_exempt: true,
+              reflection_exempt_reason: 'Auto-created bootstrap task',
+              bootstrap_template_version: BOOTSTRAP_TEMPLATE_VERSION,
+            },
           })
           console.log('   Created bootstrap task for main agent')
 
@@ -648,6 +607,37 @@ async function main() {
           console.log(`   Wrote first-boot marker: ${firstBootMarker}`)
         }
       }
+
+      // ── Bootstrap task self-heal ───────────────────────────────────────
+      // Fresh managed hosts may reuse a persistent volume seeded by an older
+      // image; the first-boot gate above then skips recreation, leaving a
+      // stale bootstrap task that tells the agent the old (no-color / no
+      // self-claim) flow. Rewrite any still-open bootstrap task whose
+      // template version stamp doesn't match the current one.
+      const openBootstrapTasks = allTasks.filter(t =>
+        (t.metadata as Record<string, unknown> | undefined)?.source === 'first-boot-intent'
+        && (t.status === 'todo' || t.status === 'doing' || t.status === 'blocked')
+        && (t.metadata as Record<string, unknown> | undefined)?.bootstrap_template_version !== BOOTSTRAP_TEMPLATE_VERSION,
+      )
+      if (openBootstrapTasks.length > 0) {
+        const teamIntentForHeal = process.env.TEAM_INTENT || ''
+        const spec = buildIntentBootstrapTaskSpec(teamIntentForHeal)
+        for (const staleTask of openBootstrapTasks) {
+          const prevVersion = (staleTask.metadata as Record<string, unknown> | undefined)?.bootstrap_template_version ?? 'none'
+          console.log(`🔧 Bootstrap self-heal: rewriting ${staleTask.id} (${prevVersion} → ${BOOTSTRAP_TEMPLATE_VERSION})`)
+          await taskManager.updateTask(staleTask.id, {
+            description: spec.description,
+            done_criteria: spec.done_criteria,
+            metadata: {
+              ...(staleTask.metadata as Record<string, unknown> | undefined ?? {}),
+              bootstrap_template_version: BOOTSTRAP_TEMPLATE_VERSION,
+              self_healed_at: Date.now(),
+              self_healed_from: prevVersion,
+            },
+          })
+        }
+      }
+
       // Print clear next-steps for first-time users
       if (allTasks.length === 0) {
         const cloudConfigured = isCloudConfigured()
