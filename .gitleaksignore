@@ -1,2 +1,5 @@
 # spike/ files contain placeholder/example values only — no real secrets
 f2c0581ddd13b6f3b97fc017d10451f9478067c4:spike/runtime-poc-writeup.md:env-dump:106
+
+# Runtime credential injection from capability context — env var name, not a hardcoded secret
+a68c42455b7a263e470dfd0d5ab1f36cf718a7eb:src/cloud.ts:env-dump:2041

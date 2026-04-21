@@ -42,6 +42,8 @@ regexes = [
   # Caught by generic API key detector; safe because only names, never values
   '''process\.env\.ELEVEN_LABS_API_KEY''',
   '''process\.env\.ELEVENLABS_API_KEY''',
+  # Runtime credential injection from capability context — env var name, not a secret value
+  '''process\.env\.GOOGLE_ACCESS_TOKEN''',
 ]
 
 # Block common env dump patterns even if not caught by default rules

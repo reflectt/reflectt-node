@@ -2017,7 +2017,7 @@ async function syncCapabilityContext(): Promise<void> {
   lastCapabilityContextFetchAt = now
 
   try {
-    const result = await cloudGet<{ systemPromptHint: string }>(`/api/hosts/${state.hostId}/capabilities/context`)
+    const result = await cloudGet<{ systemPromptHint: string; credentials?: Record<string, Record<string, string>> }>(`/api/hosts/${state.hostId}/capabilities/context`)
     if (!result.success || !result.data?.systemPromptHint) return
 
     const hint = result.data.systemPromptHint.trim()
@@ -2032,6 +2032,24 @@ async function syncCapabilityContext(): Promise<void> {
 
     writeFileSync(CAPABILITY_CONTEXT_FILE, `## Team capabilities\n\n${hint}\n`)
     console.log(`[cloud] capability context updated (${hint.length} chars)`)
+
+    // Inject capability credentials into environment so agents can use them directly.
+    // Generic loop — same contract for all capabilities. Each plugin on the cloud
+    // side implements getCredentials() if it has runtime tokens to provide.
+    // Convention: {CAPABILITY}_{KEY} → e.g. GOOGLE_ACCESS_TOKEN, GITHUB_TOKEN
+    if (result.data.credentials) {
+      const injected: string[] = []
+      for (const [capability, creds] of Object.entries(result.data.credentials)) {
+        const prefix = capability.toUpperCase()
+        for (const [key, value] of Object.entries(creds)) {
+          process.env[`${prefix}_${key.toUpperCase()}`] = value // gitleaks:allow — runtime injection, not hardcoded secrets
+        }
+        injected.push(capability)
+      }
+      if (injected.length > 0) {
+        console.log(`[cloud] capability credentials injected: ${injected.join(', ')}`)
+      }
+    }
 
     // Sync capability context to all agent workspaces so agents see available capabilities
     syncTeamContextToAgents(REFLECTT_HOME)
