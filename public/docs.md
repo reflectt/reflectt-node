@@ -220,6 +220,7 @@ If your deployment needs quiet-hours behavior today, enforce it in scheduler/gat
 | POST | `/manage/restart` | Remote management: graceful restart (Docker/systemd/CLI). Auth required. |
 | GET | `/manage/restart-context` | Read last restart context snapshot written on graceful restart. Auth required. Returns 404 if no snapshot exists. |
 | GET | `/manage/disk` | Remote management: data directory sizes. Auth required. |
+| POST | `/manage/reset-bootstrap` | Destructive bootstrap reset for managed-host reproof. Clears first-boot state, moves agents aside, deletes tasks, optionally restarts. Auth: manage token or host credential. Body: `{ confirm: "RESET_BOOTSTRAP", restart?: boolean }`. |
 | GET | `/browser/config` | Browser capability configuration (max sessions, rate limits, viewport). |
 | POST | `/browser/sessions` | Create a new isolated browser session. Body: `{ agent, url?, headless?, viewport? }`. Returns session object. |
 | GET | `/browser/sessions` | List all browser sessions (active and recent). |
@@ -1145,6 +1146,7 @@ Auth-gated endpoints for managing a reflectt-node instance remotely. Provide `RE
 | GET | `/manage/logs` | Bounded log tail. Query: `level` (error/warn/info), `since` (epoch ms), `limit` (max 200), `format=text` for plain text |
 | POST | `/manage/restart` | Graceful restart. Works with Docker, systemd, and reflectt CLI (PID file). Returns 501 if unsupported. |
 | GET | `/manage/disk` | Data directory sizes for capacity monitoring |
+| POST | `/manage/reset-bootstrap` | Destructive bootstrap reset. Clears `.first-boot-done`, moves agents aside, deletes tasks, optionally restarts. Body: `{ confirm: "RESET_BOOTSTRAP", restart?: boolean }`. Auth: manage token or host credential. |
 
 ### Agent Runs & Events
 
