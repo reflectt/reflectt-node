@@ -73,7 +73,7 @@ let lastMtime: number = 0
 let watchActive = false
 
 
-function parseRolesYaml(content: string): AgentRole[] {
+export function parseRolesYaml(content: string): AgentRole[] {
   const data = parseYaml(content)
   if (!data?.agents || !Array.isArray(data.agents)) {
     throw new Error('TEAM-ROLES.yaml: missing or invalid "agents" array')
