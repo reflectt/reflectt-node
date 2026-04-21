@@ -8647,15 +8647,9 @@ export async function createServer(): Promise<FastifyInstance> {
       return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
     }
 
-    // Agent voice IDs (ElevenLabs) — per-agent identity, same mapping as cloud
-    const NODE_AGENT_VOICE_IDS: Record<string, string> = {
-      link: 'pNInz6obpgDQGcFmaJgB',    // Adam
-      kai: 'onwK4e9ZLuTAKqWW03F9',     // Daniel
-      pixel: 'EXAVITQu4vr4xnSDxMaL',   // Sarah
-      sage: 'yoZ06aMxZJJ28mfd3POQ',    // Rachel
-      scout: '3XbDmaS0mwj3WIVTUxWa',   // Charlie
-      echo: 'MF3mGyEYCl7XYWbV9V6O',    // Elli
-    }
+    // Generic fallback voice for agents that haven't claimed their own.
+    // Agent-claimed voices (via identity/claim → agent_config) take priority.
+    const ELEVENLABS_DEFAULT_VOICE = process.env.ELEVENLABS_DEFAULT_VOICE_ID || 'pNInz6obpgDQGcFmaJgB'
 
     // ── Voice mutex — only one agent speaks at a time ──────────────────
     // P0 fix: multiple agents were triggering TTS simultaneously, causing
@@ -8691,10 +8685,9 @@ export async function createServer(): Promise<FastifyInstance> {
 
       // Fire canvas_expression alongside TTS — the room responds when an agent speaks.
       // Non-blocking: emit first, synthesize in parallel.
-      const IDENTITY_COLORS: Record<string, string> = {
-        link: '#60a5fa', kai: '#fb923c', pixel: '#a78bfa',
-        sage: '#34d399', scout: '#fbbf24', echo: '#f472b6',
-      }
+      // Resolve agent's claimed identity color from agent_config, fall back to neutral blue
+      const colorRow = getDb().prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(forAgentId) as { settings: string } | undefined
+      const claimedColor: string = colorRow ? (() => { try { return JSON.parse(colorRow.settings)?.identityColor ?? '#60a5fa' } catch { return '#60a5fa' } })() : '#60a5fa'
       eventBus.emit({
         id: `voice-expr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         type: 'canvas_expression' as const,
@@ -8703,7 +8696,7 @@ export async function createServer(): Promise<FastifyInstance> {
           agentId: forAgentId,
           channels: {
             voice: text.slice(0, 300),
-            visual: { flash: IDENTITY_COLORS[forAgentId] ?? '#60a5fa', particles: 'surge' },
+            visual: { flash: claimedColor, particles: 'surge' },
             narrative: `${forAgentId} responds`,
           },
         },
@@ -8713,7 +8706,7 @@ export async function createServer(): Promise<FastifyInstance> {
       // Prefer voice stored in agent_config (set during identity claim) over hardcoded map
       const agentConfigRow = getDb().prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(forAgentId) as { settings: string } | undefined
       const agentConfigVoice: string | undefined = agentConfigRow ? (() => { try { return JSON.parse(agentConfigRow.settings)?.voice } catch { return undefined } })() : undefined
-      const voiceId = agentConfigVoice ?? NODE_AGENT_VOICE_IDS[forAgentId] ?? NODE_AGENT_VOICE_IDS['link']
+      const voiceId = agentConfigVoice ?? ELEVENLABS_DEFAULT_VOICE
       try {
         const res = await fetch(
           `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,

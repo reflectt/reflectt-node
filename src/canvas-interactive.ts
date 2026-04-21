@@ -4,6 +4,7 @@
 
 import type { FastifyInstance } from 'fastify'
 import type { eventBus as eventBusInstance } from './events.js'
+import { getDb } from './db.js'
 
 // ── Types ──
 
@@ -559,22 +560,26 @@ export async function canvasInteractiveRoutes(
 
   const ELEVEN_BASE = 'https://api.elevenlabs.io/v1'
   const ELEVEN_API_KEY = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
-  const ELEVEN_VOICE_MAP: Record<string, string> = {
-    link: 'pNInz6obpgDQGcFmaJgB', kai: 'ErXwobaYiN019PkySvjV',
-    pixel: 'MF3mGyEYCl7XYWbV9V6O', echo: 'jBpfuIE2acCO8z3wKNLl',
-    harmony: 'jBpfuIE2acCO8z3wKNLl', rhythm: 'onwK4e9ZLuTAKqWW03F9',
-    swift: 'yoZ06aMxZJJ28mfd3POQ', kotlin: 'SOYHLrjzK2X1ezoPC6cr',
-    sage: 'ThT5KcBeYPX3keUQqHPh', bookkeeper: 'GBv7mTt0atIp3Br8iCZE',
-  }
-  const KOKORO_VOICE_MAP: Record<string, string> = {
-    link: 'af_sarah', swift: 'af_sarah',
-    kai: 'af_nicole', kotlin: 'af_nicole', pixel: 'af_nicole', echo: 'af_nicole', harmony: 'af_nicole',
-    rhythm: 'af_james', bookkeeper: 'bf_emma', sage: 'bf_emma',
+  // No hardcoded voice maps — agents own their identity via agent_config.
+  // Generic fallbacks for agents that haven't claimed a voice.
+  const KOKORO_DEFAULT_VOICE = process.env.KOKORO_DEFAULT_VOICE_ID || 'af_sarah'
+  const ELEVENLABS_DEFAULT_VOICE = process.env.ELEVENLABS_DEFAULT_VOICE_ID || 'pNInz6obpgDQGcFmaJgB'
+
+  function getClaimedVoice(agentId: string): { kokoro: string; eleven: string } {
+    try {
+      const row = getDb().prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(agentId) as { settings: string } | undefined
+      if (row) {
+        const settings = JSON.parse(row.settings)
+        if (settings?.voice) return { kokoro: settings.voice, eleven: settings.voice }
+      }
+    } catch { /* fall through to defaults */ }
+    return { kokoro: KOKORO_DEFAULT_VOICE, eleven: ELEVENLABS_DEFAULT_VOICE }
   }
 
   async function makeTts(text: string, agentId: string): Promise<{ url: string; ms: number } | null> {
-    const kokoroVoice = KOKORO_VOICE_MAP[agentId] || 'af_sarah'
-    const elevenVoice = ELEVEN_VOICE_MAP[agentId] || 'pNInz6obpgDQGcFmaJgB'
+    const claimed = getClaimedVoice(agentId)
+    const kokoroVoice = claimed.kokoro
+    const elevenVoice = claimed.eleven
     const key = await hashTts(text, kokoroVoice)
     const cached = ttsCache.get(key)
     if (cached && Date.now() - cached.ts < TTS_TTL) return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
