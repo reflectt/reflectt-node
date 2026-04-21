@@ -6,8 +6,8 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME, DATA_DIR } from './config.js'
-import { readFileSync, existsSync, statSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { promises as fs, readFileSync, existsSync, statSync, writeFileSync } from 'fs'
+import { dirname, join } from 'path'
 
 // ── Auth helper ──────────────────────────────────────────────────────
 // Uses REFLECTT_MANAGE_TOKEN or falls back to REFLECTT_INSIGHT_MUTATION_TOKEN.
@@ -85,6 +85,107 @@ function redactObject(obj: Record<string, unknown>): Record<string, unknown> {
     }
   }
   return result
+}
+
+export const RESET_BOOTSTRAP_CONFIRM = 'RESET_BOOTSTRAP'
+
+export interface ResetBootstrapDeps {
+  reflecttHome: string
+  dataDir: string
+  taskManager: {
+    listTasks: (opts: Record<string, unknown>) => Array<{ id: string }>
+    deleteTask: (id: string, actor?: string) => Promise<boolean> | boolean
+  }
+  presenceManager?: {
+    clearAll: () => void
+  }
+  listAgentConfigs?: () => Array<{ agentId: string }>
+  deleteAgentConfig?: (agentId: string) => boolean
+  clearFocusStates?: () => number
+  now?: () => number
+}
+
+export interface ResetBootstrapResult {
+  archiveDir: string
+  moved: {
+    reflecttHomeFiles: string[]
+    dataFiles: string[]
+    workspaces: string[]
+  }
+  deletedTasks: number
+  clearedAgentConfigs: number
+  clearedFocusStates: number
+  presenceCleared: boolean
+}
+
+async function movePathIfExists(sourcePath: string, targetPath: string): Promise<boolean> {
+  if (!existsSync(sourcePath)) return false
+  await fs.mkdir(dirname(targetPath), { recursive: true })
+  await fs.rename(sourcePath, targetPath)
+  return true
+}
+
+export async function resetBootstrapState(deps: ResetBootstrapDeps): Promise<ResetBootstrapResult> {
+  const now = deps.now?.() ?? Date.now()
+  const archiveDir = join(deps.dataDir, 'reset-bootstrap', `rb-${now}`)
+  await fs.mkdir(archiveDir, { recursive: true })
+
+  const moved = {
+    reflecttHomeFiles: [] as string[],
+    dataFiles: [] as string[],
+    workspaces: [] as string[],
+  }
+
+  for (const name of ['TEAM.md', 'TEAM-ROLES.yaml', 'TEAM-STANDARDS.md']) {
+    if (await movePathIfExists(join(deps.reflecttHome, name), join(archiveDir, 'reflectt-home', name))) {
+      moved.reflecttHomeFiles.push(name)
+    }
+  }
+
+  for (const name of ['.first-boot-done', 'TEAM_INTENT.md', 'restart-context.json']) {
+    if (await movePathIfExists(join(deps.dataDir, name), join(archiveDir, 'data', name))) {
+      moved.dataFiles.push(name)
+    }
+  }
+
+  try {
+    const entries = await fs.readdir(deps.reflecttHome, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !entry.name.startsWith('workspace-')) continue
+      if (await movePathIfExists(join(deps.reflecttHome, entry.name), join(archiveDir, 'workspaces', entry.name))) {
+        moved.workspaces.push(entry.name)
+      }
+    }
+  } catch {
+    // If REFLECTT_HOME cannot be enumerated, keep reset going and report what did move.
+  }
+
+  const tasks = deps.taskManager.listTasks({})
+  for (const task of tasks) {
+    await deps.taskManager.deleteTask(task.id, 'manage-reset-bootstrap')
+  }
+
+  let clearedAgentConfigs = 0
+  if (deps.listAgentConfigs && deps.deleteAgentConfig) {
+    for (const config of deps.listAgentConfigs()) {
+      if (deps.deleteAgentConfig(config.agentId)) clearedAgentConfigs++
+    }
+  }
+
+  const clearedFocusStates = deps.clearFocusStates?.() ?? 0
+
+  if (deps.presenceManager) {
+    deps.presenceManager.clearAll()
+  }
+
+  return {
+    archiveDir,
+    moved,
+    deletedTasks: tasks.length,
+    clearedAgentConfigs,
+    clearedFocusStates,
+    presenceCleared: Boolean(deps.presenceManager),
+  }
 }
 
 // ── Register manage routes ───────────────────────────────────────────
@@ -260,6 +361,82 @@ export function registerManageRoutes(app: FastifyInstance, deps: {
         process.kill(process.pid, 'SIGTERM')
       }
     }, 500)
+  })
+
+  // POST /manage/reset-bootstrap — archive current team state, clear bootstrap markers, and optionally restart
+  app.post('/manage/reset-bootstrap', async (request, reply) => {
+    if (!checkManageAuth(request, reply)) return
+
+    const body = (request.body as Record<string, unknown> | null) ?? {}
+    if (body.confirm !== RESET_BOOTSTRAP_CONFIRM) {
+      reply.code(400)
+      return {
+        error: 'confirm must equal RESET_BOOTSTRAP',
+        hint: `POST /manage/reset-bootstrap with body { "confirm": "${RESET_BOOTSTRAP_CONFIRM}", "restart": true }`,
+      }
+    }
+
+    const restart = body.restart === true
+    const restartMethod = restart ? detectRestartMethod() : null
+    if (restart && !restartMethod) {
+      reply.code(501)
+      return {
+        error: 'Restart not supported in this environment',
+        hint: 'Retry with restart=false, or run under Docker/systemd/reflectt CLI so restart can be applied automatically.',
+        pid: process.pid,
+      }
+    }
+
+    try {
+      const [{ taskManager }, { presenceManager }, agentConfig, { getDb }] = await Promise.all([
+        import('./tasks.js'),
+        import('./presence.js'),
+        import('./agent-config.js'),
+        import('./db.js'),
+      ])
+
+      const result = await resetBootstrapState({
+        reflecttHome: REFLECTT_HOME,
+        dataDir: DATA_DIR,
+        taskManager,
+        presenceManager,
+        listAgentConfigs: () => agentConfig.listAgentConfigs(),
+        deleteAgentConfig: agentConfig.deleteAgentConfig,
+        clearFocusStates: () => {
+          try {
+            const db = getDb()
+            const focusResult = db.prepare('DELETE FROM focus_states').run()
+            return Number(focusResult.changes || 0)
+          } catch {
+            return 0
+          }
+        },
+      })
+
+      reply.send({
+        status: restart ? 'resetting_and_restarting' : 'reset',
+        resetApplied: true,
+        restartApplied: restart,
+        restartMethod,
+        ...result,
+      })
+
+      if (restart && restartMethod) {
+        setTimeout(() => {
+          if (restartMethod === 'exit') {
+            process.exit(0)
+          } else if (restartMethod === 'sigterm') {
+            process.kill(process.pid, 'SIGTERM')
+          }
+        }, 500)
+      }
+    } catch (err) {
+      reply.code(500)
+      return {
+        error: 'Failed to reset bootstrap state',
+        details: String((err as Error)?.message || err),
+      }
+    }
   })
 
   // GET /manage/restart-context — read last restart snapshot (agents use on boot to resume)
