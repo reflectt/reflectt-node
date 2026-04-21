@@ -19,18 +19,6 @@ import { getAgentAliases } from './assignment.js'
 import { getAgentLane } from './lane-config.js'
 import type Database from 'better-sqlite3'
 
-// Voice IDs for agents (used for TTS)
-const VOICE_IDS: Record<string, string> = {
-  link:  'pNInz6obpgDQGcFmaJgB',
-  kai:   'onwK4e9ZLuTAKqWW03F9',
-  pixel: 'EXAVITQu4vr4xnSDxMaL',
-  sage:  'yoZ06aMxZJJ28mfd3POQ',
-  scout: '3XbDmaS0mwj3WIVTUxWa',
-  echo:  'MF3mGyEYCl7XYWbV9V6O',
-  rhythm: 'morgan',
-  spark: 'corey',
-}
-
 const TASKS_FILE = join(DATA_DIR, 'tasks.jsonl')
 const LEGACY_TASKS_FILE = join(LEGACY_DATA_DIR, 'tasks.jsonl')
 const RECURRING_TASKS_FILE = join(DATA_DIR, 'tasks.recurring.jsonl')
@@ -367,7 +355,6 @@ class TaskManager {
       for (const { assignee, title } of doingTasks) {
         if (!assignee) continue
         const work = title?.slice(0, 50) ?? 'Working...'
-        const voiceId = VOICE_IDS[assignee]
         // Auto-expression: triggers TTS audio (local SSE)
         eventBus.emit({
           id: `think-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -377,7 +364,6 @@ class TaskManager {
             kind: 'auto_expression' as const,
             agentId: assignee,
             line: work,
-            voiceId,
             intensity: 0.3,
           },
         })

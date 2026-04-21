@@ -516,22 +516,18 @@ export async function canvasInteractiveRoutes(
 
   const ELEVEN_BASE = 'https://api.elevenlabs.io/v1'
   const ELEVEN_API_KEY = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
-  const ELEVEN_VOICE_MAP: Record<string, string> = {
-    link: 'pNInz6obpgDQGcFmaJgB', kai: 'ErXwobaYiN019PkySvjV',
-    pixel: 'MF3mGyEYCl7XYWbV9V6O', echo: 'jBpfuIE2acCO8z3wKNLl',
-    harmony: 'jBpfuIE2acCO8z3wKNLl', rhythm: 'onwK4e9ZLuTAKqWW03F9',
-    swift: 'yoZ06aMxZJJ28mfd3POQ', kotlin: 'SOYHLrjzK2X1ezoPC6cr',
-    sage: 'ThT5KcBeYPX3keUQqHPh', bookkeeper: 'GBv7mTt0atIp3Br8iCZE',
-  }
-  const KOKORO_VOICE_MAP: Record<string, string> = {
-    link: 'af_sarah', swift: 'af_sarah',
-    kai: 'af_nicole', kotlin: 'af_nicole', pixel: 'af_nicole', echo: 'af_nicole', harmony: 'af_nicole',
-    rhythm: 'af_james', bookkeeper: 'bf_emma', sage: 'bf_emma',
+  const DEFAULT_KOKORO_VOICE_ID = process.env.KOKORO_DEFAULT_VOICE_ID || 'af_sarah'
+  const DEFAULT_ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_DEFAULT_VOICE_ID || 'pNInz6obpgDQGcFmaJgB'
+
+  function resolveVoiceId(requestedVoiceId: unknown, fallbackVoiceId: string): string {
+    return typeof requestedVoiceId === 'string' && requestedVoiceId.trim()
+      ? requestedVoiceId.trim()
+      : fallbackVoiceId
   }
 
-  async function makeTts(text: string, agentId: string): Promise<{ url: string; ms: number } | null> {
-    const kokoroVoice = KOKORO_VOICE_MAP[agentId] || 'af_sarah'
-    const elevenVoice = ELEVEN_VOICE_MAP[agentId] || 'pNInz6obpgDQGcFmaJgB'
+  async function makeTts(text: string, requestedVoiceId?: string): Promise<{ url: string; ms: number } | null> {
+    const kokoroVoice = resolveVoiceId(requestedVoiceId, DEFAULT_KOKORO_VOICE_ID)
+    const elevenVoice = resolveVoiceId(requestedVoiceId, DEFAULT_ELEVENLABS_VOICE_ID)
     const key = await hashTts(text, kokoroVoice)
     const cached = ttsCache.get(key)
     if (cached && Date.now() - cached.ts < TTS_TTL) return { url: '/audio/' + key, ms: Math.round(text.length * 50) }
@@ -602,10 +598,11 @@ export async function canvasInteractiveRoutes(
     const text = typeof body?.text === 'string' ? body.text.trim() : ''
     const agentId = typeof body?.agentId === 'string' ? body.agentId : 'unknown'
     const agentName = typeof body?.agentName === 'string' ? body.agentName : agentId
+    const requestedVoiceId = typeof body?.voiceId === 'string' ? body.voiceId.trim() : ''
     if (!text || text.length > 1000) return { error: 'text required, max 1000' }
 
     // Deterministic ID so clients can match queued → ready events
-    const voiceId = await hashTts(text, agentId)
+    const voiceId = await hashTts(text, requestedVoiceId || agentId)
     const estimatedMs = Math.round(text.length * 50)
 
     // Emit voice_queued immediately so UI can show "speaking" state
@@ -615,7 +612,7 @@ export async function canvasInteractiveRoutes(
     }
 
     // Generate audio in background — do not await
-    makeTts(text, agentId).then(async (result) => {
+    makeTts(text, requestedVoiceId || undefined).then(async (result) => {
       if (!result) return // Kokoro + ElevenLabs both failed
       // Re-emit with audio URL so clients can play
       const event = { type: 'voice_output', voiceId, text, url: result.url, agentId, agentName, durationMs: result.ms }

@@ -8169,15 +8169,7 @@ export async function createServer(): Promise<FastifyInstance> {
       return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
     }
 
-    // Agent voice IDs (ElevenLabs) — per-agent identity, same mapping as cloud
-    const NODE_AGENT_VOICE_IDS: Record<string, string> = {
-      link: 'pNInz6obpgDQGcFmaJgB',    // Adam
-      kai: 'onwK4e9ZLuTAKqWW03F9',     // Daniel
-      pixel: 'EXAVITQu4vr4xnSDxMaL',   // Sarah
-      sage: 'yoZ06aMxZJJ28mfd3POQ',    // Rachel
-      scout: '3XbDmaS0mwj3WIVTUxWa',   // Charlie
-      echo: 'MF3mGyEYCl7XYWbV9V6O',    // Elli
-    }
+    const DEFAULT_ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_DEFAULT_VOICE_ID || 'pNInz6obpgDQGcFmaJgB'
 
     // ── Voice mutex — only one agent speaks at a time ──────────────────
     // P0 fix: multiple agents were triggering TTS simultaneously, causing
@@ -8232,7 +8224,7 @@ export async function createServer(): Promise<FastifyInstance> {
       })
 
       if (!elevenKey) return null
-      const voiceId = NODE_AGENT_VOICE_IDS[forAgentId] ?? NODE_AGENT_VOICE_IDS['link']
+      const voiceId = DEFAULT_ELEVENLABS_VOICE_ID
       try {
         const res = await fetch(
           `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
@@ -8426,10 +8418,7 @@ export async function createServer(): Promise<FastifyInstance> {
       return `Received: "${text.slice(0, 80)}${text.length > 80 ? '...' : ''}"`
     }
 
-    const NODE_AGENT_VOICE_IDS_AUDIO: Record<string, string> = {
-      link: 'pNInz6obpgDQGcFmaJgB', kai: 'onwK4e9ZLuTAKqWW03F9', pixel: 'EXAVITQu4vr4xnSDxMaL',
-      sage: 'yoZ06aMxZJJ28mfd3POQ', scout: '3XbDmaS0mwj3WIVTUxWa', echo: 'MF3mGyEYCl7XYWbV9V6O',
-    }
+    const DEFAULT_ELEVENLABS_VOICE_ID_AUDIO = process.env.ELEVENLABS_DEFAULT_VOICE_ID || 'pNInz6obpgDQGcFmaJgB'
     const synthesizeTtsAudio = async (text: string, forAgentId: string): Promise<string | null> => {
       const elevenKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY
       // canvas_expression fires whether or not ElevenLabs is configured
@@ -8451,7 +8440,7 @@ export async function createServer(): Promise<FastifyInstance> {
         },
       })
       if (!elevenKey) return null
-      const voiceId = NODE_AGENT_VOICE_IDS_AUDIO[forAgentId] ?? NODE_AGENT_VOICE_IDS_AUDIO['link']
+      const voiceId = DEFAULT_ELEVENLABS_VOICE_ID_AUDIO
       try {
         const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
           method: 'POST',
