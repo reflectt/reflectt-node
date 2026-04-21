@@ -52,7 +52,7 @@ import { getFocus, setFocus, clearFocus, getFocusSummary } from './focus.js'
 import { generatePulse, generateCompactPulse } from './pulse.js'
 import { scanScopeOverlap, scanAndNotify } from './scopeOverlap.js'
 import { getDb } from './db.js'
-import { getIdentityColor } from './agent-config.js'
+import { getIdentityColor, getClaimedAgentIds } from './agent-config.js'
 import type { AgentMessage, Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest, getActiveSamplingProviders } from './mcp.js'
@@ -98,7 +98,7 @@ import { researchManager } from './research.js'
 import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
 import { appendStoredLog, readStoredLogs, getStoredLogPath } from './logStore.js'
-import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases, setAgentDisplayName, resolveAgentMention } from './assignment.js'
+import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases, setAgentDisplayName, resolveAgentMention, parseRolesYaml } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { recordUsage as recordUsageTracking, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, getDailySpendByModel, getAvgCostByLane, getAvgCostByAgent, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
@@ -11057,11 +11057,45 @@ export async function createServer(): Promise<FastifyInstance> {
       const { writeFileSync } = await import('node:fs')
       const { join } = await import('node:path')
       const filePath = join(REFLECTT_HOME, 'TEAM-ROLES.yaml')
-      writeFileSync(filePath, yaml, 'utf-8')
+
+      // Preserve claimed founding agents that the new yaml drops.
+      // When `main` calls /agents/main/identity/claim it renames itself in TEAM-ROLES.yaml
+      // (e.g. main → beacon) and persists avatar/voice/color into agent_config.settings.
+      // A subsequent PUT /config/team-roles that lists only the new team agents would
+      // wipe the renamed founder from yaml, orphaning it: agent_config still has its
+      // identity, but role resolution / @mention fallback / heartbeat all break.
+      // Detect this: any prev role whose name is in agent_config (with claimed identity)
+      // and missing from the incoming yaml gets re-merged before we save.
+      const prevRoles = getAgentRoles()
+      const prevAgentNames = new Set(prevRoles.map(r => r.name))
+      let preservedNames: string[] = []
+      let yamlToWrite = yaml
+      try {
+        const incomingRoles = parseRolesYaml(yaml)
+        const incomingNames = new Set(incomingRoles.map(r => r.name.toLowerCase()))
+        const claimedIds = getClaimedAgentIds()
+        const preserved = prevRoles.filter(r =>
+          claimedIds.has(r.name.toLowerCase()) && !incomingNames.has(r.name.toLowerCase())
+        )
+        if (preserved.length > 0) {
+          // Use saveAgentRoles to write the merged structured roster (preserves
+          // aliases/avatar/voice fields verbatim). The raw yaml string is discarded
+          // for this path; downstream load reads the merged file.
+          saveAgentRoles([...incomingRoles, ...preserved])
+          preservedNames = preserved.map(r => r.name)
+          console.log(`[config/team-roles] Preserved ${preserved.length} claimed agent(s) dropped by incoming yaml: ${preservedNames.join(', ')}`)
+        } else {
+          writeFileSync(filePath, yamlToWrite, 'utf-8')
+        }
+      } catch (parseErr) {
+        // If we can't parse the incoming yaml, fall back to the original write —
+        // the loadAgentRoles() below will surface the parse failure.
+        writeFileSync(filePath, yamlToWrite, 'utf-8')
+        console.warn(`[config/team-roles] Could not parse yaml for preservation check: ${(parseErr as Error).message}`)
+      }
 
       // Hot-reload the team config
       const { loadAgentRoles } = await import('./assignment.js')
-      const prevAgentNames = new Set(getAgentRoles().map(r => r.name))
       const reloaded = loadAgentRoles()
 
       // Broadcast new agents to canvas so they appear immediately (with idle orb)

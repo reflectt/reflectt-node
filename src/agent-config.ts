@@ -119,6 +119,29 @@ export function setAgentConfig(agentId: string, updates: {
 }
 
 /**
+ * Return the set of agent IDs that have claimed identity — i.e. have an
+ * agent_config row with at least one of `settings.avatar`, `settings.voice`,
+ * or `settings.identityColor` set. Used to preserve renamed founding agents
+ * across `PUT /config/team-roles` overwrites.
+ */
+export function getClaimedAgentIds(): Set<string> {
+  const ids = new Set<string>()
+  try {
+    const db = getDb()
+    const rows = db.prepare('SELECT agent_id, settings FROM agent_config').all() as Array<{ agent_id: string; settings: string }>
+    for (const row of rows) {
+      const settings = JSON.parse(row.settings || '{}') as Record<string, unknown>
+      if (settings.avatar || settings.voice || settings.identityColor) {
+        ids.add(String(row.agent_id).toLowerCase())
+      }
+    }
+  } catch {
+    // Empty set on any read/parse failure — caller treats as "no preservation needed"
+  }
+  return ids
+}
+
+/**
  * Read the agent's claimed identity color from agent_config.settings.identityColor.
  * Returns a neutral fallback when the agent hasn't claimed a color.
  * This is the single source of truth for identity color — no roster maps.
