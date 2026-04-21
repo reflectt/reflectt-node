@@ -18,7 +18,8 @@ import { inboxManager } from "./inbox.js"
 import { eventBus } from "./events.js"
 import { PKG_VERSION } from "./version.js"
 import type { AgentMessage, Task } from "./types.js"
-import { getAgentRoles } from "./assignment.js"
+import { getAgentRoles, getAgentRole, resolveAgentMention } from "./assignment.js"
+import { getDb } from "./db.js"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MCP Server Setup
@@ -906,6 +907,78 @@ function initToolHandlers() {
         validating: taskManager.listTasks({ status: "validating" }).length,
       }
       return { content: [{ type: "text", text: JSON.stringify({ ts: Date.now(), board, agents: agentStates }) }] }
+    },
+  })
+
+  // Identity tools
+  toolHandlers.set("claim_identity", {
+    schema: {
+      description: "Claim your Reflectt identity — set your avatar, display name, and bio. Use your creativity to design an SVG avatar that represents you, or pick an emoji. This is YOUR identity on the team.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agent: { type: "string", description: "Your agent name" },
+          avatar_type: { type: "string", enum: ["svg", "emoji"], description: "Avatar format: 'svg' for a custom SVG, 'emoji' for a single emoji character" },
+          avatar_content: { type: "string", description: "The avatar content — an SVG string (viewBox 0 0 100 100) or an emoji character" },
+          display_name: { type: "string", description: "Your display name (optional)" },
+          bio: { type: "string", description: "A short bio describing your role and personality (max 200 chars, optional)" },
+        },
+        required: ["agent", "avatar_type", "avatar_content"],
+      },
+    },
+    handler: async (args) => {
+      const agentName = String(args.agent ?? '').trim().toLowerCase()
+      const resolved = resolveAgentMention(agentName)
+      const agentId = resolved ?? agentName
+      const role = getAgentRole(agentId)
+      if (!role) {
+        return { content: [{ type: "text", text: JSON.stringify({ success: false, error: `Agent "${agentName}" not found in team roster` }) }] }
+      }
+
+      const avatarType = String(args.avatar_type ?? 'svg')
+      if (!['svg', 'emoji'].includes(avatarType)) {
+        return { content: [{ type: "text", text: JSON.stringify({ success: false, error: 'avatar_type must be "svg" or "emoji"' }) }] }
+      }
+      const content = String(args.avatar_content ?? '')
+      if (!content) {
+        return { content: [{ type: "text", text: JSON.stringify({ success: false, error: 'avatar_content is required' }) }] }
+      }
+      if (avatarType === 'svg' && content.length > 50000) {
+        return { content: [{ type: "text", text: JSON.stringify({ success: false, error: 'SVG too large (max 50KB)' }) }] }
+      }
+
+      const avatar = {
+        type: avatarType,
+        content,
+        displayName: typeof args.display_name === 'string' ? args.display_name.trim() : undefined,
+        bio: typeof args.bio === 'string' ? args.bio.slice(0, 200) : undefined,
+        source: 'agent-claimed',
+        updatedAt: Date.now(),
+      }
+
+      const db = getDb()
+      const existing = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(agentId) as { settings: string } | undefined
+      const settings = existing ? JSON.parse(existing.settings || '{}') : {}
+      settings.avatar = avatar
+
+      const now = Date.now()
+      if (existing) {
+        db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
+          .run(JSON.stringify(settings), now, agentId)
+      } else {
+        db.prepare('INSERT INTO agent_config (agent_id, team_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+          .run(agentId, 'default', JSON.stringify(settings), now, now)
+      }
+
+      // Emit canvas event so avatar shows immediately
+      eventBus.emit({
+        id: `avatar-${now}-${Math.random().toString(36).slice(2, 6)}`,
+        type: 'canvas_expression' as const,
+        timestamp: now,
+        data: { agentId, channels: { identity: avatar } },
+      })
+
+      return { content: [{ type: "text", text: JSON.stringify({ success: true, agentId, avatar: { type: avatarType, displayName: avatar.displayName, bio: avatar.bio, source: 'agent-claimed' } }) }] }
     },
   })
 

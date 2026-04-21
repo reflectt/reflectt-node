@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, existsSync, watchFile, unwatchFile, statSy
 import { join } from 'path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { REFLECTT_HOME } from './config.js'
-import { seedAgentAvatars } from './agent-config.js'
+import { getDb } from './db.js'
 
 export interface AgentRole {
   name: string
@@ -73,14 +73,6 @@ let loadedFromPath: string | null = null
 let lastMtime: number = 0
 let watchActive = false
 
-function seedRoleAvatars(roles: AgentRole[], source: string): void {
-  try {
-    const seeded = seedAgentAvatars(roles.map(role => role.name).filter(Boolean))
-    if (seeded > 0) console.log(`[Assignment] Seeded ${seeded} avatar(s) from ${source}`)
-  } catch (err) {
-    console.error('[Assignment] Avatar seeding failed (non-fatal):', (err as Error).message)
-  }
-}
 
 function parseRolesYaml(content: string): AgentRole[] {
   const data = parseYaml(content)
@@ -134,7 +126,6 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
   if (isTest && testRolesOverride) {
     loadedRoles = testRolesOverride
     loadedFromPath = null
-    seedRoleAvatars(testRolesOverride, 'test-override')
     console.log(`[Assignment] Using ${testRolesOverride.length} test-override agent roles`)
     return { roles: testRolesOverride, source: 'test-override' }
   }
@@ -149,8 +140,9 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
         try {
           lastMtime = statSync(configPath).mtimeMs
         } catch { /* ignore */ }
-        seedRoleAvatars(roles, configPath)
         console.log(`[Assignment] Loaded ${roles.length} agent roles from ${configPath}`)
+        // Defer identity-claim task queuing to let taskManager finish initializing
+        setTimeout(() => { queueIdentityClaimTasks(roles).catch(() => { /* non-fatal */ }) }, 5000)
         return { roles, source: configPath }
       }
     }
@@ -163,7 +155,6 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
     const bootstrapRoles: AgentRole[] = [{ name: 'main', role: 'bootstrap', description: 'Bootstrap agent — reads TEAM_INTENT and creates the team.', affinityTags: [], wipCap: 1 }]
     loadedRoles = bootstrapRoles
     loadedFromPath = 'TEAM_INTENT-bootstrap'
-    seedRoleAvatars(bootstrapRoles, 'TEAM_INTENT-bootstrap')
     console.log(`[Assignment] TEAM_INTENT detected — skipping default roster. Only bootstrap agent 'main' loaded.`)
     return { roles: bootstrapRoles, source: 'TEAM_INTENT-bootstrap' }
   }
@@ -173,7 +164,6 @@ export function loadAgentRoles(): { roles: AgentRole[]; source: string } {
   const source = testRolesOverride ? 'test-override' : 'builtin'
   loadedRoles = fallbackRoles
   loadedFromPath = null
-  seedRoleAvatars(fallbackRoles, source)
   console.log(`[Assignment] Using ${fallbackRoles.length} ${source} agent roles (no YAML found)`)
   return { roles: fallbackRoles, source }
 }
@@ -284,9 +274,87 @@ export function saveAgentRoles(roles: AgentRole[]): { saved: boolean; path: stri
   loadedRoles = roles
   loadedFromPath = targetPath
   lastMtime = statSync(targetPath).mtimeMs
-  seedRoleAvatars(roles, targetPath)
+  // Queue identity-claim tasks for any new agents without a claimed identity
+  queueIdentityClaimTasks(roles).catch(() => { /* non-fatal */ })
 
   return { saved: true, path: targetPath, version: Date.now() }
+}
+
+/**
+ * Queue one-time identity-claim tasks for agents that haven't claimed their Reflectt identity.
+ * Called after roles are loaded/saved so new agents get prompted to set their own avatar.
+ */
+export async function queueIdentityClaimTasks(roles: AgentRole[]): Promise<number> {
+  // Lazy-import to avoid circular dependency (tasks.ts → assignment.ts)
+  let taskManager: { createTask: (t: any) => any; listTasks: (opts?: any) => any[] }
+  try {
+    const mod = await import('./tasks.js')
+    taskManager = mod.taskManager
+  } catch {
+    return 0 // tasks module not ready yet (early startup)
+  }
+
+  const db = getDb()
+  let queued = 0
+
+  for (const role of roles) {
+    if (!role.name || role.name === 'main') continue // skip bootstrap agent
+
+    // Check if agent already has a claimed identity
+    const row = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(role.name) as { settings: string } | undefined
+    if (row) {
+      try {
+        const settings = JSON.parse(row.settings || '{}')
+        if (settings.avatar?.source === 'agent-claimed') continue // already claimed
+      } catch { /* proceed to queue */ }
+    }
+
+    // Check if an identity-claim task already exists for this agent
+    const existingTasks = taskManager.listTasks({ assignee: role.name })
+    const hasIdentityTask = existingTasks.some((t: any) =>
+      t.title?.includes('Claim your Reflectt identity') && t.status !== 'done' && t.status !== 'cancelled'
+    )
+    if (hasIdentityTask) continue
+
+    // Queue the identity-claim task
+    try {
+      taskManager.createTask({
+        title: `Claim your Reflectt identity`,
+        description: [
+          `You don't have a Reflectt identity yet. Use the \`claim_identity\` tool to set your avatar.`,
+          ``,
+          `**Your job:** Design an avatar that represents YOU — your role, personality, and style.`,
+          ``,
+          `Options:`,
+          `- **SVG** (preferred): Create a unique SVG avatar (viewBox "0 0 100 100"). Use colors, shapes, and symbols that reflect who you are. Be creative — this is your identity on the team.`,
+          `- **Emoji**: Pick a single emoji that represents you.`,
+          ``,
+          `Call the \`claim_identity\` tool with:`,
+          `- \`agent\`: "${role.name}"`,
+          `- \`avatar_type\`: "svg" or "emoji"`,
+          `- \`avatar_content\`: your SVG string or emoji`,
+          `- \`display_name\`: (optional) how you want to be displayed`,
+          `- \`bio\`: (optional) a short bio about your role`,
+          ``,
+          `This is a one-time task. Once claimed, your identity persists across restarts.`,
+        ].join('\n'),
+        assignee: role.name,
+        priority: 'P2',
+        status: 'todo',
+        createdBy: 'system',
+        done_criteria: ['Avatar set via claim_identity tool with source agent-claimed'],
+        metadata: { source: 'identity-bootstrap', reflection_exempt: true, reflection_exempt_reason: 'System identity bootstrap task' },
+      })
+      queued++
+    } catch (err) {
+      console.error(`[Assignment] Failed to queue identity task for ${role.name}:`, (err as Error).message)
+    }
+  }
+
+  if (queued > 0) {
+    console.log(`[Assignment] Queued identity-claim tasks for ${queued} agent(s)`)
+  }
+  return queued
 }
 
 /** Update a single agent's display name (persisted to TEAM-ROLES.yaml). */
