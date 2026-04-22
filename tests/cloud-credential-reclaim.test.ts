@@ -11,7 +11,7 @@
 // task-1776807913205-71z35p70j (managed-host canvas chat delivery)
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { _testInternals } from '../src/cloud.js'
+import { _testInternals, startCloudIntegration, stopCloudIntegration } from '../src/cloud.js'
 
 const realFetch = globalThis.fetch
 
@@ -163,6 +163,48 @@ describe('cloud credential auto-reclaim', () => {
     expect(b.success).toBe(true)
     expect(c.success).toBe(true)
     expect(claimCallCount).toBe(1) // single-flight: one claim covers all three
+  })
+
+  // Regression: live managed host rn-fb6f9131-dx35x7.fly.dev (PR #1277 follow-up).
+  // After the auto-reclaim shipped, fresh managed hosts still wedged on
+  // "Invalid or expired token" — every heartbeat tick logged
+  //   credential_reclaim_failed: no join token configured
+  // because managed-host bootstrap sets REFLECTT_HOST_ID + REFLECTT_HOST_CREDENTIAL
+  // but never sets REFLECTT_HOST_TOKEN. The cli.ts startup path already mirrors
+  // credential→token (cli.ts:132); the env-var path in cloud.ts did not. Without
+  // this fallback, the join-token branch in attemptCredentialReclaim() bails
+  // before even calling /api/hosts/claim, so heartbeat/chat sync never resumes.
+  it('falls back to REFLECTT_HOST_CREDENTIAL as the reclaim join token when REFLECTT_HOST_TOKEN is unset (managed-host startup)', async () => {
+    const prevToken = process.env.REFLECTT_HOST_TOKEN
+    const prevId = process.env.REFLECTT_HOST_ID
+    const prevCred = process.env.REFLECTT_HOST_CREDENTIAL
+    const prevUrl = process.env.REFLECTT_CLOUD_URL
+    const prevName = process.env.REFLECTT_HOST_NAME
+    delete process.env.REFLECTT_HOST_TOKEN
+    process.env.REFLECTT_HOST_ID = 'host-mgd'
+    process.env.REFLECTT_HOST_CREDENTIAL = 'cred-mgd-bootstrap'
+    process.env.REFLECTT_CLOUD_URL = 'https://cloud.test'
+    process.env.REFLECTT_HOST_NAME = 'rn-managed-test'
+
+    _testInternals.reset()
+
+    // Mock fetch so startCloudIntegration's first heartbeat 401s and the reclaim
+    // path is actually exercised end-to-end through the env-resolved config.
+    globalThis.fetch = vi.fn(async () => jsonResponse(401, { error: 'Invalid or expired token' })) as typeof fetch
+
+    try {
+      await startCloudIntegration()
+      // Token must resolve to the credential value, not '' — otherwise reclaim
+      // bails on "no join token configured".
+      expect(_testInternals.getConfigToken()).toBe('cred-mgd-bootstrap')
+    } finally {
+      stopCloudIntegration()
+      if (prevToken === undefined) delete process.env.REFLECTT_HOST_TOKEN; else process.env.REFLECTT_HOST_TOKEN = prevToken
+      if (prevId === undefined) delete process.env.REFLECTT_HOST_ID; else process.env.REFLECTT_HOST_ID = prevId
+      if (prevCred === undefined) delete process.env.REFLECTT_HOST_CREDENTIAL; else process.env.REFLECTT_HOST_CREDENTIAL = prevCred
+      if (prevUrl === undefined) delete process.env.REFLECTT_CLOUD_URL; else process.env.REFLECTT_CLOUD_URL = prevUrl
+      if (prevName === undefined) delete process.env.REFLECTT_HOST_NAME; else process.env.REFLECTT_HOST_NAME = prevName
+    }
   })
 
   it('does not reclaim for the claim endpoint itself (no recursion)', async () => {

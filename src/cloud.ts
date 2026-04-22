@@ -364,7 +364,11 @@ export async function startCloudIntegration(): Promise<void> {
 
   config = {
     cloudUrl: (process.env.REFLECTT_CLOUD_URL || fileConfig?.cloudUrl || 'https://api.reflectt.ai').replace(/\/+$/, ''),
-    token: process.env.REFLECTT_HOST_TOKEN || '',
+    // Managed hosts boot with REFLECTT_HOST_ID + REFLECTT_HOST_CREDENTIAL only —
+    // REFLECTT_HOST_TOKEN is never set in their env. Mirror the cli.ts fallback
+    // (env.REFLECTT_HOST_TOKEN = config.cloud.credential) so auto-reclaim has
+    // something to present when the cloud rejects the persisted credential.
+    token: process.env.REFLECTT_HOST_TOKEN || process.env.REFLECTT_HOST_CREDENTIAL || '',
     hostName: process.env.REFLECTT_HOST_NAME || fileConfig?.hostName || 'unnamed-host',
     hostType: process.env.REFLECTT_HOST_TYPE || fileConfig?.hostType || 'openclaw',
     heartbeatIntervalMs: Number(process.env.REFLECTT_HEARTBEAT_MS) || DEFAULT_HEARTBEAT_MS,
@@ -2438,6 +2442,9 @@ export const _testInternals = {
   },
   getConnectionEvents(): ConnectionEvent[] {
     return [...connectionEvents]
+  },
+  getConfigToken(): string {
+    return config?.token || ''
   },
   cloudPost,
   cloudGet,
