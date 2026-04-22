@@ -6312,19 +6312,25 @@ export async function createServer(): Promise<FastifyInstance> {
     return result
   })
 
-  // ── Agent Runtime Truth (loopback only — proxied by cloud) ─────────────
+  // ── Agent Runtime Truth (private network only — proxied by cloud) ──────
   // Node owns runtime/control truth: presence, last event, claimedAt.
   // Workspace-file truth (SOUL/MEMORY/HEARTBEAT) belongs to OpenClaw/gateway,
   // not node — deliberately omitted from this surface.
 
   const AGENT_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/
 
-  function loopbackOnly(request: any, reply: any): boolean {
+  // Accepts loopback (local dev / SSH-into-node curl) AND Fly 6PN (`fdaa::/16`),
+  // which is the address the cloud-API box uses when it calls
+  // `http://rn-XXX.internal:4445`. Keys off `request.ip` (direct socket); we
+  // deliberately leave Fastify's `trustProxy:false` so X-Forwarded-For cannot
+  // forge an allowed source.
+  function privateNetworkOnly(request: any, reply: any): boolean {
     const ip = String(request.ip || '')
     const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
-    if (!isLoopback) {
+    const isFly6PN = ip.toLowerCase().startsWith('fdaa:')
+    if (!isLoopback && !isFly6PN) {
       reply.code(403)
-      reply.send({ success: false, error: 'Forbidden: localhost-only endpoint' })
+      reply.send({ success: false, error: 'Forbidden: private-network-only endpoint' })
       return false
     }
     return true
@@ -6351,7 +6357,7 @@ export async function createServer(): Promise<FastifyInstance> {
   // identityClaimedAt (from agent_config.settings — pane's enabledForAgent axis).
   // No derived copy, no panel sugar — the pane composes the display layer.
   app.get<{ Params: { name: string } }>('/agents/:name/runtime', async (request, reply) => {
-    if (!loopbackOnly(request, reply)) return
+    if (!privateNetworkOnly(request, reply)) return
     const { name } = request.params
     if (!AGENT_NAME_RE.test(name)) {
       reply.code(400)
