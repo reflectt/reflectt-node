@@ -172,7 +172,7 @@ function isIdle(): boolean {
 
 // ── Connection lifecycle tracking ──────────────────────────────────
 interface ConnectionEvent {
-  type: 'connected' | 'disconnected' | 'reconnected' | 'error' | 'heartbeat_failed' | 'heartbeat_recovered'
+  type: 'connected' | 'disconnected' | 'reconnected' | 'error' | 'heartbeat_failed' | 'heartbeat_recovered' | 'credential_reclaim_attempt' | 'credential_reclaim_success' | 'credential_reclaim_failed'
   timestamp: number
   reason?: string
   errorCount?: number
@@ -2236,7 +2236,93 @@ interface CloudApiResponse<T = unknown> {
   error?: string
 }
 
-async function cloudGet<T = unknown>(path: string): Promise<CloudApiResponse<T>> {
+// Match cloud responses that indicate the bearer credential was rejected.
+// Cloud returns `{ error: "Invalid or expired token" }` (or a 401/403 status)
+// when the host's per-host credential is no longer accepted.
+function isExpiredCredentialError(status: number, errorMessage: string | undefined): boolean {
+  if (status === 401 || status === 403) return true
+  if (!errorMessage) return false
+  return /invalid or expired token/i.test(errorMessage)
+}
+
+// Single-flight reclaim: if many requests fail simultaneously, only one
+// re-claim runs; the rest await its result.
+let reclaimInFlight: Promise<boolean> | null = null
+
+/**
+ * Re-run /api/hosts/claim with the configured join token to obtain a fresh
+ * credential after the cloud has rejected the current one. Uses raw fetch to
+ * avoid recursing through cloudPost. Returns true on success.
+ */
+async function attemptCredentialReclaim(): Promise<boolean> {
+  if (!config) return false
+  if (reclaimInFlight) return reclaimInFlight
+
+  reclaimInFlight = (async () => {
+    const previousCredential = state.credential
+    logConnectionEvent({ type: 'credential_reclaim_attempt', timestamp: Date.now(), reason: 'cloud rejected current credential' })
+    console.warn('☁️  Cloud credential rejected — attempting reclaim with join token...')
+
+    if (!config!.token) {
+      logConnectionEvent({ type: 'credential_reclaim_failed', timestamp: Date.now(), reason: 'no join token configured (set REFLECTT_HOST_TOKEN to enable auto-reclaim)' })
+      console.warn('☁️  Reclaim skipped: no REFLECTT_HOST_TOKEN configured. Operator intervention required.')
+      return false
+    }
+
+    try {
+      const url = `${config!.cloudUrl}/api/hosts/claim`
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config!.token}`,
+        },
+        body: JSON.stringify({
+          joinToken: config!.token,
+          name: config!.hostName,
+          capabilities: config!.capabilities,
+        }),
+      })
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({})) as Record<string, unknown>
+        const reason = (errBody.error as string) || `HTTP ${response.status}`
+        logConnectionEvent({ type: 'credential_reclaim_failed', timestamp: Date.now(), reason })
+        console.warn(`☁️  Reclaim failed: ${reason}`)
+        // Restore previous credential so the caller's subsequent retry doesn't
+        // accidentally fall through to the join-token path on managed hosts
+        // where the join token IS the rejected credential.
+        state.credential = previousCredential
+        return false
+      }
+
+      const payload = await response.json() as { host?: { id?: string }; credential?: { token?: string } }
+      if (payload.host?.id && payload.credential?.token) {
+        state.hostId = payload.host.id
+        state.credential = payload.credential.token
+        logConnectionEvent({ type: 'credential_reclaim_success', timestamp: Date.now(), reason: `re-claimed (hostId: ${state.hostId})` })
+        console.log(`☁️  Credential reclaimed — heartbeat/sync will resume on next tick (hostId: ${state.hostId})`)
+        return true
+      }
+
+      logConnectionEvent({ type: 'credential_reclaim_failed', timestamp: Date.now(), reason: 'unexpected claim response shape' })
+      state.credential = previousCredential
+      return false
+    } catch (err: any) {
+      logConnectionEvent({ type: 'credential_reclaim_failed', timestamp: Date.now(), reason: err?.message || 'reclaim threw' })
+      state.credential = previousCredential
+      return false
+    }
+  })()
+
+  try {
+    return await reclaimInFlight
+  } finally {
+    reclaimInFlight = null
+  }
+}
+
+async function cloudGet<T = unknown>(path: string, _retried = false): Promise<CloudApiResponse<T>> {
   if (!config) return { success: false, error: 'Not configured' }
 
   try {
@@ -2253,7 +2339,14 @@ async function cloudGet<T = unknown>(path: string): Promise<CloudApiResponse<T>>
 
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({})) as Record<string, unknown>
-      return { success: false, error: (errBody.error as string) || `HTTP ${response.status}` }
+      const errorMessage = (errBody.error as string) || `HTTP ${response.status}`
+
+      if (!_retried && isExpiredCredentialError(response.status, errorMessage)) {
+        const reclaimed = await attemptCredentialReclaim()
+        if (reclaimed) return cloudGet<T>(path, true)
+      }
+
+      return { success: false, error: errorMessage }
     }
 
     const payload = await response.json() as T
@@ -2263,7 +2356,7 @@ async function cloudGet<T = unknown>(path: string): Promise<CloudApiResponse<T>>
   }
 }
 
-async function cloudPost<T = unknown>(path: string, body: unknown): Promise<CloudApiResponse<T>> {
+async function cloudPost<T = unknown>(path: string, body: unknown, _retried = false): Promise<CloudApiResponse<T>> {
   if (!config) return { success: false, error: 'Not configured' }
 
   try {
@@ -2287,7 +2380,18 @@ async function cloudPost<T = unknown>(path: string, body: unknown): Promise<Clou
 
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({})) as Record<string, unknown>
-      return { success: false, error: (errBody.error as string) || `HTTP ${response.status}` }
+      const errorMessage = (errBody.error as string) || `HTTP ${response.status}`
+
+      // Auto-reclaim path: if the cloud rejected our credential and we haven't
+      // already retried this request, re-claim and retry once. Skipping the
+      // claim endpoint itself prevents a recursive loop if cloud also rejects
+      // the join token.
+      if (!_retried && path !== '/api/hosts/claim' && isExpiredCredentialError(response.status, errorMessage)) {
+        const reclaimed = await attemptCredentialReclaim()
+        if (reclaimed) return cloudPost<T>(path, body, true)
+      }
+
+      return { success: false, error: errorMessage }
     }
 
     const payload = await response.json() as T
@@ -2296,4 +2400,45 @@ async function cloudPost<T = unknown>(path: string, body: unknown): Promise<Clou
     // Don't increment errors here — callers handle error counting
     return { success: false, error: err?.message || 'Request failed' }
   }
+}
+
+// ── Test hooks ────────────────────────────────────────────────────────────
+// Exported for tests only — never use in product code.
+export const _testInternals = {
+  reset(): void {
+    config = null
+    state.hostId = null
+    state.credential = null
+    state.errors = 0
+    connectionEvents.length = 0
+    reclaimInFlight = null
+  },
+  configure(cfg: { cloudUrl: string; token: string; hostName: string }): void {
+    config = {
+      cloudUrl: cfg.cloudUrl,
+      token: cfg.token,
+      hostName: cfg.hostName,
+      hostType: 'openclaw',
+      heartbeatIntervalMs: DEFAULT_HEARTBEAT_MS,
+      taskSyncIntervalMs: DEFAULT_TASK_SYNC_MS,
+      capabilities: ['tasks', 'chat'],
+    }
+  },
+  setCredential(credential: string | null): void {
+    state.credential = credential
+  },
+  setHostId(hostId: string | null): void {
+    state.hostId = hostId
+  },
+  getCredential(): string | null {
+    return state.credential
+  },
+  getHostId(): string | null {
+    return state.hostId
+  },
+  getConnectionEvents(): ConnectionEvent[] {
+    return [...connectionEvents]
+  },
+  cloudPost,
+  cloudGet,
 }
