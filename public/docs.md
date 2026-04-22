@@ -812,6 +812,18 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/policy/intensity` | Current intensity preset + limits (wipLimit, maxPullsPerHour, batchIntervalMs). |
 | PUT | `/policy/intensity` | Set intensity preset. Body: `{ preset: "low"|"normal"|"high", updatedBy? }`. Returns new state. |
 
+## Agent Detail Pane (loopback only)
+
+Per-agent read surfaces backing the cloud detail-pane join. All endpoints are gated to loopback (`127.0.0.1` / `::1`) — the cloud proxy injects auth before forwarding. Agent name regex: `^[a-z][a-z0-9_-]{0,63}$`. Date regex: `^\d{4}-\d{2}-\d{2}$`. Files are extension-allowlisted (`.md .txt .json .log .yml .yaml`) and capped at 400KB. Symlink-escapes are rejected.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/agents/:name/detail` | Join shape for the detail pane. Returns `{ soul, memoryIndex, heartbeat }` pointers (relPath/size/mtime, no body), `latestMemoryDay`, `memoryDays` (top 30 desc), `memoryDaysReturned`, honest `totalMemoryDays`, and `identityClaimedAt` (number\|null, persisted by identity claim). |
+| GET | `/agents/:name/memory` | List per-day memory pointers desc by date. Query: `limit` (default 100, max 500). Returns `{ days: [{ date, relPath, size, mtime }] }`. |
+| GET | `/agents/:name/memory/:date` | Read a single per-day memory file body. Returns `{ date, file: { content, size, mtime, truncated } }`. `404` if no file for that date. |
+| GET | `/agents/:name/soul` | Pointer to `SOUL.md` (relPath/size/mtime). Query: `include=body` to also return the file content. Returns `{ exists, pointer, file }`. |
+| GET | `/agents/:name/runtime` | Thin runtime truth: `{ status, currentTaskId, lastEvent: {type,at}\|null, lastObservedAt, idleForMs, identityClaimedAt }`. `lastObservedAt` reflects real activity only — heartbeat ticks do NOT advance it. |
+
 ## Other
 
 | Method | Path | Description |

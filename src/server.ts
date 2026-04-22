@@ -72,6 +72,7 @@ import {
   AGENT_NAME_RE,
   DATE_RE,
   listAgentMemoryDays,
+  countAgentMemoryDays,
   readAgentMemoryDay,
   getAgentFilePointer,
   readAgentFile,
@@ -6417,6 +6418,22 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
+  // Read identityClaimedAt from agent_config.settings — written by /agents/:name/identity/claim.
+  // Returns null when the row or field is missing or the JSON is unparseable.
+  function readIdentityClaimedAt(name: string): number | null {
+    try {
+      const row = getDb()
+        .prepare('SELECT settings FROM agent_config WHERE agent_id = ?')
+        .get(name) as { settings: string } | undefined
+      if (!row?.settings) return null
+      const parsed = JSON.parse(row.settings)
+      const v = parsed?.identityClaimedAt
+      return typeof v === 'number' ? v : null
+    } catch {
+      return null
+    }
+  }
+
   app.get<{ Params: { name: string } }>('/agents/:name/detail', async (request, reply) => {
     if (!loopbackOnly(request, reply)) return
     const { name } = request.params
@@ -6425,11 +6442,12 @@ export async function createServer(): Promise<FastifyInstance> {
       return { success: false, error: 'Invalid agent name' }
     }
     try {
-      const [soulPtr, memoryPtr, heartbeatPtr, days] = await Promise.all([
+      const [soulPtr, memoryPtr, heartbeatPtr, days, totalMemoryDays] = await Promise.all([
         getAgentFilePointer(name, 'SOUL.md').catch(() => ({ exists: false, relPath: 'SOUL.md' } as any)),
         getAgentFilePointer(name, 'MEMORY.md').catch(() => ({ exists: false, relPath: 'MEMORY.md' } as any)),
         getAgentFilePointer(name, 'HEARTBEAT.md').catch(() => ({ exists: false, relPath: 'HEARTBEAT.md' } as any)),
         listAgentMemoryDays(name, 30).catch(() => []),
+        countAgentMemoryDays(name).catch(() => 0),
       ])
       const latest = days[0] || null
       return {
@@ -6445,8 +6463,10 @@ export async function createServer(): Promise<FastifyInstance> {
           ? { relPath: heartbeatPtr.relPath, size: heartbeatPtr.size, mtime: heartbeatPtr.mtime }
           : null,
         latestMemoryDay: latest,
-        memoryDayCount: days.length,
+        memoryDaysReturned: days.length,
+        totalMemoryDays,
         memoryDays: days,
+        identityClaimedAt: readIdentityClaimedAt(name),
       }
     } catch (err) {
       mapAgentApiError(reply, (err as Error).message)
@@ -6455,7 +6475,8 @@ export async function createServer(): Promise<FastifyInstance> {
   })
 
   // GET /agents/:name/runtime — thin runtime truth for the detail pane (#24).
-  // Returns: status, currentTaskId, lastEvent {type, at}, lastObservedAt, idleForMs.
+  // Returns: status, currentTaskId, lastEvent {type, at}, lastObservedAt, idleForMs,
+  // identityClaimedAt (from agent_config.settings — pane's enabledForAgent axis).
   // No derived copy, no panel sugar — the pane composes the display layer.
   app.get<{ Params: { name: string } }>('/agents/:name/runtime', async (request, reply) => {
     if (!loopbackOnly(request, reply)) return
@@ -6476,6 +6497,7 @@ export async function createServer(): Promise<FastifyInstance> {
       lastEvent: lastEvent ? { type: lastEvent.type, at: lastEvent.at } : null,
       lastObservedAt,
       idleForMs,
+      identityClaimedAt: readIdentityClaimedAt(name),
     }
   })
 

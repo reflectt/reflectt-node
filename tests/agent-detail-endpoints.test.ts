@@ -24,6 +24,16 @@ beforeAll(async () => {
   writeFileSync(join(root, 'memory', '2026-04-21.md'), '# 2026-04-21\nentry one')
   writeFileSync(join(root, 'memory', '2026-04-20.md'), '# 2026-04-20\nentry zero')
 
+  // Seed a second agent with 35 days of memory — proves totalMemoryDays is honest
+  // beyond the 30-day list cap surfaced by /detail.
+  const farRoot = join(sandbox, 'workspace-archivist')
+  mkdirSync(join(farRoot, 'memory'), { recursive: true })
+  for (let i = 0; i < 35; i++) {
+    const d = new Date(Date.UTC(2026, 2, 1 + i)) // 2026-03-01 .. 2026-04-04
+    const iso = d.toISOString().slice(0, 10)
+    writeFileSync(join(farRoot, 'memory', `${iso}.md`), `# ${iso}\nday ${i}`)
+  }
+
   app = await createServer()
   await app.ready()
 })
@@ -61,8 +71,20 @@ describe('agent detail endpoints — happy path (loopback)', () => {
     expect(body.heartbeat).toMatchObject({ relPath: 'HEARTBEAT.md' })
     expect(body.heartbeat.size).toBeGreaterThan(0)
     expect(body.latestMemoryDay).toMatchObject({ date: '2026-04-21' })
-    expect(body.memoryDayCount).toBe(2)
+    expect(body.memoryDaysReturned).toBe(2)
+    expect(body.totalMemoryDays).toBe(2)
     expect(body.memoryDays.map((d: any) => d.date)).toEqual(['2026-04-21', '2026-04-20'])
+    expect(body).toHaveProperty('identityClaimedAt')
+  })
+
+  it('GET /agents/:name/detail reports honest totalMemoryDays beyond list cap', async () => {
+    const { status, body } = await req('GET', '/agents/archivist/detail')
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
+    // /detail caps the returned list at 30 — but totalMemoryDays must be the real count.
+    expect(body.memoryDaysReturned).toBe(30)
+    expect(body.totalMemoryDays).toBe(35)
+    expect(body.memoryDays.length).toBe(30)
   })
 
   it('GET /agents/:name/memory lists days desc', async () => {

@@ -61,6 +61,7 @@ describe('GET /agents/:name/runtime', () => {
       lastEvent: null,
       lastObservedAt: null,
       idleForMs: null,
+      identityClaimedAt: null,
     })
   })
 
@@ -198,5 +199,15 @@ describe('POST /agents/:name/identity/claim — claimedAt persistence', () => {
     expect(settings.identityClaimedAt).toBeGreaterThanOrEqual(before)
     expect(settings.identityClaimedAt).toBeLessThanOrEqual(Date.now())
     expect(settings.identityColor).toBe('#ff0066')
+
+    // The persisted truth must be surfaced on the read endpoints the pane will hit.
+    // Pane-spec axis "enabledForAgent" depends on identityClaimedAt being readable.
+    const runtime = await req('GET', '/agents/phoenix-test/runtime')
+    expect(runtime.status).toBe(200)
+    expect(runtime.body.identityClaimedAt).toBe(settings.identityClaimedAt)
+
+    const detail = await req('GET', '/agents/phoenix-test/detail')
+    expect(detail.status).toBe(200)
+    expect(detail.body.identityClaimedAt).toBe(settings.identityClaimedAt)
   })
 })

@@ -193,6 +193,30 @@ export async function listAgentMemoryDays(
 }
 
 /**
+ * Count valid per-day memory files for an agent — honest total, NOT bounded by list limit.
+ * Used by /agents/:name/detail so memoryDaysReturned (limited list) can be paired with
+ * a truthful totalMemoryDays. Cheap: one readdir + name validation, no stat per entry.
+ */
+export async function countAgentMemoryDays(name: string): Promise<number> {
+  const root = getAgentWorkspaceRoot(name)
+  const dir = join(root, 'memory')
+  let entries: string[]
+  try {
+    entries = await fs.readdir(dir)
+  } catch (err: any) {
+    if (err && err.code === 'ENOENT') return 0
+    throw err
+  }
+  let count = 0
+  for (const file of entries) {
+    if (!file.endsWith('.md')) continue
+    const date = file.slice(0, -3)
+    if (DATE_RE.test(date)) count++
+  }
+  return count
+}
+
+/**
  * Read a single per-day memory file. Lazy-load body for the requested date.
  */
 export async function readAgentMemoryDay(name: string, date: string): Promise<AgentFileBody> {
