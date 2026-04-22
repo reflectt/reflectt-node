@@ -10746,10 +10746,10 @@ export async function createServer(): Promise<FastifyInstance> {
       reply.code(400)
       return { success: false, error: `color "${color}" must be a hex (#rrggbb) or rgb()/rgba() value` }
     }
-    // Reject hallucinated voices — must match Kokoro prefix (af_/am_/bf_/bm_) or ElevenLabs ID shape.
+    // Reject hallucinated voices — internal voice IDs use af_/am_/bf_/bm_ prefix or external 20+ char ID shape.
     if (voice && !/^(af_|am_|bf_|bm_)[a-z0-9_]+$/i.test(voice) && !/^[a-zA-Z0-9]{20,}$/.test(voice)) {
       reply.code(400)
-      return { success: false, error: `voice "${voice}" is not a recognized Kokoro or ElevenLabs voice ID. Kokoro voices: af_sarah, af_nicole, af_bella, am_adam, am_michael, bf_emma, bf_isabella, bm_george, bm_lewis.` }
+      return { success: false, error: `voice "${voice}" is not a recognized voice ID. Valid voices: af_sarah, af_nicole, af_bella, am_adam, am_michael, bf_emma, bf_isabella, bm_george, bm_lewis.` }
     }
 
     // Resolve the source agent (must exist)

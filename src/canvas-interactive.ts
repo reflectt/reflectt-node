@@ -52,7 +52,7 @@ export function seedCapabilityMap(agents: Array<{ name: string; role?: string }>
     { id: 'tasks', status: 'active', label: 'Tasks', detail: 'Create, assign, and track tasks' },
     { id: 'canvas', status: 'active', label: 'Canvas', detail: 'Live visual canvas with orbs and panels' },
     { id: 'chat', status: 'active', label: 'Chat', detail: 'Team messaging and coordination' },
-    { id: 'voice', status: process.env.KOKORO_MODEL_PATH ? 'active' : 'offline', label: 'Voice', detail: 'Speech synthesis via Kokoro TTS' },
+    { id: 'voice', status: process.env.KOKORO_MODEL_PATH ? 'active' : 'offline', label: 'Voice', detail: 'Agent speech synthesis' },
     { id: 'github', status: process.env.REFLECTT_GITHUB_APP_PRIVATE_KEY_SECRET ? 'active' : 'offline', label: 'GitHub', detail: 'PR creation and repository management' },
     { id: 'sentry', status: process.env.SENTRY_DSN ? 'active' : 'offline', label: 'Sentry', detail: 'Error tracking and performance monitoring' },
     { id: 'email', status: process.env.RESEND_API_KEY ? 'active' : 'offline', label: 'Email', detail: 'Transactional email via Resend' },
