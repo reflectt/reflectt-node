@@ -12,6 +12,8 @@
  * Exposes ack-latency metrics for health/compliance reporting.
  */
 
+import { resolveAgentMention } from './assignment.js'
+
 export interface MentionAckEntry {
   id: string
   mentionedAgent: string
@@ -239,7 +241,15 @@ class MentionAckTracker {
 
   private extractMentions(content: string): string[] {
     const matches = [...content.matchAll(MENTION_REGEX)]
-    return [...new Set(matches.map(m => m[1].toLowerCase()))]
+    // Resolve each literal capture through the alias-aware resolver so that
+    // `@main` after a `main → apex` rename is recorded as `apex` (canonical),
+    // not as the literal that no agent will ever ack. Fall back to the literal
+    // when the resolver returns nothing so unknown @whoever stays debuggable.
+    const resolved = matches.map(m => {
+      const literal = m[1].toLowerCase()
+      return resolveAgentMention(literal)?.toLowerCase() ?? literal
+    })
+    return [...new Set(resolved)]
   }
 }
 
