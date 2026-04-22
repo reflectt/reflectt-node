@@ -41,6 +41,10 @@ export interface AgentPresence {
   since: number
   lastUpdate: number
   last_active?: number // Last real activity (message, task action, etc.)
+  // Last observable runtime activity — chat message, task transition, touch, identity claim.
+  // Distinct from `lastUpdate` (which advances on heartbeat tick). Cloud reads this for the
+  // detail-pane "connected" axis to show real activity, not periodic check-in cadence.
+  lastObservedAt?: number
   focus?: FocusState
   waiting?: WaitingState  // populated when status === 'waiting'
   thought?: string        // agent's current thought — expires after 8s TTL on canvas
@@ -364,11 +368,14 @@ export class PresenceManager {
     const existing = this.presence.get(agent)
 
     if (!existing || existing.status === 'offline' || existing.status === 'idle') {
-      return this.updatePresence(agent, 'working')
+      const updated = this.updatePresence(agent, 'working')
+      updated.lastObservedAt = now
+      this.presence.set(agent, updated)
+      return updated
     }
 
     // Already active — just bump the timestamp to prevent decay
-    const updated = { ...existing, lastUpdate: now, last_active: now }
+    const updated = { ...existing, lastUpdate: now, last_active: now, lastObservedAt: now }
     this.presence.set(agent, updated)
 
     const activity = this.getActivity(agent)
@@ -400,6 +407,12 @@ export class PresenceManager {
         ? explicitTask
         : existing?.task || hydratedTask?.id
 
+    // lastObservedAt only advances on real-work transitions, never decay/seed.
+    // 'idle' and 'offline' are decay or initial seed; 'working'/'reviewing'/'blocked'/'waiting'
+    // are real status reports from the agent and count as observable activity.
+    const isObservableTransition = updateActivity && status !== 'idle' && status !== 'offline'
+    const nextObservedAt = isObservableTransition ? now : existing?.lastObservedAt
+
     const presence: AgentPresence = {
       agent,
       status,
@@ -407,6 +420,7 @@ export class PresenceManager {
       since: since || existing?.since || hydratedTask?.activityAt || now,
       lastUpdate: now,
       last_active: existing?.last_active || hydratedTask?.activityAt || now,
+      ...(nextObservedAt ? { lastObservedAt: nextObservedAt } : {}),
     }
 
     this.presence.set(agent, presence)
@@ -550,10 +564,13 @@ export class PresenceManager {
     
     // Update presence timestamps — both last_active AND lastUpdate so
     // health status reads and decay timers see the latest activity.
+    // lastObservedAt advances ONLY on real activity (message, task_completed),
+    // never on the 'heartbeat' periodic tick — see kai's #24 spec.
     const presence = this.presence.get(agent)
     if (presence) {
       presence.last_active = now
       presence.lastUpdate = now
+      if (type !== 'heartbeat') presence.lastObservedAt = now
       this.presence.set(agent, presence)
     }
   }

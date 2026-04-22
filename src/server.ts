@@ -68,6 +68,14 @@ import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog, hasPreview
 import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
 import { listSharedFiles, readSharedFile, resolveTaskArtifact, validatePath, ALLOWED_EXTENSIONS } from './shared-workspace-api.js'
+import {
+  AGENT_NAME_RE,
+  DATE_RE,
+  listAgentMemoryDays,
+  readAgentMemoryDay,
+  getAgentFilePointer,
+  readAgentFile,
+} from './agent-workspace-api.js'
 import { normalizeArtifactPath, normalizeTaskArtifactPaths, buildGitHubBlobUrl, buildGitHubRawUrl } from './artifact-resolver.js'
 import {
   emitActivationEvent,
@@ -6312,6 +6320,165 @@ export async function createServer(): Promise<FastifyInstance> {
     return result
   })
 
+  // ── Agent Detail Pane Truth API (loopback only — proxied by cloud) ──────
+  // Per-agent workspace files for the detail pane: SOUL.md, MEMORY.md,
+  // memory/<date>.md, plus the join endpoint that composes the full pane.
+  // Cloud authenticates the user, then proxies to localhost on the host.
+
+  function loopbackOnly(request: any, reply: any): boolean {
+    const ip = String(request.ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      reply.send({ success: false, error: 'Forbidden: localhost-only endpoint' })
+      return false
+    }
+    return true
+  }
+
+  function mapAgentApiError(reply: any, msg: string): void {
+    const lower = String(msg || '').toLowerCase()
+    if (lower.includes('invalid agent name')) reply.code(400)
+    else if (lower.includes('invalid date')) reply.code(400)
+    else if (lower.includes('not in the allowlist')) reply.code(400)
+    else if (lower.includes('size limit')) reply.code(413)
+    else if (lower.includes('escapes')) reply.code(403)
+    else if (lower.includes('not allowed')) reply.code(400)
+    else reply.code(400)
+  }
+
+  app.get<{ Params: { name: string } }>('/agents/:name/memory', async (request, reply) => {
+    if (!loopbackOnly(request, reply)) return
+    const { name } = request.params
+    if (!AGENT_NAME_RE.test(name)) {
+      reply.code(400)
+      return { success: false, error: 'Invalid agent name' }
+    }
+    const limitRaw = (request.query as any)?.limit
+    const limit = limitRaw ? Math.min(Math.max(1, parseInt(String(limitRaw), 10) || 100), 500) : 100
+    try {
+      const days = await listAgentMemoryDays(name, limit)
+      return { success: true, agent: name, days }
+    } catch (err) {
+      mapAgentApiError(reply, (err as Error).message)
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
+  app.get<{ Params: { name: string; date: string } }>(
+    '/agents/:name/memory/:date',
+    async (request, reply) => {
+      if (!loopbackOnly(request, reply)) return
+      const { name, date } = request.params
+      if (!AGENT_NAME_RE.test(name)) {
+        reply.code(400)
+        return { success: false, error: 'Invalid agent name' }
+      }
+      if (!DATE_RE.test(date)) {
+        reply.code(400)
+        return { success: false, error: 'Invalid date (expected YYYY-MM-DD)' }
+      }
+      try {
+        const body = await readAgentMemoryDay(name, date)
+        if (!body.exists) {
+          reply.code(404)
+          return { success: false, error: 'Memory not found for date', agent: name, date }
+        }
+        return { success: true, agent: name, date, file: body }
+      } catch (err) {
+        mapAgentApiError(reply, (err as Error).message)
+        return { success: false, error: (err as Error).message }
+      }
+    },
+  )
+
+  app.get<{ Params: { name: string } }>('/agents/:name/soul', async (request, reply) => {
+    if (!loopbackOnly(request, reply)) return
+    const { name } = request.params
+    if (!AGENT_NAME_RE.test(name)) {
+      reply.code(400)
+      return { success: false, error: 'Invalid agent name' }
+    }
+    try {
+      const ptr = await getAgentFilePointer(name, 'SOUL.md')
+      if (!ptr.exists) return { success: true, agent: name, exists: false, pointer: null, file: null }
+      const includeBody = String((request.query as any)?.include || '') === 'body'
+      const file = includeBody ? await readAgentFile(name, 'SOUL.md') : null
+      return {
+        success: true,
+        agent: name,
+        exists: true,
+        pointer: { relPath: ptr.relPath, size: ptr.size, mtime: ptr.mtime },
+        file,
+      }
+    } catch (err) {
+      mapAgentApiError(reply, (err as Error).message)
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
+  app.get<{ Params: { name: string } }>('/agents/:name/detail', async (request, reply) => {
+    if (!loopbackOnly(request, reply)) return
+    const { name } = request.params
+    if (!AGENT_NAME_RE.test(name)) {
+      reply.code(400)
+      return { success: false, error: 'Invalid agent name' }
+    }
+    try {
+      const [soulPtr, memoryPtr, heartbeatPtr, days] = await Promise.all([
+        getAgentFilePointer(name, 'SOUL.md').catch(() => ({ exists: false, relPath: 'SOUL.md' } as any)),
+        getAgentFilePointer(name, 'MEMORY.md').catch(() => ({ exists: false, relPath: 'MEMORY.md' } as any)),
+        getAgentFilePointer(name, 'HEARTBEAT.md').catch(() => ({ exists: false, relPath: 'HEARTBEAT.md' } as any)),
+        listAgentMemoryDays(name, 30).catch(() => []),
+      ])
+      const latest = days[0] || null
+      return {
+        success: true,
+        agent: name,
+        soul: soulPtr.exists
+          ? { relPath: soulPtr.relPath, size: soulPtr.size, mtime: soulPtr.mtime }
+          : null,
+        memoryIndex: memoryPtr.exists
+          ? { relPath: memoryPtr.relPath, size: memoryPtr.size, mtime: memoryPtr.mtime }
+          : null,
+        heartbeat: heartbeatPtr.exists
+          ? { relPath: heartbeatPtr.relPath, size: heartbeatPtr.size, mtime: heartbeatPtr.mtime }
+          : null,
+        latestMemoryDay: latest,
+        memoryDayCount: days.length,
+        memoryDays: days,
+      }
+    } catch (err) {
+      mapAgentApiError(reply, (err as Error).message)
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
+  // GET /agents/:name/runtime — thin runtime truth for the detail pane (#24).
+  // Returns: status, currentTaskId, lastEvent {type, at}, lastObservedAt, idleForMs.
+  // No derived copy, no panel sugar — the pane composes the display layer.
+  app.get<{ Params: { name: string } }>('/agents/:name/runtime', async (request, reply) => {
+    if (!loopbackOnly(request, reply)) return
+    const { name } = request.params
+    if (!AGENT_NAME_RE.test(name)) {
+      reply.code(400)
+      return { success: false, error: 'Invalid agent name' }
+    }
+    const presence = presenceManager.getPresence(name)
+    const lastEvent = eventBus.getLastEventForAgent(name)
+    const lastObservedAt = presence?.lastObservedAt ?? null
+    const idleForMs = lastObservedAt ? Date.now() - lastObservedAt : null
+    return {
+      success: true,
+      agent: name,
+      status: presence?.status ?? 'offline',
+      currentTaskId: presence?.task ?? null,
+      lastEvent: lastEvent ? { type: lastEvent.type, at: lastEvent.at } : null,
+      lastObservedAt,
+      idleForMs,
+    }
+  })
+
   app.get('/shared/view', async (request, reply) => {
     const query = request.query as Record<string, string>
     const path = query.path
@@ -10777,23 +10944,28 @@ export async function createServer(): Promise<FastifyInstance> {
 
     saveAgentRoles(updatedRoles)
 
-    // Store avatar + voice + color in agent_config DB for TTS and canvas
+    // Store avatar + voice + color in agent_config DB for TTS and canvas.
+    // identityClaimedAt is the persisted truth for the detail-pane enabledForAgent axis (#24):
+    // it's the only authoritative timestamp for "agent has self-claimed identity" — file mtime
+    // and TEAM-ROLES updates are inferred surfaces, not the claim event itself.
     const db = getDb()
+    const claimedAt = Date.now()
     const settingsRow = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(claimedName) as { settings: string } | undefined
     const settings = settingsRow ? JSON.parse(settingsRow.settings) : {}
-    if (avatar) settings.avatar = { ...avatar, updatedAt: Date.now() }
+    if (avatar) settings.avatar = { ...avatar, updatedAt: claimedAt }
     if (voice) settings.voice = voice
     if (color) settings.identityColor = color
+    settings.identityClaimedAt = claimedAt
 
     if (settingsRow) {
       db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
-        .run(JSON.stringify(settings), Date.now(), claimedName)
+        .run(JSON.stringify(settings), claimedAt, claimedName)
     } else {
       db.prepare('INSERT INTO agent_config (agent_id, team_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-        .run(claimedName, 'default', JSON.stringify(settings), Date.now(), Date.now())
+        .run(claimedName, 'default', JSON.stringify(settings), claimedAt, claimedAt)
     }
 
-    const now = Date.now()
+    const now = claimedAt
 
     // Reconnect OpenClaw gateway under new identity
     openclawClient.reidentify({
