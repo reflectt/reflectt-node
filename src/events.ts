@@ -384,6 +384,30 @@ class EventBus {
   }
 
   /**
+   * Find the most recent event in the bounded log that is "owned by" the given agent.
+   * Used by the detail-pane runtime endpoint (#24) to surface lastEvent { type, at }
+   * without exposing payload bodies. Scans newest-first; returns null if nothing matches.
+   * Match shape mirrors shouldReceive's per-type rules (assignee/from/agent/agentId).
+   */
+  getLastEventForAgent(agent: string): { type: EventType; at: number; id: string } | null {
+    if (!agent) return null
+    for (let i = this.eventLog.length - 1; i >= 0; i--) {
+      const ev = this.eventLog[i]
+      const data = ev.data as Record<string, unknown> | null | undefined
+      if (!data || typeof data !== 'object') continue
+      const matches =
+        data.agent === agent ||
+        data.from === agent ||
+        data.agentId === agent ||
+        data.assignee === agent ||
+        (ev.type === 'agent_identity_changed' &&
+          (data.previousName === agent || data.newName === agent))
+      if (matches) return { type: ev.type, at: ev.timestamp, id: ev.id }
+    }
+    return null
+  }
+
+  /**
    * Get event bus statistics
    */
   getStatus() {

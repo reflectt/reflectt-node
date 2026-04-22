@@ -812,6 +812,16 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/policy/intensity` | Current intensity preset + limits (wipLimit, maxPullsPerHour, batchIntervalMs). |
 | PUT | `/policy/intensity` | Set intensity preset. Body: `{ preset: "low"|"normal"|"high", updatedBy? }`. Returns new state. |
 
+## Agent Runtime Truth (loopback only)
+
+Node-owned runtime truth for the cloud detail-pane join. Loopback-gated (`127.0.0.1` / `::1`) — the cloud proxy injects auth before forwarding. Agent name regex: `^[a-z][a-z0-9_-]{0,63}$`.
+
+> Workspace-file truth (`SOUL.md`, `MEMORY.md`, `HEARTBEAT.md`, per-day memory) is owned by OpenClaw/gateway, not node — the pane reads those through the gateway surface, not from here.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/agents/:name/runtime` | Thin runtime truth: `{ status, currentTaskId, lastEvent: {type,at}\|null, lastObservedAt, idleForMs, identityClaimedAt }`. `lastObservedAt` reflects real activity only — heartbeat ticks do NOT advance it. `identityClaimedAt` is persisted by `POST /agents/:name/identity/claim`. |
+
 ## Other
 
 | Method | Path | Description |

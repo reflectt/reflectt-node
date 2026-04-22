@@ -6312,6 +6312,67 @@ export async function createServer(): Promise<FastifyInstance> {
     return result
   })
 
+  // ── Agent Runtime Truth (loopback only — proxied by cloud) ─────────────
+  // Node owns runtime/control truth: presence, last event, claimedAt.
+  // Workspace-file truth (SOUL/MEMORY/HEARTBEAT) belongs to OpenClaw/gateway,
+  // not node — deliberately omitted from this surface.
+
+  const AGENT_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/
+
+  function loopbackOnly(request: any, reply: any): boolean {
+    const ip = String(request.ip || '')
+    const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+    if (!isLoopback) {
+      reply.code(403)
+      reply.send({ success: false, error: 'Forbidden: localhost-only endpoint' })
+      return false
+    }
+    return true
+  }
+
+  // Read identityClaimedAt from agent_config.settings — written by /agents/:name/identity/claim.
+  // Returns null when the row or field is missing or the JSON is unparseable.
+  function readIdentityClaimedAt(name: string): number | null {
+    try {
+      const row = getDb()
+        .prepare('SELECT settings FROM agent_config WHERE agent_id = ?')
+        .get(name) as { settings: string } | undefined
+      if (!row?.settings) return null
+      const parsed = JSON.parse(row.settings)
+      const v = parsed?.identityClaimedAt
+      return typeof v === 'number' ? v : null
+    } catch {
+      return null
+    }
+  }
+
+  // GET /agents/:name/runtime — thin runtime truth for the detail pane (#24).
+  // Returns: status, currentTaskId, lastEvent {type, at}, lastObservedAt, idleForMs,
+  // identityClaimedAt (from agent_config.settings — pane's enabledForAgent axis).
+  // No derived copy, no panel sugar — the pane composes the display layer.
+  app.get<{ Params: { name: string } }>('/agents/:name/runtime', async (request, reply) => {
+    if (!loopbackOnly(request, reply)) return
+    const { name } = request.params
+    if (!AGENT_NAME_RE.test(name)) {
+      reply.code(400)
+      return { success: false, error: 'Invalid agent name' }
+    }
+    const presence = presenceManager.getPresence(name)
+    const lastEvent = eventBus.getLastEventForAgent(name)
+    const lastObservedAt = presence?.lastObservedAt ?? null
+    const idleForMs = lastObservedAt ? Date.now() - lastObservedAt : null
+    return {
+      success: true,
+      agent: name,
+      status: presence?.status ?? 'offline',
+      currentTaskId: presence?.task ?? null,
+      lastEvent: lastEvent ? { type: lastEvent.type, at: lastEvent.at } : null,
+      lastObservedAt,
+      idleForMs,
+      identityClaimedAt: readIdentityClaimedAt(name),
+    }
+  })
+
   app.get('/shared/view', async (request, reply) => {
     const query = request.query as Record<string, string>
     const path = query.path
@@ -10777,23 +10838,28 @@ export async function createServer(): Promise<FastifyInstance> {
 
     saveAgentRoles(updatedRoles)
 
-    // Store avatar + voice + color in agent_config DB for TTS and canvas
+    // Store avatar + voice + color in agent_config DB for TTS and canvas.
+    // identityClaimedAt is the persisted truth for the detail-pane enabledForAgent axis (#24):
+    // it's the only authoritative timestamp for "agent has self-claimed identity" — file mtime
+    // and TEAM-ROLES updates are inferred surfaces, not the claim event itself.
     const db = getDb()
+    const claimedAt = Date.now()
     const settingsRow = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(claimedName) as { settings: string } | undefined
     const settings = settingsRow ? JSON.parse(settingsRow.settings) : {}
-    if (avatar) settings.avatar = { ...avatar, updatedAt: Date.now() }
+    if (avatar) settings.avatar = { ...avatar, updatedAt: claimedAt }
     if (voice) settings.voice = voice
     if (color) settings.identityColor = color
+    settings.identityClaimedAt = claimedAt
 
     if (settingsRow) {
       db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
-        .run(JSON.stringify(settings), Date.now(), claimedName)
+        .run(JSON.stringify(settings), claimedAt, claimedName)
     } else {
       db.prepare('INSERT INTO agent_config (agent_id, team_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
-        .run(claimedName, 'default', JSON.stringify(settings), Date.now(), Date.now())
+        .run(claimedName, 'default', JSON.stringify(settings), claimedAt, claimedAt)
     }
 
-    const now = Date.now()
+    const now = claimedAt
 
     // Reconnect OpenClaw gateway under new identity
     openclawClient.reidentify({

@@ -67,6 +67,9 @@ interface AgentInfo {
   status: 'active' | 'idle' | 'offline' | 'waiting'
   currentTask?: string
   lastSeen?: number
+  // Real runtime activity — distinct from `lastSeen` which advances on every heartbeat tick.
+  // Cloud surfaces this as the connected-axis lastUpdatedAt for live agents (#24).
+  lastObservedAt?: number
   waitingFor?: string   // populated when status === 'waiting'
   waitingTaskId?: string
   thought?: string      // agent's current thought/expression — shown on canvas as AI-native content
@@ -747,6 +750,7 @@ function getAgents(): AgentInfo[] {
         : 'offline' as const,
       currentTask: p?.task,
       lastSeen: p?.lastUpdate,
+      ...(p?.lastObservedAt ? { lastObservedAt: p.lastObservedAt } : {}),
       ...(p?.status === 'waiting' && p.waiting ? {
         waitingFor: p.waiting.waitingFor,
         waitingTaskId: p.waiting.taskId,
@@ -766,6 +770,7 @@ function getAgents(): AgentInfo[] {
           : 'idle' as const,
         currentTask: p.task,
         lastSeen: p.lastUpdate,
+        ...(p.lastObservedAt ? { lastObservedAt: p.lastObservedAt } : {}),
         ...(p.status === 'waiting' && p.waiting ? {
           waitingFor: p.waiting.waitingFor,
           waitingTaskId: p.waiting.taskId,
@@ -848,6 +853,9 @@ async function sendHeartbeat(): Promise<void> {
         status: a.status,
         currentTaskId: a.currentTask || undefined,
         lastSeenAt: a.lastSeen || Date.now(),
+        // Real-activity timestamp — null when no work has been observed yet.
+        // Cloud's connected-axis truth uses this, not lastSeenAt (which moves on every tick).
+        lastObservedAt: a.lastObservedAt ?? null,
         taskCounts: { todo: todoCount, doing: doingCount, blocked: blockedCount },
         ...(a.status === 'waiting' ? {
           waitingFor: a.waitingFor,
