@@ -25,10 +25,11 @@ and canvas lanes.
 
 ---
 
-## Pane shape — one row per truth field, four columns
+## Pane shape — one row per truth field, five fields
 
-Every field in the detail pane is a row with the same four columns, regardless
-of whether it's identity, capability, memory, or runtime state.
+Every field in the detail pane is a row with the same five fields (four columns
+plus a derived badge), regardless of whether it's identity, capability, memory,
+or runtime state.
 
 | Column            | Purpose                                                                                                  |
 | ----------------- | -------------------------------------------------------------------------------------------------------- |
@@ -123,7 +124,7 @@ a "this capability isn't working" can be pinpointed without follow-up.
 | `enabledForHost`    | Is the capability turned on at the host/team level? | `capability registry` + host config  |
 | `enabledForAgent`   | Is the capability turned on for this specific agent? | `agent_config table`                 |
 
-Each axis row has the same four columns (value/source/kind/freshness/badge).
+Each axis row has the same five fields (value/source/kind/freshness/badge).
 A capability "connected: true, enabledForHost: true, enabledForAgent: false"
 makes the gap obvious without requiring a second tab.
 
