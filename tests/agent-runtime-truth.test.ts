@@ -82,11 +82,19 @@ describe('GET /agents/:name/runtime', () => {
     expect(status).toBe(400)
   })
 
-  it('returns 403 to non-loopback caller', async () => {
+  it('returns 403 to public-internet caller', async () => {
     const { status } = await req('GET', '/agents/claude/runtime', {
       remoteAddress: '203.0.113.7',
     })
     expect(status).toBe(403)
+  })
+
+  it('accepts Fly 6PN caller (fdaa::/16) for cloud→node proxy', async () => {
+    const { status, body } = await req('GET', '/agents/claude/runtime', {
+      remoteAddress: 'fdaa:0:1234:a7b:1c2:3d4:5e6:7',
+    })
+    expect(status).toBe(200)
+    expect(body.success).toBe(true)
   })
 })
 
