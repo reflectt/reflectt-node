@@ -68,15 +68,6 @@ import { autoPopulateCloseGate, tryAutoCloseTask, getMergeAttemptLog, hasPreview
 import { getDuplicateClosureCanonicalRefError } from './duplicateClosureGuard.js'
 import { recordReviewMutation, diffReviewFields, getAuditEntries, loadAuditLedger } from './auditLedger.js'
 import { listSharedFiles, readSharedFile, resolveTaskArtifact, validatePath, ALLOWED_EXTENSIONS } from './shared-workspace-api.js'
-import {
-  AGENT_NAME_RE,
-  DATE_RE,
-  listAgentMemoryDays,
-  countAgentMemoryDays,
-  readAgentMemoryDay,
-  getAgentFilePointer,
-  readAgentFile,
-} from './agent-workspace-api.js'
 import { normalizeArtifactPath, normalizeTaskArtifactPaths, buildGitHubBlobUrl, buildGitHubRawUrl } from './artifact-resolver.js'
 import {
   emitActivationEvent,
@@ -6321,10 +6312,12 @@ export async function createServer(): Promise<FastifyInstance> {
     return result
   })
 
-  // ── Agent Detail Pane Truth API (loopback only — proxied by cloud) ──────
-  // Per-agent workspace files for the detail pane: SOUL.md, MEMORY.md,
-  // memory/<date>.md, plus the join endpoint that composes the full pane.
-  // Cloud authenticates the user, then proxies to localhost on the host.
+  // ── Agent Runtime Truth (loopback only — proxied by cloud) ─────────────
+  // Node owns runtime/control truth: presence, last event, claimedAt.
+  // Workspace-file truth (SOUL/MEMORY/HEARTBEAT) belongs to OpenClaw/gateway,
+  // not node — deliberately omitted from this surface.
+
+  const AGENT_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/
 
   function loopbackOnly(request: any, reply: any): boolean {
     const ip = String(request.ip || '')
@@ -6336,87 +6329,6 @@ export async function createServer(): Promise<FastifyInstance> {
     }
     return true
   }
-
-  function mapAgentApiError(reply: any, msg: string): void {
-    const lower = String(msg || '').toLowerCase()
-    if (lower.includes('invalid agent name')) reply.code(400)
-    else if (lower.includes('invalid date')) reply.code(400)
-    else if (lower.includes('not in the allowlist')) reply.code(400)
-    else if (lower.includes('size limit')) reply.code(413)
-    else if (lower.includes('escapes')) reply.code(403)
-    else if (lower.includes('not allowed')) reply.code(400)
-    else reply.code(400)
-  }
-
-  app.get<{ Params: { name: string } }>('/agents/:name/memory', async (request, reply) => {
-    if (!loopbackOnly(request, reply)) return
-    const { name } = request.params
-    if (!AGENT_NAME_RE.test(name)) {
-      reply.code(400)
-      return { success: false, error: 'Invalid agent name' }
-    }
-    const limitRaw = (request.query as any)?.limit
-    const limit = limitRaw ? Math.min(Math.max(1, parseInt(String(limitRaw), 10) || 100), 500) : 100
-    try {
-      const days = await listAgentMemoryDays(name, limit)
-      return { success: true, agent: name, days }
-    } catch (err) {
-      mapAgentApiError(reply, (err as Error).message)
-      return { success: false, error: (err as Error).message }
-    }
-  })
-
-  app.get<{ Params: { name: string; date: string } }>(
-    '/agents/:name/memory/:date',
-    async (request, reply) => {
-      if (!loopbackOnly(request, reply)) return
-      const { name, date } = request.params
-      if (!AGENT_NAME_RE.test(name)) {
-        reply.code(400)
-        return { success: false, error: 'Invalid agent name' }
-      }
-      if (!DATE_RE.test(date)) {
-        reply.code(400)
-        return { success: false, error: 'Invalid date (expected YYYY-MM-DD)' }
-      }
-      try {
-        const body = await readAgentMemoryDay(name, date)
-        if (!body.exists) {
-          reply.code(404)
-          return { success: false, error: 'Memory not found for date', agent: name, date }
-        }
-        return { success: true, agent: name, date, file: body }
-      } catch (err) {
-        mapAgentApiError(reply, (err as Error).message)
-        return { success: false, error: (err as Error).message }
-      }
-    },
-  )
-
-  app.get<{ Params: { name: string } }>('/agents/:name/soul', async (request, reply) => {
-    if (!loopbackOnly(request, reply)) return
-    const { name } = request.params
-    if (!AGENT_NAME_RE.test(name)) {
-      reply.code(400)
-      return { success: false, error: 'Invalid agent name' }
-    }
-    try {
-      const ptr = await getAgentFilePointer(name, 'SOUL.md')
-      if (!ptr.exists) return { success: true, agent: name, exists: false, pointer: null, file: null }
-      const includeBody = String((request.query as any)?.include || '') === 'body'
-      const file = includeBody ? await readAgentFile(name, 'SOUL.md') : null
-      return {
-        success: true,
-        agent: name,
-        exists: true,
-        pointer: { relPath: ptr.relPath, size: ptr.size, mtime: ptr.mtime },
-        file,
-      }
-    } catch (err) {
-      mapAgentApiError(reply, (err as Error).message)
-      return { success: false, error: (err as Error).message }
-    }
-  })
 
   // Read identityClaimedAt from agent_config.settings — written by /agents/:name/identity/claim.
   // Returns null when the row or field is missing or the JSON is unparseable.
@@ -6433,46 +6345,6 @@ export async function createServer(): Promise<FastifyInstance> {
       return null
     }
   }
-
-  app.get<{ Params: { name: string } }>('/agents/:name/detail', async (request, reply) => {
-    if (!loopbackOnly(request, reply)) return
-    const { name } = request.params
-    if (!AGENT_NAME_RE.test(name)) {
-      reply.code(400)
-      return { success: false, error: 'Invalid agent name' }
-    }
-    try {
-      const [soulPtr, memoryPtr, heartbeatPtr, days, totalMemoryDays] = await Promise.all([
-        getAgentFilePointer(name, 'SOUL.md').catch(() => ({ exists: false, relPath: 'SOUL.md' } as any)),
-        getAgentFilePointer(name, 'MEMORY.md').catch(() => ({ exists: false, relPath: 'MEMORY.md' } as any)),
-        getAgentFilePointer(name, 'HEARTBEAT.md').catch(() => ({ exists: false, relPath: 'HEARTBEAT.md' } as any)),
-        listAgentMemoryDays(name, 30).catch(() => []),
-        countAgentMemoryDays(name).catch(() => 0),
-      ])
-      const latest = days[0] || null
-      return {
-        success: true,
-        agent: name,
-        soul: soulPtr.exists
-          ? { relPath: soulPtr.relPath, size: soulPtr.size, mtime: soulPtr.mtime }
-          : null,
-        memoryIndex: memoryPtr.exists
-          ? { relPath: memoryPtr.relPath, size: memoryPtr.size, mtime: memoryPtr.mtime }
-          : null,
-        heartbeat: heartbeatPtr.exists
-          ? { relPath: heartbeatPtr.relPath, size: heartbeatPtr.size, mtime: heartbeatPtr.mtime }
-          : null,
-        latestMemoryDay: latest,
-        memoryDaysReturned: days.length,
-        totalMemoryDays,
-        memoryDays: days,
-        identityClaimedAt: readIdentityClaimedAt(name),
-      }
-    } catch (err) {
-      mapAgentApiError(reply, (err as Error).message)
-      return { success: false, error: (err as Error).message }
-    }
-  })
 
   // GET /agents/:name/runtime — thin runtime truth for the detail pane (#24).
   // Returns: status, currentTaskId, lastEvent {type, at}, lastObservedAt, idleForMs,

@@ -205,9 +205,5 @@ describe('POST /agents/:name/identity/claim — claimedAt persistence', () => {
     const runtime = await req('GET', '/agents/phoenix-test/runtime')
     expect(runtime.status).toBe(200)
     expect(runtime.body.identityClaimedAt).toBe(settings.identityClaimedAt)
-
-    const detail = await req('GET', '/agents/phoenix-test/detail')
-    expect(detail.status).toBe(200)
-    expect(detail.body.identityClaimedAt).toBe(settings.identityClaimedAt)
   })
 })
