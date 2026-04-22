@@ -5,7 +5,7 @@
 // persistent volume was previously seeded by an older image can self-heal on
 // restart: a stamp mismatch triggers a rewrite of description + done_criteria
 // so the current flow propagates without requiring a fresh volume.
-export const BOOTSTRAP_TEMPLATE_VERSION = '2026-04-21-autonomous-bootstrap-no-human'
+export const BOOTSTRAP_TEMPLATE_VERSION = '2026-04-22-no-identity-qa-leak'
 
 export interface BootstrapTaskSpec {
   title: string
@@ -19,7 +19,12 @@ export function buildIntentBootstrapTaskSpec(teamIntent: string): BootstrapTaskS
     description: [
       '## Your First Task — run this ALONE, no human is watching',
       '',
-      '**This is a managed host. There is no human user online to answer questions.** Do not post "who am I?" or "what should I call you?" in chat. You decide. Pick your name, color, voice, avatar yourself — the user will see the result in the dashboard when they next open it.',
+      '**This is a managed host. There is no human user online to answer questions.** Identity bootstrap is INTERNAL — never post identity-discovery questions to ANY chat channel (#general, #canvas, #reviews, or any product-visible room). That includes:',
+      '- "Who am I?" / "What should I call you?" / "What\'s my name?"',
+      '- "Hi everyone, I just came online — what should I do?"',
+      '- "Can someone tell me my role?"',
+      '',
+      'You decide everything yourself: name, color, voice, avatar. The user only sees the RESULT in the dashboard. Anything you post to a product channel must be a normal bootstrap progress update or the final intro — never a question about your own identity.',
       '',
       'The user described what they need:',
       '',
@@ -41,15 +46,15 @@ export function buildIntentBootstrapTaskSpec(teamIntent: string): BootstrapTaskS
       '2. Call `POST /bootstrap/team` (body: { useCase: "custom" }) to get the TEAM-ROLES.yaml schema',
       '3. Design agents that match what the user needs',
       '4. Save the team config via `PUT /config/team-roles`',
-      '5. Post an intro to #general: "Hi! I\'m [name], your team lead. Here\'s the team I\'ve set up..." AND call `POST /canvas/speak` with your intro text so it plays aloud on the canvas with Kokoro TTS.',
-      '6. Create starter tasks for each agent AND tell each one to introduce themselves in #general with their name, role, and what they will focus on.',
-      '7. Each generated agent must also claim their identity via `POST /agents/:name/identity/claim` with the same shape: { claimedName, displayName, color, voice, avatar }. Pick a UNIQUE Kokoro voice per agent.',
+      '5. Post an intro to #general: "Hi! I\'m [name], your team lead. Here\'s the team I\'ve set up..." AND call `POST /canvas/speak` with your intro text so it plays aloud on the canvas.',
+      '6. Create starter tasks for each agent AND tell each one to introduce themselves in #general with their name, role, and what they will focus on. **Each subagent task description MUST include the same no-Q&A rule** — paste this exact line into every subagent task: "Identity bootstrap is internal. Do NOT post \'who am I?\', \'what should I do?\', or any identity-discovery question to #general or any other product channel. Pick your own name, color, voice, avatar autonomously, claim them, then post your intro." Without this clause, subagents leak Q&A into product channels.',
+      '7. Each generated agent must also claim their identity via `POST /agents/:name/identity/claim` with the same shape: { claimedName, displayName, color, voice, avatar }. Pick a UNIQUE voice per agent.',
       '',
       '### Step 3 — Close out the task',
       '',
       'Once every `done_criteria` below is satisfied, call `PATCH /tasks/{this task id}` with `{ "status": "done" }`. The task must not stay in `todo` or `doing` after bootstrap completes — that is how we know the fresh-host flow actually ran to completion.',
       '',
-      '### Valid Kokoro voice IDs (do NOT invent others):',
+      '### Valid voice IDs (do NOT invent others):',
       '- Female American: `af_sarah`, `af_nicole`, `af_bella`',
       '- Male American:   `am_adam`, `am_michael`',
       '- Female British:  `bf_emma`, `bf_isabella`',
@@ -70,7 +75,7 @@ export function buildIntentBootstrapTaskSpec(teamIntent: string): BootstrapTaskS
       '',
       '`color` is a hex (`#rrggbb`) or `rgb()`/`rgba()` value. The API persists it as `settings.identityColor` — that is the single source of truth for each agent\'s canvas color.',
       '',
-      'The user should see a working team with named agents, unique avatars, unique colors, and distinct Kokoro voices when they next open the dashboard.',
+      'The user should see a working team with named agents, unique avatars, unique colors, and distinct voices when they next open the dashboard.',
     ].join('\n'),
     done_criteria: [
       'Checked GET /agent-configs first to avoid re-claiming an already-claimed identity',
@@ -80,7 +85,9 @@ export function buildIntentBootstrapTaskSpec(teamIntent: string): BootstrapTaskS
       'Intro message posted to #general',
       'Intro spoken aloud via POST /canvas/speak',
       'Each generated agent has introduced themselves in #general',
-      'Each agent (including main) has claimed its identity (name + displayName + color + avatar + Kokoro voice) via POST /agents/:name/identity/claim',
+      'Each agent (including main) has claimed its identity (name + displayName + color + avatar + voice) via POST /agents/:name/identity/claim',
+      'No agent posted identity-discovery questions (e.g. "who am I?", "what should I do?") to #general or any other product channel during bootstrap',
+      'Subagent task descriptions include the no-Q&A clause (so subagents do not leak identity questions either)',
       'All voice IDs start with af_/am_/bf_/bm_ (no invented strings like "s3://..."); all colors are hex or rgb()/rgba()',
       'At least one task created per agent',
       'This bootstrap task transitioned to `done` once all criteria above are met',
