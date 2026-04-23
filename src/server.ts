@@ -99,6 +99,7 @@ import { wsHeartbeat } from './ws-heartbeat.js'
 import { getBuildInfo } from './buildInfo.js'
 import { appendStoredLog, readStoredLogs, getStoredLogPath } from './logStore.js'
 import { getAgentRoles, getAgentRolesSource, loadAgentRoles, startConfigWatch, suggestAssignee, suggestReviewer, checkWipCap, saveAgentRoles, scoreAssignment, getAgentRole, getAgentAliases, setAgentDisplayName, resolveAgentMention, parseRolesYaml } from './assignment.js'
+import type { AgentRole } from './assignment.js'
 import { initTelemetry, trackRequest as trackTelemetryRequest, trackError as trackTelemetryError, trackTaskEvent, getSnapshot as getTelemetrySnapshot, getTelemetryConfig, isTelemetryEnabled, stopTelemetry } from './telemetry.js'
 import { recordUsage as recordUsageTracking, recordUsageBatch, getUsageSummary, getUsageByAgent, getUsageByModel, getUsageByTask, getDailySpendByModel, getAvgCostByLane, getAvgCostByAgent, setCap, listCaps, deleteCap, checkCaps, getRoutingSuggestions, estimateCost, ensureUsageTables, type UsageEvent, type SpendCap } from './usage-tracking.js'
 import { getTeamConfigHealth } from './team-config.js'
@@ -2053,6 +2054,85 @@ function isQuietHours(nowMs: number): boolean {
   if (start === end) return false
   if (start < end) return hour >= start && hour < end
   return hour >= start || hour < end
+}
+
+// Per-field DetailField envelope shape for GET / PATCH /agents/:name/identity.
+// Cloud's agent detail pane consumes this contract verbatim (see
+// reflectt-cloud/docs/AGENT_IDENTITY_PROXY.md). `support: 'editable'` means the
+// field CAN be mutated through some seam — not that any specific endpoint
+// accepts writes. `revision` is a 16-char SHA-256 prefix over the payload sans
+// `revision`, used as the optimistic-concurrency seam for cloud→channel→
+// reflectt-node writes (`If-Match` on PATCH).
+type AgentIdentityPayload =
+  | { found: false; query: string; hint: string }
+  | {
+      found: true
+      agentId: string
+      displayName: string
+      role: string
+      description: string | null
+      aliases: string[]
+      affinityTags: string[]
+      wipCap: number
+      source: 'yaml'
+      host: 'reflectt-node'
+      fields: Record<string, { support: 'editable'; source: string; value?: unknown }>
+      revision: string
+    }
+
+function buildAgentIdentityPayload(name: string): AgentIdentityPayload {
+  const resolved = resolveAgentMention(name)
+  const role = resolved ? getAgentRole(resolved) : getAgentRole(name)
+
+  if (!role) {
+    return { found: false, query: name, hint: 'Agent not found in YAML roles or config' }
+  }
+
+  const settingsRow = getDb()
+    .prepare('SELECT settings FROM agent_config WHERE agent_id = ?')
+    .get(role.name) as { settings: string } | undefined
+  const settings: Record<string, unknown> = settingsRow
+    ? (() => { try { return JSON.parse(settingsRow.settings) ?? {} } catch { return {} } })()
+    : {}
+
+  const yamlField = <T,>(key: string, value: T | null | undefined) => {
+    const base = { support: 'editable' as const, source: `reflectt-node.team-roles.yaml.${key}` }
+    return value === undefined || value === null ? base : { ...base, value }
+  }
+  const settingsField = <T,>(key: string, value: T | undefined) => {
+    const base = { support: 'editable' as const, source: `reflectt-node.agent_config.settings.${key}` }
+    return value === undefined ? base : { ...base, value }
+  }
+
+  const fields = {
+    name: yamlField('name', role.name),
+    displayName: yamlField('displayName', role.displayName ?? role.name),
+    role: yamlField('role', role.role),
+    description: yamlField('description', role.description ?? null),
+    aliases: yamlField('aliases', role.aliases ?? []),
+    affinityTags: yamlField('affinityTags', role.affinityTags ?? []),
+    wipCap: yamlField('wipCap', role.wipCap),
+    avatar: settingsField('avatar', settings.avatar as unknown),
+    voice: settingsField('voice', settings.voice as unknown),
+    color: settingsField('identityColor', settings.identityColor as unknown),
+  }
+
+  const payload = {
+    found: true as const,
+    agentId: role.name,
+    displayName: role.displayName ?? role.name,
+    role: role.role,
+    description: role.description ?? null,
+    aliases: role.aliases ?? [],
+    affinityTags: role.affinityTags ?? [],
+    wipCap: role.wipCap,
+    source: 'yaml' as const,
+    host: 'reflectt-node' as const,
+    fields,
+  }
+
+  const revision = createHash('sha256').update(JSON.stringify(payload)).digest('hex').slice(0, 16)
+  return { ...payload, revision }
 }
 
 export async function createServer(): Promise<FastifyInstance> {
@@ -10670,25 +10750,162 @@ export async function createServer(): Promise<FastifyInstance> {
   // Host-native identity resolution — resolves agent by name, alias, or display name
   // without requiring the OpenClaw gateway. Merges YAML roles + agent_config table.
   app.get<{ Params: { name: string } }>('/agents/:name/identity', async (request) => {
+    return buildAgentIdentityPayload(request.params.name)
+  })
+
+  // PATCH /agents/:name/identity — per-field identity update.
+  //
+  // The cloud→channel→openclaw write seam (kai lock 2026-04-22) terminates
+  // here: the openclaw plugin route bridges cloud writes into reflectt-node
+  // persistence so reads and writes stay on one source of truth.
+  //
+  // Body: any subset of { displayName, role, description, aliases,
+  // affinityTags, wipCap, avatar, voice, color }. Rename uses the dedicated
+  // claim endpoint — `name` is rejected here.
+  //
+  // If-Match: 16-char hex revision. Mismatch returns 412. Omitted = no check.
+  // Response mirrors GET (same fields + new revision).
+  app.patch<{ Params: { name: string } }>('/agents/:name/identity', async (request, reply) => {
     const { name } = request.params
-    const resolved = resolveAgentMention(name)
-    const role = resolved ? getAgentRole(resolved) : getAgentRole(name)
+    const ifMatch = request.headers['if-match']
+    const body = (request.body && typeof request.body === 'object' ? request.body : {}) as Record<string, unknown>
 
-    if (!role) {
-      return { found: false, query: name, hint: 'Agent not found in YAML roles or config' }
+    if ('name' in body) {
+      reply.code(400)
+      return { success: false, error: 'rename not supported on PATCH — use POST /agents/:name/identity/claim' }
     }
 
-    return {
-      found: true,
-      agentId: role.name,
-      displayName: role.displayName ?? role.name,
-      role: role.role,
-      description: role.description ?? null,
-      aliases: role.aliases ?? [],
-      affinityTags: role.affinityTags ?? [],
-      wipCap: role.wipCap,
-      source: 'yaml',
+    const before = buildAgentIdentityPayload(name)
+    if (!before.found) {
+      reply.code(404)
+      return { success: false, error: `Agent "${name}" not found` }
     }
+
+    if (typeof ifMatch === 'string' && ifMatch && ifMatch !== before.revision) {
+      reply.code(412)
+      // Well-formed envelope so the preSerialization hook (server.ts:2160)
+      // passes the payload through and preserves `currentRevision`.
+      return { success: false, error: 'revision mismatch', code: 'PRECONDITION_FAILED', status: 412, currentRevision: before.revision }
+    }
+
+    const agentId = before.agentId
+
+    // ── YAML-sourced fields ─────────────────────────────────────────────
+    const yamlPatch: Partial<Pick<AgentRole, 'displayName' | 'role' | 'description' | 'aliases' | 'affinityTags' | 'wipCap'>> = {}
+    if ('displayName' in body) {
+      const v = body.displayName
+      if (v !== null && typeof v !== 'string') { reply.code(400); return { success: false, error: 'displayName must be a string or null' } }
+      yamlPatch.displayName = (v == null ? undefined : v.trim()) as string | undefined
+    }
+    if ('role' in body) {
+      const v = body.role
+      if (typeof v !== 'string' || !v.trim()) { reply.code(400); return { success: false, error: 'role must be a non-empty string' } }
+      yamlPatch.role = v.trim()
+    }
+    if ('description' in body) {
+      const v = body.description
+      if (v !== null && typeof v !== 'string') { reply.code(400); return { success: false, error: 'description must be a string or null' } }
+      yamlPatch.description = (v == null ? undefined : v) as string | undefined
+    }
+    if ('aliases' in body) {
+      const v = body.aliases
+      if (!Array.isArray(v) || !v.every(x => typeof x === 'string')) { reply.code(400); return { success: false, error: 'aliases must be a string[]' } }
+      yamlPatch.aliases = v.map(s => (s as string).trim()).filter(Boolean)
+    }
+    if ('affinityTags' in body) {
+      const v = body.affinityTags
+      if (!Array.isArray(v) || !v.every(x => typeof x === 'string')) { reply.code(400); return { success: false, error: 'affinityTags must be a string[]' } }
+      yamlPatch.affinityTags = v.map(s => (s as string).trim()).filter(Boolean)
+    }
+    if ('wipCap' in body) {
+      const v = body.wipCap
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 1) { reply.code(400); return { success: false, error: 'wipCap must be a positive integer' } }
+      yamlPatch.wipCap = Math.floor(v)
+    }
+
+    if (Object.keys(yamlPatch).length > 0) {
+      const updated = getAgentRoles().map(r => {
+        if (r.name !== agentId) return r
+        const next = { ...r }
+        for (const [k, val] of Object.entries(yamlPatch)) {
+          if (val === undefined && (k === 'displayName' || k === 'description')) {
+            delete (next as Record<string, unknown>)[k]
+          } else {
+            (next as Record<string, unknown>)[k] = val
+          }
+        }
+        return next
+      })
+      saveAgentRoles(updated)
+    }
+
+    // ── Settings-sourced fields ─────────────────────────────────────────
+    const settingsPatch: Record<string, unknown> = {}
+    let touchedSettings = false
+    if ('avatar' in body) {
+      const v = body.avatar
+      if (v !== null && (typeof v !== 'object' || Array.isArray(v))) { reply.code(400); return { success: false, error: 'avatar must be an object or null' } }
+      settingsPatch.avatar = v == null ? null : { ...(v as Record<string, unknown>), updatedAt: Date.now() }
+      touchedSettings = true
+    }
+    if ('voice' in body) {
+      const v = body.voice
+      if (v !== null && typeof v !== 'string') { reply.code(400); return { success: false, error: 'voice must be a string or null' } }
+      if (typeof v === 'string' && v && !/^(af_|am_|bf_|bm_)[a-z0-9_]+$/i.test(v) && !/^[a-zA-Z0-9]{20,}$/.test(v)) {
+        reply.code(400)
+        return { success: false, error: `voice "${v}" is not a recognized voice ID` }
+      }
+      settingsPatch.voice = v == null ? null : v.trim()
+      touchedSettings = true
+    }
+    if ('color' in body) {
+      const v = body.color
+      if (v !== null && typeof v !== 'string') { reply.code(400); return { success: false, error: 'color must be a string or null' } }
+      if (typeof v === 'string' && v && !/^(#[0-9a-fA-F]{3,8}|rgba?\([^)]+\))$/.test(v)) {
+        reply.code(400)
+        return { success: false, error: `color "${v}" must be a hex (#rrggbb) or rgb()/rgba() value` }
+      }
+      // Stored under settings.identityColor (matches GET shape + claim handler).
+      settingsPatch.identityColor = v == null ? null : v.trim()
+      touchedSettings = true
+    }
+
+    if (touchedSettings) {
+      const db = getDb()
+      const row = db.prepare('SELECT settings FROM agent_config WHERE agent_id = ?').get(agentId) as { settings: string } | undefined
+      const settings: Record<string, unknown> = row
+        ? (() => { try { return JSON.parse(row.settings) ?? {} } catch { return {} } })()
+        : {}
+      for (const [k, v] of Object.entries(settingsPatch)) {
+        if (v === null) delete settings[k]
+        else settings[k] = v
+      }
+      const now = Date.now()
+      if (row) {
+        db.prepare('UPDATE agent_config SET settings = ?, updated_at = ? WHERE agent_id = ?')
+          .run(JSON.stringify(settings), now, agentId)
+      } else {
+        db.prepare('INSERT INTO agent_config (agent_id, team_id, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+          .run(agentId, 'default', JSON.stringify(settings), now, now)
+      }
+    }
+
+    const after = buildAgentIdentityPayload(agentId)
+
+    // Broadcast so canvas/pane refresh immediately. Kept additive — does not
+    // block the response.
+    eventBus.emit({
+      id: `identity-patch-${Date.now()}`,
+      type: 'agent_identity_changed' as const,
+      timestamp: Date.now(),
+      data: {
+        agentId,
+        previousRevision: before.revision,
+        revision: (after as { revision: string }).revision,
+      },
+    })
+
+    return { success: true, ...after }
   })
 
   // ── Agent visual identity — agents choose their own appearance ──────
