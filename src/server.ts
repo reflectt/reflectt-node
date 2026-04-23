@@ -10678,7 +10678,49 @@ export async function createServer(): Promise<FastifyInstance> {
       return { found: false, query: name, hint: 'Agent not found in YAML roles or config' }
     }
 
-    return {
+    // Per-field DetailField envelopes for the agent detail pane. Cloud
+    // mirrors `apps/api/src/routes/registry.ts` agent-identity-read entry;
+    // the docs/AGENT_IDENTITY_PROXY.md "per-field truth contract" section
+    // documents the canonical shape. Each field carries `support`, `source`,
+    // and (when present) `value` + `effective`. `support: 'editable'` means
+    // the field CAN be mutated through some seam (OpenClaw / claim / future
+    // PUT) — not that this endpoint accepts writes.
+    const settingsRow = getDb()
+      .prepare('SELECT settings FROM agent_config WHERE agent_id = ?')
+      .get(role.name) as { settings: string } | undefined
+    const settings: Record<string, unknown> = settingsRow
+      ? (() => { try { return JSON.parse(settingsRow.settings) ?? {} } catch { return {} } })()
+      : {}
+
+    const yamlField = <T,>(key: string, value: T | null | undefined) => {
+      const base = {
+        support: 'editable' as const,
+        source: `reflectt-node.team-roles.yaml.${key}`,
+      }
+      return value === undefined || value === null ? base : { ...base, value }
+    }
+    const settingsField = <T,>(key: string, value: T | undefined) => {
+      const base = {
+        support: 'editable' as const,
+        source: `reflectt-node.agent_config.settings.${key}`,
+      }
+      return value === undefined ? base : { ...base, value }
+    }
+
+    const fields = {
+      name: yamlField('name', role.name),
+      displayName: yamlField('displayName', role.displayName ?? role.name),
+      role: yamlField('role', role.role),
+      description: yamlField('description', role.description ?? null),
+      aliases: yamlField('aliases', role.aliases ?? []),
+      affinityTags: yamlField('affinityTags', role.affinityTags ?? []),
+      wipCap: yamlField('wipCap', role.wipCap),
+      avatar: settingsField('avatar', settings.avatar as unknown),
+      voice: settingsField('voice', settings.voice as unknown),
+      color: settingsField('identityColor', settings.identityColor as unknown),
+    }
+
+    const payload = {
       found: true,
       agentId: role.name,
       displayName: role.displayName ?? role.name,
@@ -10688,7 +10730,20 @@ export async function createServer(): Promise<FastifyInstance> {
       affinityTags: role.affinityTags ?? [],
       wipCap: role.wipCap,
       source: 'yaml',
+      host: 'reflectt-node',
+      fields,
     }
+
+    // 16-char SHA-256 prefix of the stable-stringified payload — the
+    // optimistic-concurrency seam for future cloud→channel→OpenClaw writes.
+    // Computed over the payload sans `revision` so re-emitting an unchanged
+    // payload yields the same revision.
+    const revision = createHash('sha256')
+      .update(JSON.stringify(payload))
+      .digest('hex')
+      .slice(0, 16)
+
+    return { ...payload, revision }
   })
 
   // ── Agent visual identity — agents choose their own appearance ──────
