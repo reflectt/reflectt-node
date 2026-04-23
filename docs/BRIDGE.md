@@ -16,6 +16,8 @@ The reflectt-channel bridge connects your OpenClaw gateway to reflectt-node's ev
 - **reflectt-node** (`http://127.0.0.1:4445`): Task board, chat, events, and dashboard
 - **Bridge**: The `reflectt` channel plugin in OpenClaw connects to reflectt-node's `/events` SSE endpoint and pushes/pulls messages
 
+> **Plugin source:** the `reflectt-channel` plugin lives in its own repo: [reflectt/reflectt-channel-openclaw](https://github.com/reflectt/reflectt-channel-openclaw). Install it from there (`openclaw plugins install /path/to/reflectt-channel-openclaw`); managed Fly gateways auto-pull the latest tarball on cold-start.
+
 ## Setup
 
 ### 1. Verify reflectt-node is running
