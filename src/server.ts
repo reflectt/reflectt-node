@@ -60,7 +60,7 @@ import { memoryManager } from './memory.js'
 import { buildContextInjection, getContextBudgets, getContextMemo, upsertContextMemo, type ContextLayer } from './context-budget.js'
 import { deriveScopeId } from './scope-routing.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
-import { presenceManager } from './presence.js'
+import { presenceManager, IDLE_THRESHOLD_MS, OFFLINE_THRESHOLD_MS } from './presence.js'
 import type { NotificationType, NotificationPriorityLevel, AckDecision, NotificationStatus } from './agent-notifications.js'
 import { startSweeper, getSweeperStatus, sweepValidatingQueue, flagPrDrift, generateDriftReport } from './executionSweeper.js'
 import { runRestartDriftGuard } from './restart-drift-guard.js'
@@ -6399,6 +6399,11 @@ export async function createServer(): Promise<FastifyInstance> {
 
   const AGENT_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/
 
+  // Cloud-sync heartbeat cadence — must match `cloud.ts` (REFLECTT_HEARTBEAT_MS
+  // override, default 30s). Surfaced so the detail pane can compute a
+  // "missed N beats" axis without baking the interval into the client.
+  const HEARTBEAT_EXPECTED_INTERVAL_MS = Number(process.env.REFLECTT_HEARTBEAT_MS) || 30_000
+
   // Accepts loopback (local dev / SSH-into-node curl) AND Fly 6PN (`fdaa::/16`),
   // which is the address the cloud-API box uses when it calls
   // `http://rn-XXX.internal:4445`. Keys off `request.ip` (direct socket); we
@@ -6456,6 +6461,34 @@ export async function createServer(): Promise<FastifyInstance> {
       lastObservedAt,
       idleForMs,
       identityClaimedAt: readIdentityClaimedAt(name),
+    }
+  })
+
+  // GET /agents/:name/heartbeat — runtime heartbeat truth for the detail pane.
+  // Per kai's lane lock 2026-04-23 (msg-1776931994885): node owns runtime/control,
+  // OpenClaw plugin owns workspace files. This endpoint surfaces ONLY the runtime
+  // heartbeat state — never the HEARTBEAT.md file content (that goes via the plugin's
+  // /api/channels/reflectt/agents/:name/files route).
+  app.get<{ Params: { name: string } }>('/agents/:name/heartbeat', async (request, reply) => {
+    if (!privateNetworkOnly(request, reply)) return
+    const { name } = request.params
+    if (!AGENT_NAME_RE.test(name)) {
+      reply.code(400)
+      return { success: false, error: 'Invalid agent name' }
+    }
+    const presence = presenceManager.getPresence(name)
+    const lastBeatAt = presence?.lastHeartbeatAt ?? null
+    const sinceLastBeatMs = lastBeatAt ? Date.now() - lastBeatAt : null
+    return {
+      success: true,
+      agent: name,
+      lastBeatAt,
+      sinceLastBeatMs,
+      intervalMs: HEARTBEAT_EXPECTED_INTERVAL_MS,
+      idleThresholdMs: IDLE_THRESHOLD_MS,
+      offlineThresholdMs: OFFLINE_THRESHOLD_MS,
+      status: presence?.status ?? 'offline',
+      beatsToday: presenceManager.getAgentActivity(name)?.heartbeats_today ?? 0,
     }
   })
 
