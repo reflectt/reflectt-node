@@ -821,6 +821,7 @@ Node-owned runtime truth for the cloud detail-pane join. Loopback-gated (`127.0.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/agents/:name/runtime` | Thin runtime truth: `{ status, currentTaskId, lastEvent: {type,at}\|null, lastObservedAt, idleForMs, identityClaimedAt }`. `lastObservedAt` reflects real activity only — heartbeat ticks do NOT advance it. `identityClaimedAt` is persisted by `POST /agents/:name/identity/claim`. |
+| GET | `/agents/:name/heartbeat` | Runtime heartbeat truth for the agent detail panel. Returns `{ success, agent, lastBeatAt, sinceLastBeatMs, intervalMs, idleThresholdMs, offlineThresholdMs, status, beatsToday }`. `intervalMs` mirrors the cloud-sync cadence (`REFLECTT_HEARTBEAT_MS`, default 30000) so the client can render "missed N beats" without baking the interval. Loopback / Fly 6PN only (`fdaa::/16`). NOTE: returns runtime presence only — file content (`HEARTBEAT.md`) is served by the OpenClaw plugin via `/api/channels/reflectt/agents/:name/files`. |
 
 ## Other
 

@@ -45,6 +45,10 @@ export interface AgentPresence {
   // Distinct from `lastUpdate` (which advances on heartbeat tick). Cloud reads this for the
   // detail-pane "connected" axis to show real activity, not periodic check-in cadence.
   lastObservedAt?: number
+  // Last `/heartbeat/:agent` poll. Distinct from `lastUpdate` (which also advances on
+  // messages/task_completed). The detail pane reads this for the "is the agent
+  // actively heartbeating" axis without confusing it with chat or task activity.
+  lastHeartbeatAt?: number
   focus?: FocusState
   waiting?: WaitingState  // populated when status === 'waiting'
   thought?: string        // agent's current thought — expires after 8s TTL on canvas
@@ -60,8 +64,8 @@ export interface AgentActivity {
   first_seen_today?: number
 }
 
-const IDLE_THRESHOLD_MS = 15 * 60 * 1000 // 15 minutes — active agents decay to idle
-const OFFLINE_THRESHOLD_MS = 30 * 60 * 1000 // 30 minutes — idle agents decay to offline
+export const IDLE_THRESHOLD_MS = 15 * 60 * 1000 // 15 minutes — active agents decay to idle
+export const OFFLINE_THRESHOLD_MS = 30 * 60 * 1000 // 30 minutes — idle agents decay to offline
 
 interface DailyActivity {
   date: string // YYYY-MM-DD
@@ -571,6 +575,7 @@ export class PresenceManager {
       presence.last_active = now
       presence.lastUpdate = now
       if (type !== 'heartbeat') presence.lastObservedAt = now
+      if (type === 'heartbeat') presence.lastHeartbeatAt = now
       this.presence.set(agent, presence)
     }
   }
