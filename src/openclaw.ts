@@ -136,7 +136,11 @@ export class OpenClawClient {
         minProtocol: 3,
         maxProtocol: 3,
         client: {
-          id: this.activeIdentity.name,
+          // Gateway requires id to be one of the enum values in
+          // openclaw/dist/gateway/protocol/client-info.js (GATEWAY_CLIENT_IDS).
+          // We run as a CLI-mode operator; the actual agent identity (e.g. "claude")
+          // travels in displayName so the gateway can log/render it.
+          id: 'cli',
           displayName: this.activeIdentity.displayName || this.activeIdentity.name,
           version: PKG_VERSION,
           platform: 'node',
