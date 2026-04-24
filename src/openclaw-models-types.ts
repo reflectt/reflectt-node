@@ -3,10 +3,10 @@
  *
  * Wire types for the OpenClaw models capability publish-up seam.
  *
- * Bounded by Link's rule (#general msg-1777007891646): only normalized fields
- * the panel actually needs. NO raw `status` / `configured` blobs from the
- * `openclaw models` CLI — plugin normalizes before POST so node never
- * receives secret-bearing config or accidental path/env leakage.
+ * Bounded contract: only normalized fields the panel actually needs.
+ * NO raw `status` / `configured` blobs from the `openclaw models` CLI —
+ * plugin normalizes before POST so node never receives secret-bearing
+ * config or accidental path/env leakage.
  */
 
 export type AuthState = 'authenticated' | 'missing' | 'invalid'
