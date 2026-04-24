@@ -268,6 +268,12 @@ export class OpenClawClient {
     })
   }
 
+  // Native gateway protocol method: returns `{ models }` from
+  // loadGatewayModelCatalog() (openclaw/dist/gateway/server-methods/models.js).
+  async models(): Promise<unknown> {
+    return this.request('models.list', {})
+  }
+
   isConnected(): boolean {
     return this.connected
   }
@@ -293,4 +299,5 @@ export const openclawClient = {
   isConnected() { return _client?.isConnected() ?? false },
   reidentify(identity: AgentIdentity) { _client?.reidentify(identity) },
   getIdentity(): AgentIdentity { return _client?.getIdentity() ?? { name: openclawConfig.agentId } },
+  models(): Promise<unknown> { return this.instance.models() },
 }

@@ -17904,6 +17904,24 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
+  // GET /openclaw/models — surface the gateway's native `models.list` over the
+  // existing node↔gateway WS. Cloud reads from here for the agent-details
+  // models capability axis; no plugin HTTP route is involved.
+  app.get('/openclaw/models', async (request, reply) => {
+    if (!privateNetworkOnly(request, reply)) return
+    if (!openclawClient.isConnected()) {
+      reply.code(503)
+      return { success: false, error: 'OpenClaw gateway WS not connected', gateway: openclawConfig.gatewayUrl }
+    }
+    try {
+      const payload = await openclawClient.models()
+      return { success: true, ...(payload as Record<string, unknown>) }
+    } catch (err) {
+      reply.code(502)
+      return { success: false, error: String((err as Error).message ?? err) }
+    }
+  })
+
   // ============ MCP ENDPOINTS ============
 
   // MCP HTTP endpoint (new protocol)
