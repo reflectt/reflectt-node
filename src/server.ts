@@ -250,6 +250,17 @@ const CreateTaskSchema = z.object({
 })
 
 /**
+ * Replace any host-internal absolute path in a roles-source value with a
+ * logical identifier so the cloud proxy never sees node filesystem layout.
+ * Sentinel values produced by the loader ('builtin', 'test-override',
+ * 'TEAM_INTENT-bootstrap') and any other non-path string pass through.
+ */
+export function sanitizeRolesSource(raw: string | null | undefined): string {
+  if (raw == null) return 'team-roles:default'
+  return raw.startsWith('/') ? 'team-roles:default' : raw
+}
+
+/**
  * Definition-of-ready check: validates task quality at creation time.
  * Returns array of problems (empty = ready).
  */
@@ -11159,13 +11170,18 @@ export async function createServer(): Promise<FastifyInstance> {
     }
   })
 
-  // Team-scoped alias for assignment-engine consumers
+  // Team-scoped alias for assignment-engine consumers.
+  // Sanitizes config.source / roleRegistry.source so host-internal absolute
+  // paths (e.g. /home/node/.reflectt/TEAM-ROLES.yaml) do not cross the cloud
+  // proxy. Sentinel values like 'builtin' / 'test-override' pass through.
   app.get('/team/roles', async () => {
     const payload = buildRoleRegistryPayload()
+    const logicalSource = sanitizeRolesSource(payload.config.source)
     return {
       ...payload,
+      config: { ...payload.config, source: logicalSource },
       roleRegistry: {
-        source: payload.config.source,
+        source: logicalSource,
         count: payload.config.count,
         format: 'TEAM-ROLES.yaml',
       },
