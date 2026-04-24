@@ -16,6 +16,8 @@ import type { WebSocket } from 'ws'
 import { execSync } from 'child_process'
 import { serverConfig, openclawConfig, isDev, REFLECTT_HOME, DATA_DIR } from './config.js'
 import { openclawClient } from './openclaw.js'
+import { putEnvelope, getCachedEnvelope, isStale } from './openclaw-models-cache.js'
+import type { ModelsEnvelope } from './openclaw-models-types.js'
 import { getStallDetector, emitWorkflowStall, onStallEvent } from './stall-detector.js'
 import { processStallEvent } from './intervention-template.js'
 import { trackRequest, getRequestMetrics } from './request-tracker.js'
@@ -17904,32 +17906,61 @@ If your heartbeat shows **no active task** and **no next task**:
     }
   })
 
-  // GET /openclaw/models — surface the gateway's native `models.list` over the
-  // existing node↔gateway WS. Cloud reads from here for the agent-details
-  // models capability axis; no plugin HTTP route is involved.
+  // POST /openclaw/models/publish — plugin (reflectt-channel-openclaw) ingests
+  // the bounded ModelsEnvelope here. Spec lock: #general msg-1777007976663.
+  // Cache is single-tenant (1:1 with plugin), no eviction, no silent flap to
+  // empty so the panel preserves last-known truth across plugin restarts.
+  app.post('/openclaw/models/publish', async (request, reply) => {
+    if (!privateNetworkOnly(request, reply)) return
+    const body = request.body as Partial<ModelsEnvelope> | null
+    if (!body || typeof body !== 'object') {
+      reply.code(400)
+      return { success: false, error: 'Body must be a ModelsEnvelope object' }
+    }
+    if (typeof body.evaluatedAt !== 'number' || typeof body.publishedAt !== 'number') {
+      reply.code(400)
+      return { success: false, error: 'evaluatedAt and publishedAt must be numbers' }
+    }
+    if (typeof body.ok !== 'boolean' || !Array.isArray(body.errors)) {
+      reply.code(400)
+      return { success: false, error: 'ok (boolean) and errors (array) are required' }
+    }
+    const envelope: ModelsEnvelope = {
+      evaluatedAt: body.evaluatedAt,
+      publishedAt: body.publishedAt,
+      maxAgeMs: typeof body.maxAgeMs === 'number' ? body.maxAgeMs : undefined,
+      ok: body.ok,
+      errors: body.errors.filter((e): e is string => typeof e === 'string'),
+      cliVersion: typeof body.cliVersion === 'string' ? body.cliVersion : null,
+      catalog: body.catalog ?? null,
+    }
+    const cached = putEnvelope(envelope)
+    return { success: true, cachedAt: cached.receivedAt }
+  })
+
+  // GET /openclaw/models — cloud reads the cached envelope published by the
+  // plugin. Drops the prior node→gateway WS `models.list` call; the 2026.4.x
+  // gateway strips operator scopes for shared-token, no-device WS connects, so
+  // sourcing the catalog through the plugin (which has native local CLI access)
+  // is the supported path. Spec lock: #general msg-1777007976663.
   app.get('/openclaw/models', async (request, reply) => {
     if (!privateNetworkOnly(request, reply)) return
-    // Force eager singleton init — without this, a never-instantiated client
-    // makes isConnected() return false and we surface a generic 503 without
-    // ever attempting the WS handshake.
-    void openclawClient.instance
-    if (!openclawClient.isConnected()) {
-      const handshakeError = openclawClient.getLastHandshakeError()
-      reply.code(503)
+    const cached = getCachedEnvelope()
+    if (!cached) {
+      reply.code(404)
       return {
         success: false,
-        error: handshakeError
-          ? `OpenClaw gateway handshake failed: ${handshakeError}`
-          : 'OpenClaw gateway WS not connected (still connecting)',
-        gateway: openclawConfig.gatewayUrl,
+        error: 'No models envelope cached',
+        hint: 'Plugin (reflectt-channel-openclaw) has not yet published. Verify gateway is running with the plugin installed.',
       }
     }
-    try {
-      const payload = await openclawClient.models()
-      return { success: true, ...(payload as Record<string, unknown>) }
-    } catch (err) {
-      reply.code(502)
-      return { success: false, error: String((err as Error).message ?? err) }
+    return {
+      success: true,
+      envelope: cached.envelope,
+      publishedAt: cached.envelope.publishedAt,
+      maxAgeMs: cached.envelope.maxAgeMs,
+      receivedAt: cached.receivedAt,
+      stale: isStale(cached),
     }
   })
 
