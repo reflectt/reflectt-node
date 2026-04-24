@@ -3231,6 +3231,32 @@ describe('Agent roles config', () => {
     expect(body.roleRegistry?.count).toBeGreaterThan(0)
   })
 
+  it('GET /team/roles does not leak host-internal absolute paths in source fields', async () => {
+    const { body } = await req('GET', '/team/roles')
+    // Both source fields must be a logical identifier — never an absolute path.
+    // Catches regression of TASK jonx1h7v2 (was leaking /home/node/.reflectt/TEAM-ROLES.yaml).
+    expect(typeof body.config?.source).toBe('string')
+    expect(body.config.source).not.toMatch(/^\//)
+    expect(body.config.source).not.toContain('/home/')
+    expect(body.config.source).not.toContain('.yaml')
+    expect(typeof body.roleRegistry?.source).toBe('string')
+    expect(body.roleRegistry.source).not.toMatch(/^\//)
+    expect(body.roleRegistry.source).not.toContain('/home/')
+    expect(body.roleRegistry.source).not.toContain('.yaml')
+  })
+
+  it('sanitizeRolesSource replaces absolute paths with logical identifier', async () => {
+    const { sanitizeRolesSource } = await import('../src/server.js')
+    expect(sanitizeRolesSource('/home/node/.reflectt/TEAM-ROLES.yaml')).toBe('team-roles:default')
+    expect(sanitizeRolesSource('/etc/reflectt/roles.yaml')).toBe('team-roles:default')
+    expect(sanitizeRolesSource(null)).toBe('team-roles:default')
+    expect(sanitizeRolesSource(undefined)).toBe('team-roles:default')
+    // Sentinel values pass through unchanged
+    expect(sanitizeRolesSource('builtin')).toBe('builtin')
+    expect(sanitizeRolesSource('test-override')).toBe('test-override')
+    expect(sanitizeRolesSource('TEAM_INTENT-bootstrap')).toBe('TEAM_INTENT-bootstrap')
+  })
+
   it('each agent has required fields', async () => {
     const { body } = await req('GET', '/agents/roles')
     for (const agent of body.agents) {
