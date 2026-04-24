@@ -836,6 +836,7 @@ Node-owned runtime truth for the cloud detail-pane join. Loopback-gated (`127.0.
 | GET | `/shared/read` | Read file from shared workspace. Query: `path` (required), `include=preview` (truncated), `maxChars` (default 2000). Security: same as `/shared/list` + size cap (400KB). |
 | GET | `/shared/view` | HTML viewer for shared workspace artifacts. Query: `path` (required). Dark-themed in-browser view. |
 | GET | `/openclaw/status` | OpenClaw connection status |
+| GET | `/openclaw/models` | Gateway model catalog. Calls `OpenClawClient.request('models.list')` over the existing node↔gateway WS and returns `{ success, models: [{id, name, provider, contextWindow, reasoning, input}] }`. Cloud reads from here for the agent-details models capability axis. Private network only (loopback or Fly 6PN). |
 | GET | `/secrets` | List all secrets (metadata only — no plaintext values) |
 | POST | `/secrets` | Create/update a secret (encrypts locally, stores ciphertext) |
 | GET | `/secrets/export` | Export all secrets as encrypted bundle for portability |
