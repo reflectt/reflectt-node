@@ -808,7 +808,7 @@ Autonomous work-continuity system. Monitors agent queue floors and auto-replenis
 | GET | `/polls/:id` | Get poll with results. Returns `{ poll }` with vote counts and voter lists. |
 | POST | `/polls/:id/vote` | Cast a vote. Body: `{ voter, choice }` (choice is 0-indexed). Allows changing vote. |
 | POST | `/polls/:id/close` | Close a poll manually. |
-| GET | `/team/roles` | TEAM-ROLES routing matrix — agent skills, affinity scores, WIP caps |
+| GET | `/team/roles` | TEAM-ROLES routing matrix — agent skills, affinity scores, WIP caps. `config.source` and `roleRegistry.source` are logical identifiers (e.g. `team-roles:default`, `builtin`) — host-internal absolute paths are never exposed across the cloud proxy boundary. |
 | GET | `/policy/intensity` | Current intensity preset + limits (wipLimit, maxPullsPerHour, batchIntervalMs). |
 | PUT | `/policy/intensity` | Set intensity preset. Body: `{ preset: "low"|"normal"|"high", updatedBy? }`. Returns new state. |
 
