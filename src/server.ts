@@ -17909,9 +17909,20 @@ If your heartbeat shows **no active task** and **no next task**:
   // models capability axis; no plugin HTTP route is involved.
   app.get('/openclaw/models', async (request, reply) => {
     if (!privateNetworkOnly(request, reply)) return
+    // Force eager singleton init — without this, a never-instantiated client
+    // makes isConnected() return false and we surface a generic 503 without
+    // ever attempting the WS handshake.
+    void openclawClient.instance
     if (!openclawClient.isConnected()) {
+      const handshakeError = openclawClient.getLastHandshakeError()
       reply.code(503)
-      return { success: false, error: 'OpenClaw gateway WS not connected', gateway: openclawConfig.gatewayUrl }
+      return {
+        success: false,
+        error: handshakeError
+          ? `OpenClaw gateway handshake failed: ${handshakeError}`
+          : 'OpenClaw gateway WS not connected (still connecting)',
+        gateway: openclawConfig.gatewayUrl,
+      }
     }
     try {
       const payload = await openclawClient.models()
