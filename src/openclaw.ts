@@ -51,6 +51,7 @@ export class OpenClawClient {
   }>()
   private eventHandlers = new Map<string, Set<(payload: unknown) => void>>()
   private activeIdentity: AgentIdentity = { name: openclawConfig.agentId }
+  private lastHandshakeError: string | null = null
 
   // Reconnect backoff: 1s, 2s, 4s, 8s, 16s, 30s (cap)
   private static readonly BASE_RECONNECT_MS = 1000
@@ -155,8 +156,10 @@ export class OpenClawClient {
 
       console.log('[OpenClaw] Handshake successful:', response)
       this.connected = true
+      this.lastHandshakeError = null
     } catch (err) {
       console.error('[OpenClaw] Handshake failed:', err)
+      this.lastHandshakeError = String((err as Error).message ?? err)
       this.ws?.close()
     }
   }
@@ -278,6 +281,10 @@ export class OpenClawClient {
     return this.connected
   }
 
+  getLastHandshakeError(): string | null {
+    return this.lastHandshakeError
+  }
+
   close() {
     this.stopPing()
     if (this.reconnectTimer) {
@@ -297,6 +304,7 @@ export const openclawClient = {
   },
   close() { _client?.close() },
   isConnected() { return _client?.isConnected() ?? false },
+  getLastHandshakeError(): string | null { return _client?.getLastHandshakeError() ?? null },
   reidentify(identity: AgentIdentity) { _client?.reidentify(identity) },
   getIdentity(): AgentIdentity { return _client?.getIdentity() ?? { name: openclawConfig.agentId } },
   models(): Promise<unknown> { return this.instance.models() },
