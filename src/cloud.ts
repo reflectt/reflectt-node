@@ -1197,6 +1197,7 @@ async function syncChat(): Promise<void> {
       : m.content,
     timestamp: m.timestamp,
     channel: m.channel || 'general',
+    ...(m.attachments?.length ? { attachments: m.attachments } : {}),
   }))
 
   const result = await cloudPost<{
