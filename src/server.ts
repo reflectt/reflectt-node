@@ -12946,9 +12946,19 @@ export async function createServer(): Promise<FastifyInstance> {
     const hostToken = process.env.REFLECTT_HOST_TOKEN
     const hostId = process.env.REFLECTT_HOST_ID
     if (!cloudUrl || !hostToken || !hostId) return
-    // Snapshot current canvas state
+    // Snapshot current canvas state. Project presence into the canvas `agents`
+    // map so the cloud relay (and SSE subscribers) see the real reply lifecycle:
+    // working/reviewing → 'working', everything else → 'ambient'. Offline agents
+    // are skipped so they don't render. No new states introduced.
     const activeSlots = canvasSlots.getActive()
-    const state = { slots: activeSlots, pushedAt: Date.now() }
+    const presences = presenceManager.getAllPresence()
+    const agents: Record<string, { state: string; task?: string | null }> = {}
+    for (const p of presences) {
+      if (p.status === 'offline') continue
+      const canvasState = (p.status === 'working' || p.status === 'reviewing') ? 'working' : 'ambient'
+      agents[p.agent] = { state: canvasState, task: p.task ?? null }
+    }
+    const state = { slots: activeSlots, agents, pushedAt: Date.now() }
     const stateJson = JSON.stringify(state)
     if (stateJson === lastPushedState) return
     try {
