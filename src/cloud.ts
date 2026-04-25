@@ -1495,28 +1495,42 @@ async function syncCanvas(): Promise<void> {
     checkNeedsAttentionTransitions(agents, state.hostId, config.cloudUrl, state.credential)
   }
 
-  // Inject agent avatars into sync payload — browsers on app.reflectt.ai read avatar
-  // from agent state (canvasStore), not from a separate API call. We merge avatar
-  // into each agent entry here so cloud browsers render custom orbs instead of circles.
-  // Agents with avatars who haven't posted a canvas state get a floor stub so their
-  // custom orb always reaches the cloud (not just when canvas/state is called).
-  // task-1773690756100
+  // Inject per-agent identity (avatar, identityColor, displayName) into sync
+  // payload so cloud browsers render real per-agent presence instead of falling
+  // back to web-side colour-hash + capitalize(name).
+  //   • avatar + identityColor live in agent_config.settings (claimed via
+  //     POST /agents/:name/identity/claim).
+  //   • displayName lives in TEAM-ROLES.yaml (assignment.ts) — load once.
+  // Source-of-truth is the host DB; the web Agent type already consumes
+  // identityColor and avatar, and consumes displayName when present (added in
+  // the same lane as this patch).
+  // task-1777087979433-47cqrl8zs (extends task-1773690756100 avatar lane)
   try {
     const db = getDb()
-    const avatarRows = db.prepare("SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%'").all() as Array<{ agent_id: string; settings: string }>
-    for (const row of avatarRows) {
+    const settingsRows = db.prepare(
+      "SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%' OR settings LIKE '%identityColor%'"
+    ).all() as Array<{ agent_id: string; settings: string }>
+    const displayNameByAgent = new Map<string, string>()
+    for (const role of getAgentRoles()) {
+      if (role.displayName && role.displayName.trim()) {
+        displayNameByAgent.set(role.name, role.displayName.trim())
+      }
+    }
+    for (const row of settingsRows) {
+      if (!agents[row.agent_id]) continue
       try {
-        const s = JSON.parse(row.settings)
-        if (s.avatar?.content) {
-          if (agents[row.agent_id]) {
-            // Agent already has a canvas state — just inject the avatar string
-            (agents[row.agent_id] as Record<string, unknown>).avatar = s.avatar.content
-          }
-          // No floor stub for agents without canvas state — this was causing extra
-          // agents to appear in the canvas constellation and fighting SSE presence updates.
-          // Avatars only render when the agent has an active canvas state.
-        }
-      } catch { /* skip */ }
+        const s = JSON.parse(row.settings) as { avatar?: { content?: string }; identityColor?: string }
+        const target = agents[row.agent_id] as Record<string, unknown>
+        if (s.avatar?.content) target.avatar = s.avatar.content
+        if (typeof s.identityColor === 'string' && s.identityColor) target.identityColor = s.identityColor
+      } catch { /* skip malformed settings */ }
+    }
+    // Inject displayName for every agent in payload that has a TEAM-ROLES entry,
+    // independent of whether they've claimed avatar/color. Loop over agents map
+    // so we don't add new entries — only enrich existing ones.
+    for (const agentId of Object.keys(agents)) {
+      const dn = displayNameByAgent.get(agentId)
+      if (dn) (agents[agentId] as Record<string, unknown>).displayName = dn
     }
   } catch { /* non-blocking */ }
 
