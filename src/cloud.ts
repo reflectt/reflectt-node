@@ -1462,6 +1462,31 @@ async function syncCanvas(): Promise<void> {
     }
   } catch { /* non-fatal */ }
 
+  // ── Presence overlay (live reply lifecycle wins) ──────────────────────
+  // Real-time presenceManager truth wins over auto-derived floor stubs
+  // and other gap-fillers. When an agent is actively producing a reply
+  // (status='working' or 'reviewing'), overlay 'working' onto the
+  // outgoing agents map so the cloud canvas reflects the live lifecycle.
+  // Idle/other statuses are NOT overlaid — the underlying state (auto,
+  // task-derived, native) stays in place, so 'working' clears naturally
+  // back out on reply done via the next auto-state sweep.
+  // task-1777092014973-yet31f5py
+  try {
+    const livePresences = presenceManager.getAllPresence()
+    const nowOverlay = Date.now()
+    for (const p of livePresences) {
+      if (p.status !== 'working' && p.status !== 'reviewing') continue
+      const existing = (agents[p.agent] ?? {}) as Record<string, unknown>
+      agents[p.agent] = {
+        ...existing,
+        state: 'working',
+        updatedAt: nowOverlay,
+        source: 'presence-live',
+        avatar: (existing.avatar as string | null | undefined) ?? avatarMap[p.agent] ?? null,
+      }
+    }
+  } catch { /* non-fatal */ }
+
   // ── Needs-attention call hook ───────────────────────────────────────────
   // Check for new needs-attention transitions BEFORE pushing to cloud.
   // The Fly canvas handler also triggers auto-calls, but this node-side hook
