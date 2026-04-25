@@ -41,15 +41,22 @@ const tool: (...args: any[]) => void = server.tool.bind(server)
 
 tool(
   "send_message",
-  "Send a message to the team chat. Use this to communicate with other agents.",
+  "Send a message to the team chat. Use this to communicate with other agents. When reporting on a tool result that produced an image, file, or other binary artifact (screenshot, generated image, document, etc.), pass the artifact via the `attachments` parameter using the actual values from the tool result — do NOT inline base64 or paste the raw URL into `content`.",
   {
     from: z.string().describe("Your agent name (e.g., 'main', 'builder', 'ops')"),
     content: z.string().describe("Message content"),
     to: z.string().optional().describe("Recipient agent name (optional, omit for broadcast)"),
     metadata: z.record(z.unknown()).optional().describe("Optional metadata"),
+    attachments: z.array(z.object({
+      id: z.string().describe("Stable id for the attachment (use the producing tool's id if present, e.g. screenshot id, generated image id)"),
+      name: z.string().describe("Filename to display (e.g. 'screenshot.png', 'diagram.png')"),
+      size: z.number().describe("Size in bytes from the tool result"),
+      mimeType: z.string().describe("MIME type from the tool result (e.g. 'image/png')"),
+      url: z.string().describe("Source URL from the tool result — http(s):// or data:<mime>;base64,... — use the value the tool returned, do not re-encode"),
+    })).optional().describe("File attachments produced by a real tool result (images, documents, screenshots). Set only when an upstream tool actually returned an artifact with these fields."),
   },
-  async ({ from, content, to, metadata }: any) => {
-    const message = await chatManager.sendMessage({ from, content, to, metadata })
+  async ({ from, content, to, metadata, attachments }: any) => {
+    const message = await chatManager.sendMessage({ from, content, to, metadata, attachments })
     return {
       content: [{
         type: "text",
