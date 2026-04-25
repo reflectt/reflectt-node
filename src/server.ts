@@ -12943,7 +12943,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
   async function pushCanvasStateToCloud() {
     const cloudUrl = process.env.REFLECTT_CLOUD_URL
-    const hostToken = process.env.REFLECTT_HOST_TOKEN
+    const hostToken = process.env.REFLECTT_HOST_TOKEN || process.env.REFLECTT_HOST_CREDENTIAL
     const hostId = process.env.REFLECTT_HOST_ID
     if (!cloudUrl || !hostToken || !hostId) return
     // Snapshot current canvas state. Project presence into the canvas `agents`
