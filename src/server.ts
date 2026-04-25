@@ -12983,6 +12983,20 @@ export async function createServer(): Promise<FastifyInstance> {
   // Start pushing canvas state to cloud
   scheduleCloudPush()
 
+  // Immediate push on presence change — without this, transitions land on web up to
+  // CLOUD_PUSH_INTERVAL (5s) late. presence.ts already debounces emissions per-agent
+  // (60s same-status floor), so a 200ms trailing coalesce is enough to absorb
+  // multi-agent bursts. lastPushedState dedup short-circuits no-op pushes.
+  let immediateCloudPushTimer: ReturnType<typeof setTimeout> | null = null
+  eventBus.on('canvas-immediate-push-on-presence', (event) => {
+    if (event.type !== 'presence_updated') return
+    if (immediateCloudPushTimer) return
+    immediateCloudPushTimer = setTimeout(() => {
+      immediateCloudPushTimer = null
+      void pushCanvasStateToCloud()
+    }, 200)
+  })
+
   // ── Feedback Collection ─────────────────────────────────────────────
 
   const VALID_CATEGORIES = new Set(['bug', 'feature', 'general'])
