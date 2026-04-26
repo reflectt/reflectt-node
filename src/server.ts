@@ -173,6 +173,7 @@ import { processRender, logRejection, getRecentRejections, subscribeCanvas } fro
 import { canvasReadRoutes, canvasPhase2Routes, formatRecency } from './canvas-routes.js'
 import { roomRoutes } from './room-routes.js'
 import { initRoomPresenceStore } from './room-presence-store.js'
+import { initRoomEventBridge } from './room-event-bridge.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
@@ -12294,6 +12295,13 @@ export async function createServer(): Promise<FastifyInstance> {
   // `room_list_participants` MCP tool. Non-fatal if Supabase env missing.
   await app.register(roomRoutes)
   initRoomPresenceStore()
+
+  // ── Room event bridge (room-model-v0.1.1 slice 3B) ───────────────────
+  // Push half of the room-model contract: turn `room_participant_joined`
+  // EventBus events into chat messages on #general so the founding agent
+  // sees them as `message_posted` SSE events (the same path webhooks use).
+  // Pairs with slice 3A's seeded greet-on-join rule in AGENTS.md.
+  initRoomEventBridge()
 
   // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
   // Phase 1: states, slots, slots/all, rejections
