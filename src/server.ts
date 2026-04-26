@@ -176,6 +176,7 @@ import { initRoomPresenceStore } from './room-presence-store.js'
 import { initRoomEventBridge } from './room-event-bridge.js'
 import { initRoomTranscriptStore } from './room-transcript-store.js'
 import { initRoomTranscriptBridge } from './room-transcript-bridge.js'
+import { initRoomArtifactBroadcast } from './room-artifact-broadcast.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
@@ -12314,6 +12315,14 @@ export async function createServer(): Promise<FastifyInstance> {
   // channel directly; agents only get finals (kai's locked rule).
   initRoomTranscriptStore()
   initRoomTranscriptBridge()
+
+  // ── Room Share Snapshot v0 slice 5A: artifact broadcaster ────────────
+  // Owns its own Supabase Realtime channel handle on `room:${hostId}` for
+  // BROADCASTING the `artifact.shared` event (cloud subscribes in 5B).
+  // Same channel as presence + transcript, separate event type per kai's
+  // v0.3 lock. Best-effort: env-missing → no-op; HTTP + chat-bridge still
+  // work, only the live realtime tile push is skipped.
+  initRoomArtifactBroadcast()
 
   // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
   // Phase 1: states, slots, slots/all, rejections

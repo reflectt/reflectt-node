@@ -5,6 +5,15 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, unlinkSyn
 import { join, dirname } from 'node:path'
 import { homedir } from 'node:os'
 
+/**
+ * Canonical agentId for room-scoped artifacts (Room Share Snapshot v0).
+ * All room artifacts (snapshots in v0; recordings, agent outputs later)
+ * ride a single agentId so the storage path stays clean and per-kind
+ * retention is straightforward. In v0 a host = a room, so this constant
+ * also serves as the "owner of room storage" identity.
+ */
+export const ROOM_ARTIFACT_AGENT_ID = 'room'
+
 export interface Artifact {
   id: string
   agentId: string
@@ -114,12 +123,18 @@ export function readArtifactContent(id: string): Buffer | null {
 }
 
 /**
- * List artifacts for an agent, run, or task.
+ * List artifacts for an agent, run, or task. Optional `kind` filters on
+ * `metadata.kind` (Room Share Snapshot v0 introduced this discriminator;
+ * snapshots are the first kind, recordings/etc. will follow). Kind filter
+ * is applied via SQLite JSON extraction so future-kind artifacts pile up
+ * cleanly under the same agent without a schema change.
  */
 export function listArtifacts(opts: {
   agentId?: string
   runId?: string
   taskId?: string
+  kind?: string
+  sinceMs?: number
   limit?: number
 }): Artifact[] {
   const db = getDb()
@@ -129,11 +144,54 @@ export function listArtifacts(opts: {
   if (opts.agentId) { conditions.push('agent_id = ?'); params.push(opts.agentId) }
   if (opts.runId) { conditions.push('run_id = ?'); params.push(opts.runId) }
   if (opts.taskId) { conditions.push('task_id = ?'); params.push(opts.taskId) }
+  if (opts.kind) { conditions.push("json_extract(metadata, '$.kind') = ?"); params.push(opts.kind) }
+  if (typeof opts.sinceMs === 'number') { conditions.push('created_at >= ?'); params.push(opts.sinceMs) }
 
   if (conditions.length === 0) conditions.push('1=1')
   const limit = opts.limit ?? 50
   return (db.prepare(`SELECT * FROM artifacts WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC LIMIT ?`)
     .all(...params, limit) as ArtifactRow[]).map(rowToArtifact)
+}
+
+/**
+ * Merge `partial` into an artifact's metadata column. Used by the snapshot
+ * write path to attach `thumbnailPath` + `dimensions` after the thumbnail
+ * is generated post-store. Returns the updated artifact, or null if the id
+ * doesn't exist (e.g. concurrent retention sweep already evicted it).
+ */
+export function updateArtifactMetadata(id: string, partial: Record<string, unknown>): Artifact | null {
+  const db = getDb()
+  const existing = getArtifact(id)
+  if (!existing) return null
+  const merged = { ...existing.metadata, ...partial }
+  db.prepare('UPDATE artifacts SET metadata = ? WHERE id = ?').run(JSON.stringify(merged), id)
+  return { ...existing, metadata: merged }
+}
+
+/**
+ * Snapshot retention sweep — Room Share Snapshot v0 lock: keep last `max`
+ * snapshots per `agentId` (= per host = per room in v0), evict oldest.
+ * Deletes both the original PNG and the matching `*-thumb.png` thumbnail
+ * file alongside the DB row. Synchronous + cheap; no scheduler.
+ *
+ * Per-kind cap so future kinds (recordings, agent outputs) carry their
+ * own retention rules set by their own specs without conflict.
+ */
+export function pruneSnapshotsForRetention(agentId: string, max: number = 20): { removed: number } {
+  const snapshots = listArtifacts({ agentId, kind: 'snapshot', limit: 1000 })
+  if (snapshots.length <= max) return { removed: 0 }
+  const toRemove = snapshots.slice(max)
+  let removed = 0
+  for (const art of toRemove) {
+    const thumb = (art.metadata?.thumbnailPath as string | undefined) ?? null
+    if (deleteArtifact(art.id)) {
+      removed++
+      if (thumb) {
+        try { if (existsSync(thumb)) unlinkSync(thumb) } catch { /* best effort */ }
+      }
+    }
+  }
+  return { removed }
 }
 
 /**

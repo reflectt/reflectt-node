@@ -21,6 +21,7 @@ import type { AgentMessage, Task } from "./types.js"
 import { getAgentRoles } from "./assignment.js"
 import { listRoomParticipants, getRoomPresenceStatus } from "./room-presence-store.js"
 import { getRecentTranscript, getRoomTranscriptStatus } from "./room-transcript-store.js"
+import { listArtifacts, ROOM_ARTIFACT_AGENT_ID } from "./artifact-store.js"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MCP Server Setup
@@ -453,6 +454,44 @@ tool(
           hostId: status.hostId,
           initialized: status.initialized,
           windowMs: status.windowMs,
+        })
+      }]
+    }
+  }
+)
+
+tool(
+  "room_list_artifacts",
+  "Artifacts shared into this host's room (Room Share Snapshot v0). Returns metadata only — fetch bytes via the cloud-proxied content/thumbnail URLs. `kind` filters by artifact discriminator (snapshots are the only kind in v0; recordings/agent outputs may follow). `since` is a unix-ms cursor for incremental polling — pass the previous result's max createdAt. `limit` defaults to 50, max 200. Each item carries id, kind, name, mimeType, sizeBytes, createdAt, sharedBy, sharedByDisplayName, optional dimensions, plus url + thumbnailUrl. Use when you want to look back at what people just shared without waiting for the next push.",
+  { kind: z.string().optional(), since: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(200).optional() },
+  async (args: { kind?: string; since?: number; limit?: number }) => {
+    const limit = typeof args?.limit === 'number' ? args.limit : 50
+    const artifacts = listArtifacts({
+      agentId: ROOM_ARTIFACT_AGENT_ID,
+      kind: args?.kind,
+      sinceMs: args?.since,
+      limit,
+    })
+    const items = artifacts.map((a) => ({
+      id: a.id,
+      kind: (a.metadata?.kind as string | undefined) ?? null,
+      name: a.name,
+      mimeType: a.mimeType,
+      sizeBytes: a.sizeBytes,
+      createdAt: a.createdAt,
+      sharedBy: (a.metadata?.sharedBy as string | undefined) ?? null,
+      sharedByDisplayName: (a.metadata?.sharedByDisplayName as string | undefined) ?? null,
+      dimensions: (a.metadata?.dimensions as { width: number; height: number } | undefined) ?? null,
+      url: `/room/artifacts/${a.id}/content`,
+      thumbnailUrl: `/room/artifacts/${a.id}/thumbnail`,
+    }))
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          artifacts: items,
+          count: items.length,
+          kind: args?.kind ?? null,
         })
       }]
     }

@@ -36,6 +36,7 @@ export type EventType =
   | 'agent_identity_changed'  // agent claims/releases full-screen takeover — orbs fade, agent content is the canvas
   | 'room_participant_joined' // room-model-v0.1.1 slice 2: a human appeared in this host's room (data: { participant, hostId })
   | 'room_transcript_segment' // browser-STT v0: a finalized speech segment from a human in this host's room (data: { segment, hostId })
+  | 'room_artifact_shared'    // Room Share Snapshot v0 slice 5A: an artifact was shared into the room (data: { artifact, by: participantId, hostId }); kind discriminator on artifact.metadata
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -59,6 +60,7 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'agent_identity_changed',
   'room_participant_joined',
   'room_transcript_segment',
+  'room_artifact_shared',
 ])
 
 export interface Event {
