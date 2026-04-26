@@ -132,4 +132,78 @@ describe('room-event-bridge', () => {
     emitJoin()
     expect(sendMessageMock).toHaveBeenCalledTimes(1)
   })
+
+  // Slice 5A — Room Share Snapshot v0: same bridge, second event type.
+  // Snapshot kind → utilitarian one-liner. Unknown kind → silent (we don't
+  // post a generic "an artifact was shared" line that would lie about what
+  // the room can render today).
+  it('forwards a snapshot artifact_shared into chatManager.sendMessage', () => {
+    initRoomEventBridge()
+    eventBus.emit({
+      id: 'art-evt-1',
+      type: 'room_artifact_shared',
+      timestamp: Date.now(),
+      data: {
+        artifact: {
+          id: 'art-abc-123',
+          kind: 'snapshot',
+          name: 'screen.png',
+          createdAt: Date.now(),
+          sharedBy: 'session-abc-123',
+          sharedByDisplayName: 'Ryan',
+        },
+        by: 'session-abc-123',
+        hostId: 'host-1',
+      },
+    })
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1)
+    const call = sendMessageMock.mock.calls[0][0]
+    expect(call.from).toBe('room')
+    expect(call.channel).toBe('general')
+    expect(call.content).toContain('Ryan')
+    expect(call.content).toContain('snapshot')
+    expect(call.metadata.source).toBe('room-event')
+    expect(call.metadata.category).toBe('room-artifact')
+    expect(call.metadata.artifactId).toBe('art-abc-123')
+    expect(call.metadata.kind).toBe('snapshot')
+    expect(call.metadata.dedup_key).toBe('room-artifact-art-abc-123')
+    expect(getRoomEventBridgeStatus().artifactCount).toBe(1)
+  })
+
+  it('drops unknown artifact kinds silently (no generic "an artifact was shared" line)', () => {
+    initRoomEventBridge()
+    eventBus.emit({
+      id: 'art-evt-2',
+      type: 'room_artifact_shared',
+      timestamp: Date.now(),
+      data: {
+        artifact: {
+          id: 'art-future',
+          kind: 'recording', // not implemented in v0
+          name: 'r.mp4',
+          createdAt: Date.now(),
+          sharedBy: 's-1',
+          sharedByDisplayName: 'Ryan',
+        },
+        by: 's-1',
+        hostId: 'host-1',
+      },
+    })
+    expect(sendMessageMock).not.toHaveBeenCalled()
+    expect(getRoomEventBridgeStatus().artifactCount).toBe(0)
+  })
+
+  it('ignores artifact events with no kind or no id', () => {
+    initRoomEventBridge()
+    eventBus.emit({
+      id: 'art-bad-1', type: 'room_artifact_shared', timestamp: Date.now(),
+      data: { artifact: { id: '', kind: 'snapshot', name: 'x', createdAt: Date.now(), sharedBy: null, sharedByDisplayName: null }, by: 's-1', hostId: 'host-1' },
+    })
+    eventBus.emit({
+      id: 'art-bad-2', type: 'room_artifact_shared', timestamp: Date.now(),
+      data: { artifact: { id: 'art-x', kind: null, name: 'x', createdAt: Date.now(), sharedBy: null, sharedByDisplayName: null }, by: 's-1', hostId: 'host-1' },
+    })
+    expect(sendMessageMock).not.toHaveBeenCalled()
+  })
 })
