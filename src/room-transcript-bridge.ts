@@ -28,6 +28,7 @@
  */
 import { eventBus } from './events.js'
 import { chatManager } from './chat.js'
+import { getAgentRoles } from './assignment.js'
 import { listRoomParticipants } from './room-presence-store.js'
 import type { RoomTranscriptSegment } from './room-transcript-store.js'
 
@@ -46,6 +47,14 @@ const LISTENER_ID = 'room-transcript-bridge'
 interface RoomTranscriptPayload {
   segment: RoomTranscriptSegment
   hostId: string
+}
+
+// Resolve the founding/default agent for this host. Same pattern used by
+// room-event-bridge (see #1304) — the OpenClaw plugin's handleInbound
+// gates dispatch on body @-mentions, so without an @-mention the
+// transcript line drops on the floor and the agent never sees STT.
+function resolveDefaultAgent(): string | null {
+  return getAgentRoles()[0]?.name ?? null
 }
 
 /**
@@ -67,9 +76,13 @@ function resolveSpeakerName(participantId: string, userId: string): string {
  * Format a finalized segment into a single concise chat line. Kept terse
  * — agents already have AGENTS.md guidance on what to do with transcript
  * context. The line is the trigger; the rule is the response.
+ *
+ * Body @-mentions the default agent for the same reason room-event-bridge
+ * does: the live OpenClaw plugin's handleInbound gates dispatch on body
+ * @-mentions and ignores `to:`. Without the prefix the message drops.
  */
-function formatSegment(speakerName: string, text: string): string {
-  return `🎙️ **${speakerName}**: ${text}`
+function formatSegment(speakerName: string, text: string, defaultAgent: string): string {
+  return `@${defaultAgent} 🎙️ **${speakerName}**: ${text}`
 }
 
 /**
@@ -88,11 +101,18 @@ export function initRoomTranscriptBridge(): boolean {
     // contract ever loosens we still want only finals reaching chat.
     if (!seg.isFinal) return
 
+    const defaultAgent = resolveDefaultAgent()
+    if (!defaultAgent) {
+      console.warn(`[room-transcript-bridge] no default agent (TEAM-ROLES empty) — dropping segment ${seg.id}`)
+      return
+    }
+
     state.segmentCount++
     const speakerName = resolveSpeakerName(seg.participantId, seg.userId)
     void chatManager.sendMessage({
       from: 'room',
-      content: formatSegment(speakerName, seg.text),
+      to: defaultAgent,
+      content: formatSegment(speakerName, seg.text, defaultAgent),
       channel: 'general',
       metadata: {
         source: 'room-event',
