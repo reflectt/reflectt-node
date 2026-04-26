@@ -16,6 +16,7 @@
 
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { listRoomParticipants, getRoomPresenceStatus } from './room-presence-store.js'
+import { getRecentTranscript, getRoomTranscriptStatus } from './room-transcript-store.js'
 
 function verifyAuth(request: FastifyRequest): { ok: boolean; error?: string } {
   const expectedToken = process.env.REFLECTT_HOST_HEARTBEAT_TOKEN
@@ -50,6 +51,32 @@ export async function roomRoutes(app: FastifyInstance) {
       count: participants.length,
       hostId: status.hostId,
       initialized: status.initialized,
+    }
+  })
+
+  // ── Browser-STT v0: GET /room/transcript ────────────────────────────
+  // Recent finalized transcript segments from the room's Realtime
+  // broadcast. `?since=<unix-ms>` returns only segments with
+  // `receivedAt >= since` (use this for incremental polling). Unset =
+  // full ring (last ~60s). Agents prefer the `room_recent_transcript`
+  // MCP tool; this HTTP endpoint exists for parity and debugging.
+  app.get('/room/transcript', async (request, reply) => {
+    const auth = verifyAuth(request)
+    if (!auth.ok) {
+      reply.status(401)
+      return { error: auth.error }
+    }
+    const query = request.query as Record<string, unknown>
+    const sinceRaw = query?.since
+    const since = typeof sinceRaw === 'string' ? Number(sinceRaw) : (typeof sinceRaw === 'number' ? sinceRaw : undefined)
+    const segments = getRecentTranscript(Number.isFinite(since) ? (since as number) : undefined)
+    const status = getRoomTranscriptStatus()
+    return {
+      segments,
+      count: segments.length,
+      hostId: status.hostId,
+      initialized: status.initialized,
+      windowMs: status.windowMs,
     }
   })
 }

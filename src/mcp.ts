@@ -20,6 +20,7 @@ import { PKG_VERSION } from "./version.js"
 import type { AgentMessage, Task } from "./types.js"
 import { getAgentRoles } from "./assignment.js"
 import { listRoomParticipants, getRoomPresenceStatus } from "./room-presence-store.js"
+import { getRecentTranscript, getRoomTranscriptStatus } from "./room-transcript-store.js"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MCP Server Setup
@@ -428,6 +429,30 @@ tool(
           count: participants.length,
           hostId: status.hostId,
           initialized: status.initialized,
+        })
+      }]
+    }
+  }
+)
+
+tool(
+  "room_recent_transcript",
+  "Recent FINALIZED speech segments from humans in this host's room (browser-STT v0). Each segment has speaker identity (participantId, userId), text, startedAt, finalizedAt, and receivedAt (node arrival). Returns the last `seconds` of finals (default 30, max 60 — the ring buffer window). Browser-STT v0 is best-effort — Firefox and other browsers without the Web Speech API contribute nothing. Use this when you want to know what people just said without waiting for the next push.",
+  { seconds: z.number().int().min(1).max(60).optional() },
+  async (args: { seconds?: number }) => {
+    const seconds = typeof args?.seconds === 'number' ? args.seconds : 30
+    const since = Date.now() - seconds * 1000
+    const segments = getRecentTranscript(since)
+    const status = getRoomTranscriptStatus()
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          segments,
+          count: segments.length,
+          hostId: status.hostId,
+          initialized: status.initialized,
+          windowMs: status.windowMs,
         })
       }]
     }
