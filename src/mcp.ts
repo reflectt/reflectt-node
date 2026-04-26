@@ -19,6 +19,7 @@ import { eventBus } from "./events.js"
 import { PKG_VERSION } from "./version.js"
 import type { AgentMessage, Task } from "./types.js"
 import { getAgentRoles } from "./assignment.js"
+import { listRoomParticipants, getRoomPresenceStatus } from "./room-presence-store.js"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MCP Server Setup
@@ -403,6 +404,31 @@ tool(
       content: [{
         type: "text",
         text: JSON.stringify({ ts: Date.now(), board, agents: agentStates })
+      }]
+    }
+  }
+)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Room Tools (room-model-v0.1.1 slice 2 — agents see humans)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+tool(
+  "room_list_participants",
+  "List humans currently present in this host's room. Returns the ephemeral participant set from the live Supabase Realtime presence channel — these are the people who have a /canvas tab open right now. Use this when deciding whether to greet someone, hold off on autonomous chatter, or check if a human is around to answer a question. Empty list = nobody on canvas right now (autonomous mode).",
+  {},
+  async () => {
+    const participants = listRoomParticipants()
+    const status = getRoomPresenceStatus()
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          participants,
+          count: participants.length,
+          hostId: status.hostId,
+          initialized: status.initialized,
+        })
       }]
     }
   }
