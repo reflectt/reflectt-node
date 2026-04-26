@@ -5,6 +5,7 @@
 // only produce one user-visible chat message even on event re-emit.
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { setTestRoles } from '../src/assignment.js'
 
 // Mock chatManager BEFORE importing the bridge so the bridge picks up
 // the mock instead of the real chatManager. vi.mock is hoisted above
@@ -56,10 +57,17 @@ describe('room-event-bridge', () => {
   beforeEach(() => {
     sendMessageMock.mockClear()
     shutdownRoomEventBridge()
+    // mj2z6nzjz contract: bridge resolves the founding agent via
+    // getAgentRoles()[0]?.name and routes there. Pin the test roster so
+    // the @-mention assertions are deterministic.
+    setTestRoles([
+      { name: 'genesis', role: 'founding', affinityTags: [], wipCap: 1 },
+    ])
   })
 
   afterEach(() => {
     shutdownRoomEventBridge()
+    setTestRoles(null)
   })
 
   it('initRoomEventBridge() returns true on first call, false on re-init', () => {
@@ -75,11 +83,14 @@ describe('room-event-bridge', () => {
     expect(sendMessageMock).toHaveBeenCalledTimes(1)
     const call = sendMessageMock.mock.calls[0][0]
     expect(call.from).toBe('room')
+    expect(call.to).toBe('genesis')
     expect(call.channel).toBe('general')
+    expect(call.content).toContain('@genesis')
     expect(call.content).toContain('Ryan')
     expect(call.content).toContain('big-screen')
     expect(call.metadata.source).toBe('room-event')
     expect(call.metadata.participantId).toBe('session-abc-123')
+    expect(call.metadata.displayName).toBe('Ryan')
     expect(call.metadata.dedup_key).toBe('room-join-session-abc-123')
     expect(call.metadata.hostId).toBe('host-1')
   })
@@ -148,9 +159,14 @@ describe('room-event-bridge', () => {
           id: 'art-abc-123',
           kind: 'snapshot',
           name: 'screen.png',
+          mimeType: 'image/png',
+          sizeBytes: 12345,
           createdAt: Date.now(),
           sharedBy: 'session-abc-123',
           sharedByDisplayName: 'Ryan',
+          dimensions: { width: 1920, height: 1080 },
+          url: 'https://cdn.example/art-abc-123.png',
+          thumbnailUrl: 'https://cdn.example/art-abc-123.thumb.png',
         },
         by: 'session-abc-123',
         hostId: 'host-1',
@@ -160,13 +176,21 @@ describe('room-event-bridge', () => {
     expect(sendMessageMock).toHaveBeenCalledTimes(1)
     const call = sendMessageMock.mock.calls[0][0]
     expect(call.from).toBe('room')
+    expect(call.to).toBe('genesis')
     expect(call.channel).toBe('general')
+    expect(call.content).toContain('@genesis')
     expect(call.content).toContain('Ryan')
     expect(call.content).toContain('snapshot')
     expect(call.metadata.source).toBe('room-event')
     expect(call.metadata.category).toBe('room-artifact')
     expect(call.metadata.artifactId).toBe('art-abc-123')
     expect(call.metadata.kind).toBe('snapshot')
+    expect(call.metadata.sharedByDisplayName).toBe('Ryan')
+    expect(call.metadata.url).toBe('https://cdn.example/art-abc-123.png')
+    expect(call.metadata.thumbnailUrl).toBe('https://cdn.example/art-abc-123.thumb.png')
+    expect(call.metadata.dimensions).toEqual({ width: 1920, height: 1080 })
+    expect(call.metadata.mimeType).toBe('image/png')
+    expect(call.metadata.sizeBytes).toBe(12345)
     expect(call.metadata.dedup_key).toBe('room-artifact-art-abc-123')
     expect(getRoomEventBridgeStatus().artifactCount).toBe(1)
   })
