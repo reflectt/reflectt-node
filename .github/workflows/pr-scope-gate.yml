@@ -21,13 +21,20 @@ jobs:
           node-version: '20'
 
       - name: Save PR body
-        run: echo "${{ github.event.pull_request.body }}" > /tmp/pr-body.txt
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s' "$PR_BODY" > /tmp/pr-body.txt
 
       - name: Run PR scope gate
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          RULE2_N: 20
+          RULE2_THRESHOLD: 40
         run: |
           echo "=== PR Scope Policy Gate (Signal #3) ==="
-          echo "Base: ${{ github.base_ref }}"
-          echo "Head: ${{ github.head_ref }}"
+          echo "Base: $BASE_REF"
+          echo "Head: $HEAD_REF"
           echo ""
           echo "Rule 1 (BLOCK): Stash residue — files modified before branch first commit"
           echo "Rule 2 (WARN):  File count > N×2 (default N=${RULE2_N}, threshold=${RULE2_THRESHOLD})"
@@ -35,9 +42,6 @@ jobs:
           echo "Rule 4 (BLOCK): Sensitive-path files without task ID in commit message"
           echo ""
           node tools/pr-scope-check.mjs \
-            --base origin/${{ github.base_ref }} \
+            --base "origin/$BASE_REF" \
             --pr-body /tmp/pr-body.txt \
             --verbose
-        env:
-          RULE2_N: 20
-          RULE2_THRESHOLD: 40
