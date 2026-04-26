@@ -83,8 +83,16 @@ export class SuppressionLedger {
     channel: string
     from: string
     content: string
+    /**
+     * Optional explicit dedup key from the caller's metadata. When provided,
+     * it overrides the content-derived key — required for events where the
+     * caller's identity (e.g. room session id) is the source of truth for
+     * "same vs. different", not the rendered message text. Without this,
+     * different sessions emitting the same templated string would collapse.
+     */
+    dedup_key?: string
   }): SuppressionCheckResult {
-    const dedup_key = this.computeDedupKey(opts.category, opts.channel, opts.content)
+    const dedup_key = opts.dedup_key ?? this.computeDedupKey(opts.category, opts.channel, opts.content)
     const now = Date.now()
     const db = getDb()
 

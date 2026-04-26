@@ -122,6 +122,34 @@ describe('Suppression Ledger', () => {
     expect(stats.total_entries).toBe(0)
   })
 
+  // Regression for slice 3B: room-event-bridge emits the same templated
+  // string ("🚪 X joined …") for every join, but each browser session has a
+  // distinct id. Without honoring the caller's explicit dedup_key, two
+  // different sessions joining the same room would collapse and only the
+  // first would post — defeating the room push contract.
+  it('honors caller-supplied dedup_key over content-derived key', () => {
+    const base = {
+      category: 'room-join',
+      channel: 'general',
+      from: 'room',
+      content: '🚪 **Proveout-Ryan** joined the room (big-screen)',
+    }
+
+    const first = ledger.check({ ...base, dedup_key: 'room-join-session-A' })
+    expect(first.isDuplicate).toBe(false)
+    expect(first.dedup_key).toBe('room-join-session-A')
+
+    // Same content, different explicit key → must NOT be flagged duplicate.
+    const second = ledger.check({ ...base, dedup_key: 'room-join-session-B' })
+    expect(second.isDuplicate).toBe(false)
+    expect(second.dedup_key).toBe('room-join-session-B')
+
+    // Same explicit key replayed → IS a duplicate (greet-once per session).
+    const third = ledger.check({ ...base, dedup_key: 'room-join-session-A' })
+    expect(third.isDuplicate).toBe(true)
+    expect(third.dedup_key).toBe('room-join-session-A')
+  })
+
   it('persists across ledger instances', () => {
     const opts = { category: 'alert', channel: 'ops', from: 'system', content: 'Persistent check' }
 
