@@ -77,7 +77,9 @@ export function initRoomPresenceStore(): boolean {
   if (state.initialized) return true
 
   const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  // Managed hosts ship the service-role JWT under SUPABASE_ACCESS_TOKEN
+  // (CLI convention), self-hosted setups under SUPABASE_SERVICE_ROLE_KEY.
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ACCESS_TOKEN
   const hostId = resolveHostId()
 
   if (!url || !key) {
