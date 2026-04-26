@@ -97,13 +97,20 @@ function formatJoin(p: RoomJoinPayload['participant'], defaultAgent: string): st
 // Per-kind dispatch — v0 only handles `kind='snapshot'`. Future kinds
 // (recordings, agent outputs) add their own one-liner here without
 // changing the event name. Body stays utilitarian (kai lock
-// msg-1777191217389: "thin factual notification, not narration") — the
-// actionable context (url, thumbnailUrl, dimensions, sharedByDisplayName)
-// rides in metadata for the agent to pull on demand.
+// msg-1777191217389: "thin factual notification, not narration") but
+// includes the artifact URL inline. The original design pushed url etc
+// into msg.metadata for "agent pulls on demand" — but receiving agents
+// only see the chat body in their prompt, so a metadata-only pointer
+// has no caller. Inline URL keeps the body factual while giving the
+// agent something to fetch (mj2z6nzjz follow-up: "noted 🧭" replies on
+// canonical staging because compass had no pointer to the bytes).
 function formatArtifactShared(p: RoomArtifactSharedPayload, defaultAgent: string): string | null {
   const who = p.artifact.sharedByDisplayName ?? 'Someone'
   switch (p.artifact.kind) {
-    case 'snapshot': return `@${defaultAgent} 📸 **${who}** shared a snapshot`
+    case 'snapshot': {
+      const dim = p.artifact.dimensions ? ` (${p.artifact.dimensions.width}×${p.artifact.dimensions.height})` : ''
+      return `@${defaultAgent} 📸 **${who}** shared a snapshot${dim} → ${p.artifact.url}`
+    }
     default: return null
   }
 }
