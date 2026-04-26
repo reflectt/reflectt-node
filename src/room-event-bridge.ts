@@ -84,12 +84,11 @@ function resolveDefaultAgent(): string | null {
 }
 
 // Why @-mention in the body even though we also set `to:` —
-// mj2z6nzjz proof on canonical: the live OpenClaw plugin's handleInbound
-// (reflectt-channel index.ts) gates dispatch on body @-mentions and
-// ignores the message `to:` field. Without an @-mention the plugin drops
-// the message and the agent never sees it. `to:` still matters for
-// node-side inbox priority (DM path), so we set both. Kai signoff
-// msg-1777223002661.
+// the live OpenClaw plugin's handleInbound (reflectt-channel index.ts)
+// gates dispatch on body @-mentions and ignores the message `to:` field.
+// Without an @-mention the plugin drops the message and the agent never
+// sees it. `to:` still matters for node-side inbox priority (DM path),
+// so we set both.
 
 function formatJoin(p: RoomJoinPayload['participant'], defaultAgent: string): string {
   return `@${defaultAgent} 🚪 **${p.displayName}** joined the room (${p.device})`
