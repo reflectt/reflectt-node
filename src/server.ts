@@ -171,6 +171,8 @@ import { startOpenClawUsageSync, stopOpenClawUsageSync, syncOpenClawUsage } from
 import { initContactsTable, createContact, getContact, updateContact, deleteContact, listContacts, countContacts } from './contacts.js'
 import { processRender, logRejection, getRecentRejections, subscribeCanvas } from './canvas-multiplexer.js'
 import { canvasReadRoutes, canvasPhase2Routes, formatRecency } from './canvas-routes.js'
+import { roomRoutes } from './room-routes.js'
+import { initRoomPresenceStore } from './room-presence-store.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
@@ -12285,6 +12287,13 @@ export async function createServer(): Promise<FastifyInstance> {
       }
     })
   })()
+
+  // ── Room presence (room-model-v0.1.1 slice 2) ────────────────────────
+  // Subscribe to the Supabase Realtime presence channel slice 1 publishes
+  // to so agents can read who's in the room via /room/participants and the
+  // `room_list_participants` MCP tool. Non-fatal if Supabase env missing.
+  await app.register(roomRoutes)
+  initRoomPresenceStore()
 
   // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
   // Phase 1: states, slots, slots/all, rejections
