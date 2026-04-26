@@ -181,6 +181,11 @@ describe('room-event-bridge', () => {
     expect(call.content).toContain('@genesis')
     expect(call.content).toContain('Ryan')
     expect(call.content).toContain('snapshot')
+    // Body now includes the artifact URL inline so the receiving agent can
+    // fetch the bytes (mj2z6nzjz follow-up — metadata-only pointer was
+    // unreachable from the agent's prompt context).
+    expect(call.content).toContain('https://cdn.example/art-abc-123.png')
+    expect(call.content).toContain('1920×1080')
     expect(call.metadata.source).toBe('room-event')
     expect(call.metadata.category).toBe('room-artifact')
     expect(call.metadata.artifactId).toBe('art-abc-123')
