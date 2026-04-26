@@ -459,11 +459,13 @@ class ChatManager {
     let dedupKey: string | undefined
 
     if (isSystemSource && !bypassBudget) {
+      const explicitDedupKey = typeof msgMeta.dedup_key === 'string' ? msgMeta.dedup_key : undefined
       const check = suppressionLedger.check({
         category,
         channel,
         from: message.from,
         content: message.content,
+        dedup_key: explicitDedupKey,
       })
       dedupKey = check.dedup_key
 
