@@ -174,6 +174,8 @@ import { canvasReadRoutes, canvasPhase2Routes, formatRecency } from './canvas-ro
 import { roomRoutes } from './room-routes.js'
 import { initRoomPresenceStore } from './room-presence-store.js'
 import { initRoomEventBridge } from './room-event-bridge.js'
+import { initRoomTranscriptStore } from './room-transcript-store.js'
+import { initRoomTranscriptBridge } from './room-transcript-bridge.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
 import { runTeamDoctor } from './team-doctor.js'
 import { createStarterTeam } from './starter-team.js'
@@ -12302,6 +12304,16 @@ export async function createServer(): Promise<FastifyInstance> {
   // sees them as `message_posted` SSE events (the same path webhooks use).
   // Pairs with slice 3A's seeded greet-on-join rule in AGENTS.md.
   initRoomEventBridge()
+
+  // ── Browser-STT v0: room transcript store + bridge ───────────────────
+  // Subscribes to the `room:${hostId}` Realtime channel for the
+  // `transcript.segment` broadcast event and ring-buffers FINAL segments
+  // (last 60s). Bridge turns each final into a #general chat message so
+  // the founding agent receives it as `message_posted` SSE — same path
+  // webhooks and room-join events use. Humans see interim+final via the
+  // channel directly; agents only get finals (kai's locked rule).
+  initRoomTranscriptStore()
+  initRoomTranscriptBridge()
 
   // ── Canvas read routes (extracted to src/canvas-routes.ts) ───────────
   // Phase 1: states, slots, slots/all, rejections
