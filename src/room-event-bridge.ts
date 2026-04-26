@@ -26,6 +26,7 @@
  */
 import { eventBus } from './events.js'
 import { chatManager } from './chat.js'
+import { getAgentRoles } from './assignment.js'
 
 interface BridgeState {
   initialized: boolean
@@ -61,39 +62,48 @@ interface RoomArtifactSharedPayload {
     id: string
     kind: string | null
     name: string
+    mimeType: string
+    sizeBytes: number
     createdAt: number
     sharedBy: string | null
     sharedByDisplayName: string | null
+    dimensions: { width: number; height: number } | null
+    url: string
+    thumbnailUrl: string
   }
   by: string
   hostId: string
 }
 
-/**
- * Format a join into a single concise chat line. Kept terse on purpose —
- * the seed rule in AGENTS.md tells the agent what to do; this is just the
- * trigger they need to see.
- */
-function formatJoin(p: RoomJoinPayload['participant']): string {
-  return `🚪 **${p.displayName}** joined the room (${p.device})`
+// Resolve the founding/default agent for this host. Same pattern used
+// throughout server.ts (getAgentRoles()[0]?.name) — first entry in
+// TEAM-ROLES.yaml. Room-originated events route here so the OpenClaw
+// dispatch path (which gates on body @mention) actually wakes someone.
+function resolveDefaultAgent(): string | null {
+  return getAgentRoles()[0]?.name ?? null
 }
 
-/**
- * Format an artifact share into a single utilitarian chat line. Per
- * kai's lock (msg-1777191217389): "thin factual notification only —
- * utilitarian, not narration." No URL, no thumbnail, no guess at
- * content. Agents that care look in the room (pull); agents that
- * don't, don't get a wall of "here's what's in the snapshot"
- * hallucinations they didn't ask for.
- *
- * Per-kind dispatch — v0 only handles `kind='snapshot'`. Future kinds
- * (recordings, agent outputs) add their own one-liner here without
- * changing the event name.
- */
-function formatArtifactShared(p: RoomArtifactSharedPayload): string | null {
+// Why @-mention in the body even though we also set `to:` —
+// the live OpenClaw plugin's handleInbound (reflectt-channel index.ts)
+// gates dispatch on body @-mentions and ignores the message `to:` field.
+// Without an @-mention the plugin drops the message and the agent never
+// sees it. `to:` still matters for node-side inbox priority (DM path),
+// so we set both.
+
+function formatJoin(p: RoomJoinPayload['participant'], defaultAgent: string): string {
+  return `@${defaultAgent} 🚪 **${p.displayName}** joined the room (${p.device})`
+}
+
+// Per-kind dispatch — v0 only handles `kind='snapshot'`. Future kinds
+// (recordings, agent outputs) add their own one-liner here without
+// changing the event name. Body stays utilitarian (kai lock
+// msg-1777191217389: "thin factual notification, not narration") — the
+// actionable context (url, thumbnailUrl, dimensions, sharedByDisplayName)
+// rides in metadata for the agent to pull on demand.
+function formatArtifactShared(p: RoomArtifactSharedPayload, defaultAgent: string): string | null {
   const who = p.artifact.sharedByDisplayName ?? 'Someone'
   switch (p.artifact.kind) {
-    case 'snapshot': return `📸 **${who}** shared a snapshot`
+    case 'snapshot': return `@${defaultAgent} 📸 **${who}** shared a snapshot`
     default: return null
   }
 }
@@ -111,10 +121,17 @@ export function initRoomEventBridge(): boolean {
       const p = payload?.participant
       if (!p || p.kind !== 'human' || !p.id || !p.displayName) return
 
+      const defaultAgent = resolveDefaultAgent()
+      if (!defaultAgent) {
+        console.warn(`[room-event-bridge] no default agent (TEAM-ROLES empty) — dropping join for ${p.id}`)
+        return
+      }
+
       state.joinCount++
       void chatManager.sendMessage({
         from: 'room',
-        content: formatJoin(p),
+        to: defaultAgent,
+        content: formatJoin(p, defaultAgent),
         channel: 'general',
         metadata: {
           source: 'room-event',
@@ -124,6 +141,7 @@ export function initRoomEventBridge(): boolean {
           userId: p.userId,
           hostId: payload?.hostId ?? p.hostId,
           device: p.device,
+          displayName: p.displayName,
           // dedup_key: chatManager's ledger swallows repeats with the
           // same key. Using participant.id (ephemeral session id) means
           // greet-once per session; new session → fresh greet.
@@ -138,7 +156,14 @@ export function initRoomEventBridge(): boolean {
     if (event.type === 'room_artifact_shared') {
       const payload = event.data as RoomArtifactSharedPayload | undefined
       if (!payload?.artifact?.id || !payload.artifact.kind) return
-      const line = formatArtifactShared(payload)
+
+      const defaultAgent = resolveDefaultAgent()
+      if (!defaultAgent) {
+        console.warn(`[room-event-bridge] no default agent (TEAM-ROLES empty) — dropping artifact ${payload.artifact.id}`)
+        return
+      }
+
+      const line = formatArtifactShared(payload, defaultAgent)
       // Unknown kind in v0 → silent. Future kinds add a formatter case
       // when they ship their own slice. We do NOT post a generic
       // "an artifact was shared" line — that would lie about what
@@ -148,6 +173,7 @@ export function initRoomEventBridge(): boolean {
       state.artifactCount++
       void chatManager.sendMessage({
         from: 'room',
+        to: defaultAgent,
         content: line,
         channel: 'general',
         metadata: {
@@ -157,7 +183,13 @@ export function initRoomEventBridge(): boolean {
           artifactId: payload.artifact.id,
           kind: payload.artifact.kind,
           sharedBy: payload.by,
+          sharedByDisplayName: payload.artifact.sharedByDisplayName,
           hostId: payload.hostId,
+          url: payload.artifact.url,
+          thumbnailUrl: payload.artifact.thumbnailUrl,
+          dimensions: payload.artifact.dimensions,
+          mimeType: payload.artifact.mimeType,
+          sizeBytes: payload.artifact.sizeBytes,
           // Artifacts have stable unique ids — strict per-id dedup so
           // a duplicate emit (rare but possible on retry) doesn't
           // double-post. Unlike `room-join-${id}` (per-session) this
