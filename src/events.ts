@@ -34,6 +34,7 @@ export type EventType =
   | 'canvas_artifact'  // proof artifact drifts through canvas on task/PR completion (commit/pr/test/run/approval)
   | 'canvas_takeover'
   | 'agent_identity_changed'  // agent claims/releases full-screen takeover — orbs fade, agent content is the canvas
+  | 'room_participant_joined' // room-model-v0.1.1 slice 2: a human appeared in this host's room (data: { participant, hostId })
 
 export const VALID_EVENT_TYPES = new Set<EventType>([
   'message_posted',
@@ -55,6 +56,7 @@ export const VALID_EVENT_TYPES = new Set<EventType>([
   'canvas_artifact',
   'canvas_takeover',
   'agent_identity_changed',
+  'room_participant_joined',
 ])
 
 export interface Event {
