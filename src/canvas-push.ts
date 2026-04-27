@@ -9,6 +9,7 @@ import { emitActivationEvent } from './activationEvents.js'
 import type { CanvasStateEntry } from './canvas-routes.js'
 import { getAgentRoles } from './assignment.js'
 import { getIdentityColor } from './agent-config.js'
+import { postCanvasResponse } from './cloud.js'
 
 interface CanvasPushDeps {
   eventBus: typeof eventBusInstance
@@ -128,12 +129,17 @@ export async function canvasPushRoutes(
       payload = { ...payload, card, query }
 
       const agentColor = getIdentityColor(agentId, '#60a5fa')
+      const resolvedCard = { ...card, agentId, agentColor, query }
       eventBus.emit({
         id: `cmsg-${now}-${Math.random().toString(36).slice(2, 8)}`,
         type: 'canvas_message' as const,
         timestamp: now,
-        data: { ...card, agentId, agentColor, query },
+        data: resolvedCard,
       })
+
+      // Push the resolved card upstream to cloud → asker browser SSE → shared
+      // sink → card.fanout → room-card-store ring buffer → late-joiner backfill.
+      postCanvasResponse(resolvedCard).catch(() => { /* best-effort */ })
     }
 
     eventBus.emit({ id: `push-${now}-${Math.random().toString(36).slice(2, 6)}`, type: 'canvas_push', timestamp: now, data: payload })

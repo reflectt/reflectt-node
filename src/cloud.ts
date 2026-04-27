@@ -1668,6 +1668,33 @@ async function pollAgentDecisions(): Promise<void> {
   }
 }
 
+/**
+ * Push a RESOLVED canvas reply card to cloud so it broadcasts to the asker
+ * browser via SSE. The asker's shared sink then publishes `card.fanout` over
+ * Realtime, which the room-card-store ring-buffers — late joiners then pick
+ * it up via /room/cards backfill.
+ *
+ * The synchronous /canvas/query/ack relay only carries the pending placeholder
+ * (returned from POST /canvas/query before the agent has answered). When the
+ * actual agent reply lands later — via canvas-query-response-bridge or
+ * /canvas/push canvas_response — this is the second-leg upstream POST that
+ * closes the loop.
+ *
+ * Best-effort: failures are logged but do not throw, mirroring the rest of
+ * the canvas relay (agents shouldn't block on transport jitter).
+ */
+export async function postCanvasResponse(card: Record<string, unknown>): Promise<void> {
+  if (!state.hostId || !config) return
+  try {
+    const result = await cloudPost(`/api/hosts/${state.hostId}/canvas/response`, { card })
+    if (!result.success) {
+      console.warn(`[CanvasResponseRelay] upstream POST failed: ${result.error ?? 'unknown'}`)
+    }
+  } catch (err) {
+    console.warn(`[CanvasResponseRelay] upstream POST error: ${(err as Error).message}`)
+  }
+}
+
 // ── Canvas query relay polling ────────────────────────────────────────────────
 // When canvas/query is called from a NAT-behind node, the cloud queues the query
 // at GET /api/hosts/:id/canvas/query/pending. We poll here, POST each query to
