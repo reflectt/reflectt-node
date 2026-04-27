@@ -13,6 +13,15 @@ interface CanvasStateEntry {
   payload?: Record<string, unknown>
 }
 
+// Pending canvas responders: responderId → expiresAt (epoch ms).
+// When /canvas/query dispatches `[canvas] @${responderId}` to an agent, we
+// register them here. The bridge then treats the next chat post from that
+// agent (within the window) as the canvas response, even when the agent
+// replies plain on #general without the `[canvas-response]` / `[canvas]`
+// prefix. Match is one-shot: the entry is consumed on the first matching post.
+const PENDING_RESPONDER_WINDOW_MS = 5 * 60 * 1000
+const pendingCanvasResponders = new Map<string, number>()
+
 interface CanvasQueryDeps {
   eventBus: typeof eventBusInstance
   canvasStateMap: Map<string, CanvasStateEntry>
@@ -295,6 +304,11 @@ export async function canvasQueryRoutes(
             ...(attachments.length > 0 ? { attachments: attachments.map(a => ({ name: a.name, type: a.type, sizeBytes: a.sizeBytes })) } : {}),
           },
         })
+        // Register this agent as a pending canvas responder. The bridge will
+        // treat their next chat post (within PENDING_RESPONDER_WINDOW_MS) as
+        // the canvas response, even when they reply plain on #general without
+        // a [canvas-response] / [canvas] prefix.
+        pendingCanvasResponders.set(responderId, Date.now() + PENDING_RESPONDER_WINDOW_MS)
       } catch {
         // Chat delivery failure is non-fatal — still show the thinking card
       }
@@ -376,15 +390,26 @@ export async function canvasQueryRoutes(
     // Only bridge messages from agents (not from 'human' or 'system')
     if (from === 'human' || from === 'system' || from === 'github') return
 
-    // Detect canvas responses: messages that start with [canvas-response] or
-    // are on the canvas channel from an agent, or mention [canvas] in reply
+    // Detect canvas responses. Three matching strategies:
+    //   1. Explicit prefix `[canvas-response]` / `[canvas]` (legacy/explicit path)
+    //   2. Posted on the dedicated `canvas` channel by an agent (legacy)
+    //   3. Implicit pending-responder match — agent was the explicit `responderId`
+    //      of a recent /canvas/query dispatch and is now posting their first reply.
+    //      This is how compass et al. actually answer in practice: plain reply on
+    //      #general with no prefix. Window bounded by PENDING_RESPONDER_WINDOW_MS.
+    const pendingExpiresAt = pendingCanvasResponders.get(from)
+    const isPendingResponder = pendingExpiresAt !== undefined && pendingExpiresAt > Date.now()
+    if (pendingExpiresAt !== undefined && pendingExpiresAt <= Date.now()) {
+      pendingCanvasResponders.delete(from)
+    }
     const isCanvasResponse = content.startsWith('[canvas-response]')
       || content.startsWith('[canvas]')
       || (channel === 'canvas' && from !== 'human')
-    // PROBE (revert after diagnosis): log every agent message_posted reaching
-    // the bridge so we can identify what path Compass's plain reply uses.
-    console.log(`[canvas-bridge-probe] from=${from} channel=${channel} matched=${isCanvasResponse} content="${content.slice(0, 80)}"`)
+      || isPendingResponder
     if (!isCanvasResponse) return
+    if (isPendingResponder) {
+      pendingCanvasResponders.delete(from)
+    }
 
     // Strip the [canvas-response] / [canvas] prefix
     const cleanContent = content
