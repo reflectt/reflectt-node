@@ -175,6 +175,7 @@ import { roomRoutes } from './room-routes.js'
 import { initRoomPresenceStore } from './room-presence-store.js'
 import { initRoomEventBridge } from './room-event-bridge.js'
 import { initRoomTranscriptStore } from './room-transcript-store.js'
+import { initRoomCardStore } from './room-card-store.js'
 import { initRoomTranscriptBridge } from './room-transcript-bridge.js'
 import { initRoomArtifactBroadcast } from './room-artifact-broadcast.js'
 import { startTeamPulse, stopTeamPulse, postTeamPulse, computeTeamPulse, getTeamPulseConfig, configureTeamPulse, getTeamPulseHistory } from './team-pulse.js'
@@ -12315,6 +12316,17 @@ export async function createServer(): Promise<FastifyInstance> {
   // channel directly; agents only get finals (kai's locked rule).
   initRoomTranscriptStore()
   initRoomTranscriptBridge()
+
+  // ── Reply-card backfill v0: room card store ──────────────────────────
+  // Subscribes to the `room:${hostId}` Realtime channel for the
+  // `card.fanout` broadcast event (asker tab emits it whenever a fresh
+  // canvas_message SSE lands) and ring-buffers entries (last 10min, cap
+  // 50). Surfaces them on `GET /room/cards` so late joiners pull recent
+  // reply context on mount and re-fetch on each broadcast — same pattern
+  // the snapshot strip uses. No bridge: cards stay client-side; agents
+  // already have the upstream canvas_message events via their own session
+  // SSE.
+  initRoomCardStore()
 
   // ── Room Share Snapshot v0 slice 5A: artifact broadcaster ────────────
   // Owns its own Supabase Realtime channel handle on `room:${hostId}` for

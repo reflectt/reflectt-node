@@ -24,6 +24,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { eventBus } from './events.js'
 import { listRoomParticipants, getRoomPresenceStatus } from './room-presence-store.js'
 import { getRecentTranscript, getRoomTranscriptStatus } from './room-transcript-store.js'
+import { getRecentCards, getRoomCardStatus } from './room-card-store.js'
 import {
   storeArtifact,
   getArtifact,
@@ -126,6 +127,42 @@ export async function roomRoutes(app: FastifyInstance) {
       hostId: status.hostId,
       initialized: status.initialized,
       windowMs: status.windowMs,
+    }
+  })
+
+  // ── Reply-card backfill v0 ──────────────────────────────────────────
+  // Recent reply cards from the room's Realtime broadcast. `?since=<ms>`
+  // returns only entries with `receivedAt >= since` (incremental polling).
+  // `?limit=<n>` caps from the END (newest entries), default unbounded
+  // within the rolling window. Wire shape mirrors the broadcast envelope
+  // so the client can apply the same drop-self / dedupe logic on backfill
+  // that it does on live receive.
+  app.get('/room/cards', async (request, reply) => {
+    const auth = verifyAuth(request)
+    if (!auth.ok) {
+      reply.status(401)
+      return { error: auth.error }
+    }
+    const query = request.query as Record<string, unknown>
+    const sinceRaw = query?.since
+    const since = typeof sinceRaw === 'string' ? Number(sinceRaw) : (typeof sinceRaw === 'number' ? sinceRaw : undefined)
+    const limitRaw = query?.limit
+    const limitParsed = typeof limitRaw === 'string' ? Number(limitRaw) : (typeof limitRaw === 'number' ? limitRaw : undefined)
+    const limit = Number.isFinite(limitParsed) && (limitParsed as number) > 0
+      ? Math.min(50, Math.floor(limitParsed as number))
+      : undefined
+    const entries = getRecentCards({
+      sinceMs: Number.isFinite(since) ? (since as number) : undefined,
+      limit,
+    })
+    const status = getRoomCardStatus()
+    return {
+      entries,
+      count: entries.length,
+      hostId: status.hostId,
+      initialized: status.initialized,
+      windowMs: status.windowMs,
+      maxEntries: status.maxEntries,
     }
   })
 
