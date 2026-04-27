@@ -5,6 +5,7 @@
 import type { FastifyInstance } from 'fastify'
 import type { eventBus as eventBusInstance } from './events.js'
 import { getIdentityColor } from './agent-config.js'
+import { postCanvasResponse } from './cloud.js'
 
 interface CanvasStateEntry {
   state: string
@@ -391,19 +392,25 @@ export async function canvasQueryRoutes(
 
     const agentColor = getIdentityColor(from, '#94a3b8')
 
+    const resolvedCard = {
+      type: 'info',
+      data: { text: cleanContent },
+      agentId: from,
+      agentColor,
+      isResponse: true,
+    }
+
     // Emit as canvas_message — browser pulse stream picks it up
     eventBus.emit({
       id: `cmsg-response-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: 'canvas_message' as const,
       timestamp: Date.now(),
-      data: {
-        type: 'info',
-        data: { text: cleanContent },
-        agentId: from,
-        agentColor,
-        isResponse: true,
-      },
+      data: resolvedCard,
     })
+
+    // Push the resolved card upstream to cloud → asker browser SSE → shared
+    // sink → card.fanout → room-card-store ring buffer → late-joiner backfill.
+    postCanvasResponse(resolvedCard).catch(() => { /* best-effort */ })
   })
 
 }
