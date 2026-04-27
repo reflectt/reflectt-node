@@ -381,6 +381,9 @@ export async function canvasQueryRoutes(
     const isCanvasResponse = content.startsWith('[canvas-response]')
       || content.startsWith('[canvas]')
       || (channel === 'canvas' && from !== 'human')
+    // PROBE (revert after diagnosis): log every agent message_posted reaching
+    // the bridge so we can identify what path Compass's plain reply uses.
+    console.log(`[canvas-bridge-probe] from=${from} channel=${channel} matched=${isCanvasResponse} content="${content.slice(0, 80)}"`)
     if (!isCanvasResponse) return
 
     // Strip the [canvas-response] / [canvas] prefix
