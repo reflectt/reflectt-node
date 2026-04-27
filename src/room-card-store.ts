@@ -5,20 +5,11 @@
  * Room Card Store — reply-card backfill v0
  *
  * Server-side mirror of the asker's `roomCard.publish()` fan-out from the
- * web side (apps/web/src/app/presence/use-room-card.ts). Subscribes to a
- * dedicated `room-cards:${hostId}` Realtime channel, listens for the
- * `card.fanout` broadcast event (the asker tab emits it whenever a fresh
- * `canvas_message` SSE lands on the asker's screen), and ring-buffers the
- * recent payloads.
- *
- * Why a dedicated channel topic and NOT the shared `room:${hostId}`:
- * supabase-js v2 silently hangs subscribe callbacks when multiple channel
- * instances on one client share a topic. The web side opens 6+ channel
- * objects on `room:${hostId}` (presence, transcript, composer, voice,
- * reply, card) — only the first one to win the race actually reaches
- * SUBSCRIBED. The card fan-out lost the race. Moving to a unique topic
- * fixes the room-card leg without touching the still-broken shared-topic
- * pattern that the other hooks share (separate decision).
+ * web side (apps/web/src/app/presence/use-room-card.ts). Subscribes to the
+ * same `room:${hostId}` Realtime channel as room-presence-store and
+ * room-transcript-store, listens for the `card.fanout` broadcast event
+ * (the asker tab emits it whenever a fresh `canvas_message` SSE lands on
+ * the asker's screen), and ring-buffers the recent payloads.
  *
  * Why: live `card.fanout` is asker→peers Realtime broadcast — anyone who
  * joins the room AFTER a reply landed never sees the card. Snapshots
@@ -148,8 +139,10 @@ function isValidEnvelope(raw: unknown): raw is { senderParticipantId: string; se
  * Initialize the store. Idempotent. Returns false if Supabase env or
  * REFLECTT_HOST_ID is missing — the rest of the node still boots.
  *
- * Opens a channel on `room-cards:${hostId}` — dedicated topic to avoid the
- * supabase-js multi-channel-same-topic subscribe-hang (see file header).
+ * Opens a SECOND channel object on the same `room:${hostId}` name as
+ * presence/transcript stores. Supabase shares the underlying WebSocket
+ * across channel objects, so this is the same transport — separate
+ * channel objects for clean responsibility split.
  */
 export function initRoomCardStore(): boolean {
   if (state.initialized) return true
@@ -172,7 +165,7 @@ export function initRoomCardStore(): boolean {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 
-  const channel = state.client.channel(`room-cards:${hostId}`)
+  const channel = state.client.channel(`room:${hostId}`)
 
   channel.on('broadcast', { event: BROADCAST_EVENT }, (msg: { payload?: unknown }) => {
     const payload = msg.payload
@@ -201,9 +194,9 @@ export function initRoomCardStore(): boolean {
 
   channel.subscribe((status) => {
     if (status === 'SUBSCRIBED') {
-      console.log(`[room-card] subscribed to room-cards:${hostId} (${BROADCAST_EVENT})`)
+      console.log(`[room-card] subscribed to room:${hostId} (${BROADCAST_EVENT})`)
     } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-      console.warn(`[room-card] channel ${status} for room-cards:${hostId}`)
+      console.warn(`[room-card] channel ${status} for room:${hostId}`)
     }
   })
 
