@@ -20,6 +20,7 @@ import { taskManager } from './tasks.js'
 import { routeMessage } from './messageRouter.js'
 import type { Task } from './types.js'
 import { resolveIdleNudgeLane, type IdleNudgeLaneState } from './watchdog/idleNudgeLane.js'
+import { listRoomParticipants } from './room-presence-store.js'
 import { getAgentLane } from './lane-config.js'
 import { getDb } from './db.js'
 import { policyManager } from './policy.js'
@@ -285,6 +286,7 @@ export type IdleNudgeDecision = {
     | 'queue-clear-restart-window'
     | 'eligible'
     | 'eligible-restart-window'
+    | 'in-active-room'
   lane: IdleNudgeLaneState
   renderedMessage: string | null
   at: number
@@ -1912,6 +1914,14 @@ class TeamHealthMonitor {
     const taskById = new Map(tasks.map((t: any) => [t.id, t]))
     const messages = chatManager.getMessages({ limit: 300 })
 
+    // Suppress all idle-nudge noise on this host while a human is in the
+    // room — system "@agent idle nudge" messages bleed into #general (which
+    // the canvas chat reads), so during a live exchange agents look like
+    // status bots instead of meeting participants. Truth source: the same
+    // Supabase Realtime room channel cloud already publishes to
+    // (room-presence-store).
+    const roomParticipantCount = listRoomParticipants().length
+
     for (const presence of presences) {
       const agent = (presence.agent || '').toLowerCase()
       if (!agent) continue
@@ -1932,6 +1942,11 @@ class TeamHealthMonitor {
         recentSuppressMin: this.idleNudgeSuppressRecentMin,
         lane,
         at: now,
+      }
+
+      if (roomParticipantCount > 0) {
+        decisions.push({ ...baseDecision, decision: 'none', reason: 'in-active-room', renderedMessage: null })
+        continue
       }
 
       if (!this.idleNudgeEnabled) {
