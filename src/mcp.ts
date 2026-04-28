@@ -21,7 +21,7 @@ import type { AgentMessage, Task } from "./types.js"
 import { getAgentRoles } from "./assignment.js"
 import { listRoomParticipants, getRoomPresenceStatus } from "./room-presence-store.js"
 import { getRecentTranscript, getRoomTranscriptStatus } from "./room-transcript-store.js"
-import { listArtifacts, ROOM_ARTIFACT_AGENT_ID } from "./artifact-store.js"
+import { getArtifact, listArtifacts, readArtifactContent, ROOM_ARTIFACT_AGENT_ID } from "./artifact-store.js"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MCP Server Setup
@@ -494,6 +494,37 @@ tool(
           kind: args?.kind ?? null,
         })
       }]
+    }
+  }
+)
+
+tool(
+  "room_get_artifact_image",
+  "Fetch a room artifact's actual image bytes so you can see it. Use this whenever a snapshot is shared into the room (room_artifact_shared push, or a `room: ... shared a snapshot ... → /room/artifacts/<id>/content` chat line) and you need to describe or reason about what's in it. Pass the artifact id (e.g. `art-1777340177042-vbh4q3lh9h`). Returns inline image content the model can see directly — same shape browser screenshots use. If the artifact is not an image (kind without bytes you can view) or doesn't exist, returns a text error.",
+  { id: z.string().min(1).describe("Artifact id (e.g. 'art-1777340177042-vbh4q3lh9h')") },
+  async ({ id }: { id: string }) => {
+    const art = getArtifact(id)
+    if (!art || art.agentId !== ROOM_ARTIFACT_AGENT_ID) {
+      return { content: [{ type: "text", text: JSON.stringify({ error: "artifact not found", id }) }] }
+    }
+    if (!art.mimeType.startsWith("image/")) {
+      return { content: [{ type: "text", text: JSON.stringify({ error: "artifact is not an image", id, mimeType: art.mimeType }) }] }
+    }
+    const buf = readArtifactContent(id)
+    if (!buf) {
+      return { content: [{ type: "text", text: JSON.stringify({ error: "artifact bytes unavailable (evicted)", id }) }] }
+    }
+    const b64 = buf.toString("base64")
+    // Payload-shape proof: confirms we returned an `image` content block (not
+    // text-wrapped base64) with non-zero bytes. Grep host logs for this line
+    // after the canonical proof to verify what the model actually received.
+    console.log(`[mcp:room_get_artifact_image] id=${id} mime=${art.mimeType} bytes=${buf.byteLength} b64Len=${b64.length} block=image`)
+    return {
+      content: [{
+        type: "image",
+        data: b64,
+        mimeType: art.mimeType,
+      }],
     }
   }
 )
