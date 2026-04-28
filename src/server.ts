@@ -60,6 +60,7 @@ import { isTestHarnessTask } from './test-task-filter.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest, getActiveSamplingProviders } from './mcp.js'
 import { memoryManager } from './memory.js'
 import { buildContextInjection, getContextBudgets, getContextMemo, upsertContextMemo, type ContextLayer } from './context-budget.js'
+import { listRoomParticipants } from './room-presence-store.js'
 import { deriveScopeId } from './scope-routing.js'
 import { eventBus, VALID_EVENT_TYPES } from './events.js'
 import { presenceManager, IDLE_THRESHOLD_MS, OFFLINE_THRESHOLD_MS } from './presence.js'
@@ -4898,6 +4899,11 @@ export async function createServer(): Promise<FastifyInstance> {
       .sort((a, b) => a.ts - b.ts)
       .slice(-limit)
 
+    // Room-active signal: surfaced both as a top-level field (for any caller)
+    // and as a single line inside compact_text below (for the live OpenClaw plugin
+    // which drops compact_text into the agent's per-turn prompt).
+    const roomActiveCount = listRoomParticipants().length
+
     // Strict compact: render a small text packet with a hard char budget.
     let compact_text: string | undefined
     if (strictCompact) {
@@ -4931,6 +4937,12 @@ export async function createServer(): Promise<FastifyInstance> {
       const push = (s: string) => { if (s) lines.push(s) }
 
       push(`AGENT: ${agent}`)
+      // Tiny semantic signal — locked by kai/link msg-1777356030100 / msg-1777356036716:
+      // one line, no participant roster blob; just enough to flip in-room agents from
+      // status-bot voice to participant voice during a live exchange. Empty room → omit.
+      if (roomActiveCount > 0) {
+        push('ROOM STATUS: in an active room with a human — speak as a meeting participant, not a status bot')
+      }
       push('')
       push('ACTIVE TASK:')
       push(doing ? `- ${doing.id} [${doing.priority}] ${doing.title}` : '- none')
@@ -4964,6 +4976,7 @@ export async function createServer(): Promise<FastifyInstance> {
       since: sinceMs,
       count: messagesOut.length,
       messages: messagesOut,
+      room_status: { in_session: roomActiveCount > 0 },
       ...(strictCompact ? { compact: true, max_chars: maxChars, compact_text } : {}),
       suppressed: {
         system_deduped: systemAlerts.length - dedupedAlerts.length,
