@@ -514,10 +514,15 @@ tool(
     if (!buf) {
       return { content: [{ type: "text", text: JSON.stringify({ error: "artifact bytes unavailable (evicted)", id }) }] }
     }
+    const b64 = buf.toString("base64")
+    // Payload-shape proof: confirms we returned an `image` content block (not
+    // text-wrapped base64) with non-zero bytes. Grep host logs for this line
+    // after the canonical proof to verify what the model actually received.
+    console.log(`[mcp:room_get_artifact_image] id=${id} mime=${art.mimeType} bytes=${buf.byteLength} b64Len=${b64.length} block=image`)
     return {
       content: [{
         type: "image",
-        data: buf.toString("base64"),
+        data: b64,
         mimeType: art.mimeType,
       }],
     }
