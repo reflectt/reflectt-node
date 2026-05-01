@@ -169,18 +169,32 @@ export function updateArtifactMetadata(id: string, partial: Record<string, unkno
 }
 
 /**
- * Snapshot retention sweep — Room Share Snapshot v0 lock: keep last `max`
- * snapshots per `agentId` (= per host = per room in v0), evict oldest.
+ * Image-artifact retention sweep — Camera Snapshot v0 lock (kai
+ * msg-1777619980384 R1-3 + R2-4): keep last `max` artifacts across the
+ * union of `kinds` per `agentId` (= per host = per room in v0), evict
+ * oldest. Camera + screen snapshots share ONE pool of 20, not separate
+ * quotas — so a camera snapshot can evict an older screen snapshot.
  * Deletes both the original PNG and the matching `*-thumb.png` thumbnail
  * file alongside the DB row. Synchronous + cheap; no scheduler.
  *
- * Per-kind cap so future kinds (recordings, agent outputs) carry their
- * own retention rules set by their own specs without conflict.
+ * Renamed from `pruneSnapshotsForRetention` in slice C-image-A: the old
+ * name lied once the helper spans both image kinds. Future non-image
+ * kinds (recordings, agent outputs) get their own retention helpers.
  */
-export function pruneSnapshotsForRetention(agentId: string, max: number = 20): { removed: number } {
-  const snapshots = listArtifacts({ agentId, kind: 'snapshot', limit: 1000 })
-  if (snapshots.length <= max) return { removed: 0 }
-  const toRemove = snapshots.slice(max)
+export function pruneImageArtifactsForRetention(
+  agentId: string,
+  kinds: string[] = ['snapshot', 'camera-snapshot'],
+  max: number = 20,
+): { removed: number } {
+  // Gather rows per kind (each list already sorted by createdAt DESC),
+  // merge into one union, re-sort, slice off everything past `max`.
+  const union: Artifact[] = []
+  for (const kind of kinds) {
+    union.push(...listArtifacts({ agentId, kind, limit: 1000 }))
+  }
+  if (union.length <= max) return { removed: 0 }
+  union.sort((a, b) => b.createdAt - a.createdAt)
+  const toRemove = union.slice(max)
   let removed = 0
   for (const art of toRemove) {
     const thumb = (art.metadata?.thumbnailPath as string | undefined) ?? null

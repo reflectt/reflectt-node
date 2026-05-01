@@ -94,23 +94,22 @@ function formatJoin(p: RoomJoinPayload['participant'], defaultAgent: string): st
   return `@${defaultAgent} 🚪 **${p.displayName}** joined the room (${p.device})`
 }
 
-// Per-kind dispatch — v0 only handles `kind='snapshot'`. Future kinds
-// (recordings, agent outputs) add their own one-liner here without
-// changing the event name. Body stays utilitarian (kai lock
-// msg-1777191217389: "thin factual notification, not narration") but
-// includes the artifact URL inline. The original design pushed url etc
-// into msg.metadata for "agent pulls on demand" — but receiving agents
-// only see the chat body in their prompt, so a metadata-only pointer
-// has no caller. Inline URL keeps the body factual while giving the
-// agent something to fetch (mj2z6nzjz follow-up: "noted 🧭" replies on
-// canonical staging because compass had no pointer to the bytes).
+// Per-kind dispatch — v0 handles `kind='snapshot'` (5A) and
+// `kind='camera-snapshot'` (Cut C-image, kai msg-1777619980384). Future
+// kinds add their own one-liner here without changing the event name.
+// Body stays utilitarian (kai lock msg-1777191217389: "thin factual
+// notification, not narration") but includes the artifact URL inline.
+// Distinct emoji per kind (R2-2 lock): 📸 screen, 📷 camera — lets
+// agents and humans read which kind was shared without opening the
+// artifact.
 function formatArtifactShared(p: RoomArtifactSharedPayload, defaultAgent: string): string | null {
   const who = p.artifact.sharedByDisplayName ?? 'Someone'
+  const dim = p.artifact.dimensions ? ` (${p.artifact.dimensions.width}×${p.artifact.dimensions.height})` : ''
   switch (p.artifact.kind) {
-    case 'snapshot': {
-      const dim = p.artifact.dimensions ? ` (${p.artifact.dimensions.width}×${p.artifact.dimensions.height})` : ''
+    case 'snapshot':
       return `@${defaultAgent} 📸 **${who}** shared a snapshot${dim} → ${p.artifact.url}`
-    }
+    case 'camera-snapshot':
+      return `@${defaultAgent} 📷 **${who}** shared a camera snapshot${dim} → ${p.artifact.url}`
     default: return null
   }
 }
