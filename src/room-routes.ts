@@ -11,7 +11,7 @@
  *   - GET /room/artifacts               (5A — list, generic, filterable by kind)
  *   - GET /room/artifacts/:id/content   (5A — full-res bytes)
  *   - GET /room/artifacts/:id/thumbnail (5A — server-generated 480px PNG)
- *   - POST /room/artifacts              (5A — multipart write; v0 only accepts kind='snapshot')
+ *   - POST /room/artifacts              (5A — multipart write; v0 accepts kind='snapshot' or 'camera-snapshot')
  *
  * Auth uses the same heartbeat-token model as `/hosts/heartbeat`: if
  * REFLECTT_HOST_HEARTBEAT_TOKEN is set, requests must present it via
@@ -31,15 +31,16 @@ import {
   deleteArtifact,
   listArtifacts,
   updateArtifactMetadata,
-  pruneSnapshotsForRetention,
+  pruneImageArtifactsForRetention,
   ROOM_ARTIFACT_AGENT_ID,
   type Artifact,
 } from './artifact-store.js'
 import { generateSnapshotThumbnail, thumbnailPathFor } from './snapshot-thumbnail.js'
 import { broadcastArtifactShared } from './room-artifact-broadcast.js'
 
-const SNAPSHOT_RETENTION_MAX = 20
-const ALLOWED_KINDS_V0 = new Set(['snapshot'])
+const IMAGE_ARTIFACT_RETENTION_MAX = 20
+const IMAGE_ARTIFACT_KINDS = ['snapshot', 'camera-snapshot'] as const
+const ALLOWED_KINDS_V0 = new Set<string>(IMAGE_ARTIFACT_KINDS)
 
 function verifyAuth(request: FastifyRequest): { ok: boolean; error?: string } {
   const expectedToken = process.env.REFLECTT_HOST_HEARTBEAT_TOKEN
@@ -67,8 +68,9 @@ function resolveHostId(): string {
 /**
  * Project an artifact for the wire — strips on-disk paths, adds the
  * relative URL the cloud will resolve. `thumbnailUrl` is present even
- * for kinds without a thumbnail (returns 404 in that case); v0 only
- * accepts `kind='snapshot'` so all v0 artifacts have one.
+ * for kinds without a thumbnail (returns 404 in that case); v0 accepts
+ * `kind='snapshot'` (5B) or `kind='camera-snapshot'` (C-image), both
+ * image/png — so all v0 artifacts have a thumbnail.
  */
 function projectArtifact(art: Artifact): Record<string, unknown> {
   const meta = art.metadata ?? {}
@@ -261,7 +263,7 @@ export async function roomRoutes(app: FastifyInstance) {
   /**
    * POST /room/artifacts (multipart)
    * Field 'file' = PNG bytes (required; v0 enforces image/png).
-   * Field 'kind' = discriminator (required; v0 only accepts 'snapshot').
+   * Field 'kind' = discriminator (required; v0 accepts 'snapshot' or 'camera-snapshot').
    * Field 'sharedBy' = participant id (required).
    * Field 'sharedByDisplayName' = denormalized display name (required).
    *
@@ -300,10 +302,11 @@ export async function roomRoutes(app: FastifyInstance) {
       reply.status(400)
       return { error: 'sharedBy + sharedByDisplayName required' }
     }
-    // v0 only handles image/png snapshots. Future kinds may relax this.
+    // v0 image artifacts (snapshot + camera-snapshot) require image/png.
+    // Future non-image kinds may relax this.
     if (data.mimetype !== 'image/png') {
       reply.status(400)
-      return { error: 'snapshot requires image/png' }
+      return { error: `${kind} requires image/png` }
     }
 
     const buf = await data.toBuffer()
@@ -314,7 +317,7 @@ export async function roomRoutes(app: FastifyInstance) {
 
     const hostId = resolveHostId()
     const isoNow = new Date().toISOString()
-    const fileName = `snapshot-${isoNow.replace(/[:.]/g, '-')}.png`
+    const fileName = `${kind}-${isoNow.replace(/[:.]/g, '-')}.png`
 
     const art = storeArtifact({
       agentId: ROOM_ARTIFACT_AGENT_ID,
@@ -379,11 +382,16 @@ export async function roomRoutes(app: FastifyInstance) {
       thumbnailUrl: projected.thumbnailUrl as string,
     })
 
-    // Per-kind retention sweep — last 20 snapshots, evict oldest. Sync,
-    // cheap, no scheduler. Future kinds set their own caps from their
-    // own specs.
-    if (kind === 'snapshot') {
-      pruneSnapshotsForRetention(ROOM_ARTIFACT_AGENT_ID, SNAPSHOT_RETENTION_MAX)
+    // Image-artifact retention sweep — shared pool of 20 across both
+    // image kinds (snapshot + camera-snapshot), evict oldest of any
+    // image kind. Sync, cheap, no scheduler. Camera Snapshot v0 lock
+    // (kai msg-1777619980384 R1-3): ONE pool, not separate quotas.
+    if ((IMAGE_ARTIFACT_KINDS as readonly string[]).includes(kind)) {
+      pruneImageArtifactsForRetention(
+        ROOM_ARTIFACT_AGENT_ID,
+        [...IMAGE_ARTIFACT_KINDS],
+        IMAGE_ARTIFACT_RETENTION_MAX,
+      )
     }
 
     reply.status(201)

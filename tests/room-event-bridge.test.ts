@@ -200,6 +200,54 @@ describe('room-event-bridge', () => {
     expect(getRoomEventBridgeStatus().artifactCount).toBe(1)
   })
 
+  // Cut C-image (Camera Snapshot v0): second image kind on the same
+  // substrate. Distinct emoji per kai R2-2 lock (msg-1777619980384):
+  // 📷 camera vs 📸 screen — lets readers distinguish at a glance.
+  it('forwards a camera-snapshot artifact_shared with the 📷 prefix', () => {
+    initRoomEventBridge()
+    eventBus.emit({
+      id: 'art-evt-cam-1',
+      type: 'room_artifact_shared',
+      timestamp: Date.now(),
+      data: {
+        artifact: {
+          id: 'art-cam-456',
+          kind: 'camera-snapshot',
+          name: 'cam.png',
+          mimeType: 'image/png',
+          sizeBytes: 22345,
+          createdAt: Date.now(),
+          sharedBy: 'session-cam-456',
+          sharedByDisplayName: 'Ryan',
+          dimensions: { width: 640, height: 480 },
+          url: 'https://cdn.example/art-cam-456.png',
+          thumbnailUrl: 'https://cdn.example/art-cam-456.thumb.png',
+        },
+        by: 'session-cam-456',
+        hostId: 'host-1',
+      },
+    })
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1)
+    const call = sendMessageMock.mock.calls[0][0]
+    expect(call.from).toBe('room')
+    expect(call.to).toBe('genesis')
+    expect(call.channel).toBe('general')
+    expect(call.content).toContain('@genesis')
+    expect(call.content).toContain('Ryan')
+    expect(call.content).toContain('camera snapshot')
+    // Distinct camera emoji — pins R2-2 lock so a future revert collapses
+    // both kinds back into one push line.
+    expect(call.content).toContain('📷')
+    expect(call.content).not.toContain('📸')
+    expect(call.content).toContain('https://cdn.example/art-cam-456.png')
+    expect(call.content).toContain('640×480')
+    expect(call.metadata.kind).toBe('camera-snapshot')
+    expect(call.metadata.url).toBe('https://cdn.example/art-cam-456.png')
+    expect(call.metadata.dedup_key).toBe('room-artifact-art-cam-456')
+    expect(getRoomEventBridgeStatus().artifactCount).toBe(1)
+  })
+
   it('drops unknown artifact kinds silently (no generic "an artifact was shared" line)', () => {
     initRoomEventBridge()
     eventBus.emit({

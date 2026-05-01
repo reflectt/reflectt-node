@@ -1,7 +1,9 @@
-// Room Share Snapshot v0 slice 5A: tests for the artifact-store extensions
-// (kind filter, sinceMs filter, updateArtifactMetadata, pruneSnapshotsForRetention).
-// The room flow piles all room-scoped artifacts under agentId=ROOM_ARTIFACT_AGENT_ID
+// Room Share Snapshot v0 slice 5A + Camera Snapshot v0 slice C-image-A:
+// tests for the artifact-store extensions (kind filter, sinceMs filter,
+// updateArtifactMetadata, pruneImageArtifactsForRetention). The room
+// flow piles all room-scoped artifacts under agentId=ROOM_ARTIFACT_AGENT_ID
 // with metadata.kind as the discriminator — these tests pin that contract.
+// Shared-pool retention (kai msg-1777619980384 R1-3) verified separately.
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { promises as fs } from 'fs'
@@ -98,7 +100,7 @@ describe('artifact-store room extensions', () => {
     expect(mod.updateArtifactMetadata('art-nonexistent', { x: 1 })).toBeNull()
   })
 
-  it('pruneSnapshotsForRetention(agentId, max=2) keeps the newest 2 snapshots and deletes thumbs', async () => {
+  it('pruneImageArtifactsForRetention(agentId, [snapshot], max=2) keeps the newest 2 snapshots and deletes thumbs', async () => {
     const mod = await import('../src/artifact-store.js')
     const items = [] as Awaited<ReturnType<typeof storeSnapshot>>[]
     for (let i = 0; i < 5; i++) {
@@ -112,7 +114,7 @@ describe('artifact-store room extensions', () => {
       await new Promise((r) => setTimeout(r, 5)) // force createdAt ordering
     }
 
-    const result = mod.pruneSnapshotsForRetention(mod.ROOM_ARTIFACT_AGENT_ID, 2)
+    const result = mod.pruneImageArtifactsForRetention(mod.ROOM_ARTIFACT_AGENT_ID, ['snapshot'], 2)
     expect(result.removed).toBe(3)
 
     const remaining = mod.listArtifacts({
@@ -131,9 +133,92 @@ describe('artifact-store room extensions', () => {
     }
   })
 
-  it('pruneSnapshotsForRetention is a no-op when count <= max', async () => {
+  it('pruneImageArtifactsForRetention is a no-op when union count <= max', async () => {
     const mod = await import('../src/artifact-store.js')
     await storeSnapshot('only.png')
-    expect(mod.pruneSnapshotsForRetention(mod.ROOM_ARTIFACT_AGENT_ID, 20)).toEqual({ removed: 0 })
+    expect(mod.pruneImageArtifactsForRetention(mod.ROOM_ARTIFACT_AGENT_ID, ['snapshot', 'camera-snapshot'], 20))
+      .toEqual({ removed: 0 })
+  })
+
+  // ── Camera Snapshot v0 (Cut C-image) ─────────────────────────────────
+  // Shared-pool retention: snapshot + camera-snapshot count against ONE
+  // pool of `max`. A new image of either kind can evict an older image
+  // of either kind. Pinning kai's R1-3 lock (msg-1777619980384).
+
+  it('pruneImageArtifactsForRetention shared-pool: a camera-snapshot can evict an older snapshot', async () => {
+    const mod = await import('../src/artifact-store.js')
+
+    // 2 screen snapshots first (older), then 1 camera snapshot (newest).
+    // With max=2 across the union, the OLDEST screen snapshot must evict.
+    const oldScreen = await storeSnapshot('old-screen.png', 'snapshot')
+    await new Promise((r) => setTimeout(r, 5))
+    const newerScreen = await storeSnapshot('newer-screen.png', 'snapshot')
+    await new Promise((r) => setTimeout(r, 5))
+    const camera = await storeSnapshot('cam.png', 'camera-snapshot')
+
+    const result = mod.pruneImageArtifactsForRetention(
+      mod.ROOM_ARTIFACT_AGENT_ID,
+      ['snapshot', 'camera-snapshot'],
+      2,
+    )
+    expect(result.removed).toBe(1)
+
+    // The oldest screen snapshot is gone; the newer screen + camera survive.
+    const allKinds = mod.listArtifacts({ agentId: mod.ROOM_ARTIFACT_AGENT_ID, limit: 100 })
+    const surviving = new Set(allKinds.map((a) => a.id))
+    expect(surviving.has(oldScreen.id)).toBe(false)
+    expect(surviving.has(newerScreen.id)).toBe(true)
+    expect(surviving.has(camera.id)).toBe(true)
+  })
+
+  it('pruneImageArtifactsForRetention shared-pool: a snapshot can evict an older camera-snapshot', async () => {
+    const mod = await import('../src/artifact-store.js')
+
+    // Inverse of above — proves eviction is kind-agnostic, not snapshot-priority.
+    const oldCamera = await storeSnapshot('old-cam.png', 'camera-snapshot')
+    await new Promise((r) => setTimeout(r, 5))
+    const newerCamera = await storeSnapshot('newer-cam.png', 'camera-snapshot')
+    await new Promise((r) => setTimeout(r, 5))
+    const screen = await storeSnapshot('s.png', 'snapshot')
+
+    mod.pruneImageArtifactsForRetention(
+      mod.ROOM_ARTIFACT_AGENT_ID,
+      ['snapshot', 'camera-snapshot'],
+      2,
+    )
+
+    const allKinds = mod.listArtifacts({ agentId: mod.ROOM_ARTIFACT_AGENT_ID, limit: 100 })
+    const surviving = new Set(allKinds.map((a) => a.id))
+    expect(surviving.has(oldCamera.id)).toBe(false)
+    expect(surviving.has(newerCamera.id)).toBe(true)
+    expect(surviving.has(screen.id)).toBe(true)
+  })
+
+  it('pruneImageArtifactsForRetention only counts kinds in the kinds list', async () => {
+    const mod = await import('../src/artifact-store.js')
+
+    // 5 recordings (a hypothetical future kind not in the image kinds list)
+    // + 2 snapshots — with max=2 and kinds=['snapshot'], no eviction should happen.
+    for (let i = 0; i < 5; i++) {
+      await storeSnapshot(`r${i}.png`, 'recording')
+      await new Promise((r) => setTimeout(r, 2))
+    }
+    await storeSnapshot('s1.png', 'snapshot')
+    await storeSnapshot('s2.png', 'snapshot')
+
+    const result = mod.pruneImageArtifactsForRetention(
+      mod.ROOM_ARTIFACT_AGENT_ID,
+      ['snapshot'],
+      2,
+    )
+    expect(result.removed).toBe(0)
+
+    // Recordings are untouched (different kind, not in the prune list).
+    const recordings = mod.listArtifacts({
+      agentId: mod.ROOM_ARTIFACT_AGENT_ID,
+      kind: 'recording',
+      limit: 100,
+    })
+    expect(recordings).toHaveLength(5)
   })
 })
