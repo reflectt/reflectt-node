@@ -22,6 +22,14 @@ const LEGACY_MESSAGES_FILE = join(LEGACY_DATA_DIR, 'messages.jsonl')
 // All reads go directly to SQLite — no in-memory message cache.
 // JSONL file is kept as an append-only audit trail.
 
+// Sorted-endpoints DM channel: a→b and b→a hash to the same string so
+// both sides land in one thread. Lowercased so case variants do not
+// fork. Used by sendMessage when `to:` is set without an explicit
+// channel.
+export function deriveDmChannel(from: string, to: string): string {
+  return `dm:${[from, to].map(s => s.toLowerCase().trim()).sort().join('_')}`
+}
+
 function importMessages(db: Database.Database, records: unknown[]): number {
   const byId = new Map<string, AgentMessage>()
 
@@ -408,7 +416,12 @@ class ChatManager {
   }
 
   async sendMessage(message: Omit<AgentMessage, 'id' | 'timestamp' | 'replyCount'>): Promise<AgentMessage> {
-    const channel = message.channel || 'general'
+    // Honor `to:` end-to-end. When the caller sets `to` without an
+    // explicit channel, route to a stable `dm:<sorted endpoints>`
+    // channel so both sides land in the same thread (a→b and b→a hash
+    // identically). Without this, every DM fell through to #general.
+    const channel = message.channel
+      || (message.to ? deriveDmChannel(message.from, message.to) : 'general')
 
     // ── Noise Budget Checks ──
     // Skip budget checks for direct messages (has `to` field) and metadata.bypass_budget

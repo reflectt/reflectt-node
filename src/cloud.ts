@@ -1189,10 +1189,15 @@ async function syncChat(): Promise<void> {
     oldestFirst: true,
   }).filter(m => (m.metadata as any)?.source !== 'cloud-relay')
 
-  // Send to cloud and get pending outbound messages
+  // Send to cloud and get pending outbound messages.
+  // Preserve `to:` over the wire so the cloud receives the recipient
+  // signal alongside the (already-derived) `dm:<sorted>` channel —
+  // belt-and-suspenders for the DM routing seam. Cloud chat_messages
+  // schema is unchanged; the cloud handler ignores `to` for now.
   const payload = recentMessages.map(m => ({
     id: m.id,
     from: m.from,
+    ...(m.to ? { to: m.to } : {}),
     content: m.channel === 'github' || m.from === 'github'
       ? remapGitHubMentions(m.content)
       : m.content,
