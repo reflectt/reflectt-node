@@ -365,7 +365,8 @@ tool(
     const inbox = inboxManager.getInbox(agent, allMessages, { limit: 10 })
     const activeTasks = taskManager.listTasks({ status: "doing", assignee: agent })
     const nextTask = taskManager.getNextTask(agent)
-    const next_event = calendarEvents.getNextEventForHeartbeat(agent)
+    const hostId = process.env.REFLECTT_HOST_ID || process.env.HOSTNAME || ''
+    const next_event = await calendarEvents.getNextEventForHeartbeat(hostId)
     const queue = {
       todo: taskManager.listTasks({ status: "todo", assignee: agent }).length,
       doing: activeTasks.length,
@@ -1003,7 +1004,8 @@ function initToolHandlers() {
       const inbox = inboxManager.getInbox(args.agent, allMessages, { limit: 10 })
       const activeTasks = taskManager.listTasks({ status: "doing", assignee: args.agent })
       const nextTask = taskManager.getNextTask(args.agent)
-      const next_event = calendarEvents.getNextEventForHeartbeat(args.agent)
+      const hostId = process.env.REFLECTT_HOST_ID || process.env.HOSTNAME || ''
+      const next_event = await calendarEvents.getNextEventForHeartbeat(hostId)
       const queue = {
         todo: taskManager.listTasks({ status: "todo", assignee: args.agent }).length,
         doing: activeTasks.length,

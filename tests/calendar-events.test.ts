@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { calendarEvents } from '../src/calendar-events.js'
+import * as cloud from '../src/cloud.js'
 
 function clearAllEvents() {
   const events = calendarEvents.listEvents({ limit: 500 })
@@ -367,77 +368,77 @@ describe('Calendar Events', () => {
     })
   })
 
-  describe('getNextEventForHeartbeat', () => {
-    it('returns confirmed next event within 24h with shaped payload', () => {
-      const now = Date.now()
-      const startsAt = now + 2 * 60 * 60 * 1000 // +2h
-      calendarEvents.createEvent({
-        summary: 'Standup',
-        dtstart: startsAt,
-        dtend: startsAt + 30 * 60_000,
-        organizer: 'ryan',
-        attendees: [{ name: 'link', status: 'accepted' }],
+  describe('getNextEventForHeartbeat (cloud-sourced)', () => {
+    // The heartbeat next_event field reads from the canonical cloud Supabase
+    // calendar store via GET /api/hosts/:hostId/calendar/upcoming?days=1, so it
+    // matches the canvas CalendarPanel exactly. These tests mock cloudGet to
+    // exercise the response-shape mapping and the null-on-failure contract.
+
+    it('shapes events[0] from a cloud success into HeartbeatNextEvent', async () => {
+      const startsIso = new Date(Date.now() + 2 * 60 * 60_000).toISOString()
+      const spy = vi.spyOn(cloud, 'cloudGet').mockResolvedValue({
+        success: true,
+        data: { events: [
+          { id: 'evt-cloud-1', title: 'Standup', start: startsIso },
+          { id: 'evt-cloud-2', title: 'Later', start: new Date(Date.now() + 5 * 60 * 60_000).toISOString() },
+        ] },
       })
 
-      const result = calendarEvents.getNextEventForHeartbeat('link', now)
+      const result = await calendarEvents.getNextEventForHeartbeat('host-abc')
+      expect(spy).toHaveBeenCalledWith('/api/hosts/host-abc/calendar/upcoming?days=1')
       expect(result).not.toBeNull()
+      expect(result!.id).toBe('evt-cloud-1')
       expect(result!.title).toBe('Standup')
-      expect(result!.starts_at).toBe(startsAt)
-      expect(result!.starts_at_iso).toBe(new Date(startsAt).toISOString())
-      expect(result!.id).toMatch(/^evt-/)
+      expect(result!.starts_at).toBe(Date.parse(startsIso))
+      expect(result!.starts_at_iso).toBe(new Date(Date.parse(startsIso)).toISOString())
+      spy.mockRestore()
     })
 
-    it('returns null when next event is beyond the 24h window', () => {
-      const now = Date.now()
-      calendarEvents.createEvent({
-        summary: 'Three days out',
-        dtstart: now + 3 * 24 * 60 * 60 * 1000,
-        dtend: now + 3 * 24 * 60 * 60 * 1000 + 30 * 60_000,
-        organizer: 'ryan',
-        attendees: [{ name: 'link', status: 'accepted' }],
+    it('returns null when cloud returns an empty events list', async () => {
+      const spy = vi.spyOn(cloud, 'cloudGet').mockResolvedValue({
+        success: true,
+        data: { events: [] },
       })
-
-      expect(calendarEvents.getNextEventForHeartbeat('link', now)).toBeNull()
+      expect(await calendarEvents.getNextEventForHeartbeat('host-abc')).toBeNull()
+      spy.mockRestore()
     })
 
-    it('skips cancelled events even when in window', () => {
-      const now = Date.now()
-      calendarEvents.createEvent({
-        summary: 'Cancelled',
-        dtstart: now + 60 * 60_000,
-        dtend: now + 90 * 60_000,
-        organizer: 'ryan',
-        attendees: [{ name: 'link', status: 'accepted' }],
-        status: 'cancelled',
+    it('returns null when cloud call fails (auth, network, etc.)', async () => {
+      const spy = vi.spyOn(cloud, 'cloudGet').mockResolvedValue({
+        success: false,
+        error: 'HTTP 401',
       })
-
-      expect(calendarEvents.getNextEventForHeartbeat('link', now)).toBeNull()
+      expect(await calendarEvents.getNextEventForHeartbeat('host-abc')).toBeNull()
+      spy.mockRestore()
     })
 
-    it('returns null when agent has no events at all', () => {
-      expect(calendarEvents.getNextEventForHeartbeat('ghost', Date.now())).toBeNull()
+    it('returns null when hostId is empty or unresolved', async () => {
+      const spy = vi.spyOn(cloud, 'cloudGet')
+      expect(await calendarEvents.getNextEventForHeartbeat('')).toBeNull()
+      expect(await calendarEvents.getNextEventForHeartbeat('unknown')).toBeNull()
+      expect(spy).not.toHaveBeenCalled()
+      spy.mockRestore()
     })
 
-    it('picks the earlier of multiple in-window events', () => {
-      const now = Date.now()
-      calendarEvents.createEvent({
-        summary: 'Later same day',
-        dtstart: now + 8 * 60 * 60_000,
-        dtend: now + 9 * 60 * 60_000,
-        organizer: 'ryan',
-        attendees: [{ name: 'link', status: 'accepted' }],
+    it('returns null on malformed payloads (missing fields, bad date)', async () => {
+      const spy = vi.spyOn(cloud, 'cloudGet').mockResolvedValue({
+        success: true,
+        data: { events: [{ id: 'evt-1', title: 'Bad', start: 'not-a-date' }] },
       })
-      calendarEvents.createEvent({
-        summary: 'Earlier same day',
-        dtstart: now + 90 * 60_000,
-        dtend: now + 120 * 60_000,
-        organizer: 'ryan',
-        attendees: [{ name: 'link', status: 'accepted' }],
-      })
+      expect(await calendarEvents.getNextEventForHeartbeat('host-abc')).toBeNull()
+      spy.mockRestore()
+    })
 
-      const result = calendarEvents.getNextEventForHeartbeat('link', now)
-      expect(result).not.toBeNull()
-      expect(result!.title).toBe('Earlier same day')
+    it('url-encodes hostId to defend against unusual characters', async () => {
+      const spy = vi.spyOn(cloud, 'cloudGet').mockResolvedValue({
+        success: true,
+        data: { events: [] },
+      })
+      await calendarEvents.getNextEventForHeartbeat('host with spaces/and?chars')
+      expect(spy).toHaveBeenCalledWith(
+        '/api/hosts/host%20with%20spaces%2Fand%3Fchars/calendar/upcoming?days=1',
+      )
+      spy.mockRestore()
     })
   })
 
