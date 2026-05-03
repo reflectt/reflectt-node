@@ -4215,6 +4215,94 @@ export async function createServer(): Promise<FastifyInstance> {
     return payload
   })
 
+  type AgentSeedCutoff = {
+    timestamp: number
+    messageId: string
+    source: string
+  }
+
+  function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  }
+
+  function findLatestAgentSeedCutoff(messages: AgentMessage[], agent: string): AgentSeedCutoff | null {
+    const agentPattern = new RegExp(`@${escapeRegExp(agent)}\\b`, 'i')
+
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index]
+      if (!message) continue
+
+      const metadata = (message.metadata || {}) as Record<string, unknown>
+      const source = typeof metadata.source === 'string' ? metadata.source : ''
+      const replyVia = typeof metadata.reply_via === 'string' ? metadata.reply_via : ''
+      const isCanvasSeed = source === 'canvas_query' || replyVia === 'canvas_push'
+      if (!isCanvasSeed) continue
+
+      const directToAgent = typeof message.to === 'string' && message.to.trim().toLowerCase() === agent
+      const mentionsAgent = agentPattern.test(message.content || '')
+      if (!directToAgent && !mentionsAgent) continue
+
+      const timestamp = Number(message.timestamp) || 0
+      if (timestamp <= 0) continue
+
+      return {
+        timestamp,
+        messageId: message.id,
+        source: source || replyVia,
+      }
+    }
+
+    return null
+  }
+
+  function selectAgentContextMessages(opts: {
+    agent: string
+    limit: number
+    channelFilter?: string
+    sinceMs: number
+  }): {
+    allMessages: AgentMessage[]
+    filteredMessages: AgentMessage[]
+    mentions: AgentMessage[]
+    systemAlerts: AgentMessage[]
+    teamMessages: AgentMessage[]
+    seedCutoff: AgentSeedCutoff | null
+    seedFilteredCount: number
+  } {
+    const allMessages = chatManager.getMessages({
+      channel: opts.channelFilter,
+      limit: Math.min(opts.limit * 6, 800),
+      since: opts.sinceMs,
+    })
+
+    const seedCutoff = findLatestAgentSeedCutoff(allMessages, opts.agent)
+    const filteredMessages = seedCutoff
+      ? allMessages.filter(message => (message.timestamp || 0) >= seedCutoff.timestamp)
+      : allMessages
+
+    const mentions: AgentMessage[] = []
+    const systemAlerts: AgentMessage[] = []
+    const teamMessages: AgentMessage[] = []
+    const agentPattern = new RegExp(`@${escapeRegExp(opts.agent)}\\b`, 'i')
+
+    for (const message of filteredMessages) {
+      const content = message.content || ''
+      if (message.from === 'system') systemAlerts.push(message)
+      else if (agentPattern.test(content)) mentions.push(message)
+      else teamMessages.push(message)
+    }
+
+    return {
+      allMessages,
+      filteredMessages,
+      mentions,
+      systemAlerts,
+      teamMessages,
+      seedCutoff,
+      seedFilteredCount: Math.max(0, allMessages.length - filteredMessages.length),
+    }
+  }
+
   // ── Agent context endpoint ──────────────────────────────────────────
   // Returns a compact, deduplicated view of recent chat optimized for
   // agent context injection. Includes: mentions of the agent, recent
@@ -4232,25 +4320,19 @@ export async function createServer(): Promise<FastifyInstance> {
     const strictCompact = query.compact === '1' || query.compact === 'true'
     const maxChars = Math.max(400, Math.min(Number(query.max_chars) || 1200, 8000))
 
-    const allMessages = chatManager.getMessages({
-      channel: channelFilter,
-      limit: Math.min(limit * 6, 800), // fetch more, then filter
-      since: sinceMs,
+    const {
+      allMessages,
+      mentions,
+      systemAlerts,
+      teamMessages,
+      seedCutoff,
+      seedFilteredCount,
+    } = selectAgentContextMessages({
+      agent,
+      limit,
+      channelFilter,
+      sinceMs,
     })
-
-    // Partition: mentions, system alerts, team messages
-    const mentions: typeof allMessages = []
-    const systemAlerts: typeof allMessages = []
-    const teamMessages: typeof allMessages = []
-
-    const agentPattern = new RegExp(`@${agent}\\b`, 'i')
-
-    for (const m of allMessages) {
-      const content = m.content || ''
-      if (m.from === 'system') systemAlerts.push(m)
-      else if (agentPattern.test(content)) mentions.push(m)
-      else teamMessages.push(m)
-    }
 
     const normalizeForDedup = (content: string): string => {
       return (content || '')
@@ -4394,8 +4476,18 @@ export async function createServer(): Promise<FastifyInstance> {
       suppressed: {
         system_deduped: systemAlerts.length - dedupedAlerts.length,
         total_scanned: allMessages.length,
+        seed_cutoff_filtered: seedFilteredCount,
         ...(strictCompact ? { truncated: result.length - messagesOut.length } : {}),
       },
+      ...(seedCutoff
+        ? {
+            seed_cutoff: {
+              timestamp: seedCutoff.timestamp,
+              message_id: seedCutoff.messageId,
+              source: seedCutoff.source,
+            },
+          }
+        : {}),
     }
   })
 
@@ -4419,25 +4511,19 @@ export async function createServer(): Promise<FastifyInstance> {
     const peer = (query.peer || '').trim()
     const taskIdOverride = (query.task_id || '').trim()
 
-    const allMessages = chatManager.getMessages({
-      channel: channelFilter,
-      limit: Math.min(limit * 6, 800),
-      since: sinceMs,
+    const {
+      allMessages,
+      mentions,
+      systemAlerts,
+      teamMessages,
+      seedCutoff,
+      seedFilteredCount,
+    } = selectAgentContextMessages({
+      agent,
+      limit,
+      channelFilter,
+      sinceMs,
     })
-
-    // Partition: mentions, system alerts, team messages
-    const mentions: typeof allMessages = []
-    const systemAlerts: typeof allMessages = []
-    const teamMessages: typeof allMessages = []
-
-    const agentPattern = new RegExp(`@${agent}\\b`, 'i')
-
-    for (const m of allMessages) {
-      const content = m.content || ''
-      if (m.from === 'system') systemAlerts.push(m)
-      else if (agentPattern.test(content)) mentions.push(m)
-      else teamMessages.push(m)
-    }
 
     // Deduplicate system alerts by normalized content
     const seenHashes = new Set<string>()
@@ -4501,7 +4587,17 @@ export async function createServer(): Promise<FastifyInstance> {
         selected: selected.length,
         suppressed: {
           system_deduped: systemAlerts.length - dedupedAlerts.length,
+          seed_cutoff_filtered: seedFilteredCount,
         },
+        ...(seedCutoff
+          ? {
+              seed_cutoff: {
+                timestamp: seedCutoff.timestamp,
+                message_id: seedCutoff.messageId,
+                source: seedCutoff.source,
+              },
+            }
+          : {}),
       },
     }
   })
