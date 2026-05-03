@@ -10,6 +10,7 @@
 
 import { getDb } from './db.js'
 import { eventBus } from './events.js'
+import { cloudGet } from './cloud.js'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -831,21 +832,32 @@ export interface HeartbeatNextEvent {
   starts_at_iso: string
 }
 
-// MCP get_heartbeat surface: single confirmed event whose next occurrence falls
-// in [now, now + 24h]. Reuses getAgentNextEvent (which already filters
-// status='confirmed' and walks both attendee + organizer) and clamps its 7-day
-// window to 24h here. Same source the team-calendar-store-backed canvas panel
-// reads from, so heartbeat and panel cannot diverge.
-export function getNextEventForHeartbeat(agent: string, atMs?: number): HeartbeatNextEvent | null {
-  const now = atMs ?? Date.now()
-  const upcoming = getAgentNextEvent(agent, now)
-  if (!upcoming) return null
-  if (upcoming.starts_at - now > 24 * 60 * 60 * 1000) return null
+// MCP get_heartbeat surface: returns the next event from the canonical cloud
+// Supabase calendar store (same source the canvas CalendarPanel reads), so
+// heartbeat and panel cannot diverge. Reads via host-credential auth on
+// GET /api/hosts/:hostId/calendar/upcoming?days=1.
+//
+// Returns null on any failure (auth, network, empty list, etc.) — the panel's
+// "honest empty" rule applies here too. See docs/HEARTBEAT_CALENDAR_TRUTH_V0.md
+// in reflectt-cloud (approved by kai msg-1777840126026).
+export async function getNextEventForHeartbeat(hostId: string): Promise<HeartbeatNextEvent | null> {
+  if (!hostId || hostId === 'unknown') return null
+
+  const resp = await cloudGet<{ events?: Array<{ id: string; title: string; start: string }> }>(
+    `/api/hosts/${encodeURIComponent(hostId)}/calendar/upcoming?days=1`,
+  )
+  if (!resp.success || !resp.data?.events?.length) return null
+
+  const first = resp.data.events[0]
+  if (!first?.id || !first.title || !first.start) return null
+  const startsMs = Date.parse(first.start)
+  if (!Number.isFinite(startsMs)) return null
+
   return {
-    id: upcoming.event.id,
-    title: upcoming.event.summary,
-    starts_at: upcoming.starts_at,
-    starts_at_iso: new Date(upcoming.starts_at).toISOString(),
+    id: first.id,
+    title: first.title,
+    starts_at: startsMs,
+    starts_at_iso: new Date(startsMs).toISOString(),
   }
 }
 
