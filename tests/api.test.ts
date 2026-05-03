@@ -5308,6 +5308,47 @@ describe('Context budget', () => {
       await fs.rm(tmp, { recursive: true, force: true }).catch(() => {})
     }
   })
+
+  it('GET /context/inject drops pre-seed stale chat before the latest canvas query for that agent', async () => {
+    const agent = `seed-cutoff-${Date.now()}`
+
+    await req('POST', '/chat/messages', {
+      from: 'sage',
+      content: `@${agent} stale failure memory says use /capture_frame surface=camera`,
+      channel: 'general',
+    })
+
+    const seed = await req('POST', '/chat/messages', {
+      from: 'kai',
+      to: agent,
+      content: `[canvas] @${agent} use the uploaded room artifact instead of capturing a fresh frame`,
+      channel: 'general',
+      metadata: {
+        source: 'canvas_query',
+        reply_via: 'canvas_push',
+        attachments: [{ name: 'proof.png', type: 'image/png', sizeBytes: 1234 }],
+      },
+    })
+    expect(seed.status).toBe(200)
+
+    await req('POST', '/chat/messages', {
+      from: 'echo',
+      content: 'Fresh room artifact is already shared in the canvas.',
+      channel: 'general',
+    })
+
+    const injected = await req('GET', `/context/inject/${agent}?limit=12&channel=general`)
+    expect(injected.status).toBe(200)
+
+    const sessionItems = injected.body.layers.session_local.items as Array<{ content: string }>
+    const contents = sessionItems.map(item => item.content)
+
+    expect(contents.some(content => content.includes('stale failure memory says use /capture_frame surface=camera'))).toBe(false)
+    expect(contents.some(content => content.includes('use the uploaded room artifact instead of capturing a fresh frame'))).toBe(true)
+    expect(contents.some(content => content.includes('Fresh room artifact is already shared in the canvas.'))).toBe(true)
+    expect(injected.body.session_source.suppressed.seed_cutoff_filtered).toBeGreaterThanOrEqual(1)
+    expect(injected.body.session_source.seed_cutoff.source).toBe('canvas_query')
+  })
 })
 
 describe('Duplicate-closure validating evidence gate', () => {
