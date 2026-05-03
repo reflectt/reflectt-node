@@ -84,6 +84,13 @@ function projectArtifact(art: Artifact): Record<string, unknown> {
     sharedBy: (meta.sharedBy as string | undefined) ?? null,
     sharedByDisplayName: (meta.sharedByDisplayName as string | undefined) ?? null,
     dimensions: (meta.dimensions as { width: number; height: number } | undefined) ?? null,
+    // Agent-issued /capture_frame stamps these on POST so the cloud chat
+    // panel's inline command card can pair the artifact with its raw
+    // `/capture_frame` request line via commandId (= chat msg id).
+    // Optional — user-shared artifacts (modal upload) carry no command
+    // provenance and these stay undefined.
+    commandId: (meta.commandId as string | undefined) ?? undefined,
+    requestedBy: (meta.requestedBy as string | undefined) ?? undefined,
     url: `/room/artifacts/${art.id}/content`,
     thumbnailUrl: `/room/artifacts/${art.id}/thumbnail`,
   }
@@ -301,6 +308,16 @@ export async function roomRoutes(app: FastifyInstance) {
     const originatingChannel = typeof fields.originatingChannel?.value === 'string'
       ? (fields.originatingChannel.value as string).trim() || undefined
       : undefined
+    // Agent /capture_frame uploader stamps these so the cloud chat panel
+    // can pair the resulting artifact with its raw `/capture_frame`
+    // request line via commandId (= chat msg id from intake.ts). Optional
+    // — modal user uploads omit them.
+    const commandId = typeof fields.commandId?.value === 'string'
+      ? (fields.commandId.value as string).trim() || undefined
+      : undefined
+    const requestedBy = typeof fields.requestedBy?.value === 'string'
+      ? (fields.requestedBy.value as string).trim() || undefined
+      : undefined
 
     if (!kind || !ALLOWED_KINDS_V0.has(kind)) {
       reply.status(400)
@@ -337,6 +354,8 @@ export async function roomRoutes(app: FastifyInstance) {
         roomId: hostId,
         sharedBy,
         sharedByDisplayName,
+        ...(commandId ? { commandId } : {}),
+        ...(requestedBy ? { requestedBy } : {}),
       },
     })
 
