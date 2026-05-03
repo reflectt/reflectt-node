@@ -54,7 +54,7 @@ import { getFocus, setFocus, clearFocus, getFocusSummary } from './focus.js'
 import { generatePulse, generateCompactPulse } from './pulse.js'
 import { scanScopeOverlap, scanAndNotify } from './scopeOverlap.js'
 import { getDb } from './db.js'
-import { getIdentityColor, getClaimedAgentIds } from './agent-config.js'
+import { getIdentityColor, getClaimedAgentIds, getAgentConfig } from './agent-config.js'
 import type { AgentMessage, Task } from './types.js'
 import { isTestHarnessTask } from './test-task-filter.js'
 import { handleMCPRequest, handleSSERequest, handleMessagesRequest, getActiveSamplingProviders } from './mcp.js'
@@ -13111,11 +13111,38 @@ export async function createServer(): Promise<FastifyInstance> {
     // are skipped so they don't render. No new states introduced.
     const activeSlots = canvasSlots.getActive()
     const presences = presenceManager.getAllPresence()
-    const agents: Record<string, { state: string; task?: string | null }> = {}
+    const roles = getAgentRoles()
+    const roleByName = new Map(roles.map(r => [r.name.toLowerCase(), r]))
+    const agents: Record<string, {
+      state: string
+      task?: string | null
+      displayName?: string
+      identityColor?: string
+      avatar?: string
+    }> = {}
     for (const p of presences) {
       if (p.status === 'offline') continue
       const canvasState = (p.status === 'working' || p.status === 'reviewing') ? 'working' : 'ambient'
-      agents[p.agent] = { state: canvasState, task: p.task ?? null }
+      // Identity enrichment: pull each agent's claimed identity from its
+      // existing sources (role map + agent_config) so cloud renders with
+      // truth instead of hash/title-case fallbacks. Only set fields the
+      // agent has actually claimed — empty/undefined preserves the cloud's
+      // own AGENT_COLORS / agentDisplayName fallback path.
+      const role = roleByName.get(p.agent.toLowerCase())
+      const claimedColor = getIdentityColor(p.agent, '')
+      const settingsAvatar = ((): string | undefined => {
+        const cfg = getAgentConfig(p.agent)
+        const v = cfg?.settings?.avatar
+        return typeof v === 'string' && v.length > 0 ? v : undefined
+      })()
+      const avatar = role?.avatar ?? settingsAvatar
+      agents[p.agent] = {
+        state: canvasState,
+        task: p.task ?? null,
+        ...(role?.displayName ? { displayName: role.displayName } : {}),
+        ...(claimedColor ? { identityColor: claimedColor } : {}),
+        ...(avatar ? { avatar } : {}),
+      }
     }
     const state = { slots: activeSlots, agents, pushedAt: Date.now() }
     const stateJson = JSON.stringify(state)
