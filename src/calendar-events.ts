@@ -824,6 +824,31 @@ export function getAgentNextEvent(agent: string, atMs?: number): { event: Calend
   return earliest
 }
 
+export interface HeartbeatNextEvent {
+  id: string
+  title: string
+  starts_at: number
+  starts_at_iso: string
+}
+
+// MCP get_heartbeat surface: single confirmed event whose next occurrence falls
+// in [now, now + 24h]. Reuses getAgentNextEvent (which already filters
+// status='confirmed' and walks both attendee + organizer) and clamps its 7-day
+// window to 24h here. Same source the team-calendar-store-backed canvas panel
+// reads from, so heartbeat and panel cannot diverge.
+export function getNextEventForHeartbeat(agent: string, atMs?: number): HeartbeatNextEvent | null {
+  const now = atMs ?? Date.now()
+  const upcoming = getAgentNextEvent(agent, now)
+  if (!upcoming) return null
+  if (upcoming.starts_at - now > 24 * 60 * 60 * 1000) return null
+  return {
+    id: upcoming.event.id,
+    title: upcoming.event.summary,
+    starts_at: upcoming.starts_at,
+    starts_at_iso: new Date(upcoming.starts_at).toISOString(),
+  }
+}
+
 // ── Export singleton ───────────────────────────────────────────────────────
 
 export const calendarEvents = {
@@ -838,6 +863,7 @@ export const calendarEvents = {
   markReminderFired,
   getAgentCurrentEvent,
   getAgentNextEvent,
+  getNextEventForHeartbeat,
   getOccurrences,
   parseRRule,
 }
