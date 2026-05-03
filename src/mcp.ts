@@ -356,7 +356,7 @@ tool(
 
 tool(
   "get_heartbeat",
-  "Get your agent heartbeat — active task, inbox count, queue state, and recommended action. The single most efficient call for staying oriented.",
+  "Get your agent heartbeat — active task, inbox count, queue state, next confirmed calendar event in the next 24h, and recommended action. The single most efficient call for staying oriented.",
   {
     agent: z.string().describe("Your agent name (e.g. 'claude')"),
   },
@@ -365,6 +365,7 @@ tool(
     const inbox = inboxManager.getInbox(agent, allMessages, { limit: 10 })
     const activeTasks = taskManager.listTasks({ status: "doing", assignee: agent })
     const nextTask = taskManager.getNextTask(agent)
+    const next_event = calendarEvents.getNextEventForHeartbeat(agent)
     const queue = {
       todo: taskManager.listTasks({ status: "todo", assignee: agent }).length,
       doing: activeTasks.length,
@@ -380,7 +381,7 @@ tool(
     return {
       content: [{
         type: "text",
-        text: JSON.stringify({ agent, ts: Date.now(), inbox, inboxCount: inbox.length, active: activeTasks[0] ?? null, next: nextTask ?? null, queue, action })
+        text: JSON.stringify({ agent, ts: Date.now(), inbox, inboxCount: inbox.length, active: activeTasks[0] ?? null, next: nextTask ?? null, next_event, queue, action })
       }]
     }
   }
@@ -1002,6 +1003,7 @@ function initToolHandlers() {
       const inbox = inboxManager.getInbox(args.agent, allMessages, { limit: 10 })
       const activeTasks = taskManager.listTasks({ status: "doing", assignee: args.agent })
       const nextTask = taskManager.getNextTask(args.agent)
+      const next_event = calendarEvents.getNextEventForHeartbeat(args.agent)
       const queue = {
         todo: taskManager.listTasks({ status: "todo", assignee: args.agent }).length,
         doing: activeTasks.length,
@@ -1012,7 +1014,7 @@ function initToolHandlers() {
         : activeTasks.length > 0
           ? `Continue task: ${activeTasks[0]?.title}`
           : nextTask ? `Pick up next task: ${nextTask.title}` : "IDLE"
-      return { content: [{ type: "text", text: JSON.stringify({ agent: args.agent, ts: Date.now(), inbox, inboxCount: inbox.length, active: activeTasks[0] ?? null, next: nextTask ?? null, queue, action }) }] }
+      return { content: [{ type: "text", text: JSON.stringify({ agent: args.agent, ts: Date.now(), inbox, inboxCount: inbox.length, active: activeTasks[0] ?? null, next: nextTask ?? null, next_event, queue, action }) }] }
     },
   })
 

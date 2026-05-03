@@ -367,6 +367,80 @@ describe('Calendar Events', () => {
     })
   })
 
+  describe('getNextEventForHeartbeat', () => {
+    it('returns confirmed next event within 24h with shaped payload', () => {
+      const now = Date.now()
+      const startsAt = now + 2 * 60 * 60 * 1000 // +2h
+      calendarEvents.createEvent({
+        summary: 'Standup',
+        dtstart: startsAt,
+        dtend: startsAt + 30 * 60_000,
+        organizer: 'ryan',
+        attendees: [{ name: 'link', status: 'accepted' }],
+      })
+
+      const result = calendarEvents.getNextEventForHeartbeat('link', now)
+      expect(result).not.toBeNull()
+      expect(result!.title).toBe('Standup')
+      expect(result!.starts_at).toBe(startsAt)
+      expect(result!.starts_at_iso).toBe(new Date(startsAt).toISOString())
+      expect(result!.id).toMatch(/^evt-/)
+    })
+
+    it('returns null when next event is beyond the 24h window', () => {
+      const now = Date.now()
+      calendarEvents.createEvent({
+        summary: 'Three days out',
+        dtstart: now + 3 * 24 * 60 * 60 * 1000,
+        dtend: now + 3 * 24 * 60 * 60 * 1000 + 30 * 60_000,
+        organizer: 'ryan',
+        attendees: [{ name: 'link', status: 'accepted' }],
+      })
+
+      expect(calendarEvents.getNextEventForHeartbeat('link', now)).toBeNull()
+    })
+
+    it('skips cancelled events even when in window', () => {
+      const now = Date.now()
+      calendarEvents.createEvent({
+        summary: 'Cancelled',
+        dtstart: now + 60 * 60_000,
+        dtend: now + 90 * 60_000,
+        organizer: 'ryan',
+        attendees: [{ name: 'link', status: 'accepted' }],
+        status: 'cancelled',
+      })
+
+      expect(calendarEvents.getNextEventForHeartbeat('link', now)).toBeNull()
+    })
+
+    it('returns null when agent has no events at all', () => {
+      expect(calendarEvents.getNextEventForHeartbeat('ghost', Date.now())).toBeNull()
+    })
+
+    it('picks the earlier of multiple in-window events', () => {
+      const now = Date.now()
+      calendarEvents.createEvent({
+        summary: 'Later same day',
+        dtstart: now + 8 * 60 * 60_000,
+        dtend: now + 9 * 60 * 60_000,
+        organizer: 'ryan',
+        attendees: [{ name: 'link', status: 'accepted' }],
+      })
+      calendarEvents.createEvent({
+        summary: 'Earlier same day',
+        dtstart: now + 90 * 60_000,
+        dtend: now + 120 * 60_000,
+        organizer: 'ryan',
+        attendees: [{ name: 'link', status: 'accepted' }],
+      })
+
+      const result = calendarEvents.getNextEventForHeartbeat('link', now)
+      expect(result).not.toBeNull()
+      expect(result!.title).toBe('Earlier same day')
+    })
+  })
+
   describe('Reminders', () => {
     it('returns pending reminder when window opens', () => {
       const now = Date.now()
