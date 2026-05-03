@@ -13,6 +13,7 @@ import { CHANNEL_DEFINITIONS, DEFAULT_CHAT_CHANNELS } from './channels.js'
 import { getDb, importJsonlIfNeeded, safeJsonParse, safeJsonStringify } from './db.js'
 import type Database from 'better-sqlite3'
 import { suppressionLedger } from './suppression-ledger.js'
+import { triggerVoiceOnChat } from './voice-on-chat.js'
 // OpenClaw integration pending — chat works standalone for now
 
 const MESSAGES_FILE = join(DATA_DIR, 'messages.jsonl')
@@ -506,6 +507,10 @@ class ChatManager {
 
     // Emit event to event bus
     eventBus.emitMessagePosted(fullMessage)
+
+    // Outbound voice loop on canvas — speak agent chat in #general when a
+    // human is present. Fires /canvas/speak (existing path); never blocks.
+    triggerVoiceOnChat(fullMessage)
 
     // Route to agent inboxes (auto-routing)
     this.routeToInboxes(fullMessage)
