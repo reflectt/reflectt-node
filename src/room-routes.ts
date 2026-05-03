@@ -293,6 +293,14 @@ export async function roomRoutes(app: FastifyInstance) {
     const kind = typeof fields.kind?.value === 'string' ? (fields.kind.value as string) : undefined
     const sharedBy = typeof fields.sharedBy?.value === 'string' ? (fields.sharedBy.value as string) : undefined
     const sharedByDisplayName = typeof fields.sharedByDisplayName?.value === 'string' ? (fields.sharedByDisplayName.value as string) : undefined
+    // Originating channel = the chat channel the issuing /capture_frame
+    // command was posted in (`#general`, `dm:*`, or `thread:*`). Threaded
+    // through so the artifact-shared bridge can echo the reply back to the
+    // same channel instead of always landing in `#general`. Manual user
+    // uploads don't send this field; bridge falls back to `general`.
+    const originatingChannel = typeof fields.originatingChannel?.value === 'string'
+      ? (fields.originatingChannel.value as string).trim() || undefined
+      : undefined
 
     if (!kind || !ALLOWED_KINDS_V0.has(kind)) {
       reply.status(400)
@@ -366,7 +374,7 @@ export async function roomRoutes(app: FastifyInstance) {
       id: `room-artifact-${updated.id}`,
       type: 'room_artifact_shared',
       timestamp: Date.now(),
-      data: { artifact: projected, by: sharedBy, hostId },
+      data: { artifact: projected, by: sharedBy, hostId, originatingChannel },
     })
 
     // Realtime fan-out: cloud subscribers (other participants) refresh

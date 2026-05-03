@@ -271,6 +271,104 @@ describe('room-event-bridge', () => {
     expect(getRoomEventBridgeStatus().artifactCount).toBe(0)
   })
 
+  // Command-reply locality: when an artifact event carries an
+  // `originatingChannel` (set by room-routes when the upload form has the
+  // field — only `/capture_frame` does today), the bridge echoes the reply
+  // back to that same channel. Manual user uploads omit the field and
+  // continue to land in `#general` (covered by the snapshot test above).
+  it('echoes originatingChannel when present (dm:* in → dm:* out)', () => {
+    initRoomEventBridge()
+    eventBus.emit({
+      id: 'art-evt-dm',
+      type: 'room_artifact_shared',
+      timestamp: Date.now(),
+      data: {
+        artifact: {
+          id: 'art-dm-789',
+          kind: 'camera-snapshot',
+          name: 'cam.png',
+          mimeType: 'image/png',
+          sizeBytes: 11111,
+          createdAt: Date.now(),
+          sharedBy: 'self',
+          sharedByDisplayName: 'Frame for compass',
+          dimensions: { width: 640, height: 480 },
+          url: 'https://cdn.example/art-dm-789.png',
+          thumbnailUrl: 'https://cdn.example/art-dm-789.thumb.png',
+        },
+        by: 'self',
+        hostId: 'host-1',
+        originatingChannel: 'dm:compass_user',
+      },
+    })
+    expect(sendMessageMock).toHaveBeenCalledTimes(1)
+    const call = sendMessageMock.mock.calls[0][0]
+    expect(call.channel).toBe('dm:compass_user')
+    expect(call.metadata.originatingChannel).toBe('dm:compass_user')
+  })
+
+  it('echoes originatingChannel when present (thread:* in → thread:* out)', () => {
+    initRoomEventBridge()
+    eventBus.emit({
+      id: 'art-evt-thread',
+      type: 'room_artifact_shared',
+      timestamp: Date.now(),
+      data: {
+        artifact: {
+          id: 'art-thread-321',
+          kind: 'camera-snapshot',
+          name: 'cam.png',
+          mimeType: 'image/png',
+          sizeBytes: 22222,
+          createdAt: Date.now(),
+          sharedBy: 'self',
+          sharedByDisplayName: 'Frame for compass',
+          dimensions: { width: 640, height: 480 },
+          url: 'https://cdn.example/art-thread-321.png',
+          thumbnailUrl: 'https://cdn.example/art-thread-321.thumb.png',
+        },
+        by: 'self',
+        hostId: 'host-1',
+        originatingChannel: 'thread:msg-1777829-abc',
+      },
+    })
+    expect(sendMessageMock).toHaveBeenCalledTimes(1)
+    const call = sendMessageMock.mock.calls[0][0]
+    expect(call.channel).toBe('thread:msg-1777829-abc')
+    expect(call.metadata.originatingChannel).toBe('thread:msg-1777829-abc')
+  })
+
+  it('falls back to #general when originatingChannel is missing (manual user upload)', () => {
+    initRoomEventBridge()
+    eventBus.emit({
+      id: 'art-evt-manual',
+      type: 'room_artifact_shared',
+      timestamp: Date.now(),
+      data: {
+        artifact: {
+          id: 'art-manual-555',
+          kind: 'snapshot',
+          name: 'screen.png',
+          mimeType: 'image/png',
+          sizeBytes: 33333,
+          createdAt: Date.now(),
+          sharedBy: 'session-abc-123',
+          sharedByDisplayName: 'Ryan',
+          dimensions: { width: 1920, height: 1080 },
+          url: 'https://cdn.example/art-manual-555.png',
+          thumbnailUrl: 'https://cdn.example/art-manual-555.thumb.png',
+        },
+        by: 'session-abc-123',
+        hostId: 'host-1',
+        // originatingChannel intentionally omitted
+      },
+    })
+    expect(sendMessageMock).toHaveBeenCalledTimes(1)
+    const call = sendMessageMock.mock.calls[0][0]
+    expect(call.channel).toBe('general')
+    expect(call.metadata.originatingChannel).toBeNull()
+  })
+
   it('ignores artifact events with no kind or no id', () => {
     initRoomEventBridge()
     eventBus.emit({
