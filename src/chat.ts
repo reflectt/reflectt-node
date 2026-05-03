@@ -23,9 +23,9 @@ const LEGACY_MESSAGES_FILE = join(LEGACY_DATA_DIR, 'messages.jsonl')
 // JSONL file is kept as an append-only audit trail.
 
 // Sorted-endpoints DM channel: a→b and b→a hash to the same string so
-// both sides land in one thread. Lowercased so case variants (Kai vs
-// kai) do not fork. Used by sendMessage when `to:` is set without an
-// explicit channel.
+// both sides land in one thread. Lowercased so case variants do not
+// fork. Used by sendMessage when `to:` is set without an explicit
+// channel.
 export function deriveDmChannel(from: string, to: string): string {
   return `dm:${[from, to].map(s => s.toLowerCase().trim()).sort().join('_')}`
 }
