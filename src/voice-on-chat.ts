@@ -143,18 +143,32 @@ async function postCanvasSpeak(text: string, agentId: string, agentName: string)
   }
 }
 
+// Reasons we don't bother logging — these fire on every non-general /
+// non-agent message and would drown the log. The interesting gate
+// decisions (humans-in-room, cooldown, speakability) all stay logged.
+const NOISY_FALSE_REASONS = new Set<VoiceTriggerDecision['reason']>([
+  'channel-not-general',
+  'sender-not-agent',
+])
+
 // Hook called from chatManager.sendMessage after a message is persisted +
 // emitted. Fires speech in the background; never blocks or throws.
 export function triggerVoiceOnChat(message: AgentMessage): void {
   const now = Date.now()
   const humansInRoom = listRoomParticipants().length
   const decision = decideVoiceTrigger(message, now, humansInRoom)
-  if (!decision.willSpeak) return
+  if (!decision.willSpeak) {
+    if (decision.reason && !NOISY_FALSE_REASONS.has(decision.reason)) {
+      console.log(`[voice-on-chat] gated: reason=${decision.reason} from=${message.from} humans=${humansInRoom}`)
+    }
+    return
+  }
   // Stamp dedup + cooldown BEFORE firing so concurrent messages don't double-speak.
   _spokenCache.set(message.content.slice(0, 200), now)
   _lastSpokenAt = now
   const text = buildSpeakableText(message.content)
   const agentName = message.from
+  console.log(`[voice-on-chat] speaking: from=${message.from} chars=${text.length} humans=${humansInRoom}`)
   // Fire-and-forget — chat write must not wait on TTS.
   void postCanvasSpeak(text, agentName, agentName)
 }
