@@ -73,6 +73,11 @@ interface RoomArtifactSharedPayload {
   }
   by: string
   hostId: string
+  // Channel the issuing /capture_frame command was posted in (#general,
+  // dm:*, or thread:*). Set by room-routes when the upload carries an
+  // `originatingChannel` field. Manual user uploads omit it — bridge
+  // falls back to `general` so behavior is unchanged for that path.
+  originatingChannel?: string
 }
 
 // Resolve the founding/default agent for this host. Same pattern used
@@ -177,11 +182,17 @@ export function initRoomEventBridge(): boolean {
       if (!line) return
 
       state.artifactCount++
+      // Command-reply locality: when the artifact came from a /capture_frame
+      // issued in a specific channel (dm:*, thread:*, or #general), echo the
+      // reply back to that same channel so command results land alongside the
+      // command. Manual user uploads carry no originatingChannel — fall back
+      // to `general` so that path is unchanged. `room_participant_joined`
+      // above stays on `general` unconditionally — joins are not replies.
       void chatManager.sendMessage({
         from: 'room',
         to: defaultAgent,
         content: line,
-        channel: 'general',
+        channel: payload.originatingChannel ?? 'general',
         metadata: {
           source: 'room-event',
           category: 'room-artifact',
@@ -191,6 +202,7 @@ export function initRoomEventBridge(): boolean {
           sharedBy: payload.by,
           sharedByDisplayName: payload.artifact.sharedByDisplayName,
           hostId: payload.hostId,
+          originatingChannel: payload.originatingChannel ?? null,
           url: payload.artifact.url,
           thumbnailUrl: payload.artifact.thumbnailUrl,
           dimensions: payload.artifact.dimensions,
