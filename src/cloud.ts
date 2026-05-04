@@ -332,6 +332,15 @@ export function getCloudStatus() {
 }
 
 /**
+ * Fetch the current team fleet snapshot for this host.
+ * Uses the host credential to read the persisted cross-host truth from cloud.
+ */
+export async function getTeamFleet(): Promise<CloudApiResponse<TeamFleetSnapshot>> {
+  if (!state.hostId) return { success: false, error: 'Host not registered with cloud' }
+  return cloudGet<TeamFleetSnapshot>(`/api/hosts/${state.hostId}/team/fleet`)
+}
+
+/**
  * Initialize and start cloud integration.
  * Call this after the server is listening.
  */
@@ -2154,6 +2163,35 @@ interface CloudApiResponse<T = unknown> {
   success: boolean
   data?: T
   error?: string
+}
+
+export interface TeamFleetAgentSnapshot {
+  id?: string
+  name?: string
+  displayName?: string
+  state?: string
+  status?: string
+  [key: string]: unknown
+}
+
+export interface TeamFleetHostSnapshot {
+  id: string
+  teamId: string
+  name: string
+  status: string
+  lastSeen: string
+  agents: TeamFleetAgentSnapshot[]
+  activeTasks: unknown[]
+  slowTasks: unknown[]
+  appVersion: string | null
+  gitSha: string | null
+  buildTimestamp: string | null
+  convergence?: unknown
+}
+
+export interface TeamFleetSnapshot {
+  teamId: string
+  hosts: TeamFleetHostSnapshot[]
 }
 
 async function cloudGet<T = unknown>(path: string): Promise<CloudApiResponse<T>> {

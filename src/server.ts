@@ -178,7 +178,7 @@ import { createRun, getRun, subscribeRun, approveRun, rejectRun, executeGithubIs
 import { validateIntent as macOSValidateIntent, isKillSwitchEngaged, engageKillSwitch, resetKillSwitch } from './macos-accessibility.js'
 import { calendarManager, type BlockType, type CreateBlockInput, type UpdateBlockInput } from './calendar.js'
 import { calendarEvents, type CreateEventInput, type UpdateEventInput, type AttendeeStatus } from './calendar-events.js'
-import { requestImmediateCanvasSync, queueCanvasPushEvent } from './cloud.js'
+import { requestImmediateCanvasSync, queueCanvasPushEvent, getTeamFleet } from './cloud.js'
 import { startReminderEngine, stopReminderEngine, getReminderEngineStats } from './calendar-reminder-engine.js'
 import { startDeployMonitor, stopDeployMonitor } from './deploy-monitor.js'
 import { exportICS, exportEventICS, importICS, parseICS } from './calendar-ical.js'
@@ -2968,6 +2968,43 @@ export async function createServer(): Promise<FastifyInstance> {
       issues: health.issues,
       roleNamesFromConfig: health.roleNamesFromConfig,
       assignmentRoleNames: health.assignmentRoleNames,
+    }
+  })
+
+  // Cross-host team fleet snapshot (read-only)
+  app.get('/team/fleet', async (_request, reply) => {
+    const result = await getTeamFleet()
+    if (!result.success || !result.data) {
+      reply.code(result.error === 'Host not registered with cloud' ? 503 : 502)
+      return {
+        success: false,
+        error: result.error || 'Failed to fetch team fleet',
+      }
+    }
+
+    return {
+      success: true,
+      teamId: result.data.teamId,
+      hosts: result.data.hosts.map((host) => ({
+        hostId: host.id,
+        hostName: host.name,
+        status: host.status,
+        lastSeen: host.lastSeen,
+        appVersion: host.appVersion,
+        gitSha: host.gitSha,
+        buildTimestamp: host.buildTimestamp,
+        agents: host.agents.map((agent) => ({
+          id: typeof agent.id === 'string' ? agent.id : null,
+          name: typeof agent.name === 'string' ? agent.name : null,
+          displayName: typeof agent.displayName === 'string' ? agent.displayName : null,
+          state: typeof agent.state === 'string'
+            ? agent.state
+            : (typeof agent.status === 'string' ? agent.status : null),
+        })),
+        activeTasks: host.activeTasks,
+        slowTasks: host.slowTasks,
+        convergence: host.convergence ?? null,
+      })),
     }
   })
 
