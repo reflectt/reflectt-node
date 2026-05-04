@@ -1520,7 +1520,7 @@ async function syncCanvas(): Promise<void> {
   try {
     const db = getDb()
     const settingsRows = db.prepare(
-      "SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%' OR settings LIKE '%identityColor%'"
+      "SELECT agent_id, settings FROM agent_config WHERE settings LIKE '%avatar%' OR settings LIKE '%identityColor%' OR settings LIKE '%voice%'"
     ).all() as Array<{ agent_id: string; settings: string }>
     const displayNameByAgent = new Map<string, string>()
     for (const role of getAgentRoles()) {
@@ -1531,10 +1531,16 @@ async function syncCanvas(): Promise<void> {
     for (const row of settingsRows) {
       if (!agents[row.agent_id]) continue
       try {
-        const s = JSON.parse(row.settings) as { avatar?: { content?: string }; identityColor?: string }
+        const s = JSON.parse(row.settings) as { avatar?: { content?: string }; identityColor?: string; voice?: string }
         const target = agents[row.agent_id] as Record<string, unknown>
         if (s.avatar?.content) target.avatar = s.avatar.content
         if (typeof s.identityColor === 'string' && s.identityColor) target.identityColor = s.identityColor
+        // voiceCapable: agent has claimed a kokoro voice (settings.voice non-empty string).
+        // Read by web AgentPresence.voiceCapable to gate Speak row + 🎤 badge.
+        if (typeof s.voice === 'string' && s.voice.trim()) {
+          target.voiceCapable = true
+          target.voiceId = s.voice.trim()
+        }
       } catch { /* skip malformed settings */ }
     }
     // Inject displayName for every agent in payload that has a TEAM-ROLES entry,
