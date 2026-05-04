@@ -14,6 +14,7 @@ import { getDb, importJsonlIfNeeded, safeJsonParse, safeJsonStringify } from './
 import type Database from 'better-sqlite3'
 import { suppressionLedger } from './suppression-ledger.js'
 import { triggerVoiceOnChat } from './voice-on-chat.js'
+import { triggerHandoffAck } from './voice-ack-on-handoff.js'
 // OpenClaw integration pending — chat works standalone for now
 
 const MESSAGES_FILE = join(DATA_DIR, 'messages.jsonl')
@@ -524,6 +525,11 @@ class ChatManager {
     // Outbound voice loop on canvas — speak agent chat in #general when a
     // human is present. Fires /canvas/speak (existing path); never blocks.
     triggerVoiceOnChat(fullMessage)
+
+    // Audible ack when this message is a real `/handoff to=...` and the
+    // recipient is voiceCapable + a human is present + recipient is not
+    // already mid-TTS. Recipient-authored 1–4 word ack via Anthropic.
+    triggerHandoffAck(fullMessage)
 
     // Route to agent inboxes (auto-routing)
     this.routeToInboxes(fullMessage)

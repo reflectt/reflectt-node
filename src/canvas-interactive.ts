@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify'
 import type { eventBus as eventBusInstance } from './events.js'
 import { getDb } from './db.js'
 import { getIdentityColor } from './agent-config.js'
+import { setActiveSpeaker as setActiveSpeakerStore } from './active-speakers.js'
 
 // ── Types ──
 
@@ -658,6 +659,13 @@ export async function canvasInteractiveRoutes(
     const voiceId = await hashTts(text, agentId)
     const estimatedMs = Math.round(text.length * 50)
 
+    // Mark this agent as currently speaking so server-side gates (e.g.
+    // voice-ack-on-handoff) can ask "is B already mid-TTS?". Cleared on
+    // voice_output (with accurate durationMs) or after a generous
+    // estimatedMs+8s safety net if TTS never resolves.
+    setActiveSpeakerStore(agentId, true)
+    const safetyClear = setTimeout(() => setActiveSpeakerStore(agentId, false), estimatedMs + 8_000)
+
     // Emit voice_queued immediately so UI can show "speaking" state
     const queuedPayload = JSON.stringify({ type: 'voice_queued', voiceId, text, agentId, agentName, estimatedMs })
     for (const [, client] of renderStreamSubscribers) {
@@ -668,6 +676,8 @@ export async function canvasInteractiveRoutes(
     makeTts(text, agentId).then(async (result) => {
       if (!result) {
         console.error(`[voice] makeTts returned null for "${text.substring(0, 30)}..." — Kokoro + ElevenLabs both failed`)
+        clearTimeout(safetyClear)
+        setActiveSpeakerStore(agentId, false)
         return
       }
       console.log(`[voice] TTS ready: voiceId=${voiceId} url=${result.url} ms=${result.ms}`)
@@ -677,8 +687,15 @@ export async function canvasInteractiveRoutes(
       for (const [, client] of renderStreamSubscribers) {
         try { client.send('event: voice_output\r\ndata: ' + payload + '\r\n\r\n') } catch {}
       }
+      // Clear the active-speaker mark after the TTS audio finishes
+      // playing on clients (rough estimate; client-side playback is what
+      // truly ends the turn, but this is the best server-side proxy).
+      clearTimeout(safetyClear)
+      setTimeout(() => setActiveSpeakerStore(agentId, false), result.ms + 500)
     }).catch((err) => {
       console.error(`[voice] makeTts failed:`, err instanceof Error ? err.message : err)
+      clearTimeout(safetyClear)
+      setActiveSpeakerStore(agentId, false)
     })
 
     return { ok: true, voiceId, estimatedMs }

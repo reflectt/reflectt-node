@@ -21,6 +21,7 @@ import type { ModelsEnvelope } from './openclaw-models-types.js'
 import { getStallDetector, emitWorkflowStall, onStallEvent } from './stall-detector.js'
 import { processStallEvent } from './intervention-template.js'
 import { trackRequest, getRequestMetrics } from './request-tracker.js'
+import { setActiveSpeaker as setActiveSpeakerStore } from './active-speakers.js'
 import { getPreflightMetrics, snapshotDailyMetrics, getDailySnapshots, startAutoSnapshot } from './alert-preflight.js'
 
 // ── Build info (read once at startup) ──────────────────────────────────────
@@ -8873,6 +8874,7 @@ export async function createServer(): Promise<FastifyInstance> {
 
     // Helper: push activeSpeaker signal into canvas state so orb reacts
     const setActiveSpeaker = (active: boolean) => {
+      setActiveSpeakerStore(agentId, active)
       const existing = canvasStateMap.get(agentId)
       if (existing) {
         canvasStateMap.set(agentId, {
@@ -9170,6 +9172,7 @@ export async function createServer(): Promise<FastifyInstance> {
     const identityColor = getIdentityColor(agentId)
 
     const setActiveSpeakerAudio = (active: boolean) => {
+      setActiveSpeakerStore(agentId, active)
       const existing = canvasStateMap.get(agentId)
       if (existing) {
         canvasStateMap.set(agentId, { ...existing, payload: { ...(existing.payload as Record<string, unknown>), activeSpeaker: active }, updatedAt: Date.now() })
