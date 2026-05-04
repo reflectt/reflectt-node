@@ -13119,6 +13119,8 @@ export async function createServer(): Promise<FastifyInstance> {
       displayName?: string
       identityColor?: string
       avatar?: string
+      voiceCapable?: boolean
+      voiceId?: string
     }> = {}
     for (const p of presences) {
       if (p.status === 'offline') continue
@@ -13128,12 +13130,21 @@ export async function createServer(): Promise<FastifyInstance> {
       // truth instead of hash/title-case fallbacks. Only set fields the
       // agent has actually claimed — empty/undefined preserves the cloud's
       // own AGENT_COLORS / agentDisplayName fallback path.
+      // Mirror the same enrichment as cloud.ts:1531 syncCanvas — both
+      // writers POST to the same host_canvas_state row, so they must
+      // agree on payload shape or the later writer strips fields the
+      // earlier one set (e.g. voiceCapable from a 30s-cadence syncCanvas
+      // gets clobbered by this 5s-cadence push).
       const role = roleByName.get(p.agent.toLowerCase())
       const claimedColor = getIdentityColor(p.agent, '')
+      const cfg = getAgentConfig(p.agent)
       const settingsAvatar = ((): string | undefined => {
-        const cfg = getAgentConfig(p.agent)
         const v = cfg?.settings?.avatar
         return typeof v === 'string' && v.length > 0 ? v : undefined
+      })()
+      const settingsVoice = ((): string | undefined => {
+        const v = cfg?.settings?.voice
+        return typeof v === 'string' && v.trim() ? v.trim() : undefined
       })()
       const avatar = role?.avatar ?? settingsAvatar
       agents[p.agent] = {
@@ -13142,6 +13153,7 @@ export async function createServer(): Promise<FastifyInstance> {
         ...(role?.displayName ? { displayName: role.displayName } : {}),
         ...(claimedColor ? { identityColor: claimedColor } : {}),
         ...(avatar ? { avatar } : {}),
+        ...(settingsVoice ? { voiceCapable: true, voiceId: settingsVoice } : {}),
       }
     }
     const state = { slots: activeSlots, agents, pushedAt: Date.now() }
