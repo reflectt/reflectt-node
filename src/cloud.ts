@@ -907,6 +907,12 @@ async function sendHeartbeat(): Promise<void> {
       hostType: config.hostType,
       uptimeMs: Date.now() - state.startedAt,
     },
+    // V2 capability-visibility ack — only emitted when we have fresh acks
+    // from the most recent /capabilities/context fetch. Cloud uses these
+    // to flip skillPack.injectionStatus from 'pending' to 'active'.
+    ...(skillPackAcks.size > 0 ? {
+      skillPackAcks: { acks: getSkillPackAcksForHeartbeat() },
+    } : {}),
   })
 
   if (result.success || result.data) {
@@ -2071,6 +2077,20 @@ const CAPABILITY_CONTEXT_FILE = join(REFLECTT_HOME, 'capability-context.md')
 let lastCapabilityContextFetchAt = 0
 
 /**
+ * Skill-pack acks emitted on each heartbeat. Keyed by provider; value carries
+ * the version we observed in the most recent /capabilities/context fetch and
+ * when we observed it. Cloud uses {provider, version, fetchedAt} to flip
+ * skillPack.injectionStatus to 'active' (V2 capability-visibility seam, kai
+ * lock msg-1777866649814). Process-local — rebuilt on the next sync.
+ */
+type SkillPackAck = { provider: string; version: string; fetchedAt: number }
+const skillPackAcks = new Map<string, SkillPackAck>()
+
+export function getSkillPackAcksForHeartbeat(): SkillPackAck[] {
+  return Array.from(skillPackAcks.values())
+}
+
+/**
  * Read the current capability context written by syncCapabilityContext().
  * Returns the content (including the ## Team capabilities header) or null.
  * Exported so server.ts can include it in the heartbeat response — the
@@ -2094,8 +2114,24 @@ async function syncCapabilityContext(): Promise<void> {
   lastCapabilityContextFetchAt = now
 
   try {
-    const result = await cloudGet<{ systemPromptHint: string; credentials?: Record<string, Record<string, string>> }>(`/api/hosts/${state.hostId}/capabilities/context`)
+    const result = await cloudGet<{
+      systemPromptHint: string
+      credentials?: Record<string, Record<string, string>>
+      skillPacks?: Array<{ provider: string; version: string }>
+    }>(`/api/hosts/${state.hostId}/capabilities/context`)
     if (!result.success || !result.data?.systemPromptHint) return
+
+    // V2 skill-pack ack seam (kai lock msg-1777866649814): record what
+    // {provider, version} we just observed; sendHeartbeat reads this and
+    // forwards it as skillPackAcks so cloud can flip injectionStatus.
+    if (Array.isArray(result.data.skillPacks)) {
+      const fetchedAt = Date.now()
+      skillPackAcks.clear()
+      for (const pack of result.data.skillPacks) {
+        if (typeof pack?.provider !== 'string' || typeof pack?.version !== 'string') continue
+        skillPackAcks.set(pack.provider, { provider: pack.provider, version: pack.version, fetchedAt })
+      }
+    }
 
     const hint = result.data.systemPromptHint.trim()
     if (!hint || hint === 'No capabilities are currently enabled for this team.') {
