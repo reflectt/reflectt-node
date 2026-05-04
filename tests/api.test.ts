@@ -181,6 +181,14 @@ describe('Health', () => {
     expect(Array.isArray(body.assignmentRoleNames)).toBe(true)
   })
 
+  it('GET /team/fleet returns a clear error when cloud fleet truth is unavailable', async () => {
+    const { status, body } = await req('GET', '/team/fleet')
+    expect(status === 502 || status === 503).toBe(true)
+    expect(body.success).toBe(false)
+    expect(typeof body.error).toBe('string')
+    expect(body.error.length).toBeGreaterThan(0)
+  })
+
   it('GET /health/team includes host-local scope metadata', async () => {
     const { status, body } = await req('GET', '/health/team')
     expect(status).toBe(200)
