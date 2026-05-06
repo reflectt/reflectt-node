@@ -26,6 +26,15 @@ RUN npm run build
 # ── Runtime stage ──
 FROM node:22-slim
 
+ARG BUILD_APP_VERSION=unknown
+ARG BUILD_GIT_SHA=unknown
+ARG BUILD_GIT_SHORT_SHA=unknown
+ARG BUILD_GIT_BRANCH=unknown
+ARG BUILD_GIT_MESSAGE=unknown
+ARG BUILD_GIT_AUTHOR=unknown
+ARG BUILD_GIT_TIMESTAMP=unknown
+ARG BUILD_TIMESTAMP=unknown
+
 WORKDIR /app
 
 # Runtime dependencies
@@ -80,8 +89,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN npx playwright install chromium --with-deps
 
 COPY --from=build /app/dist/ dist/
-# Copy pre-baked commit.txt for version reporting (run npm run build locally first)
-COPY commit.txt* ./
+COPY --from=build /app/commit.txt ./commit.txt
 
 # Runtime assets (dashboard UI, role defaults, CLI templates)
 COPY public/ public/
@@ -93,6 +101,14 @@ ENV REFLECTT_HOME=/data
 ENV NODE_ENV=production
 ENV PORT=4445
 ENV HOST=0.0.0.0
+ENV BUILD_APP_VERSION=${BUILD_APP_VERSION}
+ENV BUILD_GIT_SHA=${BUILD_GIT_SHA}
+ENV BUILD_GIT_SHORT_SHA=${BUILD_GIT_SHORT_SHA}
+ENV BUILD_GIT_BRANCH=${BUILD_GIT_BRANCH}
+ENV BUILD_GIT_MESSAGE=${BUILD_GIT_MESSAGE}
+ENV BUILD_GIT_AUTHOR=${BUILD_GIT_AUTHOR}
+ENV BUILD_GIT_TIMESTAMP=${BUILD_GIT_TIMESTAMP}
+ENV BUILD_TIMESTAMP=${BUILD_TIMESTAMP}
 
 EXPOSE 4445
 
