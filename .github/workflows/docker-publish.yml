@@ -20,6 +20,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Compute build metadata
+        id: build_meta
+        run: |
+          echo "app_version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+          echo "git_sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "git_short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "git_branch=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "git_author=$(git log -1 --pretty=%an)" >> "$GITHUB_OUTPUT"
+          echo "git_timestamp=$(git log -1 --pretty=%cI)" >> "$GITHUB_OUTPUT"
+          echo "build_timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          {
+            echo 'git_message<<EOF'
+            git log -1 --pretty=%s
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -46,6 +62,15 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_APP_VERSION=${{ steps.build_meta.outputs.app_version }}
+            BUILD_GIT_SHA=${{ steps.build_meta.outputs.git_sha }}
+            BUILD_GIT_SHORT_SHA=${{ steps.build_meta.outputs.git_short_sha }}
+            BUILD_GIT_BRANCH=${{ steps.build_meta.outputs.git_branch }}
+            BUILD_GIT_MESSAGE=${{ steps.build_meta.outputs.git_message }}
+            BUILD_GIT_AUTHOR=${{ steps.build_meta.outputs.git_author }}
+            BUILD_GIT_TIMESTAMP=${{ steps.build_meta.outputs.git_timestamp }}
+            BUILD_TIMESTAMP=${{ steps.build_meta.outputs.build_timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64

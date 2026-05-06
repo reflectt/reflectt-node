@@ -7,7 +7,7 @@
  */
 
 import { execSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 
 export interface BuildInfo {
@@ -30,7 +30,6 @@ export interface BuildInfo {
 // When running from a global install or launchd plist, cwd may point
 // to an unrelated directory (or a different git repo entirely).
 import { fileURLToPath } from 'node:url'
-import { existsSync } from 'node:fs'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // Check if we're inside a reflectt-node repo (not an ancestor .git like Homebrew's).
@@ -67,6 +66,29 @@ function git(cmd: string): string {
   }
 }
 
+function readEnvValue(...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = process.env[key]?.trim()
+    if (value) return value
+  }
+  return null
+}
+
+function readBakedCommit(): string | null {
+  const candidates = [
+    resolve(__dirname, '..', 'commit.txt'),
+    resolve(process.cwd(), 'commit.txt'),
+  ]
+  for (const path of candidates) {
+    try {
+      if (!existsSync(path)) continue
+      const value = readFileSync(path, 'utf8').trim()
+      if (value) return value
+    } catch { /* try next */ }
+  }
+  return null
+}
+
 function readPackageVersion(): string {
   // Try repo root first, then __dirname, then cwd as last resort
   const candidates = [repoRoot, __dirname, process.cwd()].filter(Boolean) as string[]
@@ -83,14 +105,19 @@ function readPackageVersion(): string {
 
 // Capture at module load (startup) time
 const startedAtMs = Date.now()
-const appVersion = readPackageVersion()
-const gitSha = git('rev-parse HEAD')
-const gitShortSha = git('rev-parse --short HEAD')
-const gitBranch = git('rev-parse --abbrev-ref HEAD')
-const gitMessage = git('log -1 --pretty=%s')
-const gitAuthor = git('log -1 --pretty=%an')
-const gitTimestamp = git('log -1 --pretty=%ci')
-const buildTimestamp = gitTimestamp !== 'unknown' ? gitTimestamp : new Date(startedAtMs).toISOString()
+const appVersion = readEnvValue('BUILD_APP_VERSION', 'APP_VERSION') ?? readPackageVersion()
+const bakedCommit = readBakedCommit()
+const gitSha = readEnvValue('BUILD_GIT_SHA', 'GIT_SHA') ?? git('rev-parse HEAD')
+const gitShortSha = readEnvValue('BUILD_GIT_SHORT_SHA', 'GIT_SHORT_SHA')
+  ?? (gitSha !== 'unknown' ? gitSha.slice(0, 7) : null)
+  ?? bakedCommit
+  ?? git('rev-parse --short HEAD')
+const gitBranch = readEnvValue('BUILD_GIT_BRANCH', 'GIT_BRANCH') ?? git('rev-parse --abbrev-ref HEAD')
+const gitMessage = readEnvValue('BUILD_GIT_MESSAGE', 'GIT_MESSAGE') ?? git('log -1 --pretty=%s')
+const gitAuthor = readEnvValue('BUILD_GIT_AUTHOR', 'GIT_AUTHOR') ?? git('log -1 --pretty=%an')
+const gitTimestamp = readEnvValue('BUILD_GIT_TIMESTAMP', 'GIT_TIMESTAMP') ?? git('log -1 --pretty=%ci')
+const buildTimestamp = readEnvValue('BUILD_TIMESTAMP')
+  ?? (gitTimestamp !== 'unknown' ? gitTimestamp : new Date(startedAtMs).toISOString())
 
 export function getBuildInfo(): BuildInfo {
   return {
