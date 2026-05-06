@@ -29,6 +29,9 @@ import { REFLECTT_HOME } from './config.js'
 import { getRequestMetrics } from './request-tracker.js'
 import { listApprovalQueue, listAgentEvents, listAgentRuns, type AgentRun } from './agent-runs.js'
 import { getUnpushedTrustEvents, markTrustEventsPushed } from './trust-events.js'
+import { getBuildInfo } from './buildInfo.js'
+import { getCapabilityReadiness } from './capability-readiness.js'
+import { getProvisioningManager } from './provisioning.js'
 
 /**
  * Docker identity guard: detect when a container has inherited cloud
@@ -154,6 +157,16 @@ export function _registerImmediateSync(fn: () => void): void {
 // The cloud then broadcasts each as a `canvas_push` SSE event to all subscribers.
 const MAX_PENDING_PUSH_EVENTS = 20
 const pendingPushEvents: Array<Record<string, unknown>> = []
+
+function getHeartbeatCapabilityReadiness() {
+  const provisioning = getProvisioningManager()
+  const provStatus = provisioning.getStatus()
+  return getCapabilityReadiness({
+    cloudConnected: provStatus.phase === 'ready',
+    cloudUrl: provStatus.cloudUrl,
+    webhooks: provStatus.webhooks as Array<{ provider: string; active: boolean }>,
+  })
+}
 
 /** Queue a canvas_push event for relay to cloud in the next sync cycle. */
 export function queueCanvasPushEvent(event: Record<string, unknown>): void {
@@ -831,11 +844,15 @@ async function sendHeartbeat(): Promise<void> {
   // "degraded" only if there are actual health issues (e.g., DB errors, high error rate).
   // Idle agents are normal — not a degraded state.
   const hostStatus = 'online' as const
+  const buildInfo = getBuildInfo()
+  const capabilityReadiness = getHeartbeatCapabilityReadiness()
 
   const result = await cloudPost(`/api/hosts/${state.hostId}/heartbeat`, {
     contractVersion: 'host-heartbeat.v1',
     status: hostStatus,
     timestamp: Date.now(),
+    buildTimestamp: buildInfo.buildTimestamp,
+    capabilityReadiness,
     agents: agents.map(a => {
       const agentAliases = [a.name]
       const todoCount = tasks.filter(t => t.status === 'todo' && agentAliases.includes(t.assignee || '')).length
@@ -896,6 +913,8 @@ async function sendHeartbeat(): Promise<void> {
       hostName: config.hostName,
       hostType: config.hostType,
       uptimeMs: Date.now() - state.startedAt,
+      version: buildInfo.appVersion,
+      sha: buildInfo.gitSha,
     },
   })
 
