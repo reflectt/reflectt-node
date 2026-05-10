@@ -364,30 +364,58 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
     const enteredAt = (meta.entered_validating_at as number) || task.updatedAt
     const ageInValidating = now - enteredAt
 
+    // PR-merged tasks: close to done regardless of artifact completeness.
+    // PR merge is the canonical completion signal, not artifact presence.
+    const prMerged = !!(meta.pr_merged)
     if (ageInValidating >= ARTIFACT_GRACE_MS && !hasRequiredArtifacts(meta)) {
-      try {
-        taskManager.updateTask(task.id, {
-          status: 'todo',
-          metadata: {
-            ...meta,
-            artifact_rejected: true,
-            artifact_rejected_at: now,
-            artifact_reject_reason: 'Missing required artifacts (PR or qa_bundle) after 24h grace period',
-            review_state: undefined,
-            reviewer_approved: undefined,
-          },
-        } as any)
-        artifactRejectedIds.add(task.id)
-        escalated.delete(task.id)
-        logDryRun('artifact_rejected', `${task.id} — no artifacts after ${msToMinutes(ageInValidating)}m in validating`)
+      if (prMerged) {
+        try {
+          await taskManager.updateTask(task.id, {
+            status: 'done',
+            metadata: {
+              ...meta,
+              auto_closed: true,
+              auto_closed_at: now,
+              auto_close_reason: 'sweeper_pr_merged_artifact_missing',
+              completed_at: now,
+            },
+          } as any)
+          autoClosedIds.add(task.id)
+          escalated.delete(task.id)
+          logDryRun('artifact_rejected_pr_merged', `${task.id} — PR merged, closing to done despite missing qa_bundle`)
+          chatManager.sendMessage({
+            from: 'system',
+            channel: 'task-notifications',
+            content: `✅ Auto-closed "${task.title}" (${task.id}) — PR merged, qa_bundle missing but completion honored. (Automated)`,
+          }).catch(() => {})
+        } catch (err) {
+          logDryRun('artifact_rejected_pr_merged_failed', `${task.id} — ${String(err)}`)
+        }
+      } else {
+        try {
+          taskManager.updateTask(task.id, {
+            status: 'todo',
+            metadata: {
+              ...meta,
+              artifact_rejected: true,
+              artifact_rejected_at: now,
+              artifact_reject_reason: 'Missing required artifacts (PR or qa_bundle) after 24h grace period',
+              review_state: undefined,
+              reviewer_approved: undefined,
+            },
+          } as any)
+          artifactRejectedIds.add(task.id)
+          escalated.delete(task.id)
+          logDryRun('artifact_rejected', `${task.id} — no artifacts after ${msToMinutes(ageInValidating)}m in validating`)
 
-        chatManager.sendMessage({
-          from: 'system',
-          channel: 'task-notifications',
-          content: `⚠️ Auto-rejected "${task.title}" (${task.id}) back to todo — missing required artifacts (PR or qa_bundle) after 24h in validating. @${task.assignee || 'unassigned'} please add artifacts and resubmit.`,
-        }).catch(() => {})
-      } catch (err) {
-        logDryRun('artifact_reject_failed', `${task.id} — ${String(err)}`)
+          chatManager.sendMessage({
+            from: 'system',
+            channel: 'task-notifications',
+            content: `⚠️ Auto-rejected "${task.title}" (${task.id}) back to todo — missing required artifacts (PR or qa_bundle) after 24h in validating. @${task.assignee || 'unassigned'} please add artifacts and resubmit.`,
+          }).catch(() => {})
+        } catch (err) {
+          logDryRun('artifact_reject_failed', `${task.id} — ${String(err)}`)
+        }
       }
     }
   }
@@ -404,6 +432,35 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
     const reviewState = meta.review_state as string | undefined
     const reviewerApproved = meta.reviewer_approved === true
     if (reviewState === 'approved' || reviewerApproved) {
+      // PR merge is canonical completion — close to done even if dupeErr blocks artifact path
+      const prMerged = !!(meta.pr_merged)
+      if (prMerged) {
+        try {
+          await taskManager.updateTask(task.id, {
+            status: 'done',
+            metadata: {
+              ...meta,
+              auto_closed: true,
+              auto_closed_at: now,
+              auto_close_reason: 'sweeper_pr_merged_approved_dup_ref',
+              completed_at: now,
+              dupeErr_resolved: getDuplicateClosureCanonicalRefError(meta) ?? null,
+            },
+          } as any)
+          autoClosedIds.add(task.id)
+          escalated.delete(task.id)
+          logDryRun('drift_repair_pr_merged_closed', `${task.id} — PR merged + approved, closing despite dupeErr`)
+          chatManager.sendMessage({
+            from: 'system',
+            channel: 'task-notifications',
+            content: `✅ Auto-closed "${task.title}" (${task.id}) — PR merged + approved, dupeErr noted but completion honored. (Automated)`,
+          }).catch(() => {})
+        } catch (err) {
+          logDryRun('drift_repair_pr_merged_failed', `${task.id} — ${String(err)}`)
+        }
+        continue
+      }
+
       const dupeErr = getDuplicateClosureCanonicalRefError(meta)
       if (dupeErr) {
         try {
@@ -413,7 +470,7 @@ export async function sweepValidatingQueue(): Promise<SweepResult> {
               ...meta,
               auto_close_blocked: true,
               auto_close_blocked_at: now,
-              auto_close_blocked_reason: dupeErr,
+              auto_close_reason: dupeErr,
               review_state: 'needs_author',
               reviewer_approved: undefined,
               reviewer_decision: undefined,
