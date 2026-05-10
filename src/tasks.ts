@@ -2091,6 +2091,20 @@ class TaskManager {
       const requestingNames = new Set(getAgentAliases(agent))
       tasks = tasks.filter(t => {
         const meta = t.metadata as Record<string, any> | undefined
+
+        // Skip parked tasks — review_state=parked_pass/fail means QA is done
+        const reviewState = meta?.review_state
+        if (reviewState === 'parked_pass' || reviewState === 'parked_fail') return false
+
+        // Skip explicitly reopened tasks — reopen=true means someone is working it
+        if (meta?.reopen === true) return false
+
+        // Skip tasks with explicit board truth routing — board_truth is authoritative
+        if (meta?.board_truth && typeof meta.board_truth === 'string') return false
+
+        // Skip blocked external tasks
+        if (meta?.blocked_external === true) return false
+
         const handoffTo = meta?.last_transition?.handoff_to || meta?.transition?.handoff_to
         if (!handoffTo || typeof handoffTo !== 'string') return true // no handoff — anyone can pull
         return requestingNames.has(handoffTo.toLowerCase()) // only the handoff target can pull
