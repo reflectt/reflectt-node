@@ -96,12 +96,12 @@ export function initRoomPresenceStore(): boolean {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 
+  const nodePresenceKey = `node:${hostId}`
   const channel = state.client.channel(`room:${hostId}`, {
-    // Listening as a service-role client — node never publishes its own
-    // presence track. The presence key is required by Supabase even for
-    // listen-only subscribers; we use a stable node sentinel that won't
-    // collide with browser session ids (which are random uuids).
-    config: { presence: { key: `node:${hostId}` } },
+    // Node must JOIN the presence channel to receive sync state. We still
+    // publish only a non-human sentinel payload so browsers/agents never
+    // mistake the listener for a participant.
+    config: { presence: { key: nodePresenceKey } },
   })
 
   const recompute = () => {
@@ -144,6 +144,14 @@ export function initRoomPresenceStore(): boolean {
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
         console.log(`[room-presence] subscribed to room:${hostId}`)
+        void channel.track({
+          kind: 'listener',
+          id: nodePresenceKey,
+          hostId,
+          joinedAt: Date.now(),
+        }).catch((err) => {
+          console.warn(`[room-presence] sentinel track failed for room:${hostId}:`, err)
+        })
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         console.warn(`[room-presence] channel ${status} for room:${hostId}`)
       }
