@@ -18,16 +18,15 @@
  * `Authorization: Bearer`, `x-heartbeat-token` header, or `?token=` query.
  * If unset, the route is open (matches existing host-cred behavior).
  *
- * `GET /room/participants` additionally accepts REFLECTT_HOST_CREDENTIAL
- * via the same three transports. Per ROOM_MODEL_V0, participants is a
- * room output the cloud/browser path reads using the host's own
- * credential — the heartbeat token is an agent/host-pair secret that
- * cloud callers do not hold, so requiring it here would lock them out.
- * Mirrors the `allowHostCredential` option in manage.ts:checkManageAuth.
+ * `GET /room/participants` is broader by contract. Per ROOM_MODEL_V0 it is
+ * a normal room-output read, so the cloud/browser path must be able to use a
+ * scoped user JWT instead of the host heartbeat secret. We therefore accept
+ * either the heartbeat token or a valid Supabase-backed bearer token here.
  */
 
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { eventBus } from './events.js'
 import { listRoomParticipants, getRoomPresenceStatus } from './room-presence-store.js'
 import { getRecentTranscript, getRoomTranscriptStatus } from './room-transcript-store.js'
@@ -49,34 +48,71 @@ const IMAGE_ARTIFACT_RETENTION_MAX = 20
 const IMAGE_ARTIFACT_KINDS = ['snapshot', 'camera-snapshot'] as const
 const ALLOWED_KINDS_V0 = new Set<string>(IMAGE_ARTIFACT_KINDS)
 
-function verifyAuth(
-  request: FastifyRequest,
-  opts?: { allowHostCredential?: boolean },
-): { ok: boolean; error?: string } {
-  const heartbeatToken = process.env.REFLECTT_HOST_HEARTBEAT_TOKEN
-  const hostCredential = opts?.allowHostCredential ? process.env.REFLECTT_HOST_CREDENTIAL : undefined
-  if (!heartbeatToken && !hostCredential) return { ok: true }
+let roomReadAuthClient: SupabaseClient | null | undefined
 
+function getBearerToken(request: FastifyRequest): string | null {
   const headers = request.headers as Record<string, string | string[] | undefined>
-  const candidates: string[] = []
   const authHeader = (headers.authorization || headers.Authorization) as string | undefined
   if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-    candidates.push(authHeader.slice('Bearer '.length).trim())
+    const token = authHeader.slice('Bearer '.length).trim()
+    return token.length > 0 ? token : null
   }
+  return null
+}
+
+function verifyAuth(request: FastifyRequest): { ok: boolean; error?: string } {
+  const heartbeatToken = process.env.REFLECTT_HOST_HEARTBEAT_TOKEN
+  if (!heartbeatToken) return { ok: true }
+
+  const bearer = getBearerToken(request)
+  if (bearer === heartbeatToken) return { ok: true }
+
+  const headers = request.headers as Record<string, string | string[] | undefined>
   const headerToken = headers['x-heartbeat-token']
-  if (typeof headerToken === 'string') candidates.push(headerToken)
+  if (typeof headerToken === 'string' && headerToken === heartbeatToken) return { ok: true }
   const query = request.query as Record<string, unknown>
-  if (typeof query?.token === 'string') candidates.push(query.token)
+  if (typeof query?.token === 'string' && query.token === heartbeatToken) return { ok: true }
 
-  for (const provided of candidates) {
-    if (heartbeatToken && provided === heartbeatToken) return { ok: true }
-    if (hostCredential && provided === hostCredential) return { ok: true }
+  return { ok: false, error: 'Unauthorized: REFLECTT_HOST_HEARTBEAT_TOKEN required' }
+}
+
+function getRoomReadAuthClient(): SupabaseClient | null {
+  if (roomReadAuthClient !== undefined) return roomReadAuthClient
+
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_ACCESS_TOKEN
+    || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!url || !key) {
+    roomReadAuthClient = null
+    return null
   }
 
-  const need = opts?.allowHostCredential
-    ? 'REFLECTT_HOST_HEARTBEAT_TOKEN or REFLECTT_HOST_CREDENTIAL'
-    : 'REFLECTT_HOST_HEARTBEAT_TOKEN'
-  return { ok: false, error: `Unauthorized: ${need} required` }
+  roomReadAuthClient = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  return roomReadAuthClient
+}
+
+async function verifyParticipantsReadAuth(request: FastifyRequest): Promise<{ ok: boolean; error?: string }> {
+  const heartbeat = verifyAuth(request)
+  if (heartbeat.ok) return heartbeat
+
+  const bearer = getBearerToken(request)
+  if (!bearer) return { ok: false, error: 'Unauthorized: valid room-read JWT or REFLECTT_HOST_HEARTBEAT_TOKEN required' }
+
+  const client = getRoomReadAuthClient()
+  if (!client) return { ok: false, error: 'Unauthorized: valid room-read JWT or REFLECTT_HOST_HEARTBEAT_TOKEN required' }
+
+  try {
+    const { data, error } = await client.auth.getUser(bearer)
+    if (!error && data.user) return { ok: true }
+  } catch {
+    // fall through
+  }
+
+  return { ok: false, error: 'Unauthorized: valid room-read JWT or REFLECTT_HOST_HEARTBEAT_TOKEN required' }
 }
 
 function resolveHostId(): string {
@@ -116,7 +152,7 @@ function projectArtifact(art: Artifact): Record<string, unknown> {
 
 export async function roomRoutes(app: FastifyInstance) {
   app.get('/room/participants', async (request, reply) => {
-    const auth = verifyAuth(request, { allowHostCredential: true })
+    const auth = await verifyParticipantsReadAuth(request)
     if (!auth.ok) {
       reply.status(401)
       return { error: auth.error }
