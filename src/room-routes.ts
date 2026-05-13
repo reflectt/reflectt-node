@@ -17,6 +17,13 @@
  * REFLECTT_HOST_HEARTBEAT_TOKEN is set, requests must present it via
  * `Authorization: Bearer`, `x-heartbeat-token` header, or `?token=` query.
  * If unset, the route is open (matches existing host-cred behavior).
+ *
+ * `GET /room/participants` additionally accepts REFLECTT_HOST_CREDENTIAL
+ * via the same three transports. Per ROOM_MODEL_V0, participants is a
+ * room output the cloud/browser path reads using the host's own
+ * credential — the heartbeat token is an agent/host-pair secret that
+ * cloud callers do not hold, so requiring it here would lock them out.
+ * Mirrors the `allowHostCredential` option in manage.ts:checkManageAuth.
  */
 
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
@@ -42,23 +49,34 @@ const IMAGE_ARTIFACT_RETENTION_MAX = 20
 const IMAGE_ARTIFACT_KINDS = ['snapshot', 'camera-snapshot'] as const
 const ALLOWED_KINDS_V0 = new Set<string>(IMAGE_ARTIFACT_KINDS)
 
-function verifyAuth(request: FastifyRequest): { ok: boolean; error?: string } {
-  const expectedToken = process.env.REFLECTT_HOST_HEARTBEAT_TOKEN
-  if (!expectedToken) return { ok: true }
+function verifyAuth(
+  request: FastifyRequest,
+  opts?: { allowHostCredential?: boolean },
+): { ok: boolean; error?: string } {
+  const heartbeatToken = process.env.REFLECTT_HOST_HEARTBEAT_TOKEN
+  const hostCredential = opts?.allowHostCredential ? process.env.REFLECTT_HOST_CREDENTIAL : undefined
+  if (!heartbeatToken && !hostCredential) return { ok: true }
 
   const headers = request.headers as Record<string, string | string[] | undefined>
+  const candidates: string[] = []
   const authHeader = (headers.authorization || headers.Authorization) as string | undefined
   if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-    const provided = authHeader.slice('Bearer '.length).trim()
-    if (provided === expectedToken) return { ok: true }
+    candidates.push(authHeader.slice('Bearer '.length).trim())
   }
   const headerToken = headers['x-heartbeat-token']
-  if (typeof headerToken === 'string' && headerToken === expectedToken) return { ok: true }
-
+  if (typeof headerToken === 'string') candidates.push(headerToken)
   const query = request.query as Record<string, unknown>
-  if (typeof query?.token === 'string' && query.token === expectedToken) return { ok: true }
+  if (typeof query?.token === 'string') candidates.push(query.token)
 
-  return { ok: false, error: 'Unauthorized: REFLECTT_HOST_HEARTBEAT_TOKEN required' }
+  for (const provided of candidates) {
+    if (heartbeatToken && provided === heartbeatToken) return { ok: true }
+    if (hostCredential && provided === hostCredential) return { ok: true }
+  }
+
+  const need = opts?.allowHostCredential
+    ? 'REFLECTT_HOST_HEARTBEAT_TOKEN or REFLECTT_HOST_CREDENTIAL'
+    : 'REFLECTT_HOST_HEARTBEAT_TOKEN'
+  return { ok: false, error: `Unauthorized: ${need} required` }
 }
 
 function resolveHostId(): string {
@@ -98,7 +116,7 @@ function projectArtifact(art: Artifact): Record<string, unknown> {
 
 export async function roomRoutes(app: FastifyInstance) {
   app.get('/room/participants', async (request, reply) => {
-    const auth = verifyAuth(request)
+    const auth = verifyAuth(request, { allowHostCredential: true })
     if (!auth.ok) {
       reply.status(401)
       return { error: auth.error }
