@@ -31,6 +31,16 @@ import { eventBus } from './events.js'
 // happens on read, not here.
 export type Device = 'big-screen' | 'desktop' | 'tablet' | 'phone'
 
+// Real device state — set when the browser actually opens the device, not
+// intent. 'denied' means the OS/browser refused; 'off' means the user toggled
+// it off (or never enabled it). Optional so older cloud builds that never
+// publish lanes still validate against this type.
+export type CaptureLaneState = 'on' | 'off' | 'denied'
+export interface CaptureLanes {
+  mic?: CaptureLaneState
+  camera?: CaptureLaneState
+}
+
 export interface HumanParticipant {
   kind: 'human'
   id: string
@@ -41,6 +51,7 @@ export interface HumanParticipant {
   device: Device
   joinedAt: number
   lastBeaconAt: number
+  captureLanes?: CaptureLanes
 }
 
 interface StoreState {
